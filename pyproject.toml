@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vrixel-agentic-sdlc"
+version = "0.1.0"
+description = "Agentic SDLC orchestrated by LangGraph: eight phases, six human gates, LLM-agnostic with Claude by default."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+dependencies = [
+  "langgraph>=1.2,<2",
+  "langgraph-checkpoint-postgres>=3.0,<4",
+  "psycopg[binary,pool]>=3.2",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2.7",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+live = ["anthropic>=0.70", "claude-agent-sdk>=0.2"]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[project.scripts]
+vrixel = "vrixel_sdlc.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vrixel_sdlc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

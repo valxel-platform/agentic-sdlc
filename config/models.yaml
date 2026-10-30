@@ -1,0 +1,26 @@
+# Role-to-model registry. Changing a role's provider or model is a config change,
+# promoted only after the role passes its phase's golden evals.
+# runtime: claude_code (Claude Agent SDK, plugins native) | generic (LangGraph tool-calling agent)
+roles:
+  discovery:  { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
+  spec:       { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
+  designer:   { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
+  architect:  { runtime: claude_code, model: anthropic/claude-opus-5-5 }
+  planner:    { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
+  coder:      { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
+  reviewer:   { runtime: claude_code, model: anthropic/claude-opus-5-5 }
+  release:    { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
+  ops:        { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
+  critic:     { runtime: generic,     model: anthropic/claude-opus-5-5 }
+  knowledge:  { runtime: generic,     model: anthropic/claude-haiku-5-5 }
+  router:     { runtime: generic,     model: anthropic/claude-haiku-5-5 }
+
+# Which providers may see each data class. PHI and payment work stays with providers
+# under the right agreements; self-hosted models are the in-boundary fallback.
+data_classes:
+  phi:      { allowed_providers: [anthropic, selfhosted] }
+  payments: { allowed_providers: [anthropic, selfhosted] }
+  general:  { allowed_providers: ["*"] }
+
+failover:
+  anthropic/claude-sonnet-5-5: []

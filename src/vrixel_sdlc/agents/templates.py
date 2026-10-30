@@ -1,0 +1,170 @@
+"""Deterministic stub outputs per phase. In stub mode these stand in for model output so the
+whole pipeline runs offline; `defective=True` drops a required element so evaluator loops,
+escalations and gates can be exercised. Live mode replaces them with real agent output."""
+
+from __future__ import annotations
+
+import json
+import re
+
+from .parse import parse_acs, parse_affected_repos
+
+_REPO_ORDER = {"library": 0, "provider": 1, "consumer": 2}
+
+
+def _slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:40] or "feature"
+
+
+def _feedback(ctx: dict) -> list[str]:
+    out = []
+    if ctx.get("feedback"):
+        out += ["", "## Reviewer feedback addressed", f"- {ctx['feedback']}"]
+    if ctx.get("prior_findings"):
+        out += ["", "## Evaluator findings addressed"] + [f"- {f}" for f in ctx["prior_findings"]]
+    return out
+
+
+def discovery(ctx: dict, defective: bool) -> str:
+    caps = ctx.get("capabilities") or []
+    cap = f"Extends: {caps[0]['id']} ({caps[0]['name']})" if caps else "New capability: no existing capability covers this"
+    lines = [
+        f"# Opportunity brief: {ctx['title']}",
+        f"Feature: {ctx['feature_id']} · Product: {ctx['product_name']}",
+        "", "## Problem", ctx.get("description") or ctx["title"],
+        "", "## Capability", cap,
+    ]
+    if not defective:
+        lines += ["", "## Success metrics",
+                  f"- M1: Weekly active use of {ctx['title']} reaches [target] within 30 days",
+                  "- M2: Support tickets for this workflow fall by [target]%"]
+    lines += ["", "## Constitution articles", "- VX-6"]
+    return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def spec(ctx: dict, defective: bool) -> str:
+    title = ctx["title"]
+    if defective:
+        acs = [f"- AC-1: {title} works well", f"- AC-2: {title} is fast"]
+    else:
+        acs = [
+            f"- AC-1: Given a signed-in user, when they complete {title}, then the change is saved and confirmed",
+            f"- AC-2: Given invalid input, when they submit {title}, then a specific error is shown and nothing is saved",
+            f"- AC-3: Given the action succeeds, when an auditor reviews it, then an audit record shows who, what and when",
+        ]
+    product_article = (ctx.get("product_articles") or ["VX-2"])[0]
+    lines = [
+        f"# PRD: {title}", f"Feature: {ctx['feature_id']}",
+        "", "## Goals", f"- G1: Deliver {title} (measured by M1)",
+        "", "## Non-goals", f"- Changes outside {ctx['product_name']} scope",
+        "", "## Acceptance criteria", *acs,
+        "", "## Constitution articles", "- VX-5", f"- {product_article}",
+    ]
+    return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def design(ctx: dict, defective: bool) -> str:
+    lines = [
+        f"# UX spec: {ctx['title']}",
+        "", "## Screens", f"- S1: {ctx['title']} form", "- S2: Confirmation",
+        "", "## States", "- Loading, empty, error, success",
+        "", "## Handoff", "- Uses design-system tokens and existing form components",
+    ]
+    if not defective:
+        lines += ["", "## Accessibility", "- WCAG 2.1 AA: 4.5:1 contrast, full keyboard path, labelled fields (VX-9)"]
+    return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def architecture(ctx: dict, defective: bool) -> str:
+    repos = sorted(ctx["repos"], key=lambda r: _REPO_ORDER.get(r["role"], 9))
+    provider = next((r["name"] for r in repos if r["role"] == "provider"), repos[0]["name"])
+    lines = [
+        f"# HLD: {ctx['title']}",
+        "", "## ADRs",
+        f"- ADR-{ctx['feature_id']}-1: Extend the {provider} API with a versioned endpoint (expand, then contract)",
+    ]
+    if not defective:
+        lines += ["", "## Affected repos"] + [f"- {r['name']} ({r['role']})" for r in repos]
+    lines += [
+        "", "## Contracts", f"- {provider}: OpenAPI minor version bump, backward compatible (VX-4)",
+        "", "## Constitution articles", "- VX-4", "- VX-8",
+    ]
+    return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def plan(ctx: dict, defective: bool) -> str:
+    acs = list(parse_acs(ctx["parent_texts"].get("PRD", "")))
+    repos = parse_affected_repos(ctx["parent_texts"].get("HLD", "")) or ctx["repos"]
+    slug = _slug(ctx["title"])
+    risky = "auth" in (ctx.get("description", "") + ctx["title"]).lower()
+    tasks = []
+    for i, repo in enumerate(repos, start=1):
+        files = {
+            "provider": [f"src/api/{slug}.py", f"tests/test_{slug}.py"],
+            "consumer": [f"src/ui/{slug}.tsx", f"tests/{slug}.test.tsx"],
+            "library": [f"contracts/{slug}.yaml"],
+        }.get(repo["role"], [f"src/{slug}.py"])
+        if risky and repo["role"] == "provider":
+            files.append("src/auth/policy.py")
+        mine = [ac for j, ac in enumerate(acs) if j % len(repos) == i - 1]
+        tasks.append({"id": f"TASK-{i}", "repo": repo["name"], "role": repo["role"], "acs": mine, "files": files})
+    trace = []
+    for j, ac in enumerate(acs, start=1):
+        owner = next((t["id"] for t in tasks if ac in t["acs"]), tasks[0]["id"])
+        trace.append(f"- {ac} -> {owner} / TEST-{j}")
+    if defective and trace:
+        trace = trace[:-1]
+    lines = [
+        f"# Plan: {ctx['title']}",
+        "", "## Tasks", "```json", json.dumps({"tasks": tasks}, indent=2), "```",
+        "", "## Traceability", *trace,
+    ]
+    return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def code_task(ctx: dict, task: dict, passed: bool) -> str:
+    return "\n".join([
+        f"## Patch for {task['id']}", f"Repo: {task['repo']}", f"Branch: feature/{ctx['feature_id']}",
+        "Files:", *[f"- {f}" for f in task["files"]],
+        f"Acceptance criteria: {', '.join(task['acs']) or 'none'}",
+        f"Tests: {'passed' if passed else 'failed: test_' + _slug(task['id'])}",
+    ]) + "\n"
+
+
+def release(ctx: dict, defective: bool) -> str:
+    flag = f"ff_{_slug(ctx['title'])}"
+    rollback = "- [ ] Rollback plan" if defective else "- [x] Rollback plan: flag off, then revert in reverse merge order"
+    comps = ctx.get("components") or []
+    lines = [
+        f"# Release: {ctx['title']}",
+        "", "## Checklist",
+        "- [x] CI green on every change-set PR",
+        "- [x] Database migrations reviewed",
+        f"- [x] Feature flag defined: {flag}",
+        rollback,
+        "- [x] SLOs, alerts and dashboards defined (VX-8)",
+        "", "## Staging", *[f"- {c}: staging" for c in comps],
+    ]
+    return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def operate(ctx: dict, defective: bool) -> str:
+    cap = f"CAP-{ctx['product_id']}-{_slug(ctx['title']).upper()[:24]}"
+    lines = [f"# Operating report: {ctx['title']}"]
+    if not defective:
+        lines += ["", "## Metrics vs brief", "- M1: baseline captured; first read in 7 days",
+                  "- M2: baseline captured; first read in 7 days"]
+    lines += ["", "## Capability", f"- Registered {cap}",
+              "", "## New intakes", "- None yet; Operate re-checks metrics on its next run"]
+    return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+PHASE_TEMPLATES = {
+    "discovery": discovery,
+    "spec": spec,
+    "design": design,
+    "architecture": architecture,
+    "plan": plan,
+    "release": release,
+    "operate": operate,
+}
