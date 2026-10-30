@@ -65,14 +65,19 @@ def _route_targets(phase: str) -> list[str]:
 
 def make_intake(services):
     def intake(state: FeatureState) -> dict:
-        product = services.settings.product(state["product_id"])
-        con = services.constitution(state["product_id"])
+        # Pins were resolved by the engine before the thread started; reading them here fails
+        # fast if the product's governance repo is unreachable or invalid.
+        snap = services.snapshot(state["product_id"], state.get("governance"))
+        product = snap.product
+        budget = min(float(state.get("token_budget_usd") or product.budget_usd), product.budget_usd)
         return {
             "status": "running",
             "data_class": product.data_class,
-            "constitution_version": con.version,
-            "token_budget_usd": float(state.get("token_budget_usd") or product.budget_usd),
-            "events": [event("intake", "started", state["title"], product=product.product_id)],
+            "constitution_version": snap.version,
+            "token_budget_usd": budget,
+            "events": [event("intake", "started", state["title"], product=product.product_id,
+                             governance=f"{snap.pins['product']['org']}/{snap.pins['product']['repo']}"
+                                        f"@{snap.pins['product']['sha'][:7]}")],
         }
 
     return intake
@@ -84,11 +89,12 @@ def make_gate(gate: str, services):
     target = GATE_APPROVE_TARGET[gate]
 
     def gate_node(state: FeatureState) -> Command:
-        product = services.settings.product(state["product_id"])
+        product = services.snapshot(state["product_id"], state.get("governance")).product
         ref = state.get("artifacts", {}).get(kind)
         packet = {
             "type": "gate", "gate": gate, "phase": phase,
             "feature_id": state["feature_id"], "product_id": state["product_id"], "title": state["title"],
+            "constitution_version": state.get("constitution_version"),
             "artifact": ref, "preview": services.artifacts.load(ref)[:2000] if ref else "",
             "score": state.get("scores", {}).get(phase), "loops": state.get("loop_count", {}).get(phase),
             "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
@@ -151,8 +157,8 @@ def make_escalation(phase: str, services):
         d = normalize(interrupt(packet), ESCALATION_DECISIONS)
         rec = _record(f"escalation:{phase}", phase, d)
         update: dict = {"gate_decisions": [rec]}
-        if d.get("budget_usd"):
-            update["token_budget_usd"] = float(d["budget_usd"])
+        if d.get("budget_usd"):  # a human may raise the budget, up to the platform ceiling
+            update["token_budget_usd"] = min(float(d["budget_usd"]), services.settings.limits.max_budget_usd)
 
         if d["decision"] == "abort":
             update |= {"status": "aborted", "events": [event(f"escalate_{phase}", "aborted", d["feedback"])]}

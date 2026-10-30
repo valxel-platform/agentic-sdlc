@@ -1,0 +1,31 @@
+# AgTech governance manifest, read by the Vrixel agentic SDLC tool.
+# Changes are pull requests approved by the product owner (see CODEOWNERS).
+# The tool rejects values that loosen platform limits.
+product_id: AG
+name: AgTech
+constitution: constitution.md
+context: context.md
+budget_usd: 150
+critic_threshold: 0.8
+max_loops: 3
+repos:
+- name: vrixel-agtech/agtech-field-api
+  role: provider
+- name: vrixel-agtech/agtech-mobile
+  role: consumer
+approvers:
+  g1:
+  - agtech-product-owner
+  g2:
+  - agtech-product-owner
+  g3:
+  - agtech-design-lead
+  g4:
+  - agtech-architect
+  g5:
+  - agtech-tech-lead
+  g6:
+  - agtech-release-manager
+high_risk_paths:
+- src/auth/
+- migrations/

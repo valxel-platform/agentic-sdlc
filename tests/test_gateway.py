@@ -4,7 +4,6 @@ import pytest
 
 from vrixel_sdlc.agents.parse import parse_acs
 from vrixel_sdlc.config import RoleConfig
-from vrixel_sdlc.constitution import load_constitution
 from vrixel_sdlc.evaluators import run_checks
 from vrixel_sdlc.gateway import CallTags, InMemoryLedger, ModelGateway, PolicyViolation, PromptLayers, StubProvider
 from vrixel_sdlc.gateway.pricing import estimate_cost
@@ -70,13 +69,6 @@ def test_list_price_math():
     _, unknown = estimate_cost("otherai/x", input_tokens=1, cache_creation_input_tokens=0,
                                cache_read_input_tokens=0, output_tokens=1)
     assert unknown == "unknown"
-
-
-def test_constitutions_combine_platform_and_product(settings):
-    con = load_constitution(str(settings.constitution_dir), "emr")
-    assert con.version == "platform@1.0.0+emr@1.0.0"
-    assert "VX-3" in con.article_ids and "EMR-8" in con.article_ids
-    assert all(a.startswith("EMR-") for a in con.product_articles())
 
 
 def test_spec_check_flags_untestable_acceptance_criteria():

@@ -1,0 +1,36 @@
+# Product registry for the Vrixel agentic SDLC tool (lives in the tools org).
+#
+# The tool does NOT carry product constitutions or product settings. Each product keeps a
+# governance repo in its own GitHub organization:
+#   product.yaml      repos, approvers, budget, thresholds, high-risk paths
+#   constitution.md   the product constitution
+#   context.md        product context pack for agents (optional)
+# The tool reads them at feature intake and pins the commit SHA for the feature's lifetime.
+#
+# Only what the platform must control stays here: where each governance repo is, the
+# product's data class (it decides which model providers may see its data), its API
+# workspace, and the limits a product may tighten but never loosen.
+
+governance:
+  source: local                    # local (examples/ tree, for dev and tests) | github
+  local_root: examples/governance  # <root>/<org>/<repo>/<path>
+  github_api: https://api.github.com
+
+platform:
+  org: vrixel-tools
+  repo: sdlc-governance
+  ref: main
+  constitution_path: platform/constitution.md
+
+limits:
+  min_critic_threshold: 0.75       # products may raise it, not lower it
+  max_loops: 5                     # products may lower it, not raise it
+  max_budget_usd: 500              # per-feature budget ceiling
+  required_gates: [g1, g2, g3, g4, g5, g6]   # every gate needs named approvers (VX-1)
+
+products:
+  EMR: { org: vrixel-emr,    repo: governance, ref: main, data_class: phi,      workspace: wrkspc-emr }
+  AG:  { org: vrixel-agtech, repo: governance, ref: main, data_class: general,  workspace: wrkspc-shared }
+  POS: { org: vrixel-pos,    repo: governance, ref: main, data_class: payments, workspace: wrkspc-shared }
+  MS:  { org: vrixel-medspa, repo: governance, ref: main, data_class: phi,      workspace: wrkspc-medspa }
+  APX: { org: vrixel-apx,    repo: governance, ref: main, data_class: payments, workspace: wrkspc-apx }

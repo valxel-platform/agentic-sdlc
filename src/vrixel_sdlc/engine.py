@@ -79,12 +79,13 @@ class FeatureEngine:
 
     def start(self, *, product_id: str, title: str, description: str = "",
               simulate_faults: dict[str, int] | None = None, budget_usd: float | None = None) -> dict:
-        self.services.settings.product(product_id)  # validates product id
+        # Read and validate the product's governance from its own org, and pin the commits.
+        snap = self.services.snapshot(product_id)
         seq = self.index.next_number(product_id)
         feature_id = f"{product_id}-FEAT-{seq}"
         self.index.add(feature_id, product_id, title, seq)
         inp = {"feature_id": feature_id, "product_id": product_id, "title": title, "description": description,
-               "simulate_faults": dict(simulate_faults or {})}
+               "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins}
         if budget_usd:
             inp["token_budget_usd"] = float(budget_usd)
         self.graph.invoke(inp, self._config(feature_id))
@@ -115,6 +116,7 @@ class FeatureEngine:
             "title": s.get("title"),
             "status": s.get("status"),
             "constitution_version": s.get("constitution_version"),
+            "governance": s.get("governance"),
             "phase_status": s.get("phase_status", {}),
             "scores": s.get("scores", {}),
             "loop_count": s.get("loop_count", {}),

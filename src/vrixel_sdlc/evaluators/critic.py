@@ -40,12 +40,14 @@ def parse_verdict(text: str) -> tuple[float, list[str]]:
 
 
 def critique(services, *, phase: str, rubric_skills: tuple[str, ...], content: str, ctx: dict) -> CriticVerdict:
-    product = services.settings.product(ctx["product_id"])
+    snap = services.snapshot(ctx["product_id"], ctx.get("governance"))
+    product = snap.product
     layers = build_layers(
         role="critic",
         skills=rubric_skills,
-        constitution=services.constitution(ctx["product_id"]),
+        constitution=snap.constitution,
         product=product,
+        product_context=snap.product_context,
         parent_texts=ctx.get("parent_texts", {}),
         tail=(
             f"Score this {phase} artifact from 0 to 1 against the rubric skills and the constitution. "

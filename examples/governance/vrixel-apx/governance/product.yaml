@@ -1,0 +1,34 @@
+# APX payment platform governance manifest, read by the Vrixel agentic SDLC tool.
+# Changes are pull requests approved by the product owner (see CODEOWNERS).
+# The tool rejects values that loosen platform limits.
+product_id: APX
+name: APX payment platform
+constitution: constitution.md
+context: context.md
+budget_usd: 200
+critic_threshold: 0.85
+max_loops: 3
+repos:
+- name: vrixel-apx/apx-contracts
+  role: library
+- name: vrixel-apx/apx-ledger
+  role: provider
+- name: vrixel-apx/apx-gateway
+  role: consumer
+approvers:
+  g1:
+  - apx-product-owner
+  g2:
+  - apx-product-owner
+  g3:
+  - apx-design-lead
+  g4:
+  - apx-architect
+  g5:
+  - apx-tech-lead
+  g6:
+  - apx-release-manager
+high_risk_paths:
+- src/ledger/
+- src/rails/
+- migrations/

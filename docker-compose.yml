@@ -19,6 +19,11 @@ services:
       DATABASE_URL: postgresql://vrixel:vrixel@postgres:5432/vrixel
       VRIXEL_MODE: ${VRIXEL_MODE:-stub}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # local reads examples/governance; github reads each product org's governance repo.
+      VRIXEL_GOVERNANCE_SOURCE: ${VRIXEL_GOVERNANCE_SOURCE:-local}
+      VRIXEL_GITHUB_APP_ID: ${VRIXEL_GITHUB_APP_ID:-}
+      VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE: ${VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE:-}
+      VRIXEL_GITHUB_TOKEN: ${VRIXEL_GITHUB_TOKEN:-}
     ports: ["8080:8080"]
     volumes: [artifacts:/data/artifacts]
     depends_on:

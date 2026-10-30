@@ -1,5 +1,6 @@
-"""GitHub interface. The stub keeps PRs in memory; a real adapter uses a GitHub App with
-repo-scoped tokens (agents never hold org-wide or production credentials)."""
+"""GitHub interface. Repos are "<org>/<repo>": each product's code lives in its own org.
+The stub keeps PRs in memory; a real adapter uses the same GitHub App as the governance
+loader, installed per product org, with tokens scoped to the change set's repos."""
 
 from __future__ import annotations
 
@@ -31,7 +32,7 @@ class StubGitHub:
                 "files": list(files),
                 "labels": list(labels),
                 "state": "open",
-                "url": f"https://github.com/vrixel/{repo}/pull/{number}",
+                "url": f"https://github.com/{repo}/pull/{number}",
             }
             self.prs[f"{repo}#{number}"] = pr
             return dict(pr)

@@ -44,15 +44,17 @@ def load_skill(name: str) -> str:
     )
 
 
-def product_pack(product: ProductConfig) -> str:
+def product_pack(product: ProductConfig, context: str = "") -> str:
+    """L4: the product's own context.md from its governance repo, plus its registered lane."""
     repos = "\n".join(f"- {r.name} ({r.role})" for r in product.repos)
     return (
-        f"# Product context: {product.name} ({product.product_id})\n"
+        f"# Product context: {product.name} ({product.product_id}, org {product.org})\n"
         f"Data class: {product.data_class}\n"
         f"Repositories:\n{repos}\n"
         f"High-risk paths: {', '.join(product.high_risk_paths)}\n"
         "Conventions: contracts first (expand, then contract); every acceptance criterion has a test; "
         "structured logs and traces in every service.\n"
+        + (f"\n{context.strip()}\n" if context.strip() else "")
     )
 
 
@@ -64,6 +66,7 @@ def build_layers(
     product: ProductConfig,
     parent_texts: dict[str, str],
     tail: str,
+    product_context: str = "",
 ) -> PromptLayers:
     tools = serialize_tools(_BASE_TOOLS + _ROLE_TOOLS.get(role, []))
     skill_text = "\n\n".join(load_skill(s) for s in sorted(skills))
@@ -72,7 +75,7 @@ def build_layers(
         tools=tools,
         skills=f"# Role: {role}\n\n{skill_text}",
         constitution=constitution.text,
-        product_context=product_pack(product),
+        product_context=product_pack(product, product_context),
         feature_context=feature,
         tail=tail,
     )

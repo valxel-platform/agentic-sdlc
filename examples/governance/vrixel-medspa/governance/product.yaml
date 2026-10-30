@@ -1,0 +1,32 @@
+# MedSpa governance manifest, read by the Vrixel agentic SDLC tool.
+# Changes are pull requests approved by the product owner (see CODEOWNERS).
+# The tool rejects values that loosen platform limits.
+product_id: MS
+name: MedSpa
+constitution: constitution.md
+context: context.md
+budget_usd: 150
+critic_threshold: 0.8
+max_loops: 3
+repos:
+- name: vrixel-medspa/medspa-booking-api
+  role: provider
+- name: vrixel-medspa/medspa-web
+  role: consumer
+approvers:
+  g1:
+  - medspa-product-owner
+  g2:
+  - medspa-product-owner
+  g3:
+  - medspa-design-lead
+  g4:
+  - medspa-architect
+  g5:
+  - medspa-tech-lead
+  g6:
+  - medspa-release-manager
+high_risk_paths:
+- src/auth/
+- migrations/
+- src/consent/

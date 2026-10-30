@@ -39,14 +39,15 @@ def event(node: str, kind: str, detail: str = "", **extra) -> dict:
 def feature_ctx(services, state: FeatureState, phase: str) -> dict:
     """Read-only snapshot a phase needs; artifact bodies are loaded from the store."""
     spec = PHASE_SPECS[phase]
-    product = services.settings.product(state["product_id"])
-    con = services.constitution(state["product_id"])
+    snap = services.snapshot(state["product_id"], state.get("governance"))
+    product, con = snap.product, snap.constitution
     arts = state.get("artifacts", {})
     parents = {k: services.artifacts.load(arts[k]) for k in spec.parents if k in arts}
     return {
         "feature_id": state["feature_id"],
         "product_id": state["product_id"],
         "product_name": product.name,
+        "governance": state.get("governance"),
         "title": state["title"],
         "description": state.get("description", ""),
         "data_class": product.data_class,
@@ -66,14 +67,15 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
 
 def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str, ...], tail: str,
                stub_text: str | None, max_tokens: int = 4096) -> AgentResult:
-    product = services.settings.product(ctx["product_id"])
+    snap = services.snapshot(ctx["product_id"], ctx.get("governance"))
+    product = snap.product
     runtime = services.runtime_for(role)
     missing = PHASE_SPECS[phase].required_capabilities - runtime.capabilities
     if missing:
         raise RuntimeError(f"Runtime {runtime.name} lacks {sorted(missing)} required by phase {phase}")
     layers = build_layers(
-        role=role, skills=skills, constitution=services.constitution(ctx["product_id"]),
-        product=product, parent_texts=ctx.get("parent_texts", {}), tail=tail,
+        role=role, skills=skills, constitution=snap.constitution, product=product,
+        parent_texts=ctx.get("parent_texts", {}), tail=tail, product_context=snap.product_context,
     )
     tags = CallTags(
         product_id=ctx["product_id"], feature_id=ctx["feature_id"], phase=phase, role=role,
@@ -229,7 +231,7 @@ def make_phase_node(phase: str, services):
     spec = PHASE_SPECS[phase]
 
     def node(state: FeatureState, config: RunnableConfig) -> dict:
-        product = services.settings.product(state["product_id"])
+        product = services.snapshot(state["product_id"], state.get("governance")).product
         spent = float(state.get("cost_usd", 0.0))
         budget = float(state.get("token_budget_usd") or product.budget_usd)
         if spent >= budget:

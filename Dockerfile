@@ -8,9 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[github]"
 COPY config ./config
-COPY constitutions ./constitutions
+# Sample governance repos, used only when VRIXEL_GOVERNANCE_SOURCE=local.
+COPY examples ./examples
 
 RUN useradd --create-home --uid 10001 vrixel && mkdir -p /data/artifacts && chown -R vrixel /data
 USER vrixel

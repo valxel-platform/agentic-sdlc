@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from ..config import load_settings
 from ..engine import FeatureEngine, InMemoryIndex, PostgresIndex
 from ..gateway import InMemoryLedger, PostgresLedger, PolicyViolation
+from ..governance import GovernanceError
 from ..graph import InvalidDecision
 from ..services import build_services
 
@@ -78,9 +79,22 @@ def create_app(engine: FeatureEngine | None = None) -> FastAPI:
 
     @app.get("/products")
     def products() -> dict:
-        s = eng().services.settings
-        return {pid: {"name": p.name, "data_class": p.data_class, "repos": [r.name for r in p.repos],
-                      "budget_usd": p.budget_usd} for pid, p in s.products.items()}
+        """Each registered product with its governance as currently read from its own org."""
+        services = eng().services
+        out = {}
+        for pid, entry in services.settings.registry.items():
+            row = {"governance_repo": entry.governance.full_name, "ref": entry.governance.ref,
+                   "data_class": entry.data_class}
+            try:
+                snap = services.snapshot(pid)
+                p = snap.product
+                row |= {"name": p.name, "repos": [r.name for r in p.repos], "budget_usd": p.budget_usd,
+                        "constitution_version": snap.version, "articles": list(snap.constitution.article_ids),
+                        "ok": True}
+            except GovernanceError as exc:
+                row |= {"ok": False, "error": str(exc)}
+            out[pid] = row
+        return out
 
     @app.post("/features", status_code=201)
     def create_feature(body: FeatureIn) -> dict:
@@ -89,6 +103,8 @@ def create_app(engine: FeatureEngine | None = None) -> FastAPI:
                                simulate_faults=body.simulate_faults, budget_usd=body.budget_usd)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
+        except GovernanceError as exc:
+            raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
         except PolicyViolation as exc:
             raise HTTPException(403, str(exc)) from exc
 

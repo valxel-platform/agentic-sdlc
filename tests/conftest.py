@@ -8,7 +8,7 @@ from vrixel_sdlc.services import build_services
 
 @pytest.fixture
 def settings(tmp_path):
-    return load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "artifacts")
+    return load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "artifacts", governance_source="local")
 
 
 @pytest.fixture

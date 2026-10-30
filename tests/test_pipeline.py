@@ -178,4 +178,6 @@ def test_agents_cannot_promote_to_production(services):
 def test_apx_merges_library_before_provider_before_consumer(engine):
     v = engine.auto_drive(engine.start(product_id="APX", title="Idempotent refunds")["feature_id"])
     assert v["status"] == "done"
-    assert v["change_set"]["merge_order"] == ["apx-contracts", "apx-ledger", "apx-gateway"]
+    assert v["change_set"]["merge_order"] == ["vrixel-apx/apx-contracts", "vrixel-apx/apx-ledger",
+                                              "vrixel-apx/apx-gateway"]
+    assert all(pr["url"].startswith("https://github.com/vrixel-apx/") for pr in v["pull_requests"].values())

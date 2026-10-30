@@ -6,7 +6,7 @@ import json
 import re
 
 _AC = re.compile(r"^- (AC-\d+):\s*(.+)$", re.M)
-_REPO = re.compile(r"^- ([a-z0-9][a-z0-9-]*) \((provider|consumer|library)\)\s*$", re.M)
+_REPO = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+) \((provider|consumer|library)\)\s*$", re.M)
 _TRACE = re.compile(r"^- (AC-\d+) -> (TASK-\d+) / (TEST-\d+)\s*$", re.M)
 _JSON_BLOCK = re.compile(r"```json\n(.*?)\n```", re.S)
 

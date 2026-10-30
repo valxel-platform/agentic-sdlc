@@ -1,0 +1,32 @@
+# POS governance manifest, read by the Vrixel agentic SDLC tool.
+# Changes are pull requests approved by the product owner (see CODEOWNERS).
+# The tool rejects values that loosen platform limits.
+product_id: POS
+name: POS
+constitution: constitution.md
+context: context.md
+budget_usd: 150
+critic_threshold: 0.8
+max_loops: 3
+repos:
+- name: vrixel-pos/pos-checkout-api
+  role: provider
+- name: vrixel-pos/pos-terminal-app
+  role: consumer
+approvers:
+  g1:
+  - pos-product-owner
+  g2:
+  - pos-product-owner
+  g3:
+  - pos-design-lead
+  g4:
+  - pos-architect
+  g5:
+  - pos-tech-lead
+  g6:
+  - pos-release-manager
+high_risk_paths:
+- src/auth/
+- migrations/
+- src/checkout/

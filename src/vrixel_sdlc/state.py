@@ -58,6 +58,7 @@ class FeatureState(TypedDict, total=False):
     title: str
     description: str
     data_class: str
+    governance: dict  # commit pins of the platform and product governance repos, set at intake
     constitution_version: str
     simulate_faults: dict[str, int]  # stub mode: phase -> number of defective attempts
 

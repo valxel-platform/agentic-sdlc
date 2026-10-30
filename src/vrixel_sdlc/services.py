@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 from .artifacts import ArtifactStore
 from .config import Settings, load_settings
-from .constitution import Constitution, load_constitution
 from .gateway import InMemoryLedger, ModelGateway, StubProvider
+from .governance import GovernanceLoader, GovernanceSnapshot, GovernanceSource, build_source
 from .gateway.ledger import Ledger
 from .integrations import (
     CapabilityCatalog,
@@ -30,14 +30,16 @@ class Services:
     openchoreo: OpenChoreo
     catalog: CapabilityCatalog
     runtimes: dict[str, AgentRuntime]
+    governance: GovernanceLoader
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
         return self.runtimes.get(kind) or self.runtimes["generic"]
 
-    def constitution(self, product_id: str) -> Constitution:
-        product = self.settings.product(product_id)
-        return load_constitution(str(self.settings.constitution_dir), product.constitution)
+    def snapshot(self, product_id: str, pins: dict | None = None) -> GovernanceSnapshot:
+        """The product's governance, read from its own org. Pass the feature's pins inside a
+        feature thread; omit them to resolve the current commit (intake and admin views)."""
+        return self.governance.snapshot(product_id, pins)
 
 
 def build_services(
@@ -47,6 +49,7 @@ def build_services(
     github: GitHub | None = None,
     openchoreo: OpenChoreo | None = None,
     catalog: CapabilityCatalog | None = None,
+    governance_source: GovernanceSource | None = None,
 ) -> Services:
     settings = settings or load_settings()
     ledger = ledger or InMemoryLedger()
@@ -73,4 +76,5 @@ def build_services(
         openchoreo=openchoreo or StubOpenChoreo(),
         catalog=catalog or default_catalog(),
         runtimes=runtimes,
+        governance=GovernanceLoader(settings, governance_source or build_source(settings)),
     )
