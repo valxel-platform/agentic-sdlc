@@ -16,6 +16,7 @@ from .errors import GovernanceError
 
 _ROLES = {"provider", "consumer", "library"}
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
+_APPROVER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}(/[A-Za-z0-9][A-Za-z0-9_.-]*)?$")
 
 
 def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
@@ -66,10 +67,16 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
     if not repos:
         problems.append("no repos listed")
 
-    approvers = {k: [str(a) for a in (v or [])] for k, v in (raw.get("approvers") or {}).items()}
+    approvers = {k: [str(a).lstrip("@") for a in (v or [])] for k, v in (raw.get("approvers") or {}).items()}
     for gate in limits.required_gates:
         if not approvers.get(gate):
             problems.append(f"gate {gate} has no approvers")
+    for gate, names in approvers.items():
+        for a in names:
+            if not _APPROVER.match(a):
+                problems.append(f"approver {a!r} at {gate} must be a GitHub user (login) or team (org/team-slug)")
+            elif "/" in a and a.split("/", 1)[0] != org:
+                problems.append(f"approver team {a} at {gate} is outside the product's organization {org}")
 
     # Runtime infrastructure stays with products; shared lanes ship packages that products run.
     runtime = raw.get("runtime")

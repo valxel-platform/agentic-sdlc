@@ -1,0 +1,77 @@
+import { StrictMode, useCallback, useEffect, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import "./styles.css";
+import { api, ApiError, type Me } from "./api";
+import { closeLive, useLive, useLiveStatus } from "./live";
+import { SignIn } from "./pages/SignIn";
+import { Inbox } from "./pages/Inbox";
+import { Board } from "./pages/Board";
+import { FeaturePage } from "./pages/Feature";
+import { Intake } from "./pages/Intake";
+
+function Mark() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="7" fill="#2a3746" />
+      <path d="M16 7l7 9-7 9-7-9z" fill="#E2A43B" />
+    </svg>
+  );
+}
+
+function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  const live = useLiveStatus();
+  const [mine, setMine] = useState(0);
+  const refresh = useCallback(() => { api.inbox(true).then((i) => setMine(i.length)).catch(() => {}); }, []);
+  useEffect(refresh, [refresh]);
+  useLive(refresh, (e) => e.type === "feature.updated");
+
+  return (
+    <div className="shell">
+      <aside className="side">
+        <div className="brand"><Mark /> Vrixel SDLC</div>
+        <nav className="nav" aria-label="Main">
+          <NavLink to="/inbox">Decisions {mine > 0 && <span className="count" aria-label={`${mine} waiting on you`}>{mine}</span>}</NavLink>
+          <NavLink to="/board">Features</NavLink>
+          <NavLink to="/intake">New intent</NavLink>
+        </nav>
+        <div className="side-foot">
+          <div className={`live ${live ? "on" : ""}`}><i aria-hidden="true" />{live ? "Live updates on" : "Reconnecting…"}</div>
+          <div className="who">
+            {me.avatar_url ? <img src={me.avatar_url} alt="" /> : <span className="initial" aria-hidden="true">{me.login[0]?.toUpperCase()}</span>}
+            <span>{me.name || me.login}</span>
+          </div>
+          <button className="linkish" onClick={onSignOut}>Sign out</button>
+        </div>
+      </aside>
+      <main>
+        <Routes>
+          <Route path="/" element={<Navigate to="/inbox" replace />} />
+          <Route path="/inbox" element={<Inbox />} />
+          <Route path="/board" element={<Board me={me} />} />
+          <Route path="/features/:id" element={<FeaturePage />} />
+          <Route path="/intake" element={<Intake me={me} />} />
+          <Route path="/intake/:sid" element={<Intake me={me} />} />
+          <Route path="*" element={<Navigate to="/inbox" replace />} />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
+function App() {
+  const [me, setMe] = useState<Me | null | undefined>(undefined);
+  const load = useCallback(() => {
+    api.me().then(setMe).catch((e) => { if (e instanceof ApiError && e.status === 401) setMe(null); else setMe(null); });
+  }, []);
+  useEffect(load, [load]);
+  if (me === undefined) return null;
+  if (me === null) return <SignIn onSignedIn={load} />;
+  return <Shell me={me} onSignOut={() => { api.logout().finally(() => { closeLive(); setMe(null); }); }} />;
+}
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <BrowserRouter><App /></BrowserRouter>
+  </StrictMode>,
+);

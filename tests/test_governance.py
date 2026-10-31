@@ -63,7 +63,9 @@ def test_snapshot_reads_platform_and_product_from_their_orgs(services):
     ("budget_usd: 150", "budget_usd: 5000", "budget_usd 5000.0 must be above 0 and at most 500"),
     ("name: vrixel-emr/emr-web", "name: vrixel-pos/emr-web", "outside the product's organization vrixel-emr"),
     ("product_id: EMR", "product_id: EMR\ndata_class: general", "data classes are set by the platform"),
-    ("  g5:\n  - emr-tech-lead\n", "  g5: []\n", "gate g5 has no approvers"),
+    ("  g5:\n  - vrixel-emr/tech-leads\n", "  g5: []\n", "gate g5 has no approvers"),
+    ("  - vrixel-emr/architects", "  - vrixel-pos/architects", "outside the product's organization vrixel-emr"),
+    ("  - vrixel-emr/architects", "  - not a handle!", "must be a GitHub user"),
     ("product_id: EMR", "product_id: POS", "the registry expects 'EMR'"),
 ])
 def test_manifest_cannot_loosen_platform_limits(local_services, gov_root, old, new, message):

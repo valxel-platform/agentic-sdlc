@@ -58,6 +58,7 @@ class FeatureState(TypedDict, total=False):
     product_id: str
     title: str
     description: str
+    created_by: str  # GitHub login of the intent creator
     data_class: str
     governance: dict  # commit pins of the platform and product governance repos, set at intake
     constitution_version: str

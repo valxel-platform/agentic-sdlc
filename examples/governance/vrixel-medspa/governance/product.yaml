@@ -20,19 +20,20 @@ repos:
   role: provider
 - name: vrixel-medspa/medspa-web
   role: consumer
+# Approvers are GitHub teams (<org>/<team-slug>) or users (<login>). Only they can decide a gate.
 approvers:
   g1:
-  - medspa-product-owner
+  - vrixel-medspa/product-owners
   g2:
-  - medspa-product-owner
+  - vrixel-medspa/product-owners
   g3:
-  - medspa-design-lead
+  - vrixel-medspa/design
   g4:
-  - medspa-architect
+  - vrixel-medspa/architects
   g5:
-  - medspa-tech-lead
+  - vrixel-medspa/tech-leads
   g6:
-  - medspa-release-manager
+  - vrixel-medspa/release-managers
 high_risk_paths:
 - src/auth/
 - migrations/

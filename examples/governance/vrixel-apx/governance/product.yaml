@@ -22,19 +22,20 @@ repos:
   role: provider
 - name: vrixel-apx/apx-gateway
   role: consumer
+# Approvers are GitHub teams (<org>/<team-slug>) or users (<login>). Only they can decide a gate.
 approvers:
   g1:
-  - apx-product-owner
+  - vrixel-apx/product-owners
   g2:
-  - apx-product-owner
+  - vrixel-apx/product-owners
   g3:
-  - apx-design-lead
+  - vrixel-apx/design
   g4:
-  - apx-architect
+  - vrixel-apx/architects
   g5:
-  - apx-tech-lead
+  - vrixel-apx/tech-leads
   g6:
-  - apx-release-manager
+  - vrixel-apx/release-managers
 high_risk_paths:
 - src/ledger/
 - src/rails/

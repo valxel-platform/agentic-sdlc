@@ -20,19 +20,20 @@ repos:
   role: provider
 - name: vrixel-pos/pos-terminal-app
   role: consumer
+# Approvers are GitHub teams (<org>/<team-slug>) or users (<login>). Only they can decide a gate.
 approvers:
   g1:
-  - pos-product-owner
+  - vrixel-pos/product-owners
   g2:
-  - pos-product-owner
+  - vrixel-pos/product-owners
   g3:
-  - pos-design-lead
+  - vrixel-pos/design
   g4:
-  - pos-architect
+  - vrixel-pos/architects
   g5:
-  - pos-tech-lead
+  - vrixel-pos/tech-leads
   g6:
-  - pos-release-manager
+  - vrixel-pos/release-managers
 high_risk_paths:
 - src/auth/
 - migrations/

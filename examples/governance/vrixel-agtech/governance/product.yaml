@@ -20,19 +20,20 @@ repos:
   role: provider
 - name: vrixel-agtech/agtech-mobile
   role: consumer
+# Approvers are GitHub teams (<org>/<team-slug>) or users (<login>). Only they can decide a gate.
 approvers:
   g1:
-  - agtech-product-owner
+  - vrixel-agtech/product-owners
   g2:
-  - agtech-product-owner
+  - vrixel-agtech/product-owners
   g3:
-  - agtech-design-lead
+  - vrixel-agtech/design
   g4:
-  - agtech-architect
+  - vrixel-agtech/architects
   g5:
-  - agtech-tech-lead
+  - vrixel-agtech/tech-leads
   g6:
-  - agtech-release-manager
+  - vrixel-agtech/release-managers
 high_risk_paths:
 - src/auth/
 - migrations/

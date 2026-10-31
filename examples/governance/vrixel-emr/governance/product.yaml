@@ -20,20 +20,21 @@ repos:
   role: provider
 - name: vrixel-emr/emr-web
   role: consumer
+# Approvers are GitHub teams (<org>/<team-slug>) or users (<login>). Only they can decide a gate.
 approvers:
   g1:
-  - emr-product-owner
+  - vrixel-emr/product-owners
   g2:
-  - emr-product-owner
+  - vrixel-emr/product-owners
   g3:
-  - emr-design-lead
-  - emr-clinician-reviewer
+  - vrixel-emr/design
+  - vrixel-emr/clinical-reviewers
   g4:
-  - emr-architect
+  - vrixel-emr/architects
   g5:
-  - emr-tech-lead
+  - vrixel-emr/tech-leads
   g6:
-  - emr-release-manager
+  - vrixel-emr/release-managers
 high_risk_paths:
 - src/auth/
 - migrations/

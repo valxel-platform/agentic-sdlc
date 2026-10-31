@@ -1,4 +1,11 @@
-"""HTTP API: feature intake, the gate inbox and human decisions.
+"""HTTP API and web app.
+
+Run with `uvicorn --factory vrixel_sdlc.api.app:create_app`.
+
+Everything under /api needs a signed-in user (GitHub sign-in, or dev sign-in for local use).
+Decisions are recorded as the signed-in user and are allowed only for a gate's approvers; intents
+can be submitted only to lanes whose GitHub org the person belongs to. The built web app (web/)
+is served from / when present.
 
 With DATABASE_URL set, threads, the usage ledger and the feature index persist in Postgres;
 without it, everything is in memory (useful for tests and quick demos).
@@ -6,18 +13,45 @@ without it, everything is in memory (useful for tests and quick demos).
 
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 from contextlib import asynccontextmanager
+from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..config import load_settings
 from ..engine import FeatureEngine, InMemoryIndex, PostgresIndex
-from ..gateway import InMemoryLedger, PostgresLedger, PolicyViolation
+from ..gateway import InMemoryLedger, PolicyViolation, PostgresLedger
 from ..governance import GovernanceError
 from ..graph import InvalidDecision
+from ..intake import IntakeAgent, IntakeStore
 from ..services import build_services
+from ..web.auth import (
+    ESCALATION_GATE,
+    SESSION_COOKIE,
+    SESSION_TTL,
+    STATE_COOKIE,
+    AuthConfig,
+    GitHubOAuth,
+    SessionSigner,
+    User,
+    can_decide,
+    new_state,
+    session_payload,
+    user_from_payload,
+)
+
+WEB_DIST = Path(
+    os.environ.get("VRIXEL_WEB_DIST")
+    or Path(os.environ.get("VRIXEL_ROOT") or Path(__file__).resolve().parents[3]) / "web" / "dist"
+)
 
 
 class FeatureIn(BaseModel):
@@ -31,11 +65,28 @@ class FeatureIn(BaseModel):
 
 class DecisionIn(BaseModel):
     decision: str = Field(examples=["approve", "revise", "takeover", "handback", "resolved", "retry", "abort"])
-    approver: str = Field(min_length=1)
     feedback: str = ""
     active_minutes: float = Field(default=0.0, ge=0)
     budget_usd: float | None = Field(default=None, gt=0, description="Escalations only: raise the feature budget")
     artifact_content: str | None = Field(default=None, description="Escalations only: the human's finished artifact")
+
+
+class DevLoginIn(BaseModel):
+    login: str = Field(min_length=1, max_length=39)
+    teams: list[str] = Field(default_factory=list)
+    orgs: list[str] = Field(default_factory=list)
+
+
+class MessageIn(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class DraftIn(BaseModel):
+    product_id: str | None = None
+    title: str | None = Field(default=None, max_length=200)
+    problem: str | None = None
+    users: str | None = None
+    success_metric: str | None = None
 
 
 def create_engine_from_env() -> tuple[FeatureEngine, Any]:
@@ -57,8 +108,13 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
     return FeatureEngine(services, InMemorySaver(), InMemoryIndex()), None
 
 
-def create_app(engine: FeatureEngine | None = None) -> FastAPI:
+def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = None,
+               oauth: GitHubOAuth | None = None, web_dist: Path | None = WEB_DIST) -> FastAPI:
     state: dict[str, Any] = {"engine": engine, "pool": None}
+    auth = auth or AuthConfig.from_env()
+    signer = SessionSigner(auth.secret)
+    oauth = oauth or GitHubOAuth(auth)
+    intakes = IntakeStore()
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -68,18 +124,119 @@ def create_app(engine: FeatureEngine | None = None) -> FastAPI:
         if state["pool"] is not None:
             state["pool"].close()
 
-    app = FastAPI(title="Vrixel agentic SDLC", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Vrixel agentic SDLC", version="0.2.0", lifespan=lifespan)
+    api = APIRouter(prefix="/api")
 
     def eng() -> FeatureEngine:
         return state["engine"]
 
-    @app.get("/healthz")
-    def healthz() -> dict:
-        return {"ok": True, "mode": eng().services.settings.mode}
+    def current_user(request: Request) -> User:
+        user = user_from_payload(signer.loads(request.cookies.get(SESSION_COOKIE)))
+        if user is None:
+            raise HTTPException(401, "Sign in to continue")
+        if request.method not in ("GET", "HEAD") and "application/json" not in request.headers.get("content-type", ""):
+            raise HTTPException(415, "Send JSON")  # with SameSite=Lax cookies, blocks cross-site form posts
+        return user
 
-    @app.get("/products")
-    def products() -> dict:
-        """Each registered product with its governance as currently read from its own org."""
+    def lanes_for(user: User) -> list[str]:
+        reg = eng().services.settings.registry
+        if auth.mode == "dev" and not user.orgs:
+            return list(reg)
+        return [pid for pid, e in reg.items() if user.member_of(e.governance.org)]
+
+    def item_approvers(fid: str, item: dict) -> list[str]:
+        """Approvers for an inbox item: the gate's own list, or for an escalation the approvers of
+        the gate that phase leads to."""
+        if item["type"] in ("gate", "handback") and item.get("approvers") is not None:
+            return list(item["approvers"])
+        if item["type"] == "handback":  # handback packets carry no approvers: use the lane's gate list
+            lane = item.get("lane") or item.get("product_id")
+        else:
+            lane = item.get("product_id")
+        view = eng().view(fid)
+        snap = eng().services.snapshot(view["product_id"], view["governance"])
+        lanes = snap.lanes()
+        gate = item.get("gate") or ESCALATION_GATE.get(item.get("phase", ""), "g4")
+        return list(lanes.get(lane or view["product_id"], snap.product).approvers.get(gate, []))
+
+    def decorate(fid: str, item: dict, user: User) -> dict:
+        approvers = item_approvers(fid, item)
+        return {**item, "approvers": approvers, "can_decide": can_decide(user, {"approvers": approvers})}
+
+    # --- auth ---
+    @api.get("/auth/config")
+    def auth_config() -> dict:
+        out: dict = {"mode": auth.mode}
+        if auth.mode == "dev":  # offer the approver identities from governance as quick picks
+            teams: set[str] = set()
+            for pid in eng().services.settings.registry:
+                try:
+                    for names in eng().services.snapshot(pid).product.approvers.values():
+                        teams |= {n for n in names if "/" in n}
+                except GovernanceError:
+                    continue
+            out["teams"] = sorted(teams)
+        return out
+
+    def _set_session(resp, user: User) -> None:
+        resp.set_cookie(SESSION_COOKIE, signer.dumps(session_payload(user)), max_age=SESSION_TTL,
+                        httponly=True, samesite="lax", secure=auth.secure_cookies, path="/")
+
+    @api.get("/auth/login")
+    def login() -> RedirectResponse:
+        if auth.mode != "github":
+            raise HTTPException(404, "GitHub sign-in is not enabled")
+        st = new_state()
+        resp = RedirectResponse(oauth.authorize_url(st), status_code=302)
+        resp.set_cookie(STATE_COOKIE, st, max_age=600, httponly=True, samesite="lax",
+                        secure=auth.secure_cookies, path="/api/auth")
+        return resp
+
+    @api.get("/auth/callback")
+    def callback(request: Request, code: str = "", error: str = "") -> RedirectResponse:
+        state_param = request.query_params.get("state", "")
+        if error or not code:
+            return RedirectResponse("/?signin=failed", status_code=302)
+        if not state_param or state_param != request.cookies.get(STATE_COOKIE):
+            raise HTTPException(400, "Sign-in expired or was started elsewhere; try again")
+        try:
+            user = oauth.identity(oauth.exchange(code))
+        except PermissionError as exc:
+            raise HTTPException(401, str(exc)) from exc
+        resp = RedirectResponse("/", status_code=302)
+        resp.delete_cookie(STATE_COOKIE, path="/api/auth")
+        _set_session(resp, user)
+        return resp
+
+    @api.post("/auth/dev-login")
+    def dev_login(body: DevLoginIn) -> JSONResponse:
+        if auth.mode != "dev":
+            raise HTTPException(404, "Dev sign-in is disabled")
+        orgs = sorted(set(body.orgs) | {t.split("/", 1)[0] for t in body.teams})
+        user = User(login=body.login, name=body.login, orgs=orgs, teams=list(body.teams))
+        resp = JSONResponse(asdict(user))
+        _set_session(resp, user)
+        return resp
+
+    @api.post("/auth/logout")
+    def logout() -> JSONResponse:
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(SESSION_COOKIE, path="/")
+        return resp
+
+    @api.get("/me")
+    def me(user: User = Depends(current_user)) -> dict:
+        lanes = lanes_for(user)
+        names = IntakeAgent(eng().services).lane_names(lanes)
+        return {**asdict(user), "lanes": [{"id": k, "name": v} for k, v in names.items()]}
+
+    # --- governance and features ---
+    @api.get("/healthz")
+    def healthz() -> dict:
+        return {"ok": True, "mode": eng().services.settings.mode, "auth": auth.mode}
+
+    @api.get("/products")
+    def products(user: User = Depends(current_user)) -> dict:
         services = eng().services
         out = {}
         for pid, entry in services.settings.registry.items():
@@ -97,51 +254,180 @@ def create_app(engine: FeatureEngine | None = None) -> FastAPI:
             out[pid] = row
         return out
 
-    @app.post("/features", status_code=201)
-    def create_feature(body: FeatureIn) -> dict:
+    @api.post("/features", status_code=201)
+    def create_feature(body: FeatureIn, user: User = Depends(current_user)) -> dict:
+        if body.product_id not in lanes_for(user):
+            if body.product_id not in eng().services.settings.registry:
+                raise HTTPException(404, f"Unknown product {body.product_id}")
+            raise HTTPException(403, f"You aren't a member of {body.product_id}'s organization")
         try:
-            return eng().start(product_id=body.product_id, title=body.title, description=body.description,
-                               simulate_faults=body.simulate_faults, budget_usd=body.budget_usd)
-        except KeyError as exc:
-            raise HTTPException(404, str(exc)) from exc
+            fid = eng().create(product_id=body.product_id, title=body.title, description=body.description,
+                               created_by=user.login, simulate_faults=body.simulate_faults,
+                               budget_usd=body.budget_usd, background=True)
         except GovernanceError as exc:
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
         except PolicyViolation as exc:
             raise HTTPException(403, str(exc)) from exc
+        return {"feature_id": fid}
 
-    @app.get("/features")
-    def list_features() -> list[dict]:
-        return eng().index.all()
+    @api.get("/features")
+    def board(user: User = Depends(current_user), product_id: str | None = None) -> list[dict]:
+        rows = [r for r in eng().index.all() if not product_id or r["product_id"] == product_id]
+        out = []
+        for r in rows:
+            try:
+                s = eng().summary(r["feature_id"])
+            except KeyError:  # created, first step not yet checkpointed
+                s = {"feature_id": r["feature_id"], "product_id": r["product_id"], "title": r["title"],
+                     "status": "running", "running": True, "rail": [], "pending": []}
+            s["pending"] = [decorate(r["feature_id"], {**p, "product_id": s["product_id"]}, user)
+                            for p in s.get("pending", [])]
+            out.append(s)
+        return out
 
-    @app.get("/features/{feature_id}")
-    def get_feature(feature_id: str) -> dict:
+    @api.get("/features/{feature_id}")
+    def get_feature(feature_id: str, user: User = Depends(current_user)) -> dict:
         try:
-            return eng().view(feature_id)
+            v = eng().view(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        v["pending"] = [decorate(feature_id, {**p, "product_id": v["product_id"]}, user) for p in v["pending"]]
+        return v
+
+    @api.get("/features/{feature_id}/artifacts/{kind}")
+    def artifact(feature_id: str, kind: str, user: User = Depends(current_user)) -> dict:
+        try:
+            return eng().artifact(feature_id, kind)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
 
-    @app.get("/inbox")
-    def inbox(product_id: str | None = None) -> list[dict]:
-        return eng().inbox(product_id)
+    @api.get("/features/{feature_id}/usage")
+    def usage(feature_id: str, user: User = Depends(current_user)) -> list[dict]:
+        return [asdict(r) for r in eng().services.ledger.records(feature_id)]
 
-    @app.post("/features/{feature_id}/decisions/{interrupt_id}")
-    def decide(feature_id: str, interrupt_id: str, body: DecisionIn) -> dict:
+    @api.get("/inbox")
+    def inbox(user: User = Depends(current_user), mine: bool = False, product_id: str | None = None) -> list[dict]:
+        items = []
+        for p in eng().inbox(product_id):
+            fid = p["feature_id"]
+            item = decorate(fid, {**p, "product_id": p.get("product_id") or fid.rsplit("-FEAT-", 1)[0]}, user)
+            if not mine or item["can_decide"]:
+                items.append(item)
+        return items
+
+    @api.post("/features/{feature_id}/decisions/{interrupt_id}", status_code=202)
+    def decide(feature_id: str, interrupt_id: str, body: DecisionIn, user: User = Depends(current_user)) -> dict:
         try:
-            return eng().decide(feature_id, interrupt_id, body.model_dump(exclude_none=True))
+            item = eng().item(feature_id, interrupt_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        approvers = item_approvers(feature_id, {**item, "product_id": eng().view(feature_id)["product_id"]})
+        if not can_decide(user, {"approvers": approvers}):
+            raise HTTPException(403, f"Only {', '.join(approvers) or 'the listed approvers'} can decide this")
+        decision = body.model_dump(exclude_none=True) | {"approver": user.login}
+        try:
+            return eng().decide(feature_id, interrupt_id, decision, background=True)
         except InvalidDecision as exc:
             raise HTTPException(422, str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    # --- intake chat ---
+    def intake_session(sid: str, user: User):
+        try:
+            return intakes.get(sid, user.login)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
+
+    @api.post("/intake", status_code=201)
+    def intake_start(user: User = Depends(current_user)) -> dict:
+        lanes = lanes_for(user)
+        if not lanes:
+            raise HTTPException(403, "You aren't a member of any product organization")
+        s = intakes.create(user.login, lanes)
+        greeting = ("What would you like to build? Describe the problem in a sentence or two, "
+                    "and mention the product if you know it.")
+        s.messages.append({"role": "agent", "text": greeting, "at": s.created_at})
+        return s.to_dict()
+
+    @api.get("/intake")
+    def intake_list(user: User = Depends(current_user)) -> list[dict]:
+        return [s.to_dict() for s in intakes.list(user.login)]
+
+    @api.get("/intake/{sid}")
+    def intake_get(sid: str, user: User = Depends(current_user)) -> dict:
+        return intake_session(sid, user).to_dict()
+
+    @api.post("/intake/{sid}/messages")
+    def intake_message(sid: str, body: MessageIn, user: User = Depends(current_user)) -> dict:
+        s = intake_session(sid, user)
+        try:
+            IntakeAgent(eng().services).respond(s, body.text)
+        except PolicyViolation as exc:
+            raise HTTPException(403, str(exc)) from exc
+        return s.to_dict()
+
+    @api.patch("/intake/{sid}/draft")
+    def intake_draft(sid: str, body: DraftIn, user: User = Depends(current_user)) -> dict:
+        s = intake_session(sid, user)
+        try:
+            IntakeAgent(eng().services).update_draft(s, body.model_dump(exclude_none=True))
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return s.to_dict()
 
-    @app.get("/features/{feature_id}/usage")
-    def usage(feature_id: str) -> list[dict]:
-        from dataclasses import asdict
+    @api.post("/intake/{sid}/submit", status_code=201)
+    def intake_submit(sid: str, user: User = Depends(current_user)) -> dict:
+        s = intake_session(sid, user)
+        if s.feature_id:
+            raise HTTPException(409, f"Already submitted as {s.feature_id}")
+        if s.draft.missing():
+            raise HTTPException(422, f"Still needed: {', '.join(s.draft.missing())}")
+        if s.draft.product_id not in lanes_for(user):
+            raise HTTPException(403, f"You aren't a member of {s.draft.product_id}'s organization")
+        try:
+            s.feature_id = eng().create(product_id=s.draft.product_id, title=s.draft.title,
+                                        description=s.draft.description(), created_by=user.login, background=True)
+        except GovernanceError as exc:
+            raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
+        s.messages.append({"role": "agent", "text": f"Submitted as {s.feature_id}. Agents are on the discovery phase now.",
+                           "at": s.messages[-1]["at"]})
+        return s.to_dict()
 
-        return [asdict(r) for r in eng().services.ledger.records(feature_id)]
+    # --- live updates ---
+    @api.get("/events")
+    async def events(request: Request, user: User = Depends(current_user)) -> StreamingResponse:
+        q = eng().bus.subscribe()
+
+        async def stream():
+            try:
+                yield "retry: 3000\n\n"
+                while not await request.is_disconnected():
+                    try:
+                        ev = await asyncio.wait_for(q.get(), timeout=15)
+                        yield f"data: {json.dumps(ev)}\n\n"
+                    except asyncio.TimeoutError:
+                        yield ": keep-alive\n\n"
+            finally:
+                eng().bus.unsubscribe(q)
+
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    app.include_router(api)
+
+    # --- web app ---
+    if web_dist and (web_dist / "index.html").is_file():
+        app.mount("/assets", StaticFiles(directory=web_dist / "assets"), name="assets")
+
+        @app.get("/{path:path}", include_in_schema=False)
+        def spa(path: str) -> FileResponse:
+            candidate = (web_dist / path).resolve()
+            if path and candidate.is_file() and web_dist.resolve() in candidate.parents:
+                return FileResponse(candidate)
+            return FileResponse(web_dist / "index.html")
 
     return app
 
-
-app = create_app()

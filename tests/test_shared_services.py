@@ -135,7 +135,7 @@ def test_shared_owner_can_send_the_architecture_back(engine):
     assert g4_pos["lane"] == "POS" and g4_pos["lanes"] == ["POS", "SS"]
     engine.decide(fid, g4_pos["interrupt_id"], {"decision": "approve", "approver": "pos-architect"})
     [g4_ss] = [p for p in engine.pending(fid) if p.get("gate") == "g4"]
-    assert g4_ss["lane"] == "SS" and g4_ss["approvers"] == ["ss-architect"]
+    assert g4_ss["lane"] == "SS" and g4_ss["approvers"] == ["vrixel-shared-services/architects"]
     v = engine.decide(fid, g4_ss["interrupt_id"], {"decision": "revise", "approver": "ss-architect",
                                                     "feedback": "Use the existing template API"})
     assert any(g["gate"] == "g4" and g["lane"] == "SS" and g["decision"] == "revise" for g in v["gate_decisions"])

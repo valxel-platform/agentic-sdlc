@@ -24,6 +24,12 @@ services:
       VRIXEL_GITHUB_APP_ID: ${VRIXEL_GITHUB_APP_ID:-}
       VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE: ${VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE:-}
       VRIXEL_GITHUB_TOKEN: ${VRIXEL_GITHUB_TOKEN:-}
+      # Web sign-in. dev lets you pick any login and teams (local only); github uses OAuth.
+      VRIXEL_AUTH: ${VRIXEL_AUTH:-dev}
+      VRIXEL_SESSION_SECRET: ${VRIXEL_SESSION_SECRET:-local-dev-only-session-secret-change-me-0000}
+      VRIXEL_PUBLIC_URL: ${VRIXEL_PUBLIC_URL:-http://localhost:8080}
+      VRIXEL_GITHUB_OAUTH_CLIENT_ID: ${VRIXEL_GITHUB_OAUTH_CLIENT_ID:-}
+      VRIXEL_GITHUB_OAUTH_CLIENT_SECRET: ${VRIXEL_GITHUB_OAUTH_CLIENT_SECRET:-}
     ports: ["8080:8080"]
     volumes: [artifacts:/data/artifacts]
     depends_on:

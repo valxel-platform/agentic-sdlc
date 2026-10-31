@@ -21,37 +21,73 @@ any phase ── 3 failed evaluator loops or budget spent ──> escalation (hu
 
 ```bash
 docker compose up --build
+open http://localhost:8080             # web interface
 open http://localhost:8080/docs        # interactive API
 ```
 
-Walk one feature through the gates with curl:
-
-```bash
-curl -s -X POST localhost:8080/features -H 'content-type: application/json' \
-  -d '{"product_id":"EMR","title":"Consent check on intake","description":"Block intake until consent is recorded"}'
-
-curl -s localhost:8080/inbox            # pending gates and escalations, all features
-
-curl -s -X POST localhost:8080/features/EMR-FEAT-1/decisions/<interrupt_id> \
-  -H 'content-type: application/json' \
-  -d '{"decision":"approve","approver":"emr-product-owner","active_minutes":5}'
-
-curl -s localhost:8080/features/EMR-FEAT-1          # status, artifacts, PRs, cost, timeline
-curl -s localhost:8080/features/EMR-FEAT-1/usage    # one ledger record per model call
-```
+Compose starts with development sign-in (`VRIXEL_AUTH=dev`): type any GitHub login and tick the
+teams to act as, for example `vrixel-emr/product-owners`. Use GitHub sign-in for anything shared
+(see [Web interface](#web-interface)).
 
 ### Without Docker
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 48 tests in memory; set VRIXEL_TEST_DATABASE_URL for the Postgres test
+pytest                                   # in memory; set VRIXEL_TEST_DATABASE_URL for the Postgres test
 vrixel demo --product EMR --fault spec=1 --revise
-uvicorn vrixel_sdlc.api.app:app --reload # in-memory unless DATABASE_URL is set
+
+(cd web && npm ci && npm run build)      # build the web interface into web/dist
+VRIXEL_AUTH=dev VRIXEL_SESSION_SECRET=$(openssl rand -hex 32) \
+  uvicorn --factory vrixel_sdlc.api.app:create_app --port 8080 --reload
 ```
+
+For frontend work, run the API as above and `cd web && npm run dev`. Vite serves the app on
+port 5173 and proxies `/api` to port 8080.
 
 `vrixel demo` runs one feature through every phase, auto-approving gates. `--fault spec=1` makes
 the first PRD defective, so the evaluator loop fixes it, and `--revise` sends the design back once
 at G3.
+
+## Web interface
+
+Three screens, all updated live over server-sent events (`/api/events`):
+
+- **Decisions** lists the gates and escalations waiting on you, or on everyone. Each opens with
+  the artifact under review, the evaluator score, attempts and spend, and the decisions you can
+  take: approve, request changes (with feedback), take over, or stop. Escalations offer mark
+  resolved, let agents retry, or stop.
+- **Features** shows every feature as a row on the pipeline rail, grouped by product, with what
+  it is waiting for. A feature's page adds the timeline, artifacts, pull requests, decisions and
+  cost.
+- **New intent** is a chat with the intake agent. It asks for the product, the problem, the users
+  and a success measure, drafts the intent alongside the conversation, and checks the capability
+  catalog for features it extends. You can edit the draft directly and submit it when it is
+  complete. Submitting starts discovery.
+
+### Sign-in and who can decide
+
+GitHub sign-in uses an OAuth app owned by `vrixel-tools`:
+
+1. In the org's settings, open Developer settings, OAuth Apps, New OAuth App. Set the callback
+   URL to `<VRIXEL_PUBLIC_URL>/api/auth/callback`.
+2. Set `VRIXEL_AUTH=github`, `VRIXEL_GITHUB_OAUTH_CLIENT_ID`, `VRIXEL_GITHUB_OAUTH_CLIENT_SECRET`,
+   `VRIXEL_PUBLIC_URL` and a random `VRIXEL_SESSION_SECRET` of at least 32 characters.
+3. Each product org approves the OAuth app (org settings, Third-party access) so team membership
+   is visible.
+
+The app requests `read:org` only to read the user's orgs and teams. It keeps them in a signed,
+HttpOnly session cookie and discards the GitHub token.
+
+- **Submitting an intent** requires membership of the product's GitHub org.
+- **Deciding a gate** requires matching one of the gate's approvers in that product's
+  `governance/product.yaml`. An approver is a team (`vrixel-emr/product-owners`) or a login.
+  Cross-lane gates (G4, G5, G6) ask each touched lane in turn, using that lane's approvers.
+- **Resolving an escalation** uses the approvers of the gate that follows the stuck phase.
+
+The API records the signed-in login as the approver; a request body cannot override it.
+
+Run one replica. Live updates and intake drafts are held in process. Pipeline state is durable in
+Postgres, so a restart loses only open intake chats.
 
 ## Organizations and product governance
 
@@ -174,7 +210,7 @@ The same app can later open PRs in product repos, scoped per org.
 
 ## Decisions
 
-Every pending item in `/inbox` carries an `interrupt_id` and its `allowed` decisions.
+The web interface is the usual way to decide. Over the API, every pending item in `/api/inbox` carries an `interrupt_id` and its `allowed` decisions.
 
 | Item | Decisions | Effect |
 | --- | --- | --- |
@@ -227,7 +263,11 @@ src/vrixel_sdlc/
   runtime/         generic and Claude Code runtimes
   integrations/    GitHub, OpenChoreo, capability catalog
   engine.py        start, inbox, decide, view
-  api/app.py       FastAPI service
+  api/app.py       FastAPI service under /api; serves web/dist
+  web/auth.py      GitHub OAuth, signed sessions, approver matching
+  intake.py        guided intake agent
+  events.py        live-update bus
   cli.py           vrixel demo
+web/               React app: decisions, features, intake
 tests/             pipeline, gateway, governance, API, Postgres durability
 ```

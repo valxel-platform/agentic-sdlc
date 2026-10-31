@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
 from langgraph.types import Command
 
+from .events import EventBus
 from .graph import build_pipeline
 from .graph.pipeline import normalize
 from .gateway import summarize
@@ -68,39 +70,96 @@ class PostgresIndex:
 
 
 class FeatureEngine:
-    def __init__(self, services: Services, checkpointer, index: FeatureIndex | None = None) -> None:
+    def __init__(self, services: Services, checkpointer, index: FeatureIndex | None = None,
+                 bus: EventBus | None = None, workers: int = 4) -> None:
         self.services = services
         self.graph = build_pipeline(services, checkpointer=checkpointer)
         self.index = index or InMemoryIndex()
+        self.bus = bus or EventBus()
+        self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="feature")
+        self._locks: dict[str, threading.Lock] = {}
+        self._locks_guard = threading.Lock()
+        self.running: set[str] = set()
+        self.errors: dict[str, str] = {}
 
     @staticmethod
     def _config(feature_id: str) -> dict:
         return {"configurable": {"thread_id": feature_id}, "recursion_limit": 200}
 
-    def start(self, *, product_id: str, title: str, description: str = "",
-              simulate_faults: dict[str, int] | None = None, budget_usd: float | None = None) -> dict:
+    def _lock(self, feature_id: str) -> threading.Lock:
+        with self._locks_guard:
+            return self._locks.setdefault(feature_id, threading.Lock())
+
+    def _execute(self, feature_id: str, payload) -> None:
+        """Run the thread until it finishes or waits on a human, publishing each node as it ends."""
+        with self._lock(feature_id):
+            self.running.add(feature_id)
+            self.errors.pop(feature_id, None)
+            self.bus.publish({"type": "feature.running", "feature_id": feature_id})
+            try:
+                for chunk in self.graph.stream(payload, self._config(feature_id), stream_mode="updates"):
+                    for node in chunk:
+                        if node != "__interrupt__":
+                            self.bus.publish({"type": "feature.node", "feature_id": feature_id, "node": node})
+            except Exception as exc:  # surfaced on the feature page; the checkpoint keeps the last good step
+                self.errors[feature_id] = f"{type(exc).__name__}: {exc}"
+                raise
+            finally:
+                self.running.discard(feature_id)
+                self.bus.publish({"type": "feature.updated", "feature_id": feature_id,
+                                  "pending": len(self.pending(feature_id))})
+
+    def _submit(self, feature_id: str, payload) -> None:
+        def run():
+            try:
+                self._execute(feature_id, payload)
+            except Exception:
+                pass  # recorded in self.errors by _execute
+        self._pool.submit(run)
+
+    def create(self, *, product_id: str, title: str, description: str = "", created_by: str = "",
+               simulate_faults: dict[str, int] | None = None, budget_usd: float | None = None,
+               background: bool = False) -> str:
         # Read and validate the product's governance from its own org, and pin the commits.
         snap = self.services.snapshot(product_id)
         seq = self.index.next_number(product_id)
         feature_id = f"{product_id}-FEAT-{seq}"
         self.index.add(feature_id, product_id, title, seq)
         inp = {"feature_id": feature_id, "product_id": product_id, "title": title, "description": description,
-               "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins}
+               "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins}
         if budget_usd:
             inp["token_budget_usd"] = float(budget_usd)
-        self.graph.invoke(inp, self._config(feature_id))
-        return self.view(feature_id)
+        self.bus.publish({"type": "feature.created", "feature_id": feature_id, "product_id": product_id})
+        if background:
+            self._submit(feature_id, inp)
+        else:
+            self._execute(feature_id, inp)
+        return feature_id
+
+    def start(self, **kwargs) -> dict:
+        """Create a feature and run it until its first human gate (synchronous)."""
+        return self.view(self.create(**kwargs))
 
     def pending(self, feature_id: str) -> list[dict]:
         snap = self.graph.get_state(self._config(feature_id))
         return [{"interrupt_id": i.id, **i.value} for i in snap.interrupts]
 
-    def decide(self, feature_id: str, interrupt_id: str, decision: dict) -> dict:
-        pending = {p["interrupt_id"]: p for p in self.pending(feature_id)}
-        if interrupt_id not in pending:
-            raise KeyError(f"No pending interrupt {interrupt_id} on {feature_id}")
-        d = normalize(decision, tuple(pending[interrupt_id]["allowed"]))  # validate before resuming
-        self.graph.invoke(Command(resume={interrupt_id: d}), self._config(feature_id))
+    def item(self, feature_id: str, interrupt_id: str) -> dict:
+        for p in self.pending(feature_id):
+            if p["interrupt_id"] == interrupt_id:
+                return p
+        raise KeyError(f"No pending interrupt {interrupt_id} on {feature_id}")
+
+    def decide(self, feature_id: str, interrupt_id: str, decision: dict, *, background: bool = False) -> dict:
+        if feature_id in self.running:
+            raise RuntimeError(f"{feature_id} is still running; decide once it is waiting")
+        item = self.item(feature_id, interrupt_id)
+        d = normalize(decision, tuple(item["allowed"]))  # validate before resuming
+        cmd = Command(resume={interrupt_id: d})
+        if background:
+            self._submit(feature_id, cmd)
+            return {"feature_id": feature_id, "accepted": True}
+        self._execute(feature_id, cmd)
         return self.view(feature_id)
 
     def view(self, feature_id: str) -> dict:
@@ -110,11 +169,17 @@ class FeatureEngine:
             raise KeyError(f"Unknown feature {feature_id}")
         records = self.services.ledger.records(feature_id)
         human = sum(g.get("active_minutes", 0.0) for g in s.get("gate_decisions", []))
+        pending = [{"interrupt_id": i.id, **i.value} for i in snap.interrupts]
         return {
             "feature_id": feature_id,
             "product_id": s.get("product_id"),
             "title": s.get("title"),
+            "description": s.get("description", ""),
+            "created_by": s.get("created_by", ""),
             "status": s.get("status"),
+            "running": feature_id in self.running,
+            "error": self.errors.get(feature_id),
+            "rail": rail(s, pending, running=feature_id in self.running),
             "constitution_version": s.get("constitution_version"),
             "governance": s.get("governance"),
             "phase_status": s.get("phase_status", {}),
@@ -127,7 +192,7 @@ class FeatureEngine:
             "change_set": s.get("change_set", {}),
             "release": s.get("release", {}),
             "gate_decisions": s.get("gate_decisions", []),
-            "pending": [{"interrupt_id": i.id, **i.value} for i in snap.interrupts],
+            "pending": pending,
             "cost_usd": round(float(s.get("cost_usd", 0.0)), 4),
             "budget_usd": s.get("token_budget_usd"),
             "tokens_used": s.get("tokens_used", 0),
@@ -135,6 +200,24 @@ class FeatureEngine:
             "usage": summarize(records),
             "events": s.get("events", []),
         }
+
+    def summary(self, feature_id: str) -> dict:
+        """The board's light view of a feature."""
+        v = self.view(feature_id)
+        keep = ("feature_id", "product_id", "title", "created_by", "status", "running", "error", "rail",
+                "risk_tier", "lanes_touched", "cost_usd", "budget_usd")
+        out = {k: v[k] for k in keep}
+        out["pending"] = [{k: p.get(k) for k in ("interrupt_id", "type", "gate", "phase", "lane", "approvers")}
+                          for p in v["pending"]]
+        out["updated_at"] = v["events"][-1]["at"] if v["events"] else None
+        return out
+
+    def artifact(self, feature_id: str, kind: str) -> dict:
+        s = self.graph.get_state(self._config(feature_id)).values
+        ref = (s.get("artifacts") or {}).get(kind)
+        if not ref:
+            raise KeyError(f"{feature_id} has no {kind} artifact")
+        return {**ref, "content": self.services.artifacts.load(ref)}
 
     def inbox(self, product_id: str | None = None) -> list[dict]:
         out = []
@@ -166,3 +249,46 @@ class FeatureEngine:
                 d = {"decision": "resolved", "feedback": "resolved by a human"}
             self.decide(feature_id, p["interrupt_id"], {"approver": approver, "active_minutes": 5, **d})
         return self.view(feature_id)
+
+
+RAIL = [("discovery", "phase"), ("g1", "gate"), ("spec", "phase"), ("g2", "gate"), ("design", "phase"),
+        ("g3", "gate"), ("architecture", "phase"), ("g4", "gate"), ("plan", "phase"), ("build", "phase"),
+        ("g5", "gate"), ("release", "phase"), ("g6", "gate"), ("operate", "phase")]
+
+
+def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
+    """Each station's state for the UI: done, skipped, waiting (on a human), current, stopped or todo."""
+    status = s.get("status")
+    phase_status, approvals = s.get("phase_status") or {}, s.get("approvals") or {}
+    waiting_gates = {p.get("gate") for p in pending if p["type"] in ("gate", "handback")}
+    waiting_phases = {p.get("phase") for p in pending if p["type"] == "escalation"}
+    merged = (s.get("change_set") or {}).get("merged")
+    stations = []
+    for key, kind in RAIL:
+        if kind == "gate":
+            if key in waiting_gates:
+                st = "waiting"
+            elif approvals.get(key):
+                st = "done"
+            elif key == "g5" and merged:
+                st = "skipped"  # low-risk change sets auto-merge
+            else:
+                st = "todo"
+        else:
+            ps = phase_status.get(key)
+            if key in waiting_phases:
+                st = "waiting"
+            elif ps in ("passed", "resolved"):
+                st = "done"
+            else:
+                st = "todo"
+        stations.append({"key": key, "kind": kind, "state": st})
+    if running and not any(x["state"] == "waiting" for x in stations):
+        nxt = next((x for x in stations if x["state"] == "todo"), None)
+        if nxt:
+            nxt["state"] = "current"
+    if status == "aborted":
+        nxt = next((x for x in stations if x["state"] in ("todo", "waiting")), None)
+        if nxt:
+            nxt["state"] = "stopped"
+    return stations

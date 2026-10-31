@@ -15,11 +15,12 @@ repos:
   role: library
 - name: vrixel-shared-services/ss-security
   role: library
+# Approvers are GitHub teams (<org>/<team-slug>) or users (<login>). Only they can decide a gate.
 approvers:
-  g1: [ss-platform-owner]
-  g2: [ss-platform-owner]
-  g3: [ss-design-lead]
-  g4: [ss-architect]
-  g5: [ss-security-lead]
-  g6: [ss-release-manager]
+  g1: [vrixel-shared-services/platform-owners]
+  g2: [vrixel-shared-services/platform-owners]
+  g3: [vrixel-shared-services/design]
+  g4: [vrixel-shared-services/architects]
+  g5: [vrixel-shared-services/security]
+  g6: [vrixel-shared-services/release-managers]
 high_risk_paths: ["src/", "migrations/"]

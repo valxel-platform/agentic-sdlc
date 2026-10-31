@@ -1,33 +1,225 @@
+import json
+import time
+from io import BytesIO
+from urllib.parse import parse_qs, urlparse
+
+import pytest
 from fastapi.testclient import TestClient
 
 from vrixel_sdlc.api.app import create_app
+from vrixel_sdlc.web.auth import AuthConfig, GitHubOAuth
+
+SECRET = "x" * 40
+EMR_TEAMS = ["vrixel-emr/product-owners", "vrixel-emr/architects", "vrixel-emr/design",
+             "vrixel-emr/tech-leads", "vrixel-emr/release-managers"]
 
 
-def test_intake_inbox_and_decisions_over_http(engine):
-    with TestClient(create_app(engine)) as client:
-        assert client.get("/healthz").json() == {"ok": True, "mode": "stub"}
-        r = client.post("/features", json={"product_id": "AG", "title": "Offline crop log"})
-        assert r.status_code == 201
-        fid = r.json()["feature_id"]
-        assert fid == "AG-FEAT-1"
-
-        inbox = client.get("/inbox").json()
-        assert [(i["feature_id"], i["gate"]) for i in inbox] == [(fid, "g1")]
-
-        bad = client.post(f"/features/{fid}/decisions/{inbox[0]['interrupt_id']}",
-                          json={"decision": "resolved", "approver": "po"})
-        assert bad.status_code == 422
-
-        ok = client.post(f"/features/{fid}/decisions/{inbox[0]['interrupt_id']}",
-                         json={"decision": "approve", "approver": "po", "active_minutes": 4})
-        assert ok.status_code == 200
-        assert [p["gate"] for p in ok.json()["pending"]] == ["g2"]
-
-        usage = client.get(f"/features/{fid}/usage").json()
-        assert usage and {"prefix_hashes", "cache_read_input_tokens", "est_cost_usd"} <= set(usage[0])
+def wait_idle(engine, fid, timeout=10.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        if fid not in engine.running:
+            try:
+                v = engine.view(fid)
+                if v["pending"] or v["status"] in ("done", "aborted"):
+                    return v
+            except KeyError:
+                pass
+        time.sleep(0.02)
+    raise TimeoutError(f"{fid} did not settle")
 
 
-def test_unknown_product_and_feature_return_404(engine):
-    with TestClient(create_app(engine)) as client:
-        assert client.post("/features", json={"product_id": "NOPE", "title": "x y z"}).status_code == 404
-        assert client.get("/features/AG-FEAT-99").status_code == 404
+@pytest.fixture
+def client(engine):
+    app = create_app(engine, auth=AuthConfig(mode="dev", secret=SECRET), web_dist=None)
+    with TestClient(app) as c:
+        yield c
+
+
+def sign_in(client, login, teams=(), orgs=()):
+    r = client.post("/api/auth/dev-login", json={"login": login, "teams": list(teams), "orgs": list(orgs)})
+    assert r.status_code == 200
+    return r
+
+
+def test_api_requires_sign_in(client):
+    assert client.get("/api/features").status_code == 401
+    assert client.get("/api/healthz").json()["auth"] == "dev"
+
+
+def test_only_listed_approvers_can_decide_and_decisions_record_the_signed_in_user(client, engine):
+    sign_in(client, "maria", teams=EMR_TEAMS)
+    r = client.post("/api/features", json={"product_id": "EMR", "title": "Consent check on intake"})
+    assert r.status_code == 201
+    fid = r.json()["feature_id"]
+    wait_idle(engine, fid)
+
+    [item] = client.get("/api/inbox?mine=true").json()
+    assert item["gate"] == "g1" and item["can_decide"] and item["approvers"] == ["vrixel-emr/product-owners"]
+
+    sign_in(client, "dev-without-teams", orgs=["vrixel-emr"])
+    assert client.get("/api/inbox?mine=true").json() == []
+    [seen] = client.get("/api/inbox").json()
+    assert seen["can_decide"] is False
+    denied = client.post(f"/api/features/{fid}/decisions/{item['interrupt_id']}", json={"decision": "approve"})
+    assert denied.status_code == 403
+
+    sign_in(client, "maria", teams=EMR_TEAMS)
+    ok = client.post(f"/api/features/{fid}/decisions/{item['interrupt_id']}",
+                     json={"decision": "approve", "active_minutes": 4, "approver": "someone-else"})
+    assert ok.status_code == 202
+    v = wait_idle(engine, fid)
+    assert v["gate_decisions"][0]["approver"] == "maria"  # the server records the signed-in user
+    assert [p["gate"] for p in v["pending"]] == ["g2"]
+
+
+def test_intents_need_membership_of_the_lane_org(client):
+    sign_in(client, "ag-person", orgs=["vrixel-agtech"])
+    me = client.get("/api/me").json()
+    assert [lane["id"] for lane in me["lanes"]] == ["AG"]
+    r = client.post("/api/features", json={"product_id": "EMR", "title": "Not my product"})
+    assert r.status_code == 403
+
+
+def test_board_and_feature_detail_show_the_rail(client, engine):
+    sign_in(client, "maria", teams=EMR_TEAMS)
+    fid = client.post("/api/features", json={"product_id": "EMR", "title": "Allergy list"}).json()["feature_id"]
+    wait_idle(engine, fid)
+    [row] = client.get("/api/features").json()
+    assert row["feature_id"] == fid and row["created_by"] == "maria"
+    states = {s["key"]: s["state"] for s in row["rail"]}
+    assert states["discovery"] == "done" and states["g1"] == "waiting" and states["spec"] == "todo"
+    detail = client.get(f"/api/features/{fid}").json()
+    assert detail["pending"][0]["can_decide"] is True
+    opp = client.get(f"/api/features/{fid}/artifacts/OPP").json()
+    assert opp["content"].startswith("# Opportunity brief: Allergy list")
+
+
+def test_guided_intake_conversation_submits_a_feature(client, engine):
+    sign_in(client, "priya", orgs=["vrixel-agtech", "vrixel-pos"])
+    s = client.post("/api/intake", json={}).json()
+    assert s["messages"][0]["role"] == "agent" and s["lanes"] == ["AG", "POS"]
+
+    s = client.post(f"/api/intake/{s['id']}/messages",
+                    json={"text": "Farmers need to log field observations while offline."}).json()
+    assert s["draft"]["problem"].startswith("Farmers need") and s["draft"]["title"]
+    assert "Which product" in s["messages"][-1]["text"] and s["draft"]["product_id"] == ""
+
+    s = client.post(f"/api/intake/{s['id']}/messages", json={"text": "It's for AgTech"}).json()
+    assert s["draft"]["product_id"] == "AG" and "Who will use" in s["messages"][-1]["text"]
+    s = client.post(f"/api/intake/{s['id']}/messages", json={"text": "Smallholder farmers on low-end phones"}).json()
+    assert not s["ready"]
+    early = client.post(f"/api/intake/{s['id']}/submit", json={})
+    assert early.status_code == 422 and "success_metric" in early.json()["detail"]
+
+    s = client.post(f"/api/intake/{s['id']}/messages", json={"text": "60% of field visits logged within a week"}).json()
+    assert s["ready"] and "Submit it when it looks right" in s["messages"][-1]["text"]
+
+    s = client.patch(f"/api/intake/{s['id']}/draft", json={"title": "Offline field observations"}).json()
+    assert s["draft"]["title"] == "Offline field observations"
+    assert client.patch(f"/api/intake/{s['id']}/draft", json={"product_id": "EMR"}).status_code == 403
+
+    s = client.post(f"/api/intake/{s['id']}/submit", json={}).json()
+    fid = s["feature_id"]
+    assert fid.startswith("AG-FEAT-")
+    v = wait_idle(engine, fid)
+    assert v["title"] == "Offline field observations" and v["created_by"] == "priya"
+    assert "Success measure: 60% of field visits" in v["description"]
+    assert client.post(f"/api/intake/{s['id']}/submit", json={}).status_code == 409
+
+    sign_in(client, "someone-else", orgs=["vrixel-agtech"])
+    assert client.get(f"/api/intake/{s['id']}").status_code == 404  # conversations are private
+
+
+def test_intake_detects_the_product_and_flags_overlapping_capabilities(client):
+    sign_in(client, "maria", orgs=["vrixel-emr"])
+    s = client.post("/api/intake", json={}).json()
+    s = client.post(f"/api/intake/{s['id']}/messages",
+                    json={"text": "Front desk needs faster patient intake for walk-ins"}).json()
+    assert s["draft"]["product_id"] == "EMR"  # only one lane: chosen without asking
+    for text in ("Front-desk staff at busy clinics", "Check-in time under 3 minutes"):
+        s = client.post(f"/api/intake/{s['id']}/messages", json={"text": text}).json()
+    assert s["draft"]["related_capability"] == "CAP-EMR-INTAKE (Patient intake)"
+    assert "CAP-EMR-INTAKE" in s["messages"][-1]["text"]
+
+
+def test_mutations_must_be_json(client):
+    sign_in(client, "maria", teams=EMR_TEAMS)
+    r = client.post("/api/intake", content="x", headers={"content-type": "application/x-www-form-urlencoded"})
+    assert r.status_code == 415
+
+
+def test_events_stream_reports_feature_progress(engine):
+    import asyncio
+
+    async def collect():
+        q = engine.bus.subscribe()
+        await asyncio.get_running_loop().run_in_executor(
+            None, lambda: engine.create(product_id="AG", title="Rain gauge import"))
+        out = []
+        while not q.empty():
+            out.append(q.get_nowait())
+        engine.bus.unsubscribe(q)
+        return out
+
+    events = asyncio.run(collect())
+    kinds = [e["type"] for e in events]
+    assert kinds[0] == "feature.created" and kinds[-1] == "feature.updated"
+    assert {"intake", "discovery"} <= {e.get("node") for e in events if e["type"] == "feature.node"}
+
+
+class FakeResp(BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class FakeGitHub:
+    def __init__(self):
+        self.calls = []
+
+    def open(self, req, timeout=None):
+        url = req.full_url
+        self.calls.append((req.get_method(), url))
+        if url.endswith("/login/oauth/access_token"):
+            body = parse_qs(req.data.decode())
+            assert body["code"] == ["the-code"]
+            return FakeResp(json.dumps({"access_token": "gho_abc"}).encode())
+        assert req.headers["Authorization"] == "Bearer gho_abc"
+        if url.endswith("/user"):
+            return FakeResp(json.dumps({"login": "maria", "name": "Maria", "avatar_url": "a"}).encode())
+        if "/user/orgs" in url:
+            return FakeResp(json.dumps([{"login": "vrixel-emr"}]).encode())
+        if "/user/teams" in url:
+            return FakeResp(json.dumps([{"slug": "architects", "organization": {"login": "vrixel-emr"}}]).encode())
+        raise AssertionError(url)
+
+
+def test_github_sign_in_flow(engine):
+    cfg = AuthConfig(mode="github", secret=SECRET, client_id="cid", client_secret="cs",
+                     public_url="https://sdlc.vrixel.dev")
+    fake = FakeGitHub()
+    app = create_app(engine, auth=cfg, oauth=GitHubOAuth(cfg, opener=fake), web_dist=None)
+    with TestClient(app, base_url="https://sdlc.vrixel.dev") as client:
+        assert client.post("/api/auth/dev-login", json={"login": "x"}).status_code == 404
+        r = client.get("/api/auth/login", follow_redirects=False)
+        q = parse_qs(urlparse(r.headers["location"]).query)
+        assert q["scope"] == ["read:org"] and q["redirect_uri"] == ["https://sdlc.vrixel.dev/api/auth/callback"]
+
+        bad = client.get("/api/auth/callback?code=the-code&state=forged", follow_redirects=False)
+        assert bad.status_code == 400  # state must match the cookie set at login
+
+        r = client.get(f"/api/auth/callback?code=the-code&state={q['state'][0]}", follow_redirects=False)
+        assert r.status_code == 302 and "secure" in r.headers["set-cookie"].lower()
+        me = client.get("/api/me").json()
+        assert me["login"] == "maria" and me["teams"] == ["vrixel-emr/architects"]
+        assert [lane["id"] for lane in me["lanes"]] == ["EMR"]
+        assert "gho_abc" not in r.headers["set-cookie"]  # the GitHub token is never stored
+
+
+def test_tampered_session_cookies_are_rejected(client):
+    sign_in(client, "maria", teams=EMR_TEAMS)
+    token = client.cookies.get("vrixel_session")
+    client.cookies.set("vrixel_session", token[:-1] + ("0" if token[-1] != "0" else "1"))
+    assert client.get("/api/me").status_code == 401
