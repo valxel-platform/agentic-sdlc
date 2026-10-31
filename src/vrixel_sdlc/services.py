@@ -13,8 +13,10 @@ from .integrations import (
     CapabilityCatalog,
     GitHub,
     OpenChoreo,
+    PackageRegistry,
     StubGitHub,
     StubOpenChoreo,
+    StubPackageRegistry,
     default_catalog,
 )
 from .runtime import AgentRuntime, ClaudeCodeRuntime, GatewayRuntime
@@ -31,6 +33,7 @@ class Services:
     catalog: CapabilityCatalog
     runtimes: dict[str, AgentRuntime]
     governance: GovernanceLoader
+    packages: PackageRegistry
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
@@ -50,6 +53,7 @@ def build_services(
     openchoreo: OpenChoreo | None = None,
     catalog: CapabilityCatalog | None = None,
     governance_source: GovernanceSource | None = None,
+    packages: PackageRegistry | None = None,
 ) -> Services:
     settings = settings or load_settings()
     ledger = ledger or InMemoryLedger()
@@ -77,4 +81,5 @@ def build_services(
         catalog=catalog or default_catalog(),
         runtimes=runtimes,
         governance=GovernanceLoader(settings, governance_source or build_source(settings)),
+        packages=packages or StubPackageRegistry(),
     )

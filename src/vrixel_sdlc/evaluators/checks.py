@@ -56,12 +56,13 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     if not bullets(section(text, "ADRs")):
         out.append("HLD records no ADRs")
     repos = parse_affected_repos(text)
-    known = {r["name"] for r in ctx.get("repos", [])}
+    known = {r["name"] for r in ctx.get("repos", []) + ctx.get("dependency_repos", [])}
     if not repos:
         out.append("HLD lists no affected repos; impact analysis is required to seed the change set")
     for r in repos:
         if r["name"] not in known:
-            out.append(f"Affected repo {r['name']} is not registered for this product; it needs a provisioning ADR")
+            out.append(f"Affected repo {r['name']} is not registered for this product or a lane it depends on; "
+                       "it needs a provisioning ADR or a depends_on entry")
     if not section(text, "Contracts"):
         out.append("HLD has no contracts section (VX-4)")
     return out

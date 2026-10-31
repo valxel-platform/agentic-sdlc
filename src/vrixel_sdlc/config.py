@@ -41,6 +41,9 @@ class ProductConfig:
     repos: tuple[RepoSpec, ...]
     approvers: dict[str, list[str]]
     high_risk_paths: tuple[str, ...]
+    kind: str = "product"  # product (owns a runtime) | shared (ships packages, no runtime)
+    runtime: dict | None = None  # {"openchoreo_project", "pipeline"}; None for shared lanes
+    depends_on: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,7 @@ class RegistryEntry:
     governance: RepoPointer
     data_class: str
     workspace: str
+    kind: str = "product"
 
 
 @dataclass(frozen=True)
@@ -140,6 +144,7 @@ def load_settings(
             governance=RepoPointer(org=p["org"], repo=p.get("repo", "governance"), ref=p.get("ref", "main")),
             data_class=p["data_class"],
             workspace=p["workspace"],
+            kind=p.get("kind", "product"),
         )
         for pid, p in reg["products"].items()
     }

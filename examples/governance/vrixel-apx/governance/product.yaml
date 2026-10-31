@@ -5,6 +5,13 @@ product_id: APX
 name: APX payment platform
 constitution: constitution.md
 context: context.md
+# Lanes this product builds on. Their repos may join this product's change sets, their
+# constitutions apply to changes in their repos, and their owners co-approve G4 to G6.
+depends_on: [SS]
+# Runtime infrastructure stays with the product: shared services run inside it.
+runtime:
+  openchoreo_project: apx
+  pipeline: [dev, staging, production]
 budget_usd: 200
 critic_threshold: 0.85
 max_loops: 3

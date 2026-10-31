@@ -18,7 +18,8 @@ _ROLES = {"provider", "consumer", "library"}
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
 
 
-def parse_manifest(text: str, entry: RegistryEntry, limits: Limits) -> tuple[ProductConfig, dict]:
+def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
+                   registry: dict[str, RegistryEntry] | None = None) -> tuple[ProductConfig, dict]:
     try:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
@@ -70,6 +71,28 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits) -> tuple[Pro
         if not approvers.get(gate):
             problems.append(f"gate {gate} has no approvers")
 
+    # Runtime infrastructure stays with products; shared lanes ship packages that products run.
+    runtime = raw.get("runtime")
+    if entry.kind == "shared":
+        if runtime:
+            problems.append("a shared lane owns no runtime; consuming products run shared services in their own runtime")
+        runtime = None
+    elif not isinstance(runtime, dict) or not runtime.get("openchoreo_project"):
+        problems.append("runtime.openchoreo_project is required: each product owns its runtime")
+    else:
+        runtime = {"openchoreo_project": str(runtime["openchoreo_project"]),
+                   "pipeline": [str(e) for e in runtime.get("pipeline") or ["dev", "staging", "production"]]}
+
+    registry = registry or {}
+    depends_on = [str(d) for d in raw.get("depends_on") or []]
+    for dep in depends_on:
+        if dep == entry.product_id:
+            problems.append("a lane cannot depend on itself")
+        elif dep not in registry:
+            problems.append(f"depends_on {dep!r} is not a registered lane")
+        elif entry.kind == "shared" and registry[dep].kind != "shared":
+            problems.append(f"shared lane may not depend on product {dep}")
+
     if problems:
         raise GovernanceError(f"{entry.governance.full_name}/product.yaml is invalid: " + "; ".join(problems))
 
@@ -85,6 +108,9 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits) -> tuple[Pro
         repos=tuple(repos),
         approvers=approvers,
         high_risk_paths=tuple(str(p) for p in raw.get("high_risk_paths") or []),
+        kind=entry.kind,
+        runtime=runtime,
+        depends_on=tuple(dict.fromkeys(depends_on)),
     )
     files = {"constitution": str(raw.get("constitution") or "constitution.md"),
              "context": str(raw.get("context") or "context.md")}

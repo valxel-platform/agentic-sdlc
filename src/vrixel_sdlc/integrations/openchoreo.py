@@ -15,7 +15,7 @@ PIPELINE = ("dev", "staging", "production")
 
 
 class OpenChoreo(Protocol):
-    def run_workflow(self, *, component: str, ref: str, kind: str) -> dict: ...
+    def run_workflow(self, *, component: str, ref: str, kind: str, project: str | None = None) -> dict: ...
     def promote(self, *, component: str, env: str, actor: str, actor_type: str) -> dict: ...
     def environment(self, component: str) -> str | None: ...
 
@@ -28,10 +28,10 @@ class StubOpenChoreo:
         self._seq = itertools.count(1)
         self._lock = threading.Lock()
 
-    def run_workflow(self, *, component, ref, kind) -> dict:
+    def run_workflow(self, *, component, ref, kind, project=None) -> dict:
         with self._lock:
             run = {"run_id": f"wfr-{next(self._seq)}", "component": component, "ref": ref, "kind": kind,
-                   "status": "succeeded"}
+                   "project": project, "status": "succeeded"}
             self.runs.append(run)
             if kind == "main":
                 self.deployments[component] = "dev"

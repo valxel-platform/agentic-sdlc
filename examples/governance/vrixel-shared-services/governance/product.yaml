@@ -1,0 +1,25 @@
+# Shared services governance manifest, read by the Vrixel agentic SDLC tool.
+# Shared services ship as versioned libraries and frameworks. They own no runtime: every
+# consuming product runs them in its own infrastructure, so this manifest declares no runtime.
+product_id: SS
+name: Shared services
+constitution: constitution.md
+context: context.md
+budget_usd: 150
+critic_threshold: 0.85
+max_loops: 3
+repos:
+- name: vrixel-shared-services/ss-communication
+  role: library
+- name: vrixel-shared-services/ss-audit-framework
+  role: library
+- name: vrixel-shared-services/ss-security
+  role: library
+approvers:
+  g1: [ss-platform-owner]
+  g2: [ss-platform-owner]
+  g3: [ss-design-lead]
+  g4: [ss-architect]
+  g5: [ss-security-lead]
+  g6: [ss-release-manager]
+high_risk_paths: ["src/", "migrations/"]

@@ -30,7 +30,7 @@ def _demo(args: argparse.Namespace) -> int:
         print(f"  {e['node']:<22} {e['kind']:<34} {e.get('detail', '')[:60]}")
     print("\nHuman decisions")
     for g in view["gate_decisions"]:
-        print(f"  {g['gate']:<22} {g['decision']:<10} by {g['approver']}")
+        print(f"  {g['gate']:<6} {g.get('lane', ''):<6} {g['decision']:<10} by {g['approver']}")
     print("\nArtifacts:", ", ".join(view["artifacts"].values()))
     print("\nUsage (stub provider, list prices)")
     print(json.dumps(view["usage"], indent=2))

@@ -121,6 +121,7 @@ class FeatureEngine:
             "scores": s.get("scores", {}),
             "loop_count": s.get("loop_count", {}),
             "risk_tier": s.get("risk_tier"),
+            "lanes_touched": s.get("lanes_touched", []),
             "artifacts": {k: v["id"] for k, v in s.get("artifacts", {}).items()},
             "pull_requests": s.get("pull_requests", {}),
             "change_set": s.get("change_set", {}),

@@ -39,20 +39,28 @@ def split_front_matter(raw: str) -> tuple[dict, str]:
     return meta, raw.strip()
 
 
-def compose(platform_text: str, product_text: str, *, platform_sha: str, product_sha: str) -> Constitution:
+def compose(platform_text: str, product_text: str, *, platform_sha: str, product_sha: str,
+            dependencies: list[tuple[str, str, str]] = ()) -> Constitution:
+    """Platform first, then the product, then each dependency lane's constitution (label, raw
+    text, commit SHA), which applies to changes the feature makes in that lane's repos."""
     p_meta, p_body = split_front_matter(platform_text)
     meta, body = split_front_matter(product_text)
+    deps = [(label, *split_front_matter(text), sha) for label, text, sha in dependencies]
 
     platform_ids = _ARTICLE.findall(p_body)
     product_ids = _ARTICLE.findall(body)
+    lane_ids = product_ids + [a for _, _, b, _ in deps for a in _ARTICLE.findall(b)]
     problems = []
     if not platform_ids:
         problems.append("platform constitution defines no articles")
     if not product_ids:
         problems.append("product constitution defines no articles")
-    if overriding := sorted({a for a in product_ids if a.startswith("VX-")}):
+    for label, _, dep_body, _ in deps:
+        if not _ARTICLE.findall(dep_body):
+            problems.append(f"{label} constitution defines no articles")
+    if overriding := sorted({a for a in lane_ids if a.startswith("VX-")}):
         problems.append(f"product constitution may not define platform articles: {', '.join(overriding)}")
-    dupes = sorted({a for a in product_ids if product_ids.count(a) > 1})
+    dupes = sorted({a for a in lane_ids if lane_ids.count(a) > 1})
     if dupes:
         problems.append(f"duplicate article ids: {', '.join(dupes)}")
     if problems:
@@ -63,4 +71,8 @@ def compose(platform_text: str, product_text: str, *, platform_sha: str, product
         f"+{meta.get('name', 'product')}@{meta.get('version', '0.0.0')}#{product_sha[:7]}"
     )
     combined = f"{p_body}\n\n{body}\n"
-    return Constitution(text=combined, version=version, article_ids=tuple(dict.fromkeys(platform_ids + product_ids)))
+    for label, d_meta, d_body, sha in deps:
+        version += f"+{d_meta.get('name', label)}@{d_meta.get('version', '0.0.0')}#{sha[:7]}"
+        combined += f"\n\n## {label}: applies to changes in its repos\n\n{d_body}\n"
+    return Constitution(text=combined, version=version,
+                        article_ids=tuple(dict.fromkeys(platform_ids + lane_ids)))

@@ -44,7 +44,7 @@ curl -s localhost:8080/features/EMR-FEAT-1/usage    # one ledger record per mode
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # 38 tests in memory; set VRIXEL_TEST_DATABASE_URL for the Postgres test
+pytest                                   # 48 tests in memory; set VRIXEL_TEST_DATABASE_URL for the Postgres test
 vrixel demo --product EMR --fault spec=1 --revise
 uvicorn vrixel_sdlc.api.app:app --reload # in-memory unless DATABASE_URL is set
 ```
@@ -62,11 +62,45 @@ product owns a governance repo in its own GitHub organization, and the tool read
 vrixel-tools/                          tools org
   agentic-sdlc                         this repo: registry.yaml points at every governance repo
   sdlc-governance                      platform/constitution.md (VX- articles)
-vrixel-emr/                            one org per product (names here are placeholders)
+vrixel-emr/                            one org per product; each owns its runtime
   governance                           product.yaml · constitution.md · context.md · CODEOWNERS
   emr-intake-api, emr-web, ...         product code; PRs are opened here
 vrixel-agtech/ · vrixel-pos/ · vrixel-medspa/ · vrixel-apx/   same layout
+vrixel-shared-services/                shared lane: communication, audit framework, security
+  governance                           same files, but no runtime
+  ss-communication, ss-audit-framework, ss-security   libraries and frameworks
 ```
+
+### Lanes: products and shared services
+
+Every org is a **lane** in `config/registry.yaml`, with a `kind`:
+
+- **`product`** lanes own their runtime. `product.yaml` declares `runtime.openchoreo_project`
+  and its environment pipeline, and their services deploy there.
+- **`shared`** lanes (`vrixel-shared-services`) own no runtime and ship versioned libraries and
+  frameworks. Each consuming product runs them in its own runtime. A shared manifest that
+  declares a runtime is rejected.
+
+A product lists the lanes it builds on in `depends_on` (the examples use `[SS, APX]`). A lane
+may depend on shared lanes; a shared lane may not depend on a product. The tool pins every
+dependency's governance at intake along with the product's own. When a feature changes a
+dependency's code:
+
+- **Change set.** The architect may add the dependency's repos. Libraries merge first.
+- **Constitutions.** The dependency's constitution is part of the feature's constitution and
+  applies to changes in its repos. For example, `SS-6` puts every security change through G5.
+- **Approvals.** G4, G5 and G6 need a decision from each lane the change set touches: the
+  product owner, then each dependency owner. Either one can send the work back. At G5 each lane
+  reviews only the PRs in its own org.
+- **Risk.** The shared lane's data class is `phi` because it serves regulated products, so any
+  change set touching shared code is regulated and goes through G5.
+- **Release.**
+  - *Shared repos* publish a release candidate on merge, and G6 marks it stable. Nothing deploys.
+  - *Product repos* build in the product's own OpenChoreo project, and G6 promotes them to
+    production there.
+
+A feature started in the shared lane itself runs the same pipeline, but its release only
+publishes packages. Consuming products adopt the new version through their own features.
 
 **What the tool keeps** (`config/registry.yaml`): for each product, the org and governance repo
 to read, its data class (which decides the model providers that may see its data) and its API
@@ -129,7 +163,8 @@ The same app can later open PRs in product repos, scoped per org.
 | Cache-first prompt layout | `gateway/prompt.py` | Six layers, breakpoints after L2, L4 and L5, chained prefix hashes recorded on every call |
 | Usage ledger | `gateway/ledger.py` | In-memory or Postgres; `summarize()` gives cache-hit rate, write share, cost by phase and model |
 | Runtimes | `runtime/` | `GatewayRuntime` (generic, any model) and `ClaudeCodeRuntime` (Claude Agent SDK, live mode) |
-| Product isolation | `config/registry.yaml`, each org's `product.yaml` | Registry: org, data class, workspace. Manifest: repos, approvers, budget, thresholds, high-risk paths |
+| Product isolation | `config/registry.yaml`, each org's `product.yaml` | Registry: lane kind, org, data class, workspace. Manifest: repos, approvers, budget, thresholds, high-risk paths, runtime, `depends_on` |
+| Shared services | `governance/loader.py`, `graph/pipeline.py` | Dependency lanes pinned at intake; their constitutions apply; G4 to G6 need each touched lane; shared repos publish packages (`integrations/packages.py`) |
 | Constitutions | `governance/` | Read from the tools org and each product org, validated, pinned by commit SHA per feature |
 | Risk-tiered merge | `graph/phase.py`, `graph/pipeline.py` | PHI and payments are `regulated`; changes to high-risk paths are `high`; both go through G5 |
 | Multi-repo change set | `graph/pipeline.py` | One branch name across repos; the merge train runs libraries, then providers, then consumers |

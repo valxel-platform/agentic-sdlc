@@ -5,6 +5,13 @@ product_id: AG
 name: AgTech
 constitution: constitution.md
 context: context.md
+# Lanes this product builds on. Their repos may join this product's change sets, their
+# constitutions apply to changes in their repos, and their owners co-approve G4 to G6.
+depends_on: [SS, APX]
+# Runtime infrastructure stays with the product: shared services run inside it.
+runtime:
+  openchoreo_project: agtech
+  pipeline: [dev, staging, production]
 budget_usd: 150
 critic_threshold: 0.8
 max_loops: 3

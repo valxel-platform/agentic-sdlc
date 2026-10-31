@@ -44,6 +44,7 @@ class ArtifactRef(TypedDict):
 class GateDecision(TypedDict, total=False):
     gate: str
     phase: str
+    lane: str
     decision: str  # approve | revise | takeover | resolved | retry | abort
     approver: str
     feedback: str
@@ -69,6 +70,7 @@ class FeatureState(TypedDict, total=False):
     tasks: Annotated[list[dict], last]
     release: Annotated[dict, last]
     change_set: Annotated[dict, last]
+    lanes_touched: Annotated[list[str], last]  # dependency lanes whose repos the HLD changes
 
     artifacts: Annotated[dict[str, ArtifactRef], merge_dict]  # kind -> latest ref
     trace_links: Annotated[list[list[str]], operator.add]  # [parent_id, child_id]

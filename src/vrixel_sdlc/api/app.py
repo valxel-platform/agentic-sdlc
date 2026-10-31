@@ -83,12 +83,13 @@ def create_app(engine: FeatureEngine | None = None) -> FastAPI:
         services = eng().services
         out = {}
         for pid, entry in services.settings.registry.items():
-            row = {"governance_repo": entry.governance.full_name, "ref": entry.governance.ref,
-                   "data_class": entry.data_class}
+            row = {"kind": entry.kind, "governance_repo": entry.governance.full_name,
+                   "ref": entry.governance.ref, "data_class": entry.data_class}
             try:
                 snap = services.snapshot(pid)
                 p = snap.product
                 row |= {"name": p.name, "repos": [r.name for r in p.repos], "budget_usd": p.budget_usd,
+                        "depends_on": list(p.depends_on), "runtime": p.runtime,
                         "constitution_version": snap.version, "articles": list(snap.constitution.article_ids),
                         "ok": True}
             except GovernanceError as exc:

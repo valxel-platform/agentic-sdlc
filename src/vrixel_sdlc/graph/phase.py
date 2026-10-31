@@ -17,7 +17,7 @@ from langgraph.types import Send
 from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers
-from ..agents.parse import parse_tasks
+from ..agents.parse import parse_affected_repos, parse_tasks
 from ..config import ProductConfig
 from ..evaluators import critique, run_checks
 from ..evaluators.critic import parse_verdict
@@ -56,6 +56,10 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "constitution_version": con.version,
         "capabilities": services.catalog.lookup(state["product_id"]),
         "repos": [{"name": r.name, "role": r.role} for r in product.repos],
+        # Repos of the lanes this product depends on (shared services, APX): they may join the
+        # change set when the architecture needs them.
+        "dependency_repos": [{"name": r.name, "role": r.role, "lane": lane_id}
+                             for lane_id, s in snap.dependencies.items() for r in s.product.repos],
         "parent_texts": parents,
         "parent_ids": [arts[k]["id"] for k in spec.parents if k in arts],
         "feedback": state.get("feedback", {}).get(phase),
@@ -217,13 +221,24 @@ def build_build_subgraph(services):
     return g.compile(name="phase_build")
 
 
-def risk_tier(product: ProductConfig, tasks: list[dict]) -> str:
-    if product.data_class in ("phi", "payments"):
+def risk_tier(lane_of_repo: dict[str, ProductConfig], product: ProductConfig, tasks: list[dict]) -> str:
+    """Regulated if this product, or any lane whose repos the change set touches, handles PHI or
+    payments; high if a task changes a high-risk path of the lane that owns its repo."""
+    lanes = [product] + [lane_of_repo[t["repo"]] for t in tasks if t.get("repo") in lane_of_repo]
+    if any(lane.data_class in ("phi", "payments") for lane in lanes):
         return "regulated"
-    files = [f for t in tasks for f in t.get("files", [])]
-    if any(f.startswith(p) for f in files for p in product.high_risk_paths):
-        return "high"
+    for task in tasks:
+        lane = lane_of_repo.get(task.get("repo"), product)
+        if any(f.startswith(p) for f in task.get("files", []) for p in lane.high_risk_paths):
+            return "high"
     return "low"
+
+
+def touched_lanes(snap, repo_names: list[str]) -> list[str]:
+    """Dependency lanes (not the feature's own) whose repos appear in the given list."""
+    lanes = snap.lane_of_repo()
+    own = snap.product.product_id
+    return sorted({lanes[r].product_id for r in repo_names if r in lanes} - {own})
 
 
 def make_phase_node(phase: str, services):
@@ -269,7 +284,11 @@ def make_phase_node(phase: str, services):
                                             "findings": list(out.get("findings") or [])}}
             return delta
 
-        if phase == "plan":
+        snap = services.snapshot(state["product_id"], state.get("governance"))
+        if phase == "architecture":
+            affected = [r["name"] for r in parse_affected_repos(out["draft"]["content"])]
+            delta["lanes_touched"] = touched_lanes(snap, affected)
+        elif phase == "plan":
             delta["tasks"] = parse_tasks(out["draft"]["content"])
         elif phase == "build":
             reviews = out.get("reviews") or {}
@@ -280,11 +299,17 @@ def make_phase_node(phase: str, services):
             }
             repos = sorted({(rv["role"], rv["pr"]["repo"]) for rv in reviews.values()},
                            key=lambda x: (REPO_ORDER.get(x[0], 9), x[1]))
-            delta["risk_tier"] = risk_tier(product, ctx["tasks"])
+            delta["risk_tier"] = risk_tier(snap.lane_of_repo(), product, ctx["tasks"])
             delta["change_set"] = {"id": f"CS-{state['feature_id']}", "branch": f"feature/{state['feature_id']}",
                                    "merge_order": [r for _, r in repos], "merged": False}
         elif phase == "release":
-            delta["release"] = {"components": ctx["components"], "staging": True, "production": False}
+            # Services deployed in a product runtime promote; shared-lane packages publish instead.
+            lanes = snap.lane_of_repo()
+            deployed = [c for c in ctx["components"] if services.openchoreo.environment(c) == "staging"]
+            packages = [c for c in ctx["components"] if c in lanes and lanes[c].kind == "shared"]
+            delta["release"] = {"components": deployed, "packages": packages,
+                                "version": f"{state['feature_id']}", "staging": bool(deployed),
+                                "production": False}
         elif phase == "operate":
             delta["events"].append(_knowledge_writeback(services, state, ctx))
         return delta

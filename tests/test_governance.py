@@ -49,7 +49,9 @@ def test_snapshot_reads_platform_and_product_from_their_orgs(services):
     assert snap.pins["platform"]["org"] == "vrixel-tools"
     assert snap.pins["product"]["org"] == "vrixel-emr"
     assert {"VX-3", "EMR-8"} <= set(snap.constitution.article_ids)
-    assert all(a.startswith("EMR-") for a in snap.constitution.product_articles())
+    prefixes = {a.split("-")[0] for a in snap.constitution.product_articles()}
+    assert prefixes == {"EMR", "SS", "APX"}  # its own articles plus those of the lanes it depends on
+    assert set(snap.pins["dependencies"]) == {"SS", "APX"}
     assert snap.version.startswith("platform@1.0.0#") and "+emr@1.0.0#" in snap.version
     assert "FHIR R4" in snap.product_context  # context.md feeds the L4 prompt layer
     assert all(r.name.startswith("vrixel-emr/") for r in snap.product.repos)
@@ -156,9 +158,13 @@ def _repo_files(org_repo: str) -> dict[str, str]:
 
 
 def test_github_source_uses_a_token_per_org_and_pins_by_sha(tmp_path):
-    fake = FakeGitHub({r: _repo_files(r) for r in ["vrixel-tools/sdlc-governance", "vrixel-emr/governance"]})
+    repos = ["vrixel-tools/sdlc-governance", "vrixel-emr/governance", "vrixel-shared-services/governance",
+             "vrixel-apx/governance"]
+    fake = FakeGitHub({r: _repo_files(r) for r in repos})
     tokens = EnvTokenProvider({"VRIXEL_GITHUB_TOKEN__VRIXEL_TOOLS": "tok-tools",
-                               "VRIXEL_GITHUB_TOKEN__VRIXEL_EMR": "tok-emr"})
+                               "VRIXEL_GITHUB_TOKEN__VRIXEL_EMR": "tok-emr",
+                               "VRIXEL_GITHUB_TOKEN__VRIXEL_SHARED_SERVICES": "tok-ss",
+                               "VRIXEL_GITHUB_TOKEN__VRIXEL_APX": "tok-apx"})
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="github")
     services = build_services(s, governance_source=GitHubSource(tokens, opener=fake))
 
@@ -166,7 +172,8 @@ def test_github_source_uses_a_token_per_org_and_pins_by_sha(tmp_path):
     assert snap.pins["product"]["sha"] == "a" * 40
     assert "#aaaaaaa" in snap.version
     auth_by_org = {url.split("/repos/")[1].split("/")[0]: auth for _, url, auth, _ in fake.calls}
-    assert auth_by_org == {"vrixel-tools": "Bearer tok-tools", "vrixel-emr": "Bearer tok-emr"}
+    assert auth_by_org == {"vrixel-tools": "Bearer tok-tools", "vrixel-emr": "Bearer tok-emr",
+                           "vrixel-shared-services": "Bearer tok-ss", "vrixel-apx": "Bearer tok-apx"}
     assert any("?ref=" + "a" * 40 in url for _, url, _, _ in fake.calls)  # reads are pinned to the commit
 
     n = len(fake.calls)

@@ -75,9 +75,19 @@ def design(ctx: dict, defective: bool) -> str:
     return "\n".join(lines + _feedback(ctx)) + "\n"
 
 
+def _mentions(ctx: dict, repo_name: str) -> bool:
+    """Stub impact analysis: a dependency repo joins when the request names what it provides,
+    e.g. 'audit' selects vrixel-shared-services/ss-audit-framework. Live architects decide."""
+    words = [w for w in repo_name.split("/", 1)[-1].split("-")[1:] if len(w) >= 5]
+    text = f"{ctx['title']} {ctx.get('description', '')}".lower()
+    return any(w in text for w in words)
+
+
 def architecture(ctx: dict, defective: bool) -> str:
-    repos = sorted(ctx["repos"], key=lambda r: _REPO_ORDER.get(r["role"], 9))
-    provider = next((r["name"] for r in repos if r["role"] == "provider"), repos[0]["name"])
+    deps = [r for r in ctx.get("dependency_repos", []) if _mentions(ctx, r["name"])]
+    repos = sorted(ctx["repos"] + deps, key=lambda r: (_REPO_ORDER.get(r["role"], 9), r["name"]))
+    own = sorted(ctx["repos"], key=lambda r: _REPO_ORDER.get(r["role"], 9))
+    provider = next((r["name"] for r in own if r["role"] == "provider"), own[0]["name"])
     lines = [
         f"# HLD: {ctx['title']}",
         "", "## ADRs",
@@ -85,6 +95,10 @@ def architecture(ctx: dict, defective: bool) -> str:
     ]
     if not defective:
         lines += ["", "## Affected repos"] + [f"- {r['name']} ({r['role']})" for r in repos]
+    if deps:
+        lines += ["", "## Dependency lanes"] + [
+            f"- {r['name']} ({r['lane']}): new minor version, adopted by this product in the same change set"
+            for r in deps]
     lines += [
         "", "## Contracts", f"- {provider}: OpenAPI minor version bump, backward compatible (VX-4)",
         "", "## Constitution articles", "- VX-4", "- VX-8",

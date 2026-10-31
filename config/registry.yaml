@@ -28,9 +28,15 @@ limits:
   max_budget_usd: 500              # per-feature budget ceiling
   required_gates: [g1, g2, g3, g4, g5, g6]   # every gate needs named approvers (VX-1)
 
+# kind: product  owns its runtime (OpenChoreo project and environments) and deploys services.
+# kind: shared   ships versioned libraries and frameworks only; each consuming product runs
+#                them in its own runtime, so a shared lane owns no environments.
+# A shared lane serves regulated products, so its data class is phi: changes to it always go
+# through G5, and only providers approved for PHI see its code.
 products:
-  EMR: { org: vrixel-emr,    repo: governance, ref: main, data_class: phi,      workspace: wrkspc-emr }
-  AG:  { org: vrixel-agtech, repo: governance, ref: main, data_class: general,  workspace: wrkspc-shared }
-  POS: { org: vrixel-pos,    repo: governance, ref: main, data_class: payments, workspace: wrkspc-shared }
-  MS:  { org: vrixel-medspa, repo: governance, ref: main, data_class: phi,      workspace: wrkspc-medspa }
-  APX: { org: vrixel-apx,    repo: governance, ref: main, data_class: payments, workspace: wrkspc-apx }
+  EMR: { kind: product, org: vrixel-emr,             repo: governance, ref: main, data_class: phi,      workspace: wrkspc-emr }
+  AG:  { kind: product, org: vrixel-agtech,          repo: governance, ref: main, data_class: general,  workspace: wrkspc-shared }
+  POS: { kind: product, org: vrixel-pos,             repo: governance, ref: main, data_class: payments, workspace: wrkspc-shared }
+  MS:  { kind: product, org: vrixel-medspa,          repo: governance, ref: main, data_class: phi,      workspace: wrkspc-medspa }
+  APX: { kind: product, org: vrixel-apx,             repo: governance, ref: main, data_class: payments, workspace: wrkspc-apx }
+  SS:  { kind: shared,  org: vrixel-shared-services, repo: governance, ref: main, data_class: phi,      workspace: wrkspc-shared-services }
