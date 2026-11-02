@@ -233,8 +233,12 @@ repo_standards:
 ```
 
 **Setup once per org.**
-1. Create the template repos named in `config/repos.yaml`, with CI whose job names match the
-   required checks (`unit`, `contract`) and the quality suites.
+1. Publish the templates named in `config/repos.yaml` to `vrixel-tools` and mark each one a
+   template repository: `template-service` (Java 21, Spring Boot), `template-web` (React,
+   TypeScript) and `template-library` (Java). Their CI jobs are named for the required checks
+   (`unit`, `contract`) and post `unit / report`-style statuses the quality suites read; their
+   `post-deploy.yml` runs integration, e2e and smoke suites when the pipeline dispatches
+   `vrixel-deployed` after a deployment is ready.
 2. Create the custom properties `vrixel_managed`, `vrixel_product` and `vrixel_data_class` in each
    product org (optional, for org-level rulesets).
 3. Install the GitHub App on all repositories of each product org (so it sees repos it creates)

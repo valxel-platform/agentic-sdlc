@@ -27,6 +27,25 @@ def now() -> str:
 class WaitChecker:
     def __init__(self, services) -> None:
         self.services = services
+        self._dispatched: set[tuple] = set()
+
+    def _start_post_deploy(self, packet: dict, results: list[dict]) -> None:
+        """Once a stage's deployment is ready, ask each repo to run its post-deploy suite
+        (integration in dev, e2e in staging, smoke in production) against it. Once per wait;
+        a repeat after a restart is harmless (the workflow cancels duplicates)."""
+        q = packet.get("quality") or {}
+        shas = {t["repo"]: t.get("sha", "") for t in q.get("targets") or []}
+        for r in results:
+            key = (packet.get("feature_id"), packet["wait"], packet.get("since"), r["repo"])
+            if key in self._dispatched or not shas.get(r["repo"]):
+                continue
+            self._dispatched.add(key)
+            try:
+                self.services.github.dispatch(repo=r["repo"], event_type="vrixel-deployed", payload={
+                    "stage": packet["wait"], "sha": shas[r["repo"]], "base_url": r.get("url", ""),
+                    "feature_id": packet.get("feature_id", "")})
+            except Exception:
+                self._dispatched.discard(key)  # try again on the next check
 
     def _one(self, wait: str, t: dict) -> dict:
         if wait == "ci":
@@ -76,6 +95,8 @@ class WaitChecker:
                         "reason": f"{LABELS.get(wait, wait)} still not done after {int(limit // 60)} minutes"}
             return None
         base = {"wait": wait, "results": results, "at": now()}
+        if wait in ("dev", "staging", "production"):
+            self._start_post_deploy(packet, results)
         return self._quality(packet, base)
 
     def _quality(self, packet: dict, base: dict) -> dict | None:

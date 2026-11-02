@@ -58,6 +58,7 @@ class GitHub(Protocol):
     def set_topics(self, *, repo: str, topics: list[str]) -> None: ...
     def set_properties(self, *, repo: str, properties: dict[str, str]) -> None: ...
     def upsert_ruleset(self, *, repo: str, branch: str, spec: dict) -> str: ...
+    def dispatch(self, *, repo: str, event_type: str, payload: dict) -> None: ...
 
 
 class StubGitHub:
@@ -72,6 +73,7 @@ class StubGitHub:
         self.secrets: dict[str, list] = {}  # repo -> secret-scanning alerts
         self.repos: dict[str, dict] = {}  # provisioned repos and the settings applied to them
         self.fail_steps: set[str] = set()  # tests: provisioning calls that should fail
+        self.dispatches: list[dict] = []
         self._seq = itertools.count(100)
         self._lock = threading.Lock()
 
@@ -121,6 +123,10 @@ class StubGitHub:
 
     def secret_alerts(self, *, repo):
         return list(self.secrets.get(repo, []))
+
+    def dispatch(self, *, repo, event_type, payload) -> None:
+        with self._lock:
+            self.dispatches.append({"repo": repo, "event_type": event_type, "payload": dict(payload)})
 
     def _repo(self, repo: str, call: str) -> dict:
         if call in self.fail_steps:
@@ -410,3 +416,7 @@ class GitHubRest:
         else:
             self._call("POST", repo, "/rulesets", body)
         return body["name"]
+
+    def dispatch(self, *, repo, event_type, payload) -> None:
+        """repository_dispatch: starts the repo's post-deploy workflow (templates ship one)."""
+        self._call("POST", repo, "/dispatches", {"event_type": event_type, "client_payload": payload})

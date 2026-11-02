@@ -42,7 +42,8 @@ defaults:
   properties: { vrixel_managed: "true", vrixel_product: "{product}", vrixel_data_class: "{data_class}" }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
-# the quality suites), and how the repo becomes an OpenChoreo component.
+# the quality suites), and how the repo becomes an OpenChoreo component. The templates live in
+# vrixel-tools: Java 21 + Spring Boot (service), React + TypeScript (web), Java library.
 roles:
   provider:
     template: vrixel-tools/template-service
@@ -50,7 +51,7 @@ roles:
     openchoreo: { component_type: deployment/service, workflow: docker }
   consumer:
     template: vrixel-tools/template-web
-    required_checks: [unit, CodeQL]
+    required_checks: [unit, contract, CodeQL]
     openchoreo: { component_type: deployment/web-app, workflow: docker }
   library:
     template: vrixel-tools/template-library

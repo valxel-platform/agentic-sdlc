@@ -457,3 +457,13 @@ def test_github_webhook_is_verified_and_resumes_the_feature(monkeypatch, engine,
     assert ok.status_code == 202 and ok.json()["resumed"] == [fid]
     wait_idle(engine, fid)
     assert not external(engine, fid)
+
+
+def test_ready_deployments_start_each_repos_post_deploy_suite(engine, services):
+    v = to_build(engine)
+    sent = [(d["repo"], d["payload"]["stage"]) for d in services.github.dispatches]
+    for repo in ("vrixel-agtech/agtech-field-api", "vrixel-agtech/agtech-mobile"):
+        assert {(repo, "dev"), (repo, "staging"), (repo, "production")} <= set(sent)
+    d = services.github.dispatches[0]
+    assert d["event_type"] == "vrixel-deployed" and d["payload"]["sha"] == v["runs"][d["repo"]]["sha"]
+    assert len(sent) == len(set(sent))  # once per stage and repo
