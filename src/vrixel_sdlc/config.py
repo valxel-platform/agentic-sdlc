@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -46,6 +47,8 @@ class ProductConfig:
     depends_on: tuple[str, ...] = ()
     # External tools: {"diagrams": {"provider": "lucid", ...}, "work_tracking": {"provider": "jira", ...}}
     tools: dict = field(default_factory=dict)
+    # Effective test and security policy: suite -> spec (see vrixel_sdlc.quality)
+    quality: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -156,6 +159,7 @@ class Settings:
     data_classes: dict[str, list[str]]
     failover: dict[str, list[str]] = field(default_factory=dict)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    quality: Any = None  # vrixel_sdlc.quality.QualityConfig
 
     def entry(self, product_id: str) -> RegistryEntry:
         try:
@@ -220,4 +224,11 @@ def load_settings(
         data_classes={n: list(s["allowed_providers"]) for n, s in models_raw["data_classes"].items()},
         failover=models_raw.get("failover") or {},
         tools=load_tools(cfg_dir / "tools.yaml"),
+        quality=_load_quality(cfg_dir / "quality.yaml"),
     )
+
+
+def _load_quality(path: Path):
+    from .quality import load_quality
+
+    return load_quality(path)

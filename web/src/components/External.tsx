@@ -86,6 +86,7 @@ const STAGES: [string, string][] = [
 ];
 const RESULT: Record<string, [string, string]> = {
   success: ["Passed", "go"], failure: ["Failed", "stop"], pending: ["In progress", "run"],
+  security: ["Security review", "wait"], accepted: ["Passed, risk accepted", "go"],
 };
 
 function short(name?: string): string {
@@ -105,7 +106,7 @@ export function Delivery({ f }: { f: Feature }) {
         {stages.map(([key, label]) => {
           const now = waiting?.wait === key;
           const res = f.delivery?.[key];
-          const [text, tone] = now ? ["In progress", "run"] : RESULT[res?.status ?? "pending"];
+          const [text, tone] = now ? ["In progress", "run"] : (RESULT[res?.status ?? "pending"] ?? [res?.status ?? "", "plain"]);
           const rows = now ? (waiting?.targets ?? []) : (res?.results ?? []);
           return (
             <li key={key}>

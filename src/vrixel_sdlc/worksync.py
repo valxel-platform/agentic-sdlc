@@ -25,7 +25,8 @@ from .integrations.worktracking import STATUS_ORDER, WorkTracker
 GATE_NAMES = {"g1": "G1 Intent", "g2": "G2 Scope", "g3": "G3 Experience", "g4": "G4 Architecture",
               "g5": "G5 Code", "g6": "G6 Release"}
 VERB = {"approve": "approved", "revise": "sent back", "takeover": "taken over", "handback": "handed back",
-        "abort": "stopped", "resolved": "resolved", "retry": "sent back to agents"}
+        "abort": "stopped", "resolved": "resolved", "retry": "sent back to agents",
+        "accept_risk": "accepted as a risk"}
 
 
 @dataclass

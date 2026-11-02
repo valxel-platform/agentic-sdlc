@@ -21,7 +21,7 @@ _APPROVER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}(/[A-Za-z0-9][A-Za-z0-9_.
 
 def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
                    registry: dict[str, RegistryEntry] | None = None,
-                   tools: ToolsConfig | None = None) -> tuple[ProductConfig, dict]:
+                   tools: ToolsConfig | None = None, quality=None) -> tuple[ProductConfig, dict]:
     try:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
@@ -111,6 +111,14 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
             problems.append(f"shared lane may not depend on product {dep}")
 
     chosen_tools = _tools(raw.get("tools"), entry, tools, problems)
+    policy = {}
+    if quality is not None:
+        from ..quality import effective_policy
+
+        if raw.get("quality") is not None and not isinstance(raw.get("quality"), dict):
+            problems.append("quality must be a mapping of suite name to settings")
+        else:
+            policy = effective_policy(quality, entry.data_class, raw.get("quality") or {}, problems)
 
     if problems:
         raise GovernanceError(f"{entry.governance.full_name}/product.yaml is invalid: " + "; ".join(problems))
@@ -131,6 +139,7 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         runtime=runtime,
         depends_on=tuple(dict.fromkeys(depends_on)),
         tools=chosen_tools,
+        quality=policy,
     )
     files = {"constitution": str(raw.get("constitution") or "constitution.md"),
              "context": str(raw.get("context") or "context.md")}

@@ -7,6 +7,10 @@ export interface PendingItem {
   gate?: string;
   wait?: string;
   label?: string;
+  stage?: string;
+  max_waiver_days?: number;
+  blocking?: SecurityFinding[];
+  quality?: { suites: QualitySuite[]; waivers: Waiver[] } | null;
   targets?: Record<string, unknown>[];
   phase?: string;
   lane?: string;
@@ -70,8 +74,24 @@ export interface Feature extends FeatureSummary {
   diagrams: Diagram[];
   delivery: Record<string, WaitResult>;
   deployments: Record<string, { repo: string; component: string; env: string; release?: string; pipeline?: string[] }>;
+  quality: Record<string, { stage: string; status: string; suites: QualitySuite[]; at: string }>;
+  waivers: Waiver[];
   runs: Record<string, { repo: string; component: string; run_id: string; sha: string; url?: string; state?: string }>;
   work_tracking: WorkTracking | null;
+}
+
+export interface SecurityFinding {
+  suite: string; tool: string; rule: string; severity: string; title: string; repo: string; url: string; fingerprint: string;
+}
+
+export interface QualitySuite {
+  stage?: string; suite: string; kind: "test" | "security"; repo: string; state: string;
+  passed?: number | null; failed?: number | null; coverage?: number | null;
+  findings?: SecurityFinding[] | number; waived?: string[] | number; reasons?: string[]; required?: boolean;
+}
+
+export interface Waiver {
+  fingerprint: string; suite: string; severity: string; title: string; repo: string; approver: string; reason: string; expires: string;
 }
 
 export interface WaitResult {

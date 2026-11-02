@@ -23,7 +23,8 @@ from urllib.parse import quote
 from urllib.request import Request, build_opener
 
 DELIVERY_PERMISSIONS = {"contents": "write", "pull_requests": "write", "statuses": "write",
-                        "checks": "read", "metadata": "read"}
+                        "checks": "read", "metadata": "read", "security_events": "read",
+                        "secret_scanning_alerts": "read", "vulnerability_alerts": "read"}
 
 
 class GitHubError(RuntimeError):
@@ -37,6 +38,10 @@ class GitHub(Protocol):
     def checks(self, *, repo: str, sha: str) -> dict: ...  # {"state": pending|success|failure, "checks": [...]}
     def set_status(self, *, repo: str, sha: str, context: str, state: str, description: str,
                    url: str = "") -> None: ...
+    # Security results; None means the feature is not enabled on the repo.
+    def code_scanning_alerts(self, *, repo: str, pr: int | None = None, ref: str | None = None) -> list | None: ...
+    def dependency_diff(self, *, repo: str, base: str, head: str) -> list | None: ...
+    def secret_alerts(self, *, repo: str) -> list | None: ...
 
 
 class StubGitHub:
@@ -46,6 +51,9 @@ class StubGitHub:
         self.ci: dict[tuple[str, str], str] = {}  # (repo, sha) -> pending | success | failure
         self.ci_default = "success"
         self.statuses: list[dict] = []
+        self.code_alerts: dict[str, list] = {}  # repo -> code-scanning alerts
+        self.dep_diffs: dict[str, list] = {}  # repo -> dependency-review diff
+        self.secrets: dict[str, list] = {}  # repo -> secret-scanning alerts
         self._seq = itertools.count(100)
         self._lock = threading.Lock()
 
@@ -57,7 +65,7 @@ class StubGitHub:
                     return dict(pr)
             number = next(self._seq)
             sha = hashlib.sha1(f"{repo}#{number}:{body}".encode()).hexdigest()
-            pr = {"repo": repo, "number": number, "branch": branch, "title": title, "body": body,
+            pr = {"repo": repo, "number": number, "branch": branch, "base": "main", "title": title, "body": body,
                   "files": list(files), "labels": list(labels), "state": "open", "head_sha": sha,
                   "url": f"https://github.com/{repo}/pull/{number}"}
             self.prs[f"{repo}#{number}"] = pr
@@ -86,6 +94,15 @@ class StubGitHub:
         with self._lock:
             self.statuses.append({"repo": repo, "sha": sha, "context": context, "state": state,
                                   "description": description, "url": url})
+
+    def code_scanning_alerts(self, *, repo, pr=None, ref=None):
+        return list(self.code_alerts.get(repo, []))
+
+    def dependency_diff(self, *, repo, base, head):
+        return list(self.dep_diffs.get(repo, []))
+
+    def secret_alerts(self, *, repo):
+        return list(self.secrets.get(repo, []))
 
 
 class GitHubRest:
@@ -137,7 +154,8 @@ class GitHubRest:
     @staticmethod
     def _pr(repo: str, pr: dict) -> dict:
         merged = bool(pr.get("merged") or pr.get("merged_at"))
-        return {"repo": repo, "number": pr["number"], "branch": pr["head"]["ref"], "title": pr["title"],
+        return {"repo": repo, "number": pr["number"], "branch": pr["head"]["ref"],
+                "base": (pr.get("base") or {}).get("ref", ""), "title": pr["title"],
                 "state": "merged" if merged else pr["state"], "head_sha": pr["head"]["sha"],
                 "merge_sha": pr.get("merge_commit_sha") if merged else None, "url": pr["html_url"],
                 "labels": [lbl["name"] for lbl in pr.get("labels", [])]}
@@ -197,12 +215,15 @@ class GitHubRest:
                 state = "success"
             else:
                 state = "failure"
-            out.append({"name": r["name"], "state": state, "url": r.get("html_url", "")})
+            output = r.get("output") or {}
+            out.append({"name": r["name"], "state": state, "url": r.get("html_url", ""),
+                        "summary": " ".join(filter(None, [output.get("title"), output.get("summary")]))})
         for st in combined.get("statuses", []):
             if st["context"].startswith("openchoreo/"):
                 continue  # our own reports, not CI
             state = {"success": "success", "pending": "pending"}.get(st["state"], "failure")
-            out.append({"name": st["context"], "state": state, "url": st.get("target_url") or ""})
+            out.append({"name": st["context"], "state": state, "url": st.get("target_url") or "",
+                        "summary": st.get("description") or ""})
         if any(c["state"] == "failure" for c in out):
             state = "failure"
         elif any(c["state"] == "pending" for c in out):
@@ -216,3 +237,23 @@ class GitHubRest:
         if url:
             body["target_url"] = url
         self._call("POST", repo, f"/statuses/{sha}", body)
+
+    def _maybe(self, repo: str, path: str) -> list | None:
+        """GitHub answers 404 or 403 when a security feature is off for the repo."""
+        try:
+            res = self._call("GET", repo, path, ok404=True)
+        except GitHubError as exc:
+            if " 403" in str(exc):
+                return None
+            raise
+        return res if isinstance(res, list) or res is None else res.get("items", [])
+
+    def code_scanning_alerts(self, *, repo, pr=None, ref=None):
+        q = "state=open&per_page=100" + (f"&pr={pr}" if pr else f"&ref={quote(ref, safe='')}" if ref else "")
+        return self._maybe(repo, f"/code-scanning/alerts?{q}")
+
+    def dependency_diff(self, *, repo, base, head):
+        return self._maybe(repo, f"/dependency-graph/compare/{quote(base, safe='')}...{quote(head, safe='')}")
+
+    def secret_alerts(self, *, repo):
+        return self._maybe(repo, "/secret-scanning/alerts?state=open&per_page=100")

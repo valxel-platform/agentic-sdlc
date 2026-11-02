@@ -26,6 +26,7 @@ from .phase import event, make_phase_node, now, touched_lanes
 GATE_DECISIONS = ("approve", "revise", "takeover", "abort")
 HANDBACK_DECISIONS = ("handback", "abort")
 ESCALATION_DECISIONS = ("resolved", "retry", "abort")
+SECURITY_DECISIONS = ("retry", "accept_risk", "abort")
 
 
 class InvalidDecision(ValueError):
@@ -96,6 +97,15 @@ def make_intake(services):
 CROSS_LANE_GATES = ("g4", "g5", "g6")
 
 
+def quality_summary(state: FeatureState) -> dict:
+    stages = state.get("quality") or {}
+    suites = [{"stage": st, "suite": r["suite"], "kind": r["kind"], "repo": r.get("repo", ""), "state": r["state"],
+               "coverage": r.get("coverage"), "passed": r.get("passed"), "failed": r.get("failed"),
+               "findings": len(r.get("findings") or []), "waived": len(r.get("waived") or [])}
+              for st, q in stages.items() for r in q.get("suites", [])]
+    return {"suites": suites, "waivers": list(state.get("waivers") or [])}
+
+
 def make_gate(gate: str, services):
     phase = GATE_PHASE[gate]
     kind = PHASE_SPECS[phase].kind
@@ -123,6 +133,8 @@ def make_gate(gate: str, services):
                 "budget_usd": state.get("token_budget_usd"),
                 "approvers": lane.approvers.get(gate, []),
                 "risk_tier": state.get("risk_tier"),
+                # G5 and G6 see the evidence: every suite run so far, and any accepted risks.
+                "quality": quality_summary(state) if gate in ("g5", "g6") else None,
                 # Each lane reviews the PRs in its own org.
                 "pull_requests": sorted(k for k, pr in state.get("pull_requests", {}).items()
                                         if pr["repo"].split("/", 1)[0] == lane.org) if gate == "g5" else [],
@@ -313,10 +325,68 @@ def make_merge_train(services):
     return merge_train
 
 
-def external(state: FeatureState, wait: str, targets: list[dict]) -> dict:
-    return {"type": "external", "wait": wait, "label": LABELS[wait], "feature_id": state["feature_id"],
-            "product_id": state["product_id"], "title": state["title"], "targets": targets, "since": now(),
-            "timeout_s": TIMEOUT_S[wait]}
+def external(state: FeatureState, wait: str, targets: list[dict], quality: dict | None = None) -> dict:
+    packet = {"type": "external", "wait": wait, "label": LABELS[wait], "feature_id": state["feature_id"],
+              "product_id": state["product_id"], "title": state["title"], "targets": targets, "since": now(),
+              "timeout_s": TIMEOUT_S[wait]}
+    if quality:
+        packet["quality"] = quality
+    return packet
+
+
+def quality_packet(services, state: FeatureState, wait: str, targets: list[dict]) -> dict | None:
+    """The product's suites for this stage, travelling with the wait so the checker needs no state."""
+    from ..quality import WAIT_STAGE
+
+    stage = WAIT_STAGE[wait]
+    policy = services.snapshot(state["product_id"], state.get("governance")).product.quality or {}
+    mine = {k: v for k, v in policy.items() if v.get("stage") == stage}
+    if not mine or not targets:
+        return None
+    return {"stage": stage, "policy": mine, "targets": targets, "waivers": list(state.get("waivers") or [])}
+
+
+def _quality_update(res: dict) -> dict:
+    q = res.get("quality")
+    return {"quality": {q["stage"]: {**q, "at": res.get("at", now())}}} if q else {}
+
+
+def security_review(services, state: FeatureState, wait: str, res: dict, *, ok: str, retry: str,
+                    retry_update: dict | None = None, extra: dict | None = None) -> Command:
+    """Blocking findings go to the lane's security approvers (approvers.security, else G5's).
+    retry: fix (before merge, agents get the findings) or scan again; accept_risk: a waiver with a
+    reason and an expiry; abort: stop the feature."""
+    q = res["quality"]
+    packet = {"type": "escalation", "phase": "security", "wait": wait, "stage": q["stage"],
+              "feature_id": state["feature_id"], "product_id": state["product_id"], "title": state["title"],
+              "reason": res.get("reason", ""), "blocking": q["blocking"],
+              "findings": [f"{f['severity'].upper()} {f['title']} ({f['repo']}, {f['tool']})" for f in q["blocking"]],
+              "max_waiver_days": services.settings.quality.waiver_max_days if services.settings.quality else 90,
+              "cost_usd": round(float(state.get("cost_usd", 0.0)), 4), "budget_usd": state.get("token_budget_usd"),
+              "allowed": list(SECURITY_DECISIONS)}
+    d = normalize(interrupt(packet), SECURITY_DECISIONS)
+    update = {"gate_decisions": [_record(f"escalation:security:{q['stage']}", "security", d)],
+              "delivery": {wait: res}, **_quality_update(res), **(extra or {})}
+    if d["decision"] == "abort":
+        return Command(goto=END, update=update | {"status": "aborted", "events": [
+            event("security", "aborted", d["feedback"], approver=d["approver"])]})
+    if d["decision"] == "accept_risk":
+        from ..quality import waiver
+
+        max_days = packet["max_waiver_days"]
+        waivers = [waiver(f, approver=d["approver"], reason=d["feedback"], days=d.get("expires_days") or max_days,
+                          max_days=max_days) for f in q["blocking"]]
+        accepted = {w["fingerprint"] for w in waivers}
+        q = {**q, "status": "passed", "blocking": [], "suites": [
+            {**r, "waived": sorted(set(r.get("waived") or []) | {f["fingerprint"] for f in r.get("findings") or []
+                                                               if f["fingerprint"] in accepted})}
+            for r in q["suites"]]}
+        update |= {"quality": {q["stage"]: {**q, "at": now()}}, "delivery": {wait: {**res, "status": "accepted"}}}
+        return Command(goto=ok, update=update | {"waivers": waivers, "events": [
+            event("security", "accepted_risk", d["feedback"], approver=d["approver"], findings=len(waivers),
+                  expires=waivers[0]["expires"] if waivers else "")]})
+    return Command(goto=retry, update=update | (retry_update or {}) | {"events": [
+        event("security", "retry", d["feedback"] or res.get("reason", ""), approver=d["approver"])]})
 
 
 def ask_release_managers(state: FeatureState, wait: str, res: dict) -> dict:
@@ -363,27 +433,34 @@ def report_to_github(services, state: FeatureState, wait: str, res: dict) -> Non
             pass
 
 
-def make_ci_wait():
+def make_ci_wait(services):
     def ci_wait(state: FeatureState) -> Command:
         prs = [pr for pr in (state.get("pull_requests") or {}).values()
                if pr.get("state") != "merged" and pr.get("head_sha")]
         nxt = after_ci(state)
         if not prs:
             return Command(goto=nxt)
-        res = interrupt(external(state, "ci", [{"repo": p["repo"], "number": p["number"], "sha": p["head_sha"],
-                                                "url": p["url"]} for p in prs]))
+        targets = [{"repo": p["repo"], "number": p["number"], "sha": p["head_sha"], "base": p.get("base") or "main",
+                    "url": p["url"]} for p in prs]
+        res = interrupt(external(state, "ci", targets, quality_packet(services, state, "ci", targets)))
         if res["status"] == "success":
-            return Command(goto=nxt, update={"delivery": {"ci": res},
+            return Command(goto=nxt, update={"delivery": {"ci": res}, **_quality_update(res),
                                              "events": [event("ci_wait", "passed", f"CI green on {len(prs)} PRs")]})
+        if res["status"] == "security":
+            fix = "Fix these security findings:\n" + "\n".join(
+                f"- {f['severity']} {f['title']} in {f['repo']} ({f['url']})" for f in res["quality"]["blocking"])
+            return security_review(services, state, "ci", res, ok=nxt, retry="build",
+                                   retry_update={"feedback": {"build": fix}})
         # Red CI sends the build back to people, who can let agents fix it or vouch for it.
-        findings = [f"{r['repo']}#{r['number']}: {r.get('message') or 'checks failed'}"
-                    for r in res["results"] if r["state"] == "failure"]
+        findings = (list((res.get("quality") or {}).get("test_failures") or []) or
+                    [f"{r['repo']}#{r['number']}: {r.get('message') or 'checks failed'}"
+                     for r in res["results"] if r["state"] == "failure"])
         return Command(goto="escalate_build", update={
-            "delivery": {"ci": res}, "phase_status": {"build": "escalated"},
+            "delivery": {"ci": res}, **_quality_update(res), "phase_status": {"build": "escalated"},
             "escalations": {"build": {"phase": "build", "reason": res["reason"], "findings": findings}},
             "events": [event("ci_wait", "failed", res["reason"])]})
 
-    return ci_wait, ("g5", "merge_train", "escalate_build")
+    return ci_wait, ("g5", "merge_train", "escalate_build", "build", END)
 
 
 def make_build_wait(services):
@@ -392,17 +469,21 @@ def make_build_wait(services):
         todo = [r for r in runs.values() if r.get("state") != "success"]
         if not todo:
             return Command(goto="deploy_dev")
-        res = interrupt(external(state, "build", todo))
+        res = interrupt(external(state, "build", todo, quality_packet(services, state, "build", todo)))
         report_to_github(services, state, "build", res)
         cs = dict(state.get("change_set") or {})
         cs["runs"] = {**runs, **{r["repo"]: {**runs[r["repo"]], "state": r["state"]} for r in res["results"]}}
+        if res["status"] == "security":
+            return security_review(services, state, "build", res, ok="deploy_dev", retry="build_wait",
+                                   extra={"change_set": cs})
         if res["status"] == "success":
-            return Command(goto="deploy_dev", update={"delivery": {"build": res}, "change_set": cs,
+            return Command(goto="deploy_dev", update={"delivery": {"build": res}, "change_set": cs, **_quality_update(res),
                                                       "events": [event("build_wait", "passed",
                                                                        f"{len(todo)} OpenChoreo builds succeeded")]})
-        return _people_said(state, "build", res, ok="deploy_dev", retry="merge_train", extra={"change_set": cs})
+        return _people_said(state, "build", res, ok="deploy_dev", retry="merge_train",
+                            extra={"change_set": cs, **_quality_update(res)})
 
-    return build_wait, ("deploy_dev", "merge_train", END)
+    return build_wait, ("deploy_dev", "merge_train", "build_wait", END)
 
 
 def make_deploy(stage: str, services, nxt: str):
@@ -443,15 +524,19 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
                    if d.get("env") == env_for(stage, tuple(d.get("pipeline") or PIPELINE))]
         if not targets:
             return Command(goto=ok)
-        res = interrupt(external(state, stage, targets))
+        runs = (state.get("change_set") or {}).get("runs") or {}
+        qtargets = [{**t, "sha": runs.get(t["repo"], {}).get("sha", "")} for t in targets]
+        res = interrupt(external(state, stage, targets, quality_packet(services, state, stage, qtargets)))
         report_to_github(services, state, stage, res)
+        if res["status"] == "security":
+            return security_review(services, state, stage, res, ok=ok, retry=f"{stage}_wait")
         if res["status"] == "success":
-            return Command(goto=ok, update={"delivery": {stage: res},
+            return Command(goto=ok, update={"delivery": {stage: res}, **_quality_update(res),
                                             "events": [event(f"{stage}_wait", "passed",
                                                              f"{len(targets)} components ready in {stage}")]})
-        return _people_said(state, stage, res, ok=ok, retry=retry)
+        return _people_said(state, stage, res, ok=ok, retry=retry, extra=_quality_update(res))
 
-    return env_wait, (ok, retry, END)
+    return env_wait, (ok, retry, f"{stage}_wait", END)
 
 
 def finalize(state: FeatureState) -> dict:
@@ -473,7 +558,7 @@ def build_pipeline(services, checkpointer=None):
         g.add_node(gate, node, destinations=dest)
     g.add_node("join", join, destinations=("plan", END))
     g.add_node("merge_train", make_merge_train(services))
-    node, dest = make_ci_wait()
+    node, dest = make_ci_wait(services)
     g.add_node("ci_wait", node, destinations=dest)
     node, dest = make_build_wait(services)
     g.add_node("build_wait", node, destinations=dest)

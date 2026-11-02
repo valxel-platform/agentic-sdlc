@@ -53,6 +53,7 @@ class StubOpenChoreo:
         self.promotions: list[dict] = []
         self.run_results: dict[str, str] = {}
         self.deploy_results: dict[tuple[str, str], str] = {}
+        self.run_tasks: dict[str, list[dict]] = {}  # component -> build steps
         self._seq = itertools.count(1)
         self._lock = threading.Lock()
 
@@ -64,7 +65,8 @@ class StubOpenChoreo:
             return dict(run)
 
     def run_status(self, *, run_id, component, project=None, namespace=None) -> dict:
-        return {"status": self.run_results.get(component, "succeeded"), "message": ""}
+        return {"status": self.run_results.get(component, "succeeded"), "message": "",
+                "tasks": list(self.run_tasks.get(component, []))}
 
     def environment(self, component: str) -> str | None:
         with self._lock:
@@ -179,7 +181,9 @@ class OpenChoreoMcp:
         failed = [t for t in _get(res, "status.tasks", "tasks") or []
                   if isinstance(t, dict) and str(t.get("phase", "")).lower() in ("failed", "error")]
         message = "; ".join(f"{t.get('name')}: {t.get('message', '')}".strip(": ") for t in failed)
-        return {"status": status, "message": message}
+        tasks = [{"name": t.get("name", ""), "phase": t.get("phase", ""), "message": t.get("message", "")}
+                 for t in _get(res, "status.tasks", "tasks") or [] if isinstance(t, dict)]
+        return {"status": status, "message": message, "tasks": tasks}
 
     # -- deployments
     def _bindings(self, component, project, namespace) -> list[dict]:

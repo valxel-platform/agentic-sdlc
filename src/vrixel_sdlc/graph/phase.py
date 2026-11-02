@@ -67,6 +67,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "tasks": list(state.get("tasks") or []),
         "components": list((state.get("change_set") or {}).get("merge_order", [])),
         "deployments": sorted((state.get("deployments") or {}).values(), key=lambda d: d["repo"]),
+        "quality": dict(state.get("quality") or {}),
+        "waivers": list(state.get("waivers") or []),
     }
 
 

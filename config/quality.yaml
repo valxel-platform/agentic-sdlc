@@ -1,0 +1,114 @@
+# Test and security policy, owned by the tools org. Each suite says WHAT must be verified, at
+# WHICH stage, and HOW to read its results (a source). Tools are named only in `match`, so moving
+# from, say, Semgrep to CodeQL, or Jest to Vitest, is an edit here or in a product's
+# governance/product.yaml, never a code change. A new kind of source is one adapter class,
+# registered under `sources` below.
+#
+# Stages: pr (each pull request head), build (the OpenChoreo build of the merge commit),
+# dev, staging, production (after the change set is ready in that environment).
+# Severities, lowest to highest: info, low, medium, high, critical.
+
+sources:
+  github-checks: vrixel_sdlc.quality.sources:GitHubChecks             # check runs and statuses by name
+  github-code-scanning: vrixel_sdlc.quality.sources:GitHubCodeScanning  # SARIF alerts (CodeQL, Semgrep, Trivy, Snyk, ...)
+  github-dependency-review: vrixel_sdlc.quality.sources:GitHubDependencyReview  # vulnerable dependencies a PR adds
+  github-secret-scanning: vrixel_sdlc.quality.sources:GitHubSecretScanning      # open secret alerts in the repo
+  openchoreo-workflow: vrixel_sdlc.quality.sources:OpenChoreoWorkflowTasks      # steps inside the OpenChoreo build
+
+# The recommended profile: a common industry baseline (OWASP SAMM / NIST SSDF practices, the
+# test pyramid). Tools in `match` are the defaults we suggest, not requirements.
+suites:
+  # --- tests
+  unit:
+    kind: test
+    stage: pr
+    source: github-checks
+    match: { checks: ["unit*", "test", "tests", "*unit tests*"] }
+    required: true
+    min_coverage: 70            # read from the check's summary, e.g. "Coverage: 82.4%"
+  contract:
+    kind: test
+    stage: pr
+    source: github-checks
+    match: { checks: ["contract*", "pact*"] }
+    required: false             # required where a lane says so (APIs with consumers)
+  integration:
+    kind: test
+    stage: dev
+    source: github-checks       # a job tests the whole change set in dev and reports on the merge commit
+    match: { checks: ["integration*"] }
+    required: true
+  e2e:
+    kind: test
+    stage: staging
+    source: github-checks
+    match: { checks: ["e2e*", "playwright*", "cypress*"] }
+    required: true
+  smoke:
+    kind: test
+    stage: production
+    source: github-checks
+    match: { checks: ["smoke*"] }
+    required: true
+
+  # --- security
+  sast:
+    kind: security
+    stage: pr
+    source: github-code-scanning
+    match: { tools: ["CodeQL"] }    # add Semgrep, SonarQube, ... as they upload SARIF
+    required: true
+    block_on: high
+  dependencies:
+    kind: security
+    stage: pr
+    source: github-dependency-review
+    required: true
+    block_on: high
+  secrets:
+    kind: security
+    stage: pr
+    source: github-secret-scanning
+    required: true
+    block_on: low               # any exposed secret blocks
+  iac:
+    kind: security
+    stage: pr
+    source: github-code-scanning
+    match: { tools: ["Trivy", "Checkov"], categories: ["iac"] }
+    required: false
+    block_on: high
+  container:
+    kind: security
+    stage: build
+    source: openchoreo-workflow
+    match: { tasks: ["*scan*", "trivy*"] }
+    required: false             # required once the build workflow has a scan step
+    block_on: high              # a failed scan step counts as a finding at this severity
+  dast:
+    kind: security
+    stage: staging
+    source: github-checks
+    match: { checks: ["zap*", "dast*"] }
+    required: false
+    block_on: high
+
+# Floors per data class. Products may tighten anything (lower block_on, higher coverage, make a
+# suite required, add suites, change tools) but may not go below these.
+floors:
+  general:
+    unit: { min_coverage: 70 }
+    dependencies: { block_on: critical }
+  phi:
+    unit: { min_coverage: 80 }
+    dast: { required: true }
+    container: { required: true }
+  payments:
+    unit: { min_coverage: 80 }
+    dast: { required: true }
+    container: { required: true }
+    secrets: { block_on: info }
+
+# Accepting a blocking finding needs a security approver, a reason and an expiry.
+waivers:
+  max_days: 90

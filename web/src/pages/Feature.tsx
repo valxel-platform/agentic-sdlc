@@ -6,11 +6,13 @@ import { Rail } from "../components/Rail";
 import { ArtifactBody } from "../components/Artifact";
 import { DecisionPanel } from "../components/Decision";
 import { Delivery, Diagrams, WorkItems } from "../components/External";
+import { QualityTable } from "../components/Quality";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
 
 const ORDER = ["OPP", "PRD", "UX", "HLD", "PLAN", "BUILD", "REL", "OPS"];
 
 const WAIT_EVENTS: Record<string, Record<string, string>> = {
+  security: { retry: "Security findings sent back", accepted_risk: "Security risk accepted", aborted: "Stopped over security findings" },
   ci_wait: { passed: "CI checks passed", failed: "CI checks failed" },
   build_wait: { passed: "OpenChoreo builds succeeded", retry: "Rebuild requested", resolved: "Build failure waved through", aborted: "Stopped after a failed build" },
   deploy_dev: { deployed: "Deployed to dev" },
@@ -140,6 +142,17 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
               </>
             )}
           </section>
+          {Object.keys(f.quality ?? {}).length > 0 && (
+            <section className="panel" aria-labelledby="h-quality">
+              <h2 id="h-quality" className="section-title">Tests and security</h2>
+              <div style={{ padding: "12px 16px 16px" }}>
+                <QualityTable
+                  suites={["pr", "build", "dev", "staging", "production"].flatMap((st) =>
+                    (f.quality[st]?.suites ?? []).map((x) => ({ ...x, stage: st })))}
+                  waivers={f.waivers} />
+              </div>
+            </section>
+          )}
           <Delivery f={f} />
           <Diagrams diagrams={f.diagrams ?? []} />
           {f.work_tracking && (

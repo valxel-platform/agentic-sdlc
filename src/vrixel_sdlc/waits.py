@@ -59,7 +59,15 @@ class WaitChecker:
             failed = [r for r in results if r["state"] == "failure"]
             reason = f"{LABELS.get(wait, wait)} failed: " + "; ".join(
                 f"{r.get('repo') or r.get('component')}{': ' + r['message'] if r.get('message') else ''}" for r in failed)
-            return {"status": "failure", "wait": wait, "results": results, "reason": reason, "at": now()}
+            failure = {"status": "failure", "wait": wait, "results": results, "reason": reason, "at": now()}
+            if wait == "ci" and packet.get("quality"):
+                # A red check may be a scanner or a test suite: let the policy say which, so security
+                # findings reach security approvers and test failures go back to the build.
+                q = self._quality(packet, {"wait": wait, "results": results, "at": now()})
+                if q is not None and q["status"] in ("security", "failure"):
+                    return q if q["status"] == "security" or not q.get("reason") else {**failure, **q}
+                return {**failure, "quality": (q or {}).get("quality")}
+            return failure
         if "pending" in states:
             since = packet.get("since")
             limit = packet.get("timeout_s") or TIMEOUT_S.get(wait, 3600)
@@ -67,4 +75,28 @@ class WaitChecker:
                 return {"status": "failure", "wait": wait, "results": results, "at": now(),
                         "reason": f"{LABELS.get(wait, wait)} still not done after {int(limit // 60)} minutes"}
             return None
-        return {"status": "success", "wait": wait, "results": results, "at": now()}
+        base = {"wait": wait, "results": results, "at": now()}
+        return self._quality(packet, base)
+
+    def _quality(self, packet: dict, base: dict) -> dict | None:
+        """Once CI, the build or the rollout is done, check the stage's test and security suites.
+        Tests that fail send work back; blocking findings go to security approvers."""
+        q = packet.get("quality")
+        quality = getattr(self.services, "quality", None)
+        if not q or not q.get("policy") or quality is None:
+            return {"status": "success", **base}
+        res = quality.check(q["stage"], q["policy"], q["targets"], q.get("waivers") or [])
+        if res["status"] == "pending":
+            since = packet.get("since")
+            limit = packet.get("timeout_s") or TIMEOUT_S.get(packet["wait"], 3600)
+            if since and (datetime.now(timezone.utc) - datetime.fromisoformat(since)).total_seconds() > limit:
+                return {"status": "failure", **base, "quality": res,
+                        "reason": f"Still waiting for {', '.join(res['pending'])} after {int(limit // 60)} minutes"}
+            return None
+        if res["status"] == "failed":
+            return {"status": "failure", **base, "quality": res, "reason": "; ".join(res["test_failures"])}
+        if res["status"] == "blocked":
+            n = len(res["blocking"])
+            return {"status": "security", **base, "quality": res,
+                    "reason": f"{n} security finding{'s' if n != 1 else ''} at or above the blocking severity"}
+        return {"status": "success", **base, "quality": res}

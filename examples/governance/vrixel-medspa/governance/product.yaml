@@ -40,6 +40,8 @@ approvers:
   - vrixel-medspa/architects
   g5:
   - vrixel-medspa/tech-leads
+  security:
+  - vrixel-medspa/security
   g6:
   - vrixel-medspa/release-managers
 high_risk_paths:

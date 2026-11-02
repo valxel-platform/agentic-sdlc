@@ -41,6 +41,8 @@ approvers:
   - vrixel-emr/architects
   g5:
   - vrixel-emr/tech-leads
+  security:
+  - vrixel-emr/security
   g6:
   - vrixel-emr/release-managers
 high_risk_paths:

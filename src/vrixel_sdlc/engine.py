@@ -230,6 +230,10 @@ class FeatureEngine:
         if item["type"] == "external":
             raise RuntimeError(f"{feature_id} is waiting on {item.get('label', 'an external system')}, not a person")
         d = normalize(decision, tuple(item["allowed"]))  # validate before resuming
+        if d["decision"] == "accept_risk" and not d["feedback"].strip():
+            from .graph import InvalidDecision
+
+            raise InvalidDecision("Accepting a security risk needs a reason")
         cmd = Command(resume={interrupt_id: d})
         if background:
             self._submit(feature_id, cmd)
@@ -278,6 +282,8 @@ class FeatureEngine:
             "delivery": s.get("delivery", {}),
             "deployments": s.get("deployments", {}),
             "runs": (s.get("change_set") or {}).get("runs", {}),
+            "quality": s.get("quality", {}),
+            "waivers": s.get("waivers", []),
             "work_tracking": self._work_view(s),
         }
 
@@ -360,6 +366,10 @@ def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
     waiting_phases = {p.get("phase") for p in pending if p["type"] == "escalation"}
     if "delivery" in waiting_phases:  # a failed build or deploy: show it on the release station
         waiting_phases.add("release")
+    for p in pending:  # blocking findings: show them where the scan ran
+        if p["type"] == "escalation" and p.get("phase") == "security":
+            waiting_phases.add({"pr": "build", "build": "build", "dev": "build", "staging": "release",
+                                "production": "operate"}.get(p.get("stage"), "build"))
     merged = (s.get("change_set") or {}).get("merged")
     stations = []
     for key, kind in RAIL:

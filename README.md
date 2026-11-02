@@ -239,6 +239,78 @@ runtime:
 The adapters match tool and argument names against OpenChoreo's published tool schemas, and
 the startup check names any missing setting.
 
+## Tests and security scans
+
+Testing and security are policy, not code. `config/quality.yaml` lists **suites** (what must be
+verified, at which stage, how strictly). Each suite names a **source** (where its results are
+read from) and a `match` (which tool or check counts). The pipeline evaluates the suites of a
+stage when that stage's wait finishes, and records the results as evidence.
+
+**Recommended profile.** A common industry baseline, following the test pyramid and the OWASP
+SAMM and NIST SSDF practices:
+
+| Stage | Suite | Recommended tool | Read from | Default rule |
+| --- | --- | --- | --- | --- |
+| Pull request | Unit tests | Your test runner, reporting counts and coverage | Check runs `unit*`, `test` | Required, coverage 70% (80% for PHI and payments) |
+| Pull request | Contract tests | Pact | Check runs `contract*`, `pact*` | Optional; required where a lane says so |
+| Pull request | Code scanning (SAST) | CodeQL, or Semgrep (SARIF) | GitHub code scanning | Required, blocks high and above |
+| Pull request | Dependency review (SCA) | GitHub dependency review, Dependabot | Dependency diff of the PR | Required, blocks high (general may relax to critical) |
+| Pull request | Secret scanning | GitHub secret scanning with push protection | Secret-scanning alerts | Required, any exposed secret blocks |
+| Pull request | Infrastructure as code | Trivy or Checkov (SARIF) | GitHub code scanning | Optional, blocks high |
+| Build | Image scan | Trivy step in the OpenChoreo build workflow | OpenChoreo build steps | Required for PHI and payments |
+| Dev | Integration tests | The change set, all repos together | Check runs `integration*` on the merge commit | Required |
+| Staging | End-to-end tests | Playwright | Check runs `e2e*`, `playwright*` | Required |
+| Staging | Dynamic scan (DAST) | OWASP ZAP baseline | Check runs `zap*`, `dast*` | Required for PHI and payments, blocks high |
+| Production | Smoke tests | A post-deploy job | Check runs `smoke*` | Required |
+
+Tool output reaches the pipeline through two open formats: check runs (any CI) and SARIF in
+GitHub code scanning (any scanner). That is what keeps tools swappable.
+
+**What happens on a result**
+- **Failed tests, low coverage, or a required suite that never reports:** before merge, the build
+  goes back to its escalation (agents fix, or a person vouches). After merge, the release
+  managers decide.
+- **Findings at or above `block_on`:** the lane's security approvers decide (`approvers.security`
+  in `product.yaml`, else the G5 approvers). They can have agents fix them (before merge; agents
+  get the findings as feedback), scan again (after merge), accept the risk, or stop the feature.
+- **Accepting a risk** creates a waiver for each finding. It records the reason (required), the
+  approver and an expiry of at most 90 days. Waived findings stop blocking until the waiver
+  expires; they are listed under "Accepted risks" in the release document and on the G6 panel.
+- **G5 and G6** show every suite run so far. The release document carries the same evidence for
+  audit.
+
+**Changing it later, without rewriting anything**
+
+| Change | Where |
+| --- | --- |
+| Swap a tool (Semgrep for CodeQL, Vitest for Jest, Snyk for Dependabot) | `match` of the suite: tool names or check names |
+| Tighten a product (coverage 90%, block on medium, make DAST required) | `quality:` in the product's `governance/product.yaml` |
+| Add a suite (license scan, performance budget, accessibility) | A new entry with `kind`, `stage`, `source`, `match` |
+| Raise or lower a floor for a data class | `floors` in `config/quality.yaml` (tools org) |
+| A tool that reports somewhere new (a SonarQube API, a test-results bucket) | One class with `collect()` in `quality/sources.py` or your own package, registered under `sources` |
+
+Products can only tighten: the platform rejects a manifest that lowers coverage, raises a
+blocking severity, or makes a required suite optional for its data class.
+
+```yaml
+# governance/product.yaml
+approvers:
+  security: [vrixel-emr/security]
+quality:
+  sast: { match: { tools: [CodeQL, Semgrep] }, block_on: medium }
+  unit: { match: { checks: ["vitest*"] }, min_coverage: 85 }
+  license:
+    kind: security
+    stage: pr
+    source: github-checks
+    match: { checks: ["license*"] }
+    required: true
+    block_on: high
+```
+
+In stub delivery mode every suite passes with sample numbers; tests inject results through
+`services.quality.sources["stub"].results`.
+
 ## Diagrams and work tracking
 
 Each product chooses its tools in `governance/product.yaml`. The tools org runs the connections
@@ -360,7 +432,7 @@ compliance counsel review the regulatory constitution articles.
 ## Layout
 
 ```
-config/            tools.yaml (MCP servers, tools allowed per data class), registry.yaml (governance repo per product, platform limits), models.yaml (role registry)
+config/            quality.yaml (test and security suites, floors per data class), tools.yaml (MCP servers, tools allowed per data class), registry.yaml (governance repo per product, platform limits), models.yaml (role registry)
 examples/governance/  sample governance repos for the tools org and each product org
 src/vrixel_sdlc/
   governance/      sources (local, GitHub), GitHub App tokens, manifest validation, pinned loader
@@ -372,6 +444,7 @@ src/vrixel_sdlc/
   integrations/    GitHub, OpenChoreo, capability catalog, MCP client, diagrams, Jira, OpenProject
   engine.py        start, inbox, decide, view; resolves CI and OpenChoreo waits
   waits.py         checks CI, builds and deployments for waiting features
+  quality/         test and security suites: policy, sources, gate
   worksync.py      keeps the work tracker in step with each feature
   api/app.py       FastAPI service under /api; serves web/dist
   web/auth.py      GitHub OAuth, signed sessions, approver matching

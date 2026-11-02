@@ -39,6 +39,7 @@ class Services:
     packages: PackageRegistry
     diagrams: dict[str, DiagramPublisher]  # provider -> publisher
     trackers: dict[str, WorkTracker]  # provider -> tracker
+    quality: object = None  # vrixel_sdlc.quality.Quality, set by build_services
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
@@ -81,7 +82,7 @@ def build_services(
     if github is None or openchoreo is None:
         live_github, live_oc = default_delivery(settings)
         github, openchoreo = github or live_github, openchoreo or live_oc
-    return Services(
+    svc = Services(
         settings=settings,
         ledger=ledger,
         gateway=gateway,
@@ -95,6 +96,28 @@ def build_services(
         diagrams=diagrams if diagrams is not None else default_diagrams(settings, github),
         trackers=trackers if trackers is not None else default_trackers(settings),
     )
+    svc.quality = default_quality(svc)
+    return svc
+
+
+def default_quality(services: Services):
+    """Live delivery reads each source from GitHub and OpenChoreo; otherwise one offline source
+    stands in for all of them (tests inject results through it)."""
+    import os
+
+    from .quality import Quality, load_sources
+    from .quality.sources import StubQuality
+
+    cfg = services.settings.quality
+    if cfg is None:
+        return None
+    if os.environ.get("VRIXEL_DELIVERY", "stub").lower() == "live":
+        sources = load_sources(cfg, services)
+    else:
+        stub = StubQuality(services)
+        sources = {name: stub for name in cfg.sources}
+        sources["stub"] = stub
+    return Quality(cfg, sources)
 
 
 def mcp_server(settings: Settings, capability: str, provider: str) -> McpHttp | None:

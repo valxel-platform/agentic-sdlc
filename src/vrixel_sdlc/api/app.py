@@ -163,7 +163,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         snap = eng().services.snapshot(view["product_id"], view["governance"])
         lanes = snap.lanes()
         gate = item.get("gate") or ESCALATION_GATE.get(item.get("phase", ""), "g4")
-        return list(lanes.get(lane or view["product_id"], snap.product).approvers.get(gate, []))
+        approvers = lanes.get(lane or view["product_id"], snap.product).approvers
+        return list(approvers.get(gate) or (approvers.get("g5", []) if gate == "security" else []))
 
     def decorate(fid: str, item: dict, user: User) -> dict:
         if item["type"] == "external":  # CI or OpenChoreo, not a person

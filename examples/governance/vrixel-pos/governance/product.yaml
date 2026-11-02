@@ -40,6 +40,8 @@ approvers:
   - vrixel-pos/architects
   g5:
   - vrixel-pos/tech-leads
+  security:
+  - vrixel-pos/security
   g6:
   - vrixel-pos/release-managers
 high_risk_paths:

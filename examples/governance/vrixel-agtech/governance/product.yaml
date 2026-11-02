@@ -40,6 +40,8 @@ approvers:
   - vrixel-agtech/architects
   g5:
   - vrixel-agtech/tech-leads
+  security:
+  - vrixel-agtech/security
   g6:
   - vrixel-agtech/release-managers
 high_risk_paths:

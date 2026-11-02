@@ -185,8 +185,33 @@ def release(ctx: dict, defective: bool) -> str:
         "", "## Staging",
         *[f"- {d['repo']}: {d['env']}, release {d.get('release') or 'n/a'}" for d in ctx.get("deployments", [])],
         *[f"- {c}: release-candidate package" for c in comps if c not in {d['repo'] for d in ctx.get("deployments", [])}],
+        *_quality_lines(ctx),
     ]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _quality_lines(ctx: dict) -> list[str]:
+    """Evidence for G6: each suite that ran, by stage, and any accepted risks."""
+    out = []
+    for stage in ("pr", "build", "dev", "staging"):
+        for r in (ctx.get("quality") or {}).get(stage, {}).get("suites", []):
+            bits = [r["state"]]
+            if r.get("passed") is not None:
+                bits.append(f"{r['passed']} passed, {r.get('failed') or 0} failed")
+            if r.get("coverage") is not None:
+                bits.append(f"coverage {r['coverage']:.0f}%")
+            if r["kind"] == "security":
+                bits.append(f"{len(r.get('findings') or [])} findings, {len(r.get('waived') or [])} accepted")
+            out.append(f"- {stage} / {r['suite']}{' / ' + r['repo'].split('/')[-1] if r.get('repo') else ''}: "
+                       + "; ".join(bits))
+    if not out:
+        return []
+    lines = ["", "## Quality evidence", *out]
+    if ctx.get("waivers"):
+        lines += ["", "## Accepted risks"] + [
+            f"- {w['severity']} {w['title']} ({w['repo']}): {w['reason']}; accepted by {w['approver']} until "
+            f"{w['expires'][:10]}" for w in ctx["waivers"]]
+    return lines
 
 
 def operate(ctx: dict, defective: bool) -> str:

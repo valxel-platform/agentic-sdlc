@@ -42,6 +42,8 @@ approvers:
   - vrixel-apx/architects
   g5:
   - vrixel-apx/tech-leads
+  security:
+  - vrixel-apx/security
   g6:
   - vrixel-apx/release-managers
 high_risk_paths:
