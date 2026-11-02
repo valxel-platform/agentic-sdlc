@@ -65,7 +65,22 @@ def _architecture(text: str, ctx: dict) -> list[str]:
                        "it needs a provisioning ADR or a depends_on entry")
     if not section(text, "Contracts"):
         out.append("HLD has no contracts section (VX-4)")
+    out += _diagram(text, repos)
     return out
+
+
+def _diagram(text: str, repos: list[dict]) -> list[str]:
+    """The diagram is published for reviewers, so it must parse and must show the change set."""
+    from ..integrations.diagrams import extract_mermaid, parse_flowchart
+
+    source = extract_mermaid(section(text, "Diagram"))
+    if not source:
+        return ["HLD has no Diagram section with a mermaid flowchart"]
+    labels = " ".join(n["label"] for n in parse_flowchart(source).nodes.values())
+    if not labels:
+        return ["The HLD diagram has no nodes; write a mermaid flowchart"]
+    return [f"The HLD diagram does not show {r['name']}" for r in repos
+            if r["name"].split("/", 1)[-1] not in labels]
 
 
 def _plan(text: str, ctx: dict) -> list[str]:

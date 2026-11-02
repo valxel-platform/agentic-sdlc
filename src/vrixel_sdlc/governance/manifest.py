@@ -11,7 +11,7 @@ import re
 
 import yaml
 
-from ..config import Limits, ProductConfig, RegistryEntry, RepoSpec
+from ..config import Limits, ProductConfig, RegistryEntry, RepoSpec, ToolsConfig
 from .errors import GovernanceError
 
 _ROLES = {"provider", "consumer", "library"}
@@ -20,7 +20,8 @@ _APPROVER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}(/[A-Za-z0-9][A-Za-z0-9_.
 
 
 def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
-                   registry: dict[str, RegistryEntry] | None = None) -> tuple[ProductConfig, dict]:
+                   registry: dict[str, RegistryEntry] | None = None,
+                   tools: ToolsConfig | None = None) -> tuple[ProductConfig, dict]:
     try:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
@@ -100,6 +101,8 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         elif entry.kind == "shared" and registry[dep].kind != "shared":
             problems.append(f"shared lane may not depend on product {dep}")
 
+    chosen_tools = _tools(raw.get("tools"), entry, tools, problems)
+
     if problems:
         raise GovernanceError(f"{entry.governance.full_name}/product.yaml is invalid: " + "; ".join(problems))
 
@@ -118,7 +121,53 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         kind=entry.kind,
         runtime=runtime,
         depends_on=tuple(dict.fromkeys(depends_on)),
+        tools=chosen_tools,
     )
     files = {"constitution": str(raw.get("constitution") or "constitution.md"),
              "context": str(raw.get("context") or "context.md")}
     return product, files
+
+
+_TRACKER_DEFAULTS = {
+    "jira": {"epic_type": "Epic", "story_type": "Story", "task_type": "Task",
+             "statuses": {"in_progress": "In Progress", "done": "Done", "cancelled": "Done"}},
+    "openproject": {"epic_type": "Epic", "story_type": "User story", "task_type": "Task",
+                    "statuses": {"in_progress": "In progress", "done": "Closed", "cancelled": "Rejected"}},
+}
+
+
+def _tools(raw, entry: RegistryEntry, tools: ToolsConfig | None, problems: list[str]) -> dict:
+    """tools.diagrams and tools.work_tracking: the provider must be one the platform runs, and one
+    the lane's data class may send design content to."""
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        problems.append("tools must be a mapping")
+        return {}
+    tools = tools or ToolsConfig()
+    out: dict = {}
+    for capability in ("diagrams", "work_tracking"):
+        spec = raw.get(capability)
+        if spec is None:
+            continue
+        spec = {"provider": spec} if isinstance(spec, str) else dict(spec or {})
+        provider = str(spec.get("provider", ""))
+        known = tools.providers.get(capability, {})
+        if provider not in known:
+            problems.append(f"tools.{capability}.provider {provider!r} must be one of {sorted(known)}")
+            continue
+        if not tools.allowed(entry.data_class, provider):
+            problems.append(f"tools.{capability}.provider {provider} is not approved for {entry.data_class} data; "
+                            f"approved: {sorted(tools.data_classes.get(entry.data_class, []))}")
+            continue
+        if capability == "work_tracking":
+            if not spec.get("project"):
+                problems.append(f"tools.work_tracking.project is required for {provider}")
+            defaults = _TRACKER_DEFAULTS.get(provider, {})
+            spec = {**defaults, **spec,
+                    "statuses": {**defaults.get("statuses", {}), **(spec.get("statuses") or {})}}
+        out[capability] = spec
+    unknown = set(raw) - {"diagrams", "work_tracking"}
+    if unknown:
+        problems.append(f"tools has unknown keys {sorted(unknown)}")
+    return out

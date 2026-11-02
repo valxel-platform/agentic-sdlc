@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir ".[github]"
+RUN pip install --no-cache-dir ".[github,integrations]"
 COPY config ./config
 # Sample governance repos, used only when VRIXEL_GOVERNANCE_SOURCE=local.
 COPY examples ./examples

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
@@ -13,6 +14,7 @@ from .graph import build_pipeline
 from .graph.pipeline import normalize
 from .gateway import summarize
 from .services import Services
+from .worksync import InMemoryLinkStore, WorkSync
 
 
 class FeatureIndex(Protocol):
@@ -71,7 +73,7 @@ class PostgresIndex:
 
 class FeatureEngine:
     def __init__(self, services: Services, checkpointer, index: FeatureIndex | None = None,
-                 bus: EventBus | None = None, workers: int = 4) -> None:
+                 bus: EventBus | None = None, workers: int = 4, work: WorkSync | None = None) -> None:
         self.services = services
         self.graph = build_pipeline(services, checkpointer=checkpointer)
         self.index = index or InMemoryIndex()
@@ -81,6 +83,9 @@ class FeatureEngine:
         self._locks_guard = threading.Lock()
         self.running: set[str] = set()
         self.errors: dict[str, str] = {}
+        self.work = work or WorkSync(services, InMemoryLinkStore(),
+                                     os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
+        self.sync_errors: dict[str, str] = {}
 
     @staticmethod
     def _config(feature_id: str) -> dict:
@@ -106,8 +111,21 @@ class FeatureEngine:
                 raise
             finally:
                 self.running.discard(feature_id)
+                self.sync_work(feature_id)
                 self.bus.publish({"type": "feature.updated", "feature_id": feature_id,
                                   "pending": len(self.pending(feature_id))})
+
+    def sync_work(self, feature_id: str) -> dict:
+        """Bring the product's work tracker up to date. Errors are recorded, never raised: the
+        next run of the feature, or POST /api/features/{id}/sync, catches up."""
+        try:
+            s = self.graph.get_state(self._config(feature_id)).values
+            result = self.work.sync(s) if s else {}
+            self.sync_errors.pop(feature_id, None)
+            return result
+        except Exception as exc:
+            self.sync_errors[feature_id] = f"{type(exc).__name__}: {exc}"
+            return {"error": self.sync_errors[feature_id]}
 
     def _submit(self, feature_id: str, payload) -> None:
         def run():
@@ -199,7 +217,20 @@ class FeatureEngine:
             "human_active_minutes": human,
             "usage": summarize(records),
             "events": s.get("events", []),
+            "diagrams": s.get("diagrams", []),
+            "work_tracking": self._work_view(s),
         }
+
+    def _work_view(self, s: dict) -> dict | None:
+        try:
+            cfg, _ = self.work.config(s)
+        except Exception:
+            return None
+        if not cfg:
+            return None
+        fid = s["feature_id"]
+        return {"provider": cfg["provider"], "project": cfg.get("project"),
+                "items": self.work.items(fid), "error": self.sync_errors.get(fid)}
 
     def summary(self, feature_id: str) -> dict:
         """The board's light view of a feature."""

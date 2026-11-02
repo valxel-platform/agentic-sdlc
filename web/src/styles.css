@@ -274,3 +274,16 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-weight: 600;
   main { padding: 20px 16px 48px; }
   .rail.full .label { display: none; }
 }
+
+/* External tools: diagrams and work items */
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-right: 16px; }
+.small-btn { padding: 5px 12px; font-size: var(--fs-0); }
+.ext-list { list-style: none; margin: 0; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px; }
+.ext-list li { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.work-line { display: flex; align-items: center; gap: 10px; }
+.work-kind { width: 40px; flex: none; }
+.work.story, .work.task { padding-left: 14px; border-left: 2px solid var(--rule-soft); margin-left: 4px; }
+.work-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 50px; }
+.work.story .work-summary, .work.task .work-summary { padding-left: 50px; }
+.ext-list li, .timeline li { overflow-wrap: anywhere; }
+.feature-grid > .stack { min-width: 0; }

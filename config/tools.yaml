@@ -1,0 +1,41 @@
+# External tools the agents work in, owned by the tools org. Products choose a provider in
+# their governance/product.yaml (tools.diagrams, tools.work_tracking); credentials stay here,
+# with the platform, as environment variables issued to a service account.
+
+servers:
+  # Lucid MCP server. Unattended agents need an API key (Team or Enterprise plan), and a Lucid
+  # admin must enable MCP access for the account.
+  lucid:
+    url: https://mcp.lucid.app/mcp
+    url_env: VRIXEL_LUCID_MCP_URL            # optional override
+    auth_header: Authorization
+    auth_env: VRIXEL_LUCID_MCP_AUTH          # e.g. "Bearer <api key>"
+  # Atlassian Rovo MCP server (Jira). Needs the read_jira, write_jira and search_jira scopes.
+  atlassian:
+    url: https://mcp.atlassian.com/v1/mcp
+    url_env: VRIXEL_ATLASSIAN_MCP_URL        # optional override
+    auth_header: Authorization
+    auth_env: VRIXEL_ATLASSIAN_MCP_AUTH      # e.g. "Basic <base64 email:api-token>"
+    settings:
+      cloud_id_env: VRIXEL_ATLASSIAN_CLOUD_ID # optional; looked up from the token when unset
+  # OpenProject's built-in MCP server (17.2+, Enterprise add-on) at <instance>/mcp.
+  openproject:
+    url_env: VRIXEL_OPENPROJECT_MCP_URL      # e.g. https://openproject.example.com/mcp
+    auth_header: Authorization
+    auth_env: VRIXEL_OPENPROJECT_MCP_AUTH    # e.g. "Bearer <api token>"
+
+providers:
+  diagrams:
+    lucid: { server: lucid }
+    drawio: {}                               # files in the product's repo; no server needed
+  work_tracking:
+    jira: { server: atlassian }
+    openproject: { server: openproject }
+
+# Which providers may receive content from a lane of each data class. Agents never put PHI or
+# card data in diagrams or tickets, but design detail of regulated systems still leaves the
+# platform, so add a SaaS provider here only once a vendor agreement (BAA, DPA) covers it.
+data_classes:
+  general: [lucid, drawio, jira, openproject]
+  phi: [drawio, openproject]
+  payments: [drawio, openproject]

@@ -64,7 +64,21 @@ export interface Feature extends FeatureSummary {
   human_active_minutes: number;
   usage: { calls: number; cache_hit_rate: number; est_cost_usd: number; cost_by_phase: Record<string, number> };
   events: FeatureEvent[];
+  diagrams: Diagram[];
+  work_tracking: WorkTracking | null;
 }
+
+export interface Diagram {
+  provider: string; title: string; version: number; url: string; edit_url?: string;
+  file?: string; file_url?: string; stub?: boolean; at: string;
+}
+
+export interface WorkItem {
+  item: string; kind: "epic" | "story" | "task"; key: string; url: string; summary: string;
+  status: "todo" | "in_progress" | "done" | "cancelled";
+}
+
+export interface WorkTracking { provider: string; project: string; items: WorkItem[]; error: string | null }
 
 export interface Me {
   login: string; name: string; avatar_url: string; orgs: string[]; teams: string[];
@@ -109,6 +123,7 @@ export const api = {
   me: () => request<Me>("GET", "/me"),
   features: () => request<FeatureSummary[]>("GET", "/features"),
   products: () => request<Record<string, { name?: string; kind: string; ok: boolean }>>("GET", "/products"),
+  syncWork: (id: string) => request<unknown>("POST", `/features/${encodeURIComponent(id)}/sync`, {}),
   feature: (id: string) => request<Feature>("GET", `/features/${encodeURIComponent(id)}`),
   artifact: (id: string, kind: string) =>
     request<{ id: string; content: string; version: number; constitution_version: string }>(

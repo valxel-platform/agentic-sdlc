@@ -22,7 +22,9 @@ dependencies = [
 [project.optional-dependencies]
 live = ["anthropic>=0.70", "claude-agent-sdk>=0.2"]
 github = ["pyjwt[crypto]>=2.8"]
-dev = ["pytest>=8", "httpx>=0.27", "pyjwt[crypto]>=2.8"]
+# Lucid, Jira and OpenProject through their MCP servers.
+integrations = ["mcp>=1.10"]
+dev = ["pytest>=8", "httpx>=0.27", "pyjwt[crypto]>=2.8", "mcp>=1.10"]
 
 [project.scripts]
 vrixel = "vrixel_sdlc.cli:main"

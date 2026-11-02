@@ -44,6 +44,56 @@ class ProductConfig:
     kind: str = "product"  # product (owns a runtime) | shared (ships packages, no runtime)
     runtime: dict | None = None  # {"openchoreo_project", "pipeline"}; None for shared lanes
     depends_on: tuple[str, ...] = ()
+    # External tools: {"diagrams": {"provider": "lucid", ...}, "work_tracking": {"provider": "jira", ...}}
+    tools: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ServerConfig:
+    """A remote MCP server the platform holds credentials for (config/tools.yaml)."""
+
+    name: str
+    url: str
+    auth_header: str = "Authorization"
+    auth_env: str = ""
+    settings: dict = field(default_factory=dict)
+
+    def auth_value(self) -> str:
+        return os.environ.get(self.auth_env, "") if self.auth_env else ""
+
+    def setting(self, key: str) -> str:
+        """A server setting, read from the environment variable named by `<key>_env`."""
+        env = self.settings.get(f"{key}_env")
+        return os.environ.get(env, "") if env else str(self.settings.get(key, ""))
+
+
+@dataclass(frozen=True)
+class ToolsConfig:
+    servers: dict[str, ServerConfig] = field(default_factory=dict)
+    providers: dict[str, dict[str, dict]] = field(default_factory=dict)  # capability -> provider -> spec
+    data_classes: dict[str, list[str]] = field(default_factory=dict)  # data class -> allowed providers
+
+    def allowed(self, data_class: str, provider: str) -> bool:
+        return provider in self.data_classes.get(data_class, [])
+
+    def server_for(self, capability: str, provider: str) -> ServerConfig | None:
+        name = (self.providers.get(capability, {}).get(provider) or {}).get("server")
+        return self.servers.get(name) if name else None
+
+
+def load_tools(path: Path) -> ToolsConfig:
+    if not path.exists():
+        return ToolsConfig()
+    raw = yaml.safe_load(path.read_text()) or {}
+    servers = {}
+    for name, spec in (raw.get("servers") or {}).items():
+        url = (os.environ.get(spec["url_env"], "") if spec.get("url_env") else "") or spec.get("url", "")
+        servers[name] = ServerConfig(name=name, url=url, auth_header=spec.get("auth_header", "Authorization"),
+                                     auth_env=spec.get("auth_env", ""), settings=dict(spec.get("settings") or {}))
+    providers = {cap: {p: dict(v or {}) for p, v in (provs or {}).items()}
+                 for cap, provs in (raw.get("providers") or {}).items()}
+    return ToolsConfig(servers=servers, providers=providers,
+                       data_classes={k: list(v or []) for k, v in (raw.get("data_classes") or {}).items()})
 
 
 @dataclass(frozen=True)
@@ -105,6 +155,7 @@ class Settings:
     roles: dict[str, RoleConfig]
     data_classes: dict[str, list[str]]
     failover: dict[str, list[str]] = field(default_factory=dict)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
 
     def entry(self, product_id: str) -> RegistryEntry:
         try:
@@ -168,4 +219,5 @@ def load_settings(
         roles={name: RoleConfig(**spec) for name, spec in models_raw["roles"].items()},
         data_classes={n: list(s["allowed_providers"]) for n, s in models_raw["data_classes"].items()},
         failover=models_raw.get("failover") or {},
+        tools=load_tools(cfg_dir / "tools.yaml"),
     )

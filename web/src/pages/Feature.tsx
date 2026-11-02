@@ -5,6 +5,7 @@ import { useLive } from "../live";
 import { Rail } from "../components/Rail";
 import { ArtifactBody } from "../components/Artifact";
 import { DecisionPanel } from "../components/Decision";
+import { Diagrams, WorkItems } from "../components/External";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
 
 const ORDER = ["OPP", "PRD", "UX", "HLD", "PLAN", "BUILD", "REL", "OPS"];
@@ -25,11 +26,14 @@ function describe(e: FeatureEvent): string {
     case "design_and_architecture_approved": return "Design and architecture both approved";
     case "waiting_for_other_gate": return "Waiting for the other design gate";
     case "done": return "Released";
+    case "diagram_published": return `Architecture diagram v${e.version ?? ""} published`;
+    case "diagram_withheld": return "Architecture diagram kept off the diagram tool";
+    case "diagram_failed": return "Architecture diagram couldn't be published";
     default: return `${name}: ${e.kind.replace(/_/g, " ")}`;
   }
 }
 
-export function FeaturePage() {
+export function FeaturePage({ canSync }: { canSync: (productId: string) => boolean }) {
   const { id = "" } = useParams();
   const [f, setF] = useState<Feature | null>(null);
   const [err, setErr] = useState("");
@@ -89,7 +93,7 @@ export function FeaturePage() {
                   <span className="tick" aria-hidden="true" />
                   <div>
                     <div>{describe(e)}</div>
-                    {e.detail && e.kind !== "started" && e.kind !== "passed" && <div className="small muted">{e.detail}</div>}
+                    {e.detail && !["started", "passed", "diagram_published"].includes(e.kind) && <div className="small muted">{e.detail}</div>}
                     <div className="when">{new Date(e.at).toLocaleString()}</div>
                   </div>
                 </li>
@@ -123,6 +127,10 @@ export function FeaturePage() {
               </>
             )}
           </section>
+          <Diagrams diagrams={f.diagrams ?? []} />
+          {f.work_tracking && (
+            <WorkItems featureId={f.feature_id} work={f.work_tracking} canSync={canSync(f.product_id)} onSynced={load} />
+          )}
           {prs.length > 0 && (
             <section className="panel" aria-labelledby="h-prs">
               <h2 id="h-prs" className="section-title">Pull requests</h2>

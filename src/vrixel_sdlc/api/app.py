@@ -32,7 +32,8 @@ from ..gateway import InMemoryLedger, PolicyViolation, PostgresLedger
 from ..governance import GovernanceError
 from ..graph import InvalidDecision
 from ..intake import IntakeAgent, IntakeStore
-from ..services import build_services
+from ..services import build_services, integration_modes
+from ..worksync import PostgresLinkStore, WorkSync
 from ..web.auth import (
     ESCALATION_GATE,
     SESSION_COOKIE,
@@ -101,7 +102,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         saver = PostgresSaver(pool)
         saver.setup()
         services = build_services(settings, ledger=PostgresLedger(pool))
-        return FeatureEngine(services, saver, PostgresIndex(pool)), pool
+        work = WorkSync(services, PostgresLinkStore(pool),
+                        os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
+        return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
     from langgraph.checkpoint.memory import InMemorySaver
 
     services = build_services(settings, ledger=InMemoryLedger())
@@ -245,6 +248,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             try:
                 snap = services.snapshot(pid)
                 p = snap.product
+                modes = integration_modes(services)
+                row |= {"tools": {cap: {**spec, "mode": modes.get(spec["provider"], "stub")}
+                                  for cap, spec in p.tools.items()}}
                 row |= {"name": p.name, "repos": [r.name for r in p.repos], "budget_usd": p.budget_usd,
                         "depends_on": list(p.depends_on), "runtime": p.runtime,
                         "constitution_version": snap.version, "articles": list(snap.constitution.article_ids),
@@ -331,6 +337,19 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(422, str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/features/{feature_id}/sync")
+    def sync(feature_id: str, user: User = Depends(current_user)) -> dict:
+        """Retry the work-tracker sync now, e.g. after a tracker outage."""
+        try:
+            pid = eng().view(feature_id)["product_id"]
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if pid not in lanes_for(user):
+            raise HTTPException(403, f"Only members of {pid}'s organization can sync its tracker")
+        result = eng().sync_work(feature_id)
+        eng().bus.publish({"type": "feature.updated", "feature_id": feature_id})
+        return {**result, "work_tracking": eng().view(feature_id)["work_tracking"]}
 
     # --- intake chat ---
     def intake_session(sid: str, user: User):

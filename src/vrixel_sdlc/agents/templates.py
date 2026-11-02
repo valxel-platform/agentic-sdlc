@@ -101,9 +101,34 @@ def architecture(ctx: dict, defective: bool) -> str:
             for r in deps]
     lines += [
         "", "## Contracts", f"- {provider}: OpenAPI minor version bump, backward compatible (VX-4)",
+        "", "## Diagram", "```mermaid", _flowchart(ctx, repos), "```",
         "", "## Constitution articles", "- VX-4", "- VX-8",
     ]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _node_id(repo: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", repo.split("/", 1)[-1]).strip("_")
+
+
+def _flowchart(ctx: dict, repos: list[dict]) -> str:
+    """Container view: one subgraph per lane, consumers call providers, providers use libraries."""
+    lane_names = {ctx["product_id"]: ctx["product_name"]}
+    by_lane: dict[str, list[dict]] = {}
+    for r in repos:
+        by_lane.setdefault(r.get("lane", ctx["product_id"]), []).append(r)
+    out = ["flowchart LR"]
+    for lane, members in by_lane.items():
+        out.append(f'  subgraph {lane}["{lane_names.get(lane, lane)}"]')
+        out += [f'    {_node_id(r["name"])}["{r["name"].split("/", 1)[-1]} ({r["role"]})"]' for r in members]
+        out.append("  end")
+    providers = [r for r in repos if r["role"] == "provider"]
+    for r in repos:
+        if r["role"] == "consumer":
+            out += [f'  {_node_id(r["name"])} -->|"versioned API"| {_node_id(p["name"])}' for p in providers]
+        elif r["role"] == "library":
+            out += [f'  {_node_id(p["name"])} -->|"uses"| {_node_id(r["name"])}' for p in providers]
+    return "\n".join(out)
 
 
 def plan(ctx: dict, defective: bool) -> str:

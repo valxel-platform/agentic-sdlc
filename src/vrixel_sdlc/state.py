@@ -84,6 +84,7 @@ class FeatureState(TypedDict, total=False):
     approvals: Annotated[dict[str, bool], merge_dict]
     pull_requests: Annotated[dict[str, dict], merge_dict]
     gate_decisions: Annotated[list[GateDecision], operator.add]
+    diagrams: Annotated[list[dict], operator.add]  # published architecture diagrams, one per HLD version
     events: Annotated[list[dict], operator.add]
     tokens_used: Annotated[int, operator.add]
     cost_usd: Annotated[float, operator.add]

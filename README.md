@@ -186,6 +186,63 @@ The same app can later open PRs in product repos, scoped per org.
 2. Install the GitHub App in the org.
 3. Add one line to `config/registry.yaml`.
 
+## Diagrams and work tracking
+
+Each product chooses its tools in `governance/product.yaml`. The tools org runs the connections
+and holds the credentials (`config/tools.yaml`), and limits which tools may receive content from
+each data class:
+
+```yaml
+tools:
+  diagrams:
+    provider: lucid          # lucid | drawio
+  work_tracking:
+    provider: jira           # jira | openproject
+    project: AG              # Jira project key or OpenProject project identifier
+    # optional: epic_type, story_type, task_type, statuses: {in_progress, done, cancelled}
+```
+
+| Data class | Allowed by default | Note |
+| --- | --- | --- |
+| general | lucid, drawio, jira, openproject | |
+| phi, payments | drawio, openproject | Add a SaaS tool once a vendor agreement (BAA, DPA) covers it |
+
+**Architecture diagrams.** The architect writes one Mermaid flowchart in the HLD's `## Diagram`
+section. The evaluator checks that it parses and shows every affected repo. When the phase
+passes, the diagram is published and linked from the HLD, so G4 reviewers open it from the gate.
+
+- **Lucid**: imported through the Lucid MCP server (`lucid_create_diagram_from_mermaid`),
+  tagged with the feature ID, and shared view-only within the Lucid account.
+- **draw.io**: converted to a native `.drawio` file and committed to the feature branch of the
+  product's provider repo, so it is reviewed and merged with the code. The link opens it in the
+  draw.io editor. draw.io's MCP servers run beside a person's editor and store nothing, so the
+  pipeline writes the file itself.
+
+If the change touches a lane whose data class doesn't allow the tool (an AgTech change to the
+PHI shared-services lane, say), the diagram stays in the HLD and isn't published. A failed
+publish never fails the phase.
+
+**Work tracking.** After every step of a feature, the engine reconciles the product's Jira or
+OpenProject project with the feature.
+
+| When | In the tracker |
+| --- | --- |
+| G1 approved | Epic `[AG-FEAT-1] title`, linked to the feature page |
+| G2 approved | One story per acceptance criterion, under the epic; epic in progress |
+| Plan passed | One task per planned repo change; tasks in a restricted lane carry no detail |
+| Build and merge | A task is in progress once it has a PR and done when merged; stories done at merge |
+| Every decision | A comment on the epic with gate, decision, approver and feedback; diagram links too |
+| Released or stopped | Epic done, or open items cancelled |
+
+Sync is idempotent: each item carries a marker (a Jira label, an OpenProject subject prefix), so
+a retry finds what it created. A tracker outage shows on the feature page and never stops agents
+or gates; the next step, or **Sync now**, catches up.
+
+Adapters resolve tool and argument names from each server's published tool schemas, so they keep
+working when a server renames a parameter. Without credentials a provider runs as an offline
+stand-in, and `/api/products` reports `mode: stub`. Unattended agents can't complete an OAuth
+consent screen, so each server needs an API key or token issued to a service account.
+
 ## How the design maps to code
 
 | Design element | Where | Notes |
@@ -252,7 +309,7 @@ compliance counsel review the regulatory constitution articles.
 ## Layout
 
 ```
-config/            registry.yaml (governance repo per product, platform limits), models.yaml (role registry)
+config/            tools.yaml (MCP servers, tools allowed per data class), registry.yaml (governance repo per product, platform limits), models.yaml (role registry)
 examples/governance/  sample governance repos for the tools org and each product org
 src/vrixel_sdlc/
   governance/      sources (local, GitHub), GitHub App tokens, manifest validation, pinned loader
@@ -261,8 +318,9 @@ src/vrixel_sdlc/
   evaluators/      deterministic checks, rubric critic
   gateway/         gateway, providers, prompt layers, pricing, ledger
   runtime/         generic and Claude Code runtimes
-  integrations/    GitHub, OpenChoreo, capability catalog
+  integrations/    GitHub, OpenChoreo, capability catalog, MCP client, diagrams, Jira, OpenProject
   engine.py        start, inbox, decide, view
+  worksync.py      keeps the work tracker in step with each feature
   api/app.py       FastAPI service under /api; serves web/dist
   web/auth.py      GitHub OAuth, signed sessions, approver matching
   intake.py        guided intake agent

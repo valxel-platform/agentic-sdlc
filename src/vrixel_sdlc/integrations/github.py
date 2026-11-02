@@ -12,6 +12,7 @@ from typing import Protocol
 class GitHub(Protocol):
     def open_pr(self, *, repo: str, branch: str, title: str, body: str, files: list[str], labels: list[str]) -> dict: ...
     def merge(self, *, repo: str, number: int, actor: str) -> dict: ...
+    def put_file(self, *, repo: str, branch: str, path: str, content: str, message: str) -> dict: ...
 
 
 class StubGitHub:
@@ -19,6 +20,7 @@ class StubGitHub:
         self.prs: dict[str, dict] = {}
         self._seq = itertools.count(100)
         self._lock = threading.Lock()
+        self.files: dict[tuple[str, str, str], str] = {}  # (repo, branch, path) -> content
 
     def open_pr(self, *, repo, branch, title, body, files, labels) -> dict:
         with self._lock:
@@ -43,3 +45,13 @@ class StubGitHub:
             pr["state"] = "merged"
             pr["merged_by"] = actor
             return dict(pr)
+
+    def put_file(self, *, repo, branch, path, content, message) -> dict:
+        """Create or update one file on a branch (created from the default branch if missing).
+        A real adapter uses the contents API with the repo-scoped installation token."""
+        import hashlib
+
+        with self._lock:
+            self.files[(repo, branch, path)] = content
+        return {"repo": repo, "branch": branch, "path": path, "message": message,
+                "sha": hashlib.sha1(content.encode()).hexdigest()}

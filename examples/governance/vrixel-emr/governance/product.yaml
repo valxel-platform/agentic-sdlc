@@ -12,6 +12,14 @@ depends_on: [SS, APX]
 runtime:
   openchoreo_project: emr
   pipeline: [dev, staging, production]
+# Where agents publish work. Providers and credentials are run by the tools org; the platform
+# limits which providers may receive content from each data class (config/tools.yaml).
+tools:
+  diagrams:
+    provider: drawio          # a .drawio file committed with the change set, plus an editor link
+  work_tracking:
+    provider: openproject
+    project: emr
 budget_usd: 150
 critic_threshold: 0.8
 max_loops: 3

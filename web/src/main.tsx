@@ -49,7 +49,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <Route path="/" element={<Navigate to="/inbox" replace />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/board" element={<Board me={me} />} />
-          <Route path="/features/:id" element={<FeaturePage />} />
+          <Route path="/features/:id" element={<FeaturePage canSync={(pid) => me.lanes.some((l) => l.id === pid)} />} />
           <Route path="/intake" element={<Intake me={me} />} />
           <Route path="/intake/:sid" element={<Intake me={me} />} />
           <Route path="*" element={<Navigate to="/inbox" replace />} />

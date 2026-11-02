@@ -272,6 +272,13 @@ def make_phase_node(phase: str, services):
             "events": [event(phase, status, out.get("reason", ""), attempts=out.get("attempt", 0),
                              score=out.get("score", 0.0))],
         }
+        if phase == "architecture" and status == "passed" and out.get("draft"):
+            content, diagram, ev = publish_diagram(services, state, out["draft"]["content"])
+            out["draft"]["content"] = content
+            if diagram:
+                delta["diagrams"] = [diagram]
+            if ev:
+                delta["events"].append(ev)
         if out.get("draft"):
             ref = services.artifacts.save(
                 feature_id=state["feature_id"], kind=spec.kind, phase=phase, content=out["draft"]["content"],
@@ -329,3 +336,52 @@ def _knowledge_writeback(services, state: FeatureState, ctx: dict) -> dict:
         "release": state.get("change_set", {}).get("id"),
     })
     return event("operate", "capability_registered", cap_id)
+
+
+PROVIDER_NAMES = {"lucid": "Lucid", "drawio": "draw.io"}
+
+
+def publish_diagram(services, state: FeatureState, content: str) -> tuple[str, dict | None, dict | None]:
+    """Publish the HLD's diagram with the product's diagram provider and link it from the HLD.
+    Publishing never fails the phase: the Mermaid source in the HLD stays the reviewed record."""
+    from ..agents.parse import section
+    from ..integrations.diagrams import DiagramRequest, extract_mermaid
+
+    snap = services.snapshot(state["product_id"], state.get("governance"))
+    cfg = snap.product.tools.get("diagrams")
+    if not cfg:
+        return content, None, None
+    provider = cfg["provider"]
+    name = PROVIDER_NAMES.get(provider, provider)
+    affected = [r["name"] for r in parse_affected_repos(content)]
+    lanes = snap.lane_of_repo()
+    tools = services.settings.tools
+    blocked = sorted({lanes[r].product_id for r in affected
+                      if r in lanes and not tools.allowed(lanes[r].data_class, provider)})
+    if blocked:
+        note = (f"Not published to {name}: the change touches {', '.join(blocked)}, whose data class may not "
+                f"be sent to {name}. The diagram source above is the record.")
+        return content.rstrip() + f"\n\n## Diagrams\n- {note}\n", None, event("architecture", "diagram_withheld", note)
+
+    version = len(state.get("diagrams") or []) + 1
+    own = sorted(snap.product.repos, key=lambda r: REPO_ORDER.get(r.role, 9))
+    repo = next((r.name for r in own if r.role == "provider"), own[0].name)
+    req = DiagramRequest(
+        feature_id=state["feature_id"], title=f"{state['feature_id']} {state['title']}: architecture v{version}",
+        mermaid=extract_mermaid(section(content, "Diagram")), repo=repo, branch=f"feature/{state['feature_id']}",
+        version=version, settings=cfg)
+    publisher = services.diagrams.get(provider)
+    try:
+        if publisher is None:
+            raise RuntimeError(f"no {provider} publisher is configured")
+        ref = publisher.publish(req)
+    except Exception as exc:  # the gate can still review the source; the next HLD version retries
+        note = f"Publishing to {name} failed ({type(exc).__name__}: {exc}). The diagram source above is the record."
+        return content.rstrip() + f"\n\n## Diagrams\n- {note}\n", None, event("architecture", "diagram_failed", note)
+
+    links = [f"- [Architecture v{version} in {name}]({ref['url']})"]
+    if ref.get("file_url"):
+        links.append(f"- Source file: [{ref['file']}]({ref['file_url']})")
+    ref = {**ref, "at": now()}
+    return (content.rstrip() + "\n\n## Diagrams\n" + "\n".join(links) + "\n", ref,
+            event("architecture", "diagram_published", ref["url"], provider=provider, version=version))

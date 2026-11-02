@@ -5,6 +5,14 @@ product_id: SS
 name: Shared services
 constitution: constitution.md
 context: context.md
+# Where agents publish work. Providers and credentials are run by the tools org; the platform
+# limits which providers may receive content from each data class (config/tools.yaml).
+tools:
+  diagrams:
+    provider: drawio          # a .drawio file committed with the change set, plus an editor link
+  work_tracking:
+    provider: openproject
+    project: shared-services
 budget_usd: 150
 critic_threshold: 0.85
 max_loops: 3
