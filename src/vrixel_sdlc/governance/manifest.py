@@ -88,8 +88,17 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
     elif not isinstance(runtime, dict) or not runtime.get("openchoreo_project"):
         problems.append("runtime.openchoreo_project is required: each product owns its runtime")
     else:
-        runtime = {"openchoreo_project": str(runtime["openchoreo_project"]),
-                   "pipeline": [str(e) for e in runtime.get("pipeline") or ["dev", "staging", "production"]]}
+        pipeline = [str(e) for e in runtime.get("pipeline") or ["dev", "staging", "production"]]
+        if len(pipeline) < 2 or len(set(pipeline)) != len(pipeline):
+            problems.append("runtime.pipeline needs at least two distinct environments, ending with production")
+        components = {str(k): str(v) for k, v in (runtime.get("components") or {}).items()}
+        own = {r.get("name") for r in raw.get("repos") or [] if isinstance(r, dict)}
+        for repo in components:
+            if repo not in own:
+                problems.append(f"runtime.components maps {repo}, which is not one of this product's repos")
+        runtime = {"openchoreo_project": str(runtime["openchoreo_project"]), "pipeline": pipeline,
+                   "namespace": str(runtime["namespace"]) if runtime.get("namespace") else None,
+                   "components": components}
 
     registry = registry or {}
     depends_on = [str(d) for d in raw.get("depends_on") or []]

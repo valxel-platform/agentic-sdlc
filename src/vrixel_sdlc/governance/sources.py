@@ -143,16 +143,18 @@ class EnvTokenProvider:
 
 
 class GitHubAppTokenProvider:
-    """One GitHub App installed in the tools org and every product org. Mints a short-lived,
-    contents:read installation token per org. Requires `pip install .[github]`."""
+    """One GitHub App installed in the tools org and every product org. Mints a short-lived
+    installation token per org, narrowed to `permissions` (contents:read for governance reads;
+    the delivery adapter asks for more). Requires `pip install .[github]`."""
 
     def __init__(self, app_id: str, private_key_pem: str, *, api: str = "https://api.github.com", opener=None,
-                 clock: Callable[[], float] = time.time) -> None:
+                 clock: Callable[[], float] = time.time, permissions: dict[str, str] | None = None) -> None:
         self.app_id = str(app_id)
         self.key = private_key_pem
         self.api = api.rstrip("/")
         self.opener = opener or build_opener()
         self.clock = clock
+        self.permissions = dict(permissions or {"contents": "read"})
         self._tokens: dict[str, tuple[str, float]] = {}
         self._lock = threading.Lock()
 
@@ -182,7 +184,7 @@ class GitHubAppTokenProvider:
         app_jwt = self._jwt()
         inst = self._call("GET", f"/orgs/{quote(org)}/installation", app_jwt)
         tok = self._call("POST", f"/app/installations/{inst['id']}/access_tokens", app_jwt,
-                         {"permissions": {"contents": "read"}})
+                         {"permissions": self.permissions})
         from datetime import datetime
 
         expires = datetime.fromisoformat(tok["expires_at"].replace("Z", "+00:00")).timestamp()

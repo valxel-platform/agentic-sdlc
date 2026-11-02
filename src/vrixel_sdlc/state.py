@@ -84,6 +84,8 @@ class FeatureState(TypedDict, total=False):
     approvals: Annotated[dict[str, bool], merge_dict]
     pull_requests: Annotated[dict[str, dict], merge_dict]
     gate_decisions: Annotated[list[GateDecision], operator.add]
+    deployments: Annotated[dict[str, dict], merge_dict]  # component -> {"env", "release", "repo", ...}
+    delivery: Annotated[dict[str, dict], merge_dict]  # wait (ci, build, dev, ...) -> latest result
     diagrams: Annotated[list[dict], operator.add]  # published architecture diagrams, one per HLD version
     events: Annotated[list[dict], operator.add]
     tokens_used: Annotated[int, operator.add]

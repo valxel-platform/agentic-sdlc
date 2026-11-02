@@ -1,7 +1,16 @@
 // Names people see. Keep them identical everywhere: a gate is always called by these words.
 export const PHASES: Record<string, string> = {
   discovery: "Discovery", spec: "Spec", design: "Design", architecture: "Architecture",
-  plan: "Plan", build: "Build", release: "Release", operate: "Operate",
+  plan: "Plan", build: "Build", release: "Release", operate: "Operate", delivery: "Delivery",
+};
+
+const FAILED: Record<string, string> = {
+  build: "OpenChoreo build", dev: "Dev deploy", staging: "Staging deploy", production: "Production deploy",
+};
+
+export const WAITS: Record<string, string> = {
+  ci: "Waiting for CI", build: "Building in OpenChoreo", dev: "Deploying to dev",
+  staging: "Deploying to staging", production: "Deploying to production",
 };
 
 export const GATES: Record<string, { name: string; question: string; approve: string }> = {
@@ -28,7 +37,9 @@ export function gateLabel(gate?: string): string {
   return g ? `${gate.toUpperCase()} ${g.name}` : gate.toUpperCase();
 }
 
-export function waitingLabel(item: { type: string; gate?: string; phase?: string; lane?: string }, ownLane?: string): string {
+export function waitingLabel(item: { type: string; gate?: string; phase?: string; lane?: string; wait?: string }, ownLane?: string): string {
+  if (item.type === "external") return WAITS[item.wait ?? ""] ?? "Waiting on delivery";
+  if (item.type === "escalation" && item.phase === "delivery") return `${FAILED[item.wait ?? ""] ?? "Delivery"} failed: needs a person`;
   if (item.type === "escalation") return `${PHASES[item.phase ?? ""] ?? item.phase} needs a person`;
   if (item.type === "handback") return `${gateLabel(item.gate)}: taken over, waiting for hand-back`;
   const lane = item.lane && ownLane && item.lane !== ownLane ? ` (${item.lane})` : "";

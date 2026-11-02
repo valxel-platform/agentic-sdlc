@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { api, type Diagram, type WorkItem, type WorkTracking } from "../api";
+import { api, type Diagram, type Feature, type PendingItem, type WorkItem, type WorkTracking } from "../api";
+import { WAITS } from "../vocab";
 
 const PROVIDER: Record<string, string> = { lucid: "Lucid", drawio: "draw.io", jira: "Jira", openproject: "OpenProject" };
 const KIND: Record<string, string> = { epic: "Epic", story: "Story", task: "Task" };
@@ -75,6 +76,71 @@ export function WorkItems({ featureId, work, canSync, onSynced }: {
             );
           })}
         </ul>
+      )}
+    </section>
+  );
+}
+
+const STAGES: [string, string][] = [
+  ["ci", "CI checks"], ["build", "OpenChoreo build"], ["dev", "Dev"], ["staging", "Staging"], ["production", "Production"],
+];
+const RESULT: Record<string, [string, string]> = {
+  success: ["Passed", "go"], failure: ["Failed", "stop"], pending: ["In progress", "run"],
+};
+
+function short(name?: string): string {
+  return (name ?? "").split("/").pop() ?? "";
+}
+
+/** CI, builds and deployments: what passed, what is running now, and where each component runs. */
+export function Delivery({ f }: { f: Feature }) {
+  const waiting = f.pending.find((p) => p.type === "external") as (PendingItem & { targets?: Record<string, string>[] }) | undefined;
+  const stages = STAGES.filter(([k]) => f.delivery?.[k] || waiting?.wait === k);
+  const deployed = Object.values(f.deployments ?? {});
+  if (!stages.length && !deployed.length) return null;
+  return (
+    <section className="panel" aria-labelledby="h-delivery">
+      <h2 id="h-delivery" className="section-title">Delivery</h2>
+      <ul className="ext-list">
+        {stages.map(([key, label]) => {
+          const now = waiting?.wait === key;
+          const res = f.delivery?.[key];
+          const [text, tone] = now ? ["In progress", "run"] : RESULT[res?.status ?? "pending"];
+          const rows = now ? (waiting?.targets ?? []) : (res?.results ?? []);
+          return (
+            <li key={key}>
+              <div className="work-line">
+                <span className="stage-name">{label}</span>
+                <span className={`chip ${tone}`}>{now ? WAITS[key] : text}</span>
+              </div>
+              <ul className="stage-rows">
+                {rows.map((r, i) => {
+                  const row = r as Record<string, unknown>;
+                  const name = String(row.repo ?? row.component ?? "");
+                  const url = String(row.url ?? "");
+                  const state = String(row.state ?? "");
+                  return (
+                    <li key={i} className="small">
+                      {url ? <a href={url} target="_blank" rel="noreferrer">{short(name)}{row.number ? ` #${row.number}` : ""}</a>
+                        : <span>{short(name)}</span>}
+                      {!now && state && state !== "success" && <span className="muted">: {String(row.message || state)}</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+          );
+        })}
+      </ul>
+      {deployed.length > 0 && (
+        <dl className="kv">
+          {deployed.map((d) => (
+            <div key={d.repo} style={{ display: "contents" }}>
+              <dt>{short(d.repo)}</dt>
+              <dd>{d.env}{d.release ? `, release ${d.release}` : ""}</dd>
+            </div>
+          ))}
+        </dl>
       )}
     </section>
   );

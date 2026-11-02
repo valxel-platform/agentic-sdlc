@@ -186,6 +186,59 @@ The same app can later open PRs in product repos, scoped per org.
 2. Install the GitHub App in the org.
 3. Add one line to `config/registry.yaml`.
 
+## Delivery: GitHub and OpenChoreo
+
+From build to production, the pipeline works in the product's own GitHub org and OpenChoreo
+project, and pauses on CI, builds and deployments the way it pauses on people:
+
+```
+build ─ ci_wait ─[G5]─ merge_train ─ build_wait ─ deploy_dev ─ dev_wait ─ deploy_staging ─ staging_wait
+      ─ release ─ G6 (binds production for the approver) ─ production_wait ─ operate
+```
+
+| Step | GitHub | OpenChoreo |
+| --- | --- | --- |
+| Build | A change note per task (`.vrixel/changes/<feature>/<task>.md`) on `feature/<id>`; one PR per repo, found again by branch on retries | |
+| ci_wait | Waits until every check run and status on each PR head is green | |
+| merge_train | Merges in dependency order (libraries, providers, consumers); branch protection still applies | Triggers a WorkflowRun on each merge commit; shared-lane repos publish packages instead |
+| build_wait | Posts `openchoreo/build` on the merge commit | Waits for the WorkflowRuns |
+| deploy and wait | Posts `openchoreo/dev`, `openchoreo/staging`, `openchoreo/production` | Binds the latest release to the first environment, then promotes the same release; waits until each ReleaseBinding is ready |
+
+Waits are interrupts with `type: "external"`. They never reach the decision inbox. The engine
+checks them after every step, on a timer (`VRIXEL_WATCH_INTERVAL_S`), and when GitHub sends a
+webhook. When one fails or times out:
+- **Red CI** sends the build back to its escalation: let agents retry, or vouch for it.
+- **A failed build or deployment** asks the release managers (G6 approvers) to try again, carry
+  on anyway, or stop. Retrying production means asking for G6 again.
+
+Agents bind only dev and staging (VX-3). Production is bound after G6, recorded under the
+approver's name, and OpenChoreo's own authorization is the backstop.
+
+**Product runtime** (`governance/product.yaml`):
+
+```yaml
+runtime:
+  openchoreo_project: agtech
+  pipeline: [dev, staging, production]   # OpenChoreo environment names, first to last
+  namespace: vrixel                      # optional; defaults to config/tools.yaml
+  components:                            # optional; defaults to the repo name
+    vrixel-agtech/agtech-mobile: field-app
+```
+
+**Going live** (`VRIXEL_DELIVERY=live`):
+1. Grant the GitHub App, in each product org: contents, pull requests and commit statuses
+   (write), checks (read). Subscribe it to check runs, check suites, statuses and pull requests,
+   with the webhook URL `<VRIXEL_PUBLIC_URL>/api/webhooks/github` and `VRIXEL_GITHUB_WEBHOOK_SECRET`.
+2. In OpenChoreo, give the confidential service client (`service_mcp_client` by default) a role
+   that can trigger workflow runs and manage release bindings in each product's project. Set
+   `VRIXEL_OPENCHOREO_MCP_URL` (`<api host>/mcp`), `VRIXEL_OPENCHOREO_TOKEN_URL` and
+   `VRIXEL_OPENCHOREO_CLIENT_SECRET`.
+3. Create each product's OpenChoreo project, components and deployment pipeline to match
+   `runtime`. Try a sandbox product first: with stub agents, the change notes alone make real PRs.
+
+The adapters match tool and argument names against OpenChoreo's published tool schemas, and
+the startup check names any missing setting.
+
 ## Diagrams and work tracking
 
 Each product chooses its tools in `governance/product.yaml`. The tools org runs the connections
@@ -296,14 +349,12 @@ effect once the other is also decided. An earlier approval of the other gate sti
 
 | Stub | Replace with | Interface |
 | --- | --- | --- |
-| `StubGitHub` | A GitHub App with repo-scoped tokens: open PRs, required checks, merge | `integrations/github.py` |
-| `StubOpenChoreo` | The OpenChoreo API: WorkflowRuns, DeploymentPipeline promotion, a watcher that resumes threads | `integrations/openchoreo.py` |
 | `InMemoryCatalog` | The Backstage catalog in the OpenChoreo portal | `integrations/catalog.py` |
 | Phase templates | Real agent output in live mode; keep the section structure the checks read | `agents/templates.py` |
 | Build tasks | Coder agents in sandboxed containers with a checkout of one repo each | `runtime/claude_code.py` |
 
-Open items carried over from the design: confirm OpenChoreo GitHub status reporting, RBAC that
-limits production promotion to humans, and per-change-set integration environments. Have
+Open items carried over from the design: per-change-set integration environments, and a
+package registry for shared-lane releases (`PackageRegistry` is still a stub). Have
 compliance counsel review the regulatory constitution articles.
 
 ## Layout
@@ -319,7 +370,8 @@ src/vrixel_sdlc/
   gateway/         gateway, providers, prompt layers, pricing, ledger
   runtime/         generic and Claude Code runtimes
   integrations/    GitHub, OpenChoreo, capability catalog, MCP client, diagrams, Jira, OpenProject
-  engine.py        start, inbox, decide, view
+  engine.py        start, inbox, decide, view; resolves CI and OpenChoreo waits
+  waits.py         checks CI, builds and deployments for waiting features
   worksync.py      keeps the work tracker in step with each feature
   api/app.py       FastAPI service under /api; serves web/dist
   web/auth.py      GitHub OAuth, signed sessions, approver matching

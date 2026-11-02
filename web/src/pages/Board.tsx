@@ -10,7 +10,7 @@ function Status({ f }: { f: FeatureSummary }) {
   if (f.status === "done") return <span className="chip go">Released</span>;
   if (f.status === "aborted") return <span className="chip stop">Stopped</span>;
   const p = f.pending[0];
-  if (p) return <span className={`chip ${p.type === "escalation" ? "stop" : "wait"}`}>{waitingLabel(p, f.product_id)}</span>;
+  if (p) return <span className={`chip ${p.type === "escalation" ? "stop" : p.type === "external" ? "run" : "wait"}`}>{waitingLabel(p, f.product_id)}</span>;
   return <span className="chip run">Agents working</span>;
 }
 

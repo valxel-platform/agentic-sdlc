@@ -4,6 +4,11 @@ import { api, type PendingItem } from "../api";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 
+const DELIVERY_FAILED: Record<string, string> = {
+  build: "The OpenChoreo build failed", dev: "The dev deployment failed", staging: "The staging deployment failed",
+  production: "The production deployment failed",
+};
+
 type Mode = null | "revise" | "takeover" | "abort" | "resolve" | "retry";
 
 /** What's being decided, the evidence, and the actions this person is allowed to take. */
@@ -38,10 +43,13 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
 
   const gate = item.gate ? GATES[item.gate] : undefined;
   const heading =
-    item.type === "escalation" ? `${PHASES[item.phase ?? ""] ?? item.phase} needs a person`
+    item.type === "escalation" && item.phase === "delivery" ? (DELIVERY_FAILED[item.wait ?? ""] ?? "Delivery failed")
+    : item.type === "escalation" ? `${PHASES[item.phase ?? ""] ?? item.phase} needs a person`
     : item.type === "handback" ? `You took over ${gateLabel(item.gate)}`
     : gate?.question ?? "Decision";
   const kind = item.artifact?.kind;
+  const delivery = item.phase === "delivery";
+  const retryLabel = { build: "Rebuild", dev: "Deploy again", staging: "Deploy again", production: "Ask for G6 again" }[item.wait ?? ""] ?? "Try again";
 
   return (
     <section className="panel decision" aria-labelledby="decision-q">
@@ -58,6 +66,11 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
           </p>
         )}
         {item.type === "escalation" && <p className="muted">{item.reason}</p>}
+        {delivery && (
+          <p className="muted small" style={{ marginTop: 6 }}>
+            {retryLabel} tries the failed step again. Carry on anyway moves the feature forward without it.
+          </p>
+        )}
         {item.type === "handback" && <p className="muted">Finish the work yourself, then hand it back so the pipeline continues.</p>}
       </div>
 
@@ -72,7 +85,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
 
       {item.findings && item.findings.length > 0 && (
         <div>
-          <h3>What the evaluators found</h3>
+          <h3>{delivery ? "What went wrong" : "What the evaluators found"}</h3>
           <ul className="findings">{item.findings.map((f) => <li key={f}>{f}</li>)}</ul>
         </div>
       )}
@@ -129,7 +142,15 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
                 <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>Stop feature</button>
               </>
             )}
-            {item.type === "escalation" && mode === null && (
+            {item.type === "escalation" && delivery && mode === null && (
+              <>
+                <button className="btn go" disabled={busy} onClick={() => send("resolved")}>Carry on anyway</button>
+                <button className="btn secondary" disabled={busy} onClick={() => send("retry")}>{retryLabel}</button>
+                <span className="spacer" />
+                <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>Stop feature</button>
+              </>
+            )}
+            {item.type === "escalation" && !delivery && mode === null && (
               <>
                 <button className="btn go" disabled={busy} onClick={() => setMode("resolve")}>Mark resolved</button>
                 <button className="btn secondary" disabled={busy} onClick={() => setMode("retry")}>Let agents retry</button>

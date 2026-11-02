@@ -5,12 +5,24 @@ import { useLive } from "../live";
 import { Rail } from "../components/Rail";
 import { ArtifactBody } from "../components/Artifact";
 import { DecisionPanel } from "../components/Decision";
-import { Diagrams, WorkItems } from "../components/External";
+import { Delivery, Diagrams, WorkItems } from "../components/External";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
 
 const ORDER = ["OPP", "PRD", "UX", "HLD", "PLAN", "BUILD", "REL", "OPS"];
 
+const WAIT_EVENTS: Record<string, Record<string, string>> = {
+  ci_wait: { passed: "CI checks passed", failed: "CI checks failed" },
+  build_wait: { passed: "OpenChoreo builds succeeded", retry: "Rebuild requested", resolved: "Build failure waved through", aborted: "Stopped after a failed build" },
+  deploy_dev: { deployed: "Deployed to dev" },
+  dev_wait: { passed: "Ready in dev", retry: "Dev deployment retried", resolved: "Dev failure waved through", aborted: "Stopped after a failed dev deployment" },
+  deploy_staging: { deployed: "Deployed to staging" },
+  staging_wait: { passed: "Ready in staging", retry: "Staging deployment retried", resolved: "Staging failure waved through", aborted: "Stopped after a failed staging deployment" },
+  production_wait: { passed: "Ready in production", retry: "Production deployment sent back to G6", resolved: "Production failure waved through", aborted: "Stopped after a failed production deployment" },
+};
+
 function describe(e: FeatureEvent): string {
+  const wait = WAIT_EVENTS[e.node]?.[e.kind];
+  if (wait) return e.approver && ["retry", "resolved", "aborted"].includes(e.kind) ? `${wait} by ${e.approver}` : wait;
   const name = PHASES[e.node] ?? (GATES[e.node] ? gateLabel(e.node) : e.node.replace(/_/g, " "));
   switch (e.kind) {
     case "started": return "Intent received";
@@ -54,6 +66,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
 
   const kinds = ORDER.filter((k) => f.artifacts[k]);
   const mine = f.pending.find((p) => p.can_decide);
+  const people = f.pending.filter((p) => p.type !== "external");
   const spentPct = f.budget_usd ? Math.min(100, ((f.cost_usd ?? 0) / f.budget_usd) * 100) : 0;
   const prs = Object.entries(f.pull_requests);
 
@@ -73,12 +86,12 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
       <div className="panel rail-panel"><Rail stations={f.rail} /></div>
       {f.error && <p className="error-note" role="alert" style={{ marginBottom: 20 }}>The pipeline stopped with an error: {f.error}</p>}
 
-      {f.pending.length > 0 && (
+      {people.length > 0 && (
         <div style={{ marginBottom: 20 }}>
           {mine ? (
             <DecisionPanel item={{ ...mine, feature_id: f.feature_id, title: f.title }} featureId={f.feature_id} onDone={load} />
           ) : (
-            <p className="note">Waiting for {f.pending.map((p) => `${p.gate ? gateLabel(p.gate) : PHASES[p.phase ?? ""]} (${p.approvers.join(", ")})`).join("; ")}.</p>
+            <p className="note">Waiting for {people.map((p) => `${p.gate ? gateLabel(p.gate) : PHASES[p.phase ?? ""]} (${p.approvers.join(", ")})`).join("; ")}.</p>
           )}
         </div>
       )}
@@ -127,6 +140,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
               </>
             )}
           </section>
+          <Delivery f={f} />
           <Diagrams diagrams={f.diagrams ?? []} />
           {f.work_tracking && (
             <WorkItems featureId={f.feature_id} work={f.work_tracking} canSync={canSync(f.product_id)} onSynced={load} />

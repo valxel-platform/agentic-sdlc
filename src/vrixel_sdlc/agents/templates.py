@@ -182,7 +182,9 @@ def release(ctx: dict, defective: bool) -> str:
         f"- [x] Feature flag defined: {flag}",
         rollback,
         "- [x] SLOs, alerts and dashboards defined (VX-8)",
-        "", "## Staging", *[f"- {c}: staging" for c in comps],
+        "", "## Staging",
+        *[f"- {d['repo']}: {d['env']}, release {d.get('release') or 'n/a'}" for d in ctx.get("deployments", [])],
+        *[f"- {c}: release-candidate package" for c in comps if c not in {d['repo'] for d in ctx.get("deployments", [])}],
     ]
     return "\n".join(lines + _feedback(ctx)) + "\n"
 

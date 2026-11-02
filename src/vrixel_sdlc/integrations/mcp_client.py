@@ -58,10 +58,11 @@ class McpHttp:
     """One remote MCP server. `target` is a URL, or an in-process server object in tests."""
 
     def __init__(self, name: str, target: Any, headers: dict[str, str] | None = None,
-                 timeout_s: float = 60.0) -> None:
+                 timeout_s: float = 60.0, auth=None) -> None:
         self.name = name
         self.target = target
         self.headers = dict(headers or {})
+        self.auth = auth  # optional callable returning headers per call, e.g. a refreshed bearer token
         self.timeout_s = timeout_s
         self._schemas: dict[str, dict] | None = None
 
@@ -72,7 +73,7 @@ class McpHttp:
         except ImportError:
             return await self._with_session_v1(fn)
         if isinstance(self.target, str):
-            transport = streamable_http_client(self.target, http_client=create_mcp_http_client(headers=self.headers))
+            transport = streamable_http_client(self.target, http_client=create_mcp_http_client(headers=self._headers()))
             client = Client(transport, read_timeout_seconds=self.timeout_s)
         else:
             client = Client(self.target, read_timeout_seconds=self.timeout_s)
@@ -83,10 +84,13 @@ class McpHttp:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamablehttp_client
 
-        async with streamablehttp_client(self.target, headers=self.headers) as (read, write, _):
+        async with streamablehttp_client(self.target, headers=self._headers()) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 return await fn(session)
+
+    def _headers(self) -> dict[str, str]:
+        return {**self.headers, **(self.auth() if self.auth else {})}
 
     def _run(self, fn):
         import anyio
@@ -155,3 +159,44 @@ def fit_args(server: McpTools, tool: str, wanted: dict[tuple[str, ...], Any]) ->
         if name:
             out[name] = value
     return out
+
+
+class ClientCredentials:
+    """OAuth 2.0 client-credentials grant, cached until shortly before expiry. OpenChoreo's
+    control plane issues these for its confidential service client."""
+
+    def __init__(self, token_url: str, client_id: str, client_secret: str, scope: str = "",
+                 opener=None, clock=None) -> None:
+        import threading
+        import time
+        from urllib.request import build_opener
+
+        self.token_url, self.client_id, self.client_secret, self.scope = token_url, client_id, client_secret, scope
+        self.opener = opener or build_opener()
+        self.clock = clock or time.time
+        self._token: tuple[str, float] | None = None
+        self._lock = threading.Lock()
+
+    def __call__(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.token()}"}
+
+    def token(self) -> str:
+        from urllib.parse import urlencode
+        from urllib.request import Request
+
+        with self._lock:
+            if self._token and self._token[1] - 60 > self.clock():
+                return self._token[0]
+            form = {"grant_type": "client_credentials", "client_id": self.client_id,
+                    "client_secret": self.client_secret}
+            if self.scope:
+                form["scope"] = self.scope
+            req = Request(self.token_url, data=urlencode(form).encode(), method="POST",
+                          headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"})
+            try:
+                with self.opener.open(req, timeout=15) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+            except Exception as exc:
+                raise McpError(f"token request to {self.token_url} failed: {exc}") from exc
+            self._token = (body["access_token"], self.clock() + float(body.get("expires_in", 300)))
+            return self._token[0]

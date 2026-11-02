@@ -23,6 +23,19 @@ servers:
     url_env: VRIXEL_OPENPROJECT_MCP_URL      # e.g. https://openproject.example.com/mcp
     auth_header: Authorization
     auth_env: VRIXEL_OPENPROJECT_MCP_AUTH    # e.g. "Bearer <api token>"
+  # OpenChoreo control plane MCP server (<api host>/mcp). The pipeline signs in as OpenChoreo's
+  # confidential service client (client-credentials grant), whose role should allow builds and
+  # deployments; OpenChoreo's own authorization is the backstop for VX-3.
+  openchoreo:
+    url_env: VRIXEL_OPENCHOREO_MCP_URL       # e.g. https://api.openchoreo.example.com/mcp
+    auth: client_credentials
+    settings:
+      token_url_env: VRIXEL_OPENCHOREO_TOKEN_URL       # the identity provider's /oauth2/token
+      client_id_env: VRIXEL_OPENCHOREO_CLIENT_ID       # default service_mcp_client
+      client_secret_env: VRIXEL_OPENCHOREO_CLIENT_SECRET
+      scope_env: VRIXEL_OPENCHOREO_SCOPE               # optional
+      console_url_env: VRIXEL_OPENCHOREO_CONSOLE_URL   # optional, links runs to the console
+      namespace: default                               # products may set runtime.namespace
 
 providers:
   diagrams:

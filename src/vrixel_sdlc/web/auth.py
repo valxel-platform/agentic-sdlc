@@ -29,7 +29,7 @@ SESSION_TTL = 12 * 3600
 
 # Who may act on an escalation: the approvers of the gate that phase leads to.
 ESCALATION_GATE = {"discovery": "g1", "spec": "g2", "design": "g3", "architecture": "g4", "plan": "g4",
-                   "build": "g5", "release": "g6", "operate": "g6"}
+                   "build": "g5", "release": "g6", "operate": "g6", "delivery": "g6"}
 
 
 @dataclass

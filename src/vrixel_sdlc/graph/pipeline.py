@@ -1,10 +1,14 @@
 """The feature pipeline: supervisor routing, eight phase subgraphs, six human gates.
 
 discovery -> G1 -> spec -> G2 -> (design -> G3 | architecture -> G4) -> join -> plan -> build
-  -> [G5 if high-risk] -> merge_train -> release -> G6 -> operate -> finalize
+  -> ci_wait -> [G5 if high-risk] -> merge_train -> build_wait -> deploy_dev -> dev_wait
+  -> deploy_staging -> staging_wait -> release -> G6 (promotes production) -> production_wait
+  -> operate -> finalize
 
 Gates and escalations are `interrupt()` nodes; a durable checkpointer keeps each thread
 waiting for as long as a human needs. Any phase escalates after its loop cap or budget.
+The *_wait nodes pause the same way on GitHub CI and OpenChoreo (see vrixel_sdlc.waits); when
+one fails, the release managers decide whether to retry, carry on, or stop.
 """
 
 from __future__ import annotations
@@ -14,7 +18,9 @@ from langgraph.types import Command, interrupt
 
 from ..agents import GATE_APPROVE_TARGET, GATE_PHASE, NEXT_AFTER_PHASE, PHASE_SPECS
 from ..agents.parse import parse_affected_repos, parse_tasks
+from ..integrations.openchoreo import PIPELINE
 from ..state import GATES, PHASES, FeatureState, GateDecision
+from ..waits import LABELS, TIMEOUT_S
 from .phase import event, make_phase_node, now, touched_lanes
 
 GATE_DECISIONS = ("approve", "revise", "takeover", "abort")
@@ -43,9 +49,13 @@ def _record(gate: str, phase: str, d: dict, lane: str = "") -> GateDecision:
                         feedback=d["feedback"], active_minutes=d["active_minutes"], at=now())
 
 
+def after_ci(state: FeatureState) -> str:
+    return "g5" if state.get("risk_tier") in ("high", "regulated") else "merge_train"
+
+
 def after_phase(phase: str, state: FeatureState) -> str:
     if phase == "build":
-        return "g5" if state.get("risk_tier") in ("high", "regulated") else "merge_train"
+        return "ci_wait"
     return NEXT_AFTER_PHASE[phase]
 
 
@@ -59,7 +69,7 @@ def _route(phase: str):
 
 
 def _route_targets(phase: str) -> list[str]:
-    nxt = ["g5", "merge_train"] if phase == "build" else [NEXT_AFTER_PHASE[phase]]
+    nxt = ["ci_wait"] if phase == "build" else [NEXT_AFTER_PHASE[phase]]
     return [f"escalate_{phase}", *nxt]
 
 
@@ -148,9 +158,16 @@ def make_gate(gate: str, services):
             # VX-3: production promotion is a human action, in each product's own runtime. In
             # production the approver promotes in the OpenChoreo portal and a watcher resumes this
             # thread; the stub records it here.
-            for comp in release.get("components", []):
-                services.openchoreo.promote(component=comp, env="production", actor=d["approver"],
-                                            actor_type="human")
+            lanes_by_repo = snap.lane_of_repo()
+            for repo in release.get("components", []):
+                t = oc_target(lanes_by_repo.get(repo, snap.product), repo)
+                env = env_for("production", t["pipeline"])
+                rec = services.openchoreo.promote(component=t["component"], env=env, actor=d["approver"],
+                                                  actor_type="human", project=t["project"],
+                                                  namespace=t["namespace"], pipeline=t["pipeline"])
+                update.setdefault("deployments", {})[repo] = {"repo": repo, **t, "env": env,
+                                                              "release": rec.get("release", ""),
+                                                              "pipeline": list(t["pipeline"])}
             # Shared lanes own no runtime: their packages are marked stable for consumers to adopt.
             for repo in release.get("packages", []):
                 services.packages.publish(repo=repo, version=release.get("version", state["feature_id"]),
@@ -158,9 +175,9 @@ def make_gate(gate: str, services):
             release |= {"production": bool(release.get("components")), "stable": release.get("packages", []),
                         "promoted_by": d["approver"]}
             update["release"] = release
-        return Command(goto=target, update=update)
+        return Command(goto="production_wait" if gate == "g6" else target, update=update)
 
-    dest = tuple(target) if isinstance(target, list) else (target,)
+    dest = ("production_wait",) if gate == "g6" else (tuple(target) if isinstance(target, list) else (target,))
     return gate_node, (*dest, phase, END)
 
 
@@ -217,7 +234,8 @@ def make_escalation(phase: str, services):
             update["approvals"] = {spec.gate: True}
             target = GATE_APPROVE_TARGET[spec.gate]
             return Command(goto=target, update=update)
-        return Command(goto=after_phase(phase, state), update=update)
+        nxt = after_ci(state) if phase == "build" else after_phase(phase, state)  # a person vouched for CI
+        return Command(goto=nxt, update=update)
 
     targets = {phase, END}
     if spec.gate in CROSS_LANE_GATES:
@@ -225,6 +243,8 @@ def make_escalation(phase: str, services):
     elif spec.gate:
         t = GATE_APPROVE_TARGET[spec.gate]
         targets |= set(t) if isinstance(t, list) else {t}
+    elif phase == "build":
+        targets |= {"g5", "merge_train"}
     else:
         targets.add(NEXT_AFTER_PHASE[phase])
     return escalate, tuple(sorted(targets))
@@ -238,6 +258,22 @@ def join(state: FeatureState) -> Command:
     return Command(goto=END, update={"events": [event("join", "waiting_for_other_gate")]})
 
 
+def oc_target(lane, repo: str) -> dict:
+    """Where a repo builds and runs in OpenChoreo, from the owning product's runtime block."""
+    rt = (lane.runtime if lane is not None else None) or {}
+    return {"component": (rt.get("components") or {}).get(repo, repo), "project": rt.get("openchoreo_project"),
+            "namespace": rt.get("namespace"), "pipeline": tuple(rt.get("pipeline") or PIPELINE)}
+
+
+def env_for(stage: str, pipeline: tuple[str, ...]) -> str | None:
+    """dev is the first environment, production the last, staging the one in between (if any)."""
+    if stage == "dev":
+        return pipeline[0]
+    if stage == "production":
+        return pipeline[-1]
+    return pipeline[1] if len(pipeline) > 2 else None
+
+
 def make_merge_train(services):
     def merge_train(state: FeatureState) -> dict:
         cs = dict(state.get("change_set") or {})
@@ -245,27 +281,177 @@ def make_merge_train(services):
         lanes = services.snapshot(state["product_id"], state.get("governance")).lane_of_repo()
         g5 = [g for g in state.get("gate_decisions", []) if g["gate"] == "g5" and g["decision"] in ("approve", "handback")]
         actor = g5[-1]["approver"] if (risk != "low" and g5) else "agent:merge-train"
-        merged, published = {}, []
+        merged, published, runs = {}, list(cs.get("published") or []), dict(cs.get("runs") or {})
+        failed_runs = {r for r, v in runs.items() if v.get("state") == "failure"}
         for repo in cs.get("merge_order", []):  # dependency order: libraries, providers, consumers
+            sha = ""
             for key, pr in sorted(state.get("pull_requests", {}).items()):
-                if pr["repo"] == repo and pr.get("state") != "merged":
+                if pr["repo"] != repo:
+                    continue
+                if pr.get("state") != "merged":  # idempotent: a retry skips what is merged
                     res = services.github.merge(repo=repo, number=pr["number"], actor=actor)
-                    merged[key] = {**pr, "state": res["state"], "merged_by": actor}
+                    pr = {**pr, "state": res["state"], "merged_by": actor, "merge_sha": res.get("merge_sha")}
+                    merged[key] = pr
+                sha = pr.get("merge_sha") or sha
             lane = lanes.get(repo)
             if lane is not None and lane.kind == "shared":
                 # No runtime of its own: publish a release candidate that consumers build against.
-                services.packages.publish(repo=repo, version=state["feature_id"], channel="rc", actor=actor)
-                published.append(repo)
-            else:
-                project = (lane.runtime or {}).get("openchoreo_project") if lane else None
-                services.openchoreo.run_workflow(component=repo, ref="main", kind="main", project=project)
-        cs["merged"] = True
-        cs["published"] = published
+                if repo not in published:
+                    services.packages.publish(repo=repo, version=state["feature_id"], channel="rc", actor=actor)
+                    published.append(repo)
+            elif repo not in runs or repo in failed_runs:  # build the merge commit in OpenChoreo
+                t = oc_target(lane, repo)
+                run = services.openchoreo.run_workflow(component=t["component"], ref=sha or "main", kind="main",
+                                                       project=t["project"], namespace=t["namespace"])
+                runs[repo] = {"repo": repo, "sha": sha, **t, "pipeline": list(t["pipeline"]),
+                              "run_id": run["run_id"], "url": run.get("url", "")}
+        cs |= {"merged": True, "published": published, "runs": runs}
         return {"pull_requests": merged, "change_set": cs,
                 "events": [event("merge_train", "merged", f"{len(merged)} PRs by {actor}",
                                  order=cs.get("merge_order", []), published=published)]}
 
     return merge_train
+
+
+def external(state: FeatureState, wait: str, targets: list[dict]) -> dict:
+    return {"type": "external", "wait": wait, "label": LABELS[wait], "feature_id": state["feature_id"],
+            "product_id": state["product_id"], "title": state["title"], "targets": targets, "since": now(),
+            "timeout_s": TIMEOUT_S[wait]}
+
+
+def ask_release_managers(state: FeatureState, wait: str, res: dict) -> dict:
+    """A failed CI-to-production step goes to people, like a stuck phase."""
+    packet = {"type": "escalation", "phase": "delivery", "wait": wait, "feature_id": state["feature_id"],
+              "product_id": state["product_id"], "title": state["title"], "reason": res.get("reason", ""),
+              "findings": [f"{r.get('repo') or r.get('component')}: {r.get('message') or r.get('state')}"
+                           for r in res.get("results", []) if r.get("state") != "success"],
+              "results": res.get("results", []), "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
+              "budget_usd": state.get("token_budget_usd"), "allowed": list(ESCALATION_DECISIONS)}
+    return normalize(interrupt(packet), ESCALATION_DECISIONS)
+
+
+def _people_said(state, wait: str, res: dict, *, ok: str, retry: str, extra: dict | None = None) -> Command:
+    d = ask_release_managers(state, wait, res)
+    update = {"gate_decisions": [_record(f"escalation:delivery:{wait}", "delivery", d)],
+              "delivery": {wait: res}, **(extra or {})}
+    if d["decision"] == "abort":
+        return Command(goto=END, update=update | {"status": "aborted",
+                                                  "events": [event(f"{wait}_wait", "aborted", d["feedback"],
+                                                                   approver=d["approver"])]})
+    kind = "retry" if d["decision"] == "retry" else "resolved"
+    return Command(goto=retry if kind == "retry" else ok,
+                   update=update | {"events": [event(f"{wait}_wait", kind, d["feedback"] or res.get("reason", ""),
+                                                     approver=d["approver"])]})
+
+
+def report_to_github(services, state: FeatureState, wait: str, res: dict) -> None:
+    """Post OpenChoreo's build and deploy results on the merge commit, so GitHub shows how far each
+    commit got (contexts openchoreo/build, openchoreo/dev, ...). Best effort: never blocks delivery."""
+    runs = (state.get("change_set") or {}).get("runs") or {}
+    for r in res.get("results", []):
+        run = runs.get(r.get("repo"), {})
+        if not run.get("sha"):
+            continue
+        ok = r.get("state") == "success"
+        try:
+            services.github.set_status(
+                repo=r["repo"], sha=run["sha"], context=f"openchoreo/{wait}",
+                state="success" if ok else "failure",
+                description=(f"{LABELS[wait]}: done" if ok else (r.get("message") or f"{LABELS[wait]} failed")),
+                url=r.get("url") or run.get("url", ""))
+        except Exception:
+            pass
+
+
+def make_ci_wait():
+    def ci_wait(state: FeatureState) -> Command:
+        prs = [pr for pr in (state.get("pull_requests") or {}).values()
+               if pr.get("state") != "merged" and pr.get("head_sha")]
+        nxt = after_ci(state)
+        if not prs:
+            return Command(goto=nxt)
+        res = interrupt(external(state, "ci", [{"repo": p["repo"], "number": p["number"], "sha": p["head_sha"],
+                                                "url": p["url"]} for p in prs]))
+        if res["status"] == "success":
+            return Command(goto=nxt, update={"delivery": {"ci": res},
+                                             "events": [event("ci_wait", "passed", f"CI green on {len(prs)} PRs")]})
+        # Red CI sends the build back to people, who can let agents fix it or vouch for it.
+        findings = [f"{r['repo']}#{r['number']}: {r.get('message') or 'checks failed'}"
+                    for r in res["results"] if r["state"] == "failure"]
+        return Command(goto="escalate_build", update={
+            "delivery": {"ci": res}, "phase_status": {"build": "escalated"},
+            "escalations": {"build": {"phase": "build", "reason": res["reason"], "findings": findings}},
+            "events": [event("ci_wait", "failed", res["reason"])]})
+
+    return ci_wait, ("g5", "merge_train", "escalate_build")
+
+
+def make_build_wait(services):
+    def build_wait(state: FeatureState) -> Command:
+        runs = (state.get("change_set") or {}).get("runs") or {}
+        todo = [r for r in runs.values() if r.get("state") != "success"]
+        if not todo:
+            return Command(goto="deploy_dev")
+        res = interrupt(external(state, "build", todo))
+        report_to_github(services, state, "build", res)
+        cs = dict(state.get("change_set") or {})
+        cs["runs"] = {**runs, **{r["repo"]: {**runs[r["repo"]], "state": r["state"]} for r in res["results"]}}
+        if res["status"] == "success":
+            return Command(goto="deploy_dev", update={"delivery": {"build": res}, "change_set": cs,
+                                                      "events": [event("build_wait", "passed",
+                                                                       f"{len(todo)} OpenChoreo builds succeeded")]})
+        return _people_said(state, "build", res, ok="deploy_dev", retry="merge_train", extra={"change_set": cs})
+
+    return build_wait, ("deploy_dev", "merge_train", END)
+
+
+def make_deploy(stage: str, services, nxt: str):
+    """Agents deploy to dev and staging only (VX-3); each component in its own product's runtime."""
+
+    def deploy(state: FeatureState) -> Command:
+        lanes = services.snapshot(state["product_id"], state.get("governance")).lane_of_repo()
+        deps, failures = {}, []
+        for repo, run in ((state.get("change_set") or {}).get("runs") or {}).items():
+            t = oc_target(lanes.get(repo), repo)
+            env = env_for(stage, t["pipeline"])
+            if env is None:
+                continue
+            try:
+                rec = services.openchoreo.promote(component=t["component"], env=env, actor=f"agent:{stage}",
+                                                  actor_type="agent", project=t["project"],
+                                                  namespace=t["namespace"], pipeline=t["pipeline"])
+                deps[repo] = {"repo": repo, **t, "pipeline": list(t["pipeline"]), "env": env,
+                              "release": rec.get("release", "")}
+            except Exception as exc:
+                failures.append({"repo": repo, "component": t["component"], "state": "failure",
+                                 "message": f"{type(exc).__name__}: {exc}"})
+        if failures:
+            res = {"status": "failure", "wait": stage, "results": failures, "at": now(),
+                   "reason": f"Couldn't deploy to {stage}: " + "; ".join(f["message"] for f in failures)}
+            return _people_said(state, stage, res, ok=nxt, retry=f"deploy_{stage}", extra={"deployments": deps})
+        events = [event(f"deploy_{stage}", "deployed", ", ".join(sorted(deps)))] if deps else []
+        return Command(goto=f"{stage}_wait", update={"deployments": deps, "events": events})
+
+    return deploy, (f"{stage}_wait", nxt, f"deploy_{stage}", END)
+
+
+def make_env_wait(services, stage: str, ok: str, retry: str):
+    def env_wait(state: FeatureState) -> Command:
+        targets = [{"repo": d["repo"], "component": d["component"], "project": d.get("project"),
+                    "namespace": d.get("namespace"), "env": d["env"]}
+                   for d in (state.get("deployments") or {}).values()
+                   if d.get("env") == env_for(stage, tuple(d.get("pipeline") or PIPELINE))]
+        if not targets:
+            return Command(goto=ok)
+        res = interrupt(external(state, stage, targets))
+        report_to_github(services, state, stage, res)
+        if res["status"] == "success":
+            return Command(goto=ok, update={"delivery": {stage: res},
+                                            "events": [event(f"{stage}_wait", "passed",
+                                                             f"{len(targets)} components ready in {stage}")]})
+        return _people_said(state, stage, res, ok=ok, retry=retry)
+
+    return env_wait, (ok, retry, END)
 
 
 def finalize(state: FeatureState) -> dict:
@@ -287,12 +473,23 @@ def build_pipeline(services, checkpointer=None):
         g.add_node(gate, node, destinations=dest)
     g.add_node("join", join, destinations=("plan", END))
     g.add_node("merge_train", make_merge_train(services))
+    node, dest = make_ci_wait()
+    g.add_node("ci_wait", node, destinations=dest)
+    node, dest = make_build_wait(services)
+    g.add_node("build_wait", node, destinations=dest)
+    for stage, after in (("dev", "deploy_staging"), ("staging", "release")):
+        node, dest = make_deploy(stage, services, after)
+        g.add_node(f"deploy_{stage}", node, destinations=dest)
+        node, dest = make_env_wait(services, stage, ok=after, retry=f"deploy_{stage}")
+        g.add_node(f"{stage}_wait", node, destinations=dest)
+    node, dest = make_env_wait(services, "production", ok="operate", retry="g6")
+    g.add_node("production_wait", node, destinations=dest)
     g.add_node("finalize", finalize)
 
     g.add_edge(START, "intake")
     g.add_edge("intake", "discovery")
     for phase in PHASES:
         g.add_conditional_edges(phase, _route(phase), _route_targets(phase))
-    g.add_edge("merge_train", "release")
+    g.add_edge("merge_train", "build_wait")
     g.add_edge("finalize", END)
     return g.compile(checkpointer=checkpointer, name="vrixel_feature")

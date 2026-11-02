@@ -66,6 +66,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "simulate_faults": dict(state.get("simulate_faults") or {}),
         "tasks": list(state.get("tasks") or []),
         "components": list((state.get("change_set") or {}).get("merge_order", [])),
+        "deployments": sorted((state.get("deployments") or {}).values(), key=lambda d: d["repo"]),
     }
 
 
@@ -100,12 +101,6 @@ def _finish(s: PhaseState, findings: list[str], usage: dict) -> dict:
     return {"status": "retry", "reason": ""}
 
 
-def _promote_staging(services, ctx: dict) -> None:
-    for comp in ctx.get("components", []):
-        if services.openchoreo.environment(comp) == "dev":
-            services.openchoreo.promote(component=comp, env="staging", actor="agent:release", actor_type="agent")
-
-
 def build_phase_subgraph(phase: str, services):
     spec = PHASE_SPECS[phase]
     template = templates.PHASE_TEMPLATES[phase]
@@ -114,8 +109,6 @@ def build_phase_subgraph(phase: str, services):
         attempt = s.get("attempt", 0) + 1
         ctx = {**s["ctx"], "prior_findings": s.get("findings") or []}
         defective = attempt <= int(ctx["simulate_faults"].get(phase, 0))
-        if phase == "release":
-            _promote_staging(services, ctx)
         tail = [f"Produce the {spec.kind} artifact for {ctx['feature_id']}: {ctx['title']}.",
                 f"Request: {ctx.get('description', '')}"]
         if ctx.get("feedback"):
@@ -180,6 +173,12 @@ def build_build_subgraph(services):
         for tid, r in sorted((s.get("task_results") or {}).items()):
             if not r["tests_passed"] or tid in (s.get("reviews") or {}):
                 continue
+            # The change note puts the task's trace (ACs, files, tests) in the repo, on the branch the
+            # PR merges; with stub agents it is also the commit that makes the PR possible.
+            services.github.put_file(
+                repo=r["repo"], branch=r["branch"], path=f".vrixel/changes/{ctx['feature_id']}/{tid}.md",
+                content=f"# {ctx['feature_id']} {tid}: {ctx['title']}\n\n{r['summary']}",
+                message=f"{ctx['feature_id']} {tid}: change note")
             pr = services.github.open_pr(
                 repo=r["repo"], branch=r["branch"], title=f"{ctx['feature_id']} {tid}: {ctx['title']}",
                 body=r["summary"], files=r["files"],
@@ -310,9 +309,10 @@ def make_phase_node(phase: str, services):
             delta["change_set"] = {"id": f"CS-{state['feature_id']}", "branch": f"feature/{state['feature_id']}",
                                    "merge_order": [r for _, r in repos], "merged": False}
         elif phase == "release":
-            # Services deployed in a product runtime promote; shared-lane packages publish instead.
+            # Services deployed in a product runtime promote at G6; shared-lane packages publish instead.
             lanes = snap.lane_of_repo()
-            deployed = [c for c in ctx["components"] if services.openchoreo.environment(c) == "staging"]
+            deployed = sorted(r for r, d in (state.get("deployments") or {}).items()
+                              if d.get("env") != (d.get("pipeline") or ["dev"])[-1])
             packages = [c for c in ctx["components"] if c in lanes and lanes[c].kind == "shared"]
             delta["release"] = {"components": deployed, "packages": packages,
                                 "version": f"{state['feature_id']}", "staging": bool(deployed),

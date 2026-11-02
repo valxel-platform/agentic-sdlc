@@ -14,6 +14,7 @@ from .graph import build_pipeline
 from .graph.pipeline import normalize
 from .gateway import summarize
 from .services import Services
+from .waits import WaitChecker
 from .worksync import InMemoryLinkStore, WorkSync
 
 
@@ -86,6 +87,9 @@ class FeatureEngine:
         self.work = work or WorkSync(services, InMemoryLinkStore(),
                                      os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         self.sync_errors: dict[str, str] = {}
+        self.waits = WaitChecker(services)
+        self._watcher: threading.Thread | None = None
+        self._stop = threading.Event()
 
     @staticmethod
     def _config(feature_id: str) -> dict:
@@ -102,10 +106,12 @@ class FeatureEngine:
             self.errors.pop(feature_id, None)
             self.bus.publish({"type": "feature.running", "feature_id": feature_id})
             try:
-                for chunk in self.graph.stream(payload, self._config(feature_id), stream_mode="updates"):
-                    for node in chunk:
-                        if node != "__interrupt__":
-                            self.bus.publish({"type": "feature.node", "feature_id": feature_id, "node": node})
+                while payload is not None:
+                    for chunk in self.graph.stream(payload, self._config(feature_id), stream_mode="updates"):
+                        for node in chunk:
+                            if node != "__interrupt__":
+                                self.bus.publish({"type": "feature.node", "feature_id": feature_id, "node": node})
+                    payload = self._ready_wait(feature_id)  # CI or a deploy already done: carry on
             except Exception as exc:  # surfaced on the feature page; the checkpoint keeps the last good step
                 self.errors[feature_id] = f"{type(exc).__name__}: {exc}"
                 raise
@@ -114,6 +120,55 @@ class FeatureEngine:
                 self.sync_work(feature_id)
                 self.bus.publish({"type": "feature.updated", "feature_id": feature_id,
                                   "pending": len(self.pending(feature_id))})
+
+    # --- external waits (CI, OpenChoreo builds and deployments) ---
+    def _ready_wait(self, feature_id: str) -> Command | None:
+        for p in self.pending(feature_id):
+            if p["type"] == "external":
+                res = self.waits.check(p)
+                if res is not None:
+                    return Command(resume={p["interrupt_id"]: res})
+        return None
+
+    def poke(self, feature_id: str) -> bool:
+        """Check a feature's external wait now (the watcher's tick, or a GitHub webhook). Resumes
+        in the background when the wait is over; returns whether it did."""
+        if feature_id in self.running:
+            return False
+        try:
+            cmd = self._ready_wait(feature_id)
+        except Exception:
+            return False
+        if cmd is None:
+            return False
+        self._submit(feature_id, cmd)
+        return True
+
+    def waiting_on_external(self) -> list[str]:
+        out = []
+        for row in self.index.all():
+            try:
+                if any(p["type"] == "external" for p in self.pending(row["feature_id"])):
+                    out.append(row["feature_id"])
+            except Exception:
+                continue
+        return out
+
+    def start_watcher(self, interval_s: float = 30.0) -> None:
+        """Poll features that wait on CI or OpenChoreo. One replica runs it (see README)."""
+        if self._watcher is not None:
+            return
+
+        def loop():
+            while not self._stop.wait(interval_s):
+                for fid in self.waiting_on_external():
+                    self.poke(fid)
+
+        self._watcher = threading.Thread(target=loop, name="vrixel-watcher", daemon=True)
+        self._watcher.start()
+
+    def stop_watcher(self) -> None:
+        self._stop.set()
 
     def sync_work(self, feature_id: str) -> dict:
         """Bring the product's work tracker up to date. Errors are recorded, never raised: the
@@ -172,6 +227,8 @@ class FeatureEngine:
         if feature_id in self.running:
             raise RuntimeError(f"{feature_id} is still running; decide once it is waiting")
         item = self.item(feature_id, interrupt_id)
+        if item["type"] == "external":
+            raise RuntimeError(f"{feature_id} is waiting on {item.get('label', 'an external system')}, not a person")
         d = normalize(decision, tuple(item["allowed"]))  # validate before resuming
         cmd = Command(resume={interrupt_id: d})
         if background:
@@ -218,6 +275,9 @@ class FeatureEngine:
             "usage": summarize(records),
             "events": s.get("events", []),
             "diagrams": s.get("diagrams", []),
+            "delivery": s.get("delivery", {}),
+            "deployments": s.get("deployments", {}),
+            "runs": (s.get("change_set") or {}).get("runs", {}),
             "work_tracking": self._work_view(s),
         }
 
@@ -238,7 +298,8 @@ class FeatureEngine:
         keep = ("feature_id", "product_id", "title", "created_by", "status", "running", "error", "rail",
                 "risk_tier", "lanes_touched", "cost_usd", "budget_usd")
         out = {k: v[k] for k in keep}
-        out["pending"] = [{k: p.get(k) for k in ("interrupt_id", "type", "gate", "phase", "lane", "approvers")}
+        out["pending"] = [{k: p.get(k) for k in ("interrupt_id", "type", "gate", "phase", "lane", "approvers",
+                                                 "wait", "label")}
                           for p in v["pending"]]
         out["updated_at"] = v["events"][-1]["at"] if v["events"] else None
         return out
@@ -256,7 +317,8 @@ class FeatureEngine:
             if product_id and row["product_id"] != product_id:
                 continue
             for p in self.pending(row["feature_id"]):
-                out.append({"feature_id": row["feature_id"], "title": row["title"], **p})
+                if p["type"] != "external":  # the inbox is for people
+                    out.append({"feature_id": row["feature_id"], "title": row["title"], **p})
         return out
 
     def auto_drive(self, feature_id: str, *, approver: str = "auto-approver", decisions: dict | None = None,
@@ -265,9 +327,9 @@ class FeatureEngine:
         `decisions` maps a gate or 'escalation:<phase>' to a decision dict used once."""
         scripted = {k: list(v) if isinstance(v, list) else [v] for k, v in (decisions or {}).items()}
         for _ in range(max_steps):
-            pending = self.pending(feature_id)
+            pending = [p for p in self.pending(feature_id) if p["type"] != "external"]
             if not pending:
-                break
+                break  # done, or waiting on CI or OpenChoreo
             p = pending[0]
             key = p.get("gate") if p["type"] in ("gate", "handback") else f"escalation:{p['phase']}"
             if p["type"] == "handback":
@@ -287,12 +349,17 @@ RAIL = [("discovery", "phase"), ("g1", "gate"), ("spec", "phase"), ("g2", "gate"
         ("g5", "gate"), ("release", "phase"), ("g6", "gate"), ("operate", "phase")]
 
 
+WAIT_STATION = {"ci": "build", "build": "build", "dev": "build", "staging": "release", "production": "operate"}
+
+
 def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
     """Each station's state for the UI: done, skipped, waiting (on a human), current, stopped or todo."""
     status = s.get("status")
     phase_status, approvals = s.get("phase_status") or {}, s.get("approvals") or {}
     waiting_gates = {p.get("gate") for p in pending if p["type"] in ("gate", "handback")}
     waiting_phases = {p.get("phase") for p in pending if p["type"] == "escalation"}
+    if "delivery" in waiting_phases:  # a failed build or deploy: show it on the release station
+        waiting_phases.add("release")
     merged = (s.get("change_set") or {}).get("merged")
     stations = []
     for key, kind in RAIL:
@@ -314,7 +381,12 @@ def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
             else:
                 st = "todo"
         stations.append({"key": key, "kind": kind, "state": st})
-    if running and not any(x["state"] == "waiting" for x in stations):
+    for p in pending:  # CI or OpenChoreo: work in progress, not a person's turn
+        if p["type"] == "external":
+            st = next((x for x in stations if x["key"] == WAIT_STATION.get(p.get("wait"), "build")), None)
+            if st:
+                st["state"] = "current"
+    if running and not any(x["state"] in ("waiting", "current") for x in stations):
         nxt = next((x for x in stations if x["state"] == "todo"), None)
         if nxt:
             nxt["state"] = "current"

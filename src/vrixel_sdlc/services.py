@@ -20,7 +20,7 @@ from .integrations import (
     default_catalog,
 )
 from .integrations.diagrams import DiagramPublisher, DrawioPublisher, LucidPublisher, StubLucidPublisher
-from .integrations.mcp_client import McpHttp
+from .integrations.mcp_client import ClientCredentials, McpHttp
 from .integrations.worktracking import JiraTracker, OpenProjectTracker, StubTracker, WorkTracker
 from .runtime import AgentRuntime, ClaudeCodeRuntime, GatewayRuntime
 
@@ -78,14 +78,16 @@ def build_services(
         runtimes["claude_code"] = GatewayRuntime(
             gateway, name="claude_code", capabilities=frozenset({"text", "native_plugins", "subagents"})
         )
-    github = github or StubGitHub()
+    if github is None or openchoreo is None:
+        live_github, live_oc = default_delivery(settings)
+        github, openchoreo = github or live_github, openchoreo or live_oc
     return Services(
         settings=settings,
         ledger=ledger,
         gateway=gateway,
         artifacts=ArtifactStore(settings.artifact_dir),
         github=github,
-        openchoreo=openchoreo or StubOpenChoreo(),
+        openchoreo=openchoreo,
         catalog=catalog or default_catalog(),
         runtimes=runtimes,
         governance=GovernanceLoader(settings, governance_source or build_source(settings)),
@@ -130,3 +132,41 @@ def integration_modes(services: Services) -> dict[str, str]:
     for name, tr in services.trackers.items():
         modes[name] = "stub" if isinstance(tr, StubTracker) else "live"
     return modes
+
+
+class DeliveryConfigError(RuntimeError):
+    pass
+
+
+def default_delivery(settings: Settings) -> tuple[GitHub, OpenChoreo]:
+    """VRIXEL_DELIVERY=live opens real pull requests and runs real builds and deployments;
+    anything else keeps both in memory. Live mode needs the GitHub App and OpenChoreo settings."""
+    import os
+    from pathlib import Path
+
+    if os.environ.get("VRIXEL_DELIVERY", "stub").lower() != "live":
+        return StubGitHub(), StubOpenChoreo()
+    from .governance.sources import GitHubAppTokenProvider
+    from .integrations.github import DELIVERY_PERMISSIONS, GitHubRest
+    from .integrations.openchoreo import OpenChoreoMcp
+
+    missing = [v for v in ("VRIXEL_GITHUB_APP_ID", "VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE") if not os.environ.get(v)]
+    oc = settings.tools.servers.get("openchoreo")
+    secret = oc.setting("client_secret") if oc else ""
+    if not oc or not oc.url:
+        missing.append("VRIXEL_OPENCHOREO_MCP_URL")
+    if not oc or not oc.setting("token_url"):
+        missing.append("VRIXEL_OPENCHOREO_TOKEN_URL")
+    if not secret:
+        missing.append("VRIXEL_OPENCHOREO_CLIENT_SECRET")
+    if missing:
+        raise DeliveryConfigError(f"VRIXEL_DELIVERY=live needs {', '.join(missing)}")
+    tokens = GitHubAppTokenProvider(os.environ["VRIXEL_GITHUB_APP_ID"],
+                                    Path(os.environ["VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE"]).read_text(),
+                                    api=settings.github_api, permissions=DELIVERY_PERMISSIONS)
+    creds = ClientCredentials(oc.setting("token_url"), oc.setting("client_id") or "service_mcp_client", secret,
+                              scope=oc.setting("scope"))
+    server = McpHttp("openchoreo", oc.url, auth=creds)
+    return (GitHubRest(tokens, api=settings.github_api),
+            OpenChoreoMcp(server, default_namespace=oc.setting("namespace") or "default",
+                          console_url=oc.setting("console_url")))

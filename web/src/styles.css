@@ -287,3 +287,6 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-weight: 600;
 .work.story .work-summary, .work.task .work-summary { padding-left: 50px; }
 .ext-list li, .timeline li { overflow-wrap: anywhere; }
 .feature-grid > .stack { min-width: 0; }
+.stage-name { font-weight: 600; min-width: 140px; }
+.stage-rows { list-style: none; margin: 4px 0 0; padding: 0 0 0 14px; display: flex; flex-direction: column; gap: 2px; border-left: 2px solid var(--rule-soft); }
+.section-title + .ext-list, .panel-head + .ext-list { padding-top: 12px; }

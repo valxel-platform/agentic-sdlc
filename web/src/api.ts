@@ -3,8 +3,11 @@ export interface Station { key: string; kind: "phase" | "gate"; state: StationSt
 
 export interface PendingItem {
   interrupt_id: string;
-  type: "gate" | "handback" | "escalation";
+  type: "gate" | "handback" | "escalation" | "external";
   gate?: string;
+  wait?: string;
+  label?: string;
+  targets?: Record<string, unknown>[];
   phase?: string;
   lane?: string;
   lanes?: string[];
@@ -65,7 +68,16 @@ export interface Feature extends FeatureSummary {
   usage: { calls: number; cache_hit_rate: number; est_cost_usd: number; cost_by_phase: Record<string, number> };
   events: FeatureEvent[];
   diagrams: Diagram[];
+  delivery: Record<string, WaitResult>;
+  deployments: Record<string, { repo: string; component: string; env: string; release?: string; pipeline?: string[] }>;
+  runs: Record<string, { repo: string; component: string; run_id: string; sha: string; url?: string; state?: string }>;
   work_tracking: WorkTracking | null;
+}
+
+export interface WaitResult {
+  status: "success" | "failure"; wait: string; reason?: string; at: string;
+  results: { repo?: string; component?: string; state: string; message?: string; url?: string; env?: string;
+             checks?: { name: string; state: string; url: string }[] }[];
 }
 
 export interface Diagram {

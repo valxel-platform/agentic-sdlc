@@ -123,7 +123,10 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     async def lifespan(_app: FastAPI):
         if state["engine"] is None:
             state["engine"], state["pool"] = create_engine_from_env()
+            # Polls CI and OpenChoreo for features waiting on them; webhooks make it immediate.
+            state["engine"].start_watcher(float(os.environ.get("VRIXEL_WATCH_INTERVAL_S", "30")))
         yield
+        state["engine"].stop_watcher()
         if state["pool"] is not None:
             state["pool"].close()
 
@@ -163,6 +166,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         return list(lanes.get(lane or view["product_id"], snap.product).approvers.get(gate, []))
 
     def decorate(fid: str, item: dict, user: User) -> dict:
+        if item["type"] == "external":  # CI or OpenChoreo, not a person
+            return {**item, "approvers": [], "can_decide": False}
         approvers = item_approvers(fid, item)
         return {**item, "approvers": approvers, "can_decide": can_decide(user, {"approvers": approvers})}
 
@@ -236,7 +241,37 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     # --- governance and features ---
     @api.get("/healthz")
     def healthz() -> dict:
-        return {"ok": True, "mode": eng().services.settings.mode, "auth": auth.mode}
+        return {"ok": True, "mode": eng().services.settings.mode, "auth": auth.mode,
+                "delivery": os.environ.get("VRIXEL_DELIVERY", "stub")}
+
+    @api.post("/webhooks/github", status_code=202)
+    async def github_webhook(request: Request) -> dict:
+        """CI and pull-request events from the product orgs' GitHub App. Verified with the app's
+        webhook secret; only triggers a check, so a forged event could do no more than that."""
+        import hashlib
+        import hmac
+
+        secret = os.environ.get("VRIXEL_GITHUB_WEBHOOK_SECRET", "")
+        if not secret:
+            raise HTTPException(404, "Webhooks are not configured")
+        body = await request.body()
+        expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, request.headers.get("x-hub-signature-256", "")):
+            raise HTTPException(401, "Bad signature")
+        try:
+            event = json.loads(body or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        branches = {
+            (event.get("pull_request") or {}).get("head", {}).get("ref"),
+            (event.get("check_suite") or {}).get("head_branch"),
+            ((event.get("check_run") or {}).get("check_suite") or {}).get("head_branch"),
+            *[b.get("name") for b in event.get("branches") or [] if isinstance(b, dict)],
+        }
+        features = {b.split("/", 1)[1] for b in branches if b and b.startswith("feature/")}
+        waiting = set(eng().waiting_on_external())
+        poked = [fid for fid in sorted(features & waiting if features else waiting) if eng().poke(fid)]
+        return {"event": request.headers.get("x-github-event", ""), "resumed": poked}
 
     @api.get("/products")
     def products(user: User = Depends(current_user)) -> dict:

@@ -170,6 +170,7 @@ def test_invalid_decisions_are_rejected_before_resuming(engine):
 def test_agents_cannot_promote_to_production(services):
     oc = services.openchoreo
     oc.run_workflow(component="svc", ref="main", kind="main")
+    oc.promote(component="svc", env="dev", actor="agent:dev", actor_type="agent")
     oc.promote(component="svc", env="staging", actor="agent:release", actor_type="agent")
     with pytest.raises(PermissionError):
         oc.promote(component="svc", env="production", actor="agent:release", actor_type="agent")
