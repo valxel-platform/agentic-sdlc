@@ -21,7 +21,7 @@ _APPROVER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}(/[A-Za-z0-9][A-Za-z0-9_.
 
 def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
                    registry: dict[str, RegistryEntry] | None = None,
-                   tools: ToolsConfig | None = None, quality=None) -> tuple[ProductConfig, dict]:
+                   tools: ToolsConfig | None = None, quality=None, standards_cfg=None) -> tuple[ProductConfig, dict]:
     try:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
@@ -119,6 +119,11 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
             problems.append("quality must be a mapping of suite name to settings")
         else:
             policy = effective_policy(quality, entry.data_class, raw.get("quality") or {}, problems)
+    standards = {}
+    if standards_cfg is not None:
+        from ..provisioning import effective_standards
+
+        standards = effective_standards(standards_cfg, entry.data_class, raw.get("repo_standards") or {}, problems)
 
     if problems:
         raise GovernanceError(f"{entry.governance.full_name}/product.yaml is invalid: " + "; ".join(problems))
@@ -140,6 +145,7 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         depends_on=tuple(dict.fromkeys(depends_on)),
         tools=chosen_tools,
         quality=policy,
+        repo_standards=standards,
     )
     files = {"constitution": str(raw.get("constitution") or "constitution.md"),
              "context": str(raw.get("context") or "context.md")}

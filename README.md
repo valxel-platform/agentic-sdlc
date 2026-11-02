@@ -10,8 +10,8 @@ constitutions. It runs offline and deterministically. Each stub sits behind an i
 replace with the real integration (see [Replacing the stubs](#replacing-the-stubs)).
 
 ```
-discovery ─G1─ spec ─G2─┬─ design ───────G3─┬─ join ─ plan ─ build ─[G5 if high risk]─ merge train ─ release ─G6─ operate
-                        └─ architecture ─G4─┘
+discovery ─G1─ spec ─G2─┬─ design ───────G3─┬─ join ─ provision new repos ─ plan ─ build ─ CI ─[G5 if high risk]─ merge train
+                        └─ architecture ─G4─┘    ─ build, deploy dev and staging ─ release ─G6─ production ─ operate
 any phase ── 3 failed evaluator loops or budget spent ──> escalation (human takeover)
 ```
 
@@ -186,13 +186,71 @@ The same app can later open PRs in product repos, scoped per org.
 2. Install the GitHub App in the org.
 3. Add one line to `config/registry.yaml`.
 
+## New repositories
+
+When a feature needs a repo that doesn't exist, the pipeline creates it. The architect proposes
+it in the HLD; G4 approves it with the architecture; the provision step creates it after G3 and
+G4, before planning, with the platform's settings. CI, the quality suites, the merge train and
+OpenChoreo delivery then work on it from its first pull request, with no manual setup.
+
+```
+## ADRs
+- ADR-EMR-FEAT-4-2: Create vrixel-emr/emr-consent-registry-service: consent has its own data and release cadence
+## New repos
+- vrixel-emr/emr-consent-registry-service (provider): Owns patient consent records [ADR-EMR-FEAT-4-2]
+```
+
+**Checked before G4.** The repo must be in the product's own org, follow the naming rule (the
+product's prefix, lowercase words joined by "-"), have a role with a template, not exist
+already, and have an ADR that names it. G4 shows exactly what approval will create.
+
+**Applied by the provision step** (`config/repos.yaml`, the golden path):
+
+| Area | Setting |
+| --- | --- |
+| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`), private |
+| Merging | Squash only, branches deleted after merge |
+| Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
+| Branch ruleset | Pull requests only; 1 approval (2 for PHI and payments); code owner review; stale approvals dismissed; conversations resolved; linear history; no force pushes or deletion; required checks per role; merges blocked on new code-scanning alerts of high or above |
+| Ownership | CODEOWNERS from the gate approvers (tech leads own everything; security owns the high-risk paths) |
+| Access | Teams from the approvers: tech leads maintain, architects and security push, product owners read |
+| Labels | Topics, and org custom properties (`vrixel_managed`, `vrixel_product`, `vrixel_data_class`) that org-level rulesets can target |
+| Runtime | An OpenChoreo component in the product's project (none for libraries), with auto-build and auto-deploy off so every change goes through the gates |
+| Governance | A pull request to the product's governance repo adding the repo to `product.yaml` |
+
+Until that governance PR merges, the feature carries its new repos itself, so its plan, PRs,
+risk tier, builds and deployments include them. Every step is idempotent. If one fails, the
+architects (G4 approvers) can retry, finish it by hand and carry on, or stop the feature.
+
+Products tighten in `governance/product.yaml`: their own templates, extra required checks, more
+approvals, broader team access. Lowering approvals or turning off a security feature is rejected.
+
+```yaml
+repo_standards:
+  templates: { provider: vrixel-emr/template-fhir-service }
+  extra_required_checks: [fhir-conformance]
+  required_approvals: 3
+```
+
+**Setup once per org.**
+1. Create the template repos named in `config/repos.yaml`, with CI whose job names match the
+   required checks (`unit`, `contract`) and the quality suites.
+2. Create the custom properties `vrixel_managed`, `vrixel_product` and `vrixel_data_class` in each
+   product org (optional, for org-level rulesets).
+3. Install the GitHub App on all repositories of each product org (so it sees repos it creates)
+   with administration, contents, pull requests, security events, secret scanning alerts,
+   Dependabot alerts and custom properties (write), and members (read). The provision step asks
+   for these in its own token; delivery tokens stay narrower.
+4. The app is a ruleset bypass actor for pull requests only, so the merge train can merge once
+   the pipeline's gates pass; people still can't push to the default branch.
+
 ## Delivery: GitHub and OpenChoreo
 
 From build to production, the pipeline works in the product's own GitHub org and OpenChoreo
 project, and pauses on CI, builds and deployments the way it pauses on people:
 
 ```
-build ─ ci_wait ─[G5]─ merge_train ─ build_wait ─ deploy_dev ─ dev_wait ─ deploy_staging ─ staging_wait
+join ─ provision ─ plan ─ build ─ ci_wait ─[G5]─ merge_train ─ build_wait ─ deploy_dev ─ dev_wait ─ deploy_staging ─ staging_wait
       ─ release ─ G6 (binds production for the approver) ─ production_wait ─ operate
 ```
 
@@ -432,7 +490,7 @@ compliance counsel review the regulatory constitution articles.
 ## Layout
 
 ```
-config/            quality.yaml (test and security suites, floors per data class), tools.yaml (MCP servers, tools allowed per data class), registry.yaml (governance repo per product, platform limits), models.yaml (role registry)
+config/            repos.yaml (golden path for new repos), quality.yaml (test and security suites, floors per data class), tools.yaml (MCP servers, tools allowed per data class), registry.yaml (governance repo per product, platform limits), models.yaml (role registry)
 examples/governance/  sample governance repos for the tools org and each product org
 src/vrixel_sdlc/
   governance/      sources (local, GitHub), GitHub App tokens, manifest validation, pinned loader
@@ -444,6 +502,7 @@ src/vrixel_sdlc/
   integrations/    GitHub, OpenChoreo, capability catalog, MCP client, diagrams, Jira, OpenProject
   engine.py        start, inbox, decide, view; resolves CI and OpenChoreo waits
   waits.py         checks CI, builds and deployments for waiting features
+  provisioning.py  new repos: standards, proposal checks, provisioner
   quality/         test and security suites: policy, sources, gate
   worksync.py      keeps the work tracker in step with each feature
   api/app.py       FastAPI service under /api; serves web/dist

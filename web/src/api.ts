@@ -11,6 +11,7 @@ export interface PendingItem {
   max_waiver_days?: number;
   blocking?: SecurityFinding[];
   quality?: { suites: QualitySuite[]; waivers: Waiver[] } | null;
+  new_repos?: RepoPlan[];
   targets?: Record<string, unknown>[];
   phase?: string;
   lane?: string;
@@ -76,8 +77,18 @@ export interface Feature extends FeatureSummary {
   deployments: Record<string, { repo: string; component: string; env: string; release?: string; pipeline?: string[] }>;
   quality: Record<string, { stage: string; status: string; suites: QualitySuite[]; at: string }>;
   waivers: Waiver[];
+  new_repos: RepoPlan[];
   runs: Record<string, { repo: string; component: string; run_id: string; sha: string; url?: string; state?: string }>;
   work_tracking: WorkTracking | null;
+}
+
+export interface RepoPlan {
+  repo: string; role: string; purpose: string; template?: string; visibility?: string;
+  ruleset?: { required_approvals?: number; required_checks?: string[] };
+  teams?: Record<string, string>; security?: Record<string, boolean>;
+  // after provisioning
+  status?: string; url?: string; governance_pr?: string | null; steps?: { step: string; ok: boolean; error?: string; detail?: string }[];
+  required_checks?: string[]; required_approvals?: number;
 }
 
 export interface SecurityFinding {

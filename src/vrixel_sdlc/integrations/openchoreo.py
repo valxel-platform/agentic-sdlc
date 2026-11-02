@@ -34,6 +34,8 @@ class OpenChoreo(Protocol):
     def deployment(self, *, component: str, env: str, project: str | None = None,
                    namespace: str | None = None) -> dict: ...  # {"state": ready|progressing|failed|absent, ...}
     def environment(self, component: str) -> str | None: ...  # furthest environment requested so far
+    def register_component(self, *, component: str, project: str | None, namespace: str | None,
+                           component_type: str, workflow: str | None, repo_url: str, branch: str) -> str: ...
 
 
 def check_promotion(env: str, actor_type: str, pipeline: tuple[str, ...]) -> None:
@@ -54,8 +56,18 @@ class StubOpenChoreo:
         self.run_results: dict[str, str] = {}
         self.deploy_results: dict[tuple[str, str], str] = {}
         self.run_tasks: dict[str, list[dict]] = {}  # component -> build steps
+        self.components: dict[str, dict] = {}  # registered by provisioning
         self._seq = itertools.count(1)
         self._lock = threading.Lock()
+
+    def register_component(self, *, component, project, namespace, component_type, workflow, repo_url,
+                           branch) -> str:
+        with self._lock:
+            new = component not in self.components
+            self.components.setdefault(component, {"project": project, "namespace": namespace,
+                                                   "component_type": component_type, "workflow": workflow,
+                                                   "repo_url": repo_url, "branch": branch})
+        return "created" if new else "exists"
 
     def run_workflow(self, *, component, ref, kind, project=None, namespace=None) -> dict:
         with self._lock:
@@ -155,6 +167,28 @@ class OpenChoreoMcp:
 
     def _scope(self, component: str, project: str | None, namespace: str | None) -> dict:
         return {_NS: namespace or self.default_namespace, _PROJECT: project, _COMPONENT: self.name(component)}
+
+    # -- components
+    def register_component(self, *, component, project, namespace, component_type, workflow, repo_url,
+                           branch) -> str:
+        """Create the component if missing. The pipeline triggers builds itself (autoBuild off) and
+        deploys through release bindings (autoDeploy off), so every change passes the gates."""
+        scope = self._scope(component, project, namespace)
+        try:
+            if self._call(("get_component",), scope):
+                return "exists"
+        except McpError:
+            pass  # not found
+        self._call(("create_component",), {
+            **scope,
+            ("component_type", "componentType", "type"): component_type,
+            ("workflow", "workflow_name", "build_workflow"): workflow,
+            ("repository_url", "repo_url", "git_repository", "repository"): repo_url,
+            ("branch", "git_branch"): branch,
+            ("auto_deploy", "autoDeploy"): False,
+            ("auto_build", "autoBuild"): False,
+        })
+        return "created"
 
     # -- builds
     def run_workflow(self, *, component, ref, kind, project=None, namespace=None) -> dict:

@@ -4,6 +4,7 @@ import { api, type PendingItem } from "../api";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
+import { RepoPlans } from "./External";
 
 const DELIVERY_FAILED: Record<string, string> = {
   build: "The OpenChoreo build failed", dev: "The dev deployment failed", staging: "The staging deployment failed",
@@ -49,6 +50,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   const heading =
     item.type === "escalation" && item.phase === "delivery" ? (DELIVERY_FAILED[item.wait ?? ""] ?? "Delivery failed")
     : item.type === "escalation" && item.phase === "security" ? "Security findings block this change"
+    : item.type === "escalation" && item.phase === "provisioning" ? "Setting up a new repository failed"
     : item.type === "escalation" ? `${PHASES[item.phase ?? ""] ?? item.phase} needs a person`
     : item.type === "handback" ? `You took over ${gateLabel(item.gate)}`
     : gate?.question ?? "Decision";
@@ -115,6 +117,13 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         <div>
           <h3>{delivery ? "What went wrong" : "What the evaluators found"}</h3>
           <ul className="findings">{item.findings.map((f) => <li key={f}>{f}</li>)}</ul>
+        </div>
+      )}
+
+      {item.new_repos && item.new_repos.length > 0 && (
+        <div>
+          <h3>{item.type === "gate" ? "Approving also creates these repositories" : "New repositories"}</h3>
+          <RepoPlans plans={item.new_repos} />
         </div>
       )}
 

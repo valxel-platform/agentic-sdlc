@@ -19,6 +19,7 @@ from ..agents import templates
 from ..agents.context import build_layers
 from ..agents.parse import parse_affected_repos, parse_tasks
 from ..config import ProductConfig
+from ..provisioning import naming_policy
 from ..evaluators import critique, run_checks
 from ..evaluators.critic import parse_verdict
 from ..gateway import CallTags
@@ -39,7 +40,7 @@ def event(node: str, kind: str, detail: str = "", **extra) -> dict:
 def feature_ctx(services, state: FeatureState, phase: str) -> dict:
     """Read-only snapshot a phase needs; artifact bodies are loaded from the store."""
     spec = PHASE_SPECS[phase]
-    snap = services.snapshot(state["product_id"], state.get("governance"))
+    snap = services.feature_snapshot(state)
     product, con = snap.product, snap.constitution
     arts = state.get("artifacts", {})
     parents = {k: services.artifacts.load(arts[k]) for k in spec.parents if k in arts}
@@ -68,6 +69,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "components": list((state.get("change_set") or {}).get("merge_order", [])),
         "deployments": sorted((state.get("deployments") or {}).values(), key=lambda d: d["repo"]),
         "quality": dict(state.get("quality") or {}),
+        "repo_policy": (naming_policy(services.settings.repos, product) if services.settings.repos else None),
         "waivers": list(state.get("waivers") or []),
     }
 
@@ -247,7 +249,7 @@ def make_phase_node(phase: str, services):
     spec = PHASE_SPECS[phase]
 
     def node(state: FeatureState, config: RunnableConfig) -> dict:
-        product = services.snapshot(state["product_id"], state.get("governance")).product
+        product = services.feature_snapshot(state).product
         spent = float(state.get("cost_usd", 0.0))
         budget = float(state.get("token_budget_usd") or product.budget_usd)
         if spent >= budget:
@@ -292,7 +294,7 @@ def make_phase_node(phase: str, services):
                                             "findings": list(out.get("findings") or [])}}
             return delta
 
-        snap = services.snapshot(state["product_id"], state.get("governance"))
+        snap = services.feature_snapshot(state)
         if phase == "architecture":
             affected = [r["name"] for r in parse_affected_repos(out["draft"]["content"])]
             delta["lanes_touched"] = touched_lanes(snap, affected)
@@ -349,7 +351,7 @@ def publish_diagram(services, state: FeatureState, content: str) -> tuple[str, d
     from ..agents.parse import section
     from ..integrations.diagrams import DiagramRequest, extract_mermaid
 
-    snap = services.snapshot(state["product_id"], state.get("governance"))
+    snap = services.feature_snapshot(state)
     cfg = snap.product.tools.get("diagrams")
     if not cfg:
         return content, None, None

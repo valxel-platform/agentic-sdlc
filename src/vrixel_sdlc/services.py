@@ -40,6 +40,7 @@ class Services:
     diagrams: dict[str, DiagramPublisher]  # provider -> publisher
     trackers: dict[str, WorkTracker]  # provider -> tracker
     quality: object = None  # vrixel_sdlc.quality.Quality, set by build_services
+    provisioner: object = None  # vrixel_sdlc.provisioning.RepoProvisioner, set by build_services
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
@@ -49,6 +50,21 @@ class Services:
         """The product's governance, read from its own org. Pass the feature's pins inside a
         feature thread; omit them to resolve the current commit (intake and admin views)."""
         return self.governance.snapshot(product_id, pins)
+
+    def feature_snapshot(self, state: dict) -> GovernanceSnapshot:
+        """The feature's pinned governance, plus repos provisioned for it. Until the governance PR
+        that registers them merges, the feature carries them itself, as repos of its own product."""
+        from dataclasses import replace
+
+        from .config import RepoSpec
+
+        snap = self.snapshot(state["product_id"], state.get("governance"))
+        known = {r.name for r in snap.product.repos}
+        extra = tuple(RepoSpec(name=r["repo"], role=r["role"]) for r in state.get("new_repos") or []
+                      if r.get("status") == "provisioned" and r["repo"] not in known)
+        if not extra:
+            return snap
+        return replace(snap, product=replace(snap.product, repos=snap.product.repos + extra))
 
 
 def build_services(
@@ -97,7 +113,27 @@ def build_services(
         trackers=trackers if trackers is not None else default_trackers(settings),
     )
     svc.quality = default_quality(svc)
+    svc.provisioner = default_provisioner(settings, github, openchoreo)
     return svc
+
+
+def default_provisioner(settings: Settings, github, openchoreo):
+    """Live delivery creates repos with its own, broader GitHub App token (administration:write),
+    used only by the provision step; stubs share the in-memory GitHub."""
+    import os
+    from pathlib import Path
+
+    from .provisioning import RepoProvisioner
+
+    if os.environ.get("VRIXEL_DELIVERY", "stub").lower() == "live":
+        from .governance.sources import GitHubAppTokenProvider
+        from .integrations.github import PROVISIONING_PERMISSIONS, GitHubRest
+
+        tokens = GitHubAppTokenProvider(os.environ["VRIXEL_GITHUB_APP_ID"],
+                                        Path(os.environ["VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE"]).read_text(),
+                                        api=settings.github_api, permissions=PROVISIONING_PERMISSIONS)
+        return RepoProvisioner(GitHubRest(tokens, api=settings.github_api), openchoreo)
+    return RepoProvisioner(github, openchoreo)
 
 
 def default_quality(services: Services):

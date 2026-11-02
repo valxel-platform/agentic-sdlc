@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Diagram, type Feature, type PendingItem, type WorkItem, type WorkTracking } from "../api";
+import { api, type Diagram, type Feature, type PendingItem, type RepoPlan, type WorkItem, type WorkTracking } from "../api";
 import { WAITS } from "../vocab";
 
 const PROVIDER: Record<string, string> = { lucid: "Lucid", drawio: "draw.io", jira: "Jira", openproject: "OpenProject" };
@@ -143,6 +143,58 @@ export function Delivery({ f }: { f: Feature }) {
           ))}
         </dl>
       )}
+    </section>
+  );
+}
+
+const SECURITY: Record<string, string> = {
+  secret_scanning: "secret scanning", push_protection: "push protection", dependabot_alerts: "Dependabot alerts",
+  dependabot_security_updates: "Dependabot updates", code_scanning_default_setup: "CodeQL", dependency_graph: "dependency graph",
+};
+
+/** What G4 approves: each new repo and the settings it will get. */
+export function RepoPlans({ plans }: { plans: RepoPlan[] }) {
+  return (
+    <ul className="repo-plans">
+      {plans.map((p) => (
+        <li key={p.repo}>
+          <div><strong>{p.repo}</strong> <span className="chip plain">{p.role}</span></div>
+          <div className="small muted">{p.purpose}</div>
+          <div className="small">
+            From {p.template ?? "an empty repo"}, {p.visibility ?? "private"}. Merges need {p.ruleset?.required_approvals ?? 1} approval
+            {(p.ruleset?.required_approvals ?? 1) === 1 ? "" : "s"} and checks {(p.ruleset?.required_checks ?? []).join(", ") || "none"}.
+            {" "}Turns on {Object.entries(p.security ?? {}).filter(([, on]) => on).map(([k]) => SECURITY[k] ?? k).join(", ")}.
+            {" "}Teams: {Object.entries(p.teams ?? {}).map(([t, perm]) => `${t} (${perm})`).join(", ")}.
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Repos created for this feature, and how far their setup got. */
+export function NewRepos({ repos }: { repos: RepoPlan[] }) {
+  if (!repos.length) return null;
+  return (
+    <section className="panel" aria-labelledby="h-repos">
+      <h2 id="h-repos" className="section-title">New repositories</h2>
+      <ul className="ext-list">
+        {repos.map((r) => (
+          <li key={r.repo}>
+            <div className="work-line">
+              {r.url ? <a href={r.url} target="_blank" rel="noreferrer">{r.repo}</a> : <span>{r.repo}</span>}
+              <span className={`chip ${r.status === "provisioned" ? "go" : "stop"}`}>{r.status === "provisioned" ? "Ready" : "Setup failed"}</span>
+            </div>
+            <div className="small muted">{r.purpose}</div>
+            <div className="small">
+              {(r.steps ?? []).map((s) => (
+                <span key={s.step} className={s.ok ? "step-ok" : "step-bad"} title={s.error ?? s.detail ?? ""}>{s.step}</span>
+              ))}
+            </div>
+            {r.governance_pr && <div className="small">Registered in governance by <a href={r.governance_pr} target="_blank" rel="noreferrer">this pull request</a>.</div>}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

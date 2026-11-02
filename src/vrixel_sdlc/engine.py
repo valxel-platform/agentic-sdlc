@@ -283,6 +283,7 @@ class FeatureEngine:
             "deployments": s.get("deployments", {}),
             "runs": (s.get("change_set") or {}).get("runs", {}),
             "quality": s.get("quality", {}),
+            "new_repos": s.get("new_repos", []),
             "waivers": s.get("waivers", []),
             "work_tracking": self._work_view(s),
         }
@@ -364,6 +365,8 @@ def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
     phase_status, approvals = s.get("phase_status") or {}, s.get("approvals") or {}
     waiting_gates = {p.get("gate") for p in pending if p["type"] in ("gate", "handback")}
     waiting_phases = {p.get("phase") for p in pending if p["type"] == "escalation"}
+    if "provisioning" in waiting_phases:
+        waiting_phases.add("plan")
     if "delivery" in waiting_phases:  # a failed build or deploy: show it on the release station
         waiting_phases.add("release")
     for p in pending:  # blocking findings: show them where the scan ran

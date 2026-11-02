@@ -5,13 +5,14 @@ import { useLive } from "../live";
 import { Rail } from "../components/Rail";
 import { ArtifactBody } from "../components/Artifact";
 import { DecisionPanel } from "../components/Decision";
-import { Delivery, Diagrams, WorkItems } from "../components/External";
+import { Delivery, Diagrams, NewRepos, WorkItems } from "../components/External";
 import { QualityTable } from "../components/Quality";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
 
 const ORDER = ["OPP", "PRD", "UX", "HLD", "PLAN", "BUILD", "REL", "OPS"];
 
 const WAIT_EVENTS: Record<string, Record<string, string>> = {
+  provision: { repo_provisioned: "New repository ready", retry: "Repository setup retried", resolved: "Repository setup finished by hand", aborted: "Stopped during repository setup" },
   security: { retry: "Security findings sent back", accepted_risk: "Security risk accepted", aborted: "Stopped over security findings" },
   ci_wait: { passed: "CI checks passed", failed: "CI checks failed" },
   build_wait: { passed: "OpenChoreo builds succeeded", retry: "Rebuild requested", resolved: "Build failure waved through", aborted: "Stopped after a failed build" },
@@ -153,6 +154,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
               </div>
             </section>
           )}
+          <NewRepos repos={f.new_repos ?? []} />
           <Delivery f={f} />
           <Diagrams diagrams={f.diagrams ?? []} />
           {f.work_tracking && (

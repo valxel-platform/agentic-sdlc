@@ -66,7 +66,7 @@ class GovernanceLoader:
         product_pin = self._pin(entry.governance)
         manifest = self.source.read(product_pin["org"], product_pin["repo"], MANIFEST, product_pin["sha"])
         product, _ = parse_manifest(manifest, entry, self.settings.limits, self.settings.registry,
-                                    self.settings.tools, self.settings.quality)
+                                    self.settings.tools, self.settings.quality, self.settings.repos)
         return {
             "platform": self._pin(self.settings.platform),
             "product": product_pin,
@@ -92,7 +92,7 @@ class GovernanceLoader:
         s = self.source
         manifest = s.read(prod["org"], prod["repo"], MANIFEST, prod["sha"])
         product, files = parse_manifest(manifest, entry, self.settings.limits, self.settings.registry,
-                                    self.settings.tools, self.settings.quality)
+                                    self.settings.tools, self.settings.quality, self.settings.repos)
         own_text = s.read(prod["org"], prod["repo"], files["constitution"], prod["sha"])
 
         dependencies: dict[str, GovernanceSnapshot] = {}

@@ -17,7 +17,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from ..agents import GATE_APPROVE_TARGET, GATE_PHASE, NEXT_AFTER_PHASE, PHASE_SPECS
-from ..agents.parse import parse_affected_repos, parse_tasks
+from ..agents.parse import parse_affected_repos, parse_new_repos, parse_tasks
 from ..integrations.openchoreo import PIPELINE
 from ..state import GATES, PHASES, FeatureState, GateDecision
 from ..waits import LABELS, TIMEOUT_S
@@ -78,7 +78,7 @@ def make_intake(services):
     def intake(state: FeatureState) -> dict:
         # Pins were resolved by the engine before the thread started; reading them here fails
         # fast if the product's governance repo is unreachable or invalid.
-        snap = services.snapshot(state["product_id"], state.get("governance"))
+        snap = services.feature_snapshot(state)
         product = snap.product
         budget = min(float(state.get("token_budget_usd") or product.budget_usd), product.budget_usd)
         return {
@@ -112,7 +112,7 @@ def make_gate(gate: str, services):
     target = GATE_APPROVE_TARGET[gate]
 
     def gate_node(state: FeatureState) -> Command:
-        snap = services.snapshot(state["product_id"], state.get("governance"))
+        snap = services.feature_snapshot(state)
         lanes = snap.lanes()
         # G4 to G6 need every lane whose repos the change set touches: each owner signs off.
         approving = [state["product_id"]]
@@ -135,6 +135,8 @@ def make_gate(gate: str, services):
                 "risk_tier": state.get("risk_tier"),
                 # G5 and G6 see the evidence: every suite run so far, and any accepted risks.
                 "quality": quality_summary(state) if gate in ("g5", "g6") else None,
+                # Approving G4 approves creating these repos, with these settings.
+                "new_repos": repo_plans(services, state) if gate == "g4" and lane_id == state["product_id"] else [],
                 # Each lane reviews the PRs in its own org.
                 "pull_requests": sorted(k for k, pr in state.get("pull_requests", {}).items()
                                         if pr["repo"].split("/", 1)[0] == lane.org) if gate == "g5" else [],
@@ -236,7 +238,7 @@ def make_escalation(phase: str, services):
             update["tasks"] = parse_tasks(services.artifacts.load(ref)) if ref else []
         if phase == "architecture":
             ref = update.get("artifacts", {}).get("HLD") or state.get("artifacts", {}).get("HLD")
-            snap = services.snapshot(state["product_id"], state.get("governance"))
+            snap = services.feature_snapshot(state)
             affected = [r["name"] for r in parse_affected_repos(services.artifacts.load(ref))] if ref else []
             update["lanes_touched"] = touched_lanes(snap, affected)
         if spec.gate in CROSS_LANE_GATES:
@@ -266,8 +268,83 @@ def join(state: FeatureState) -> Command:
     """Plan starts only when both G3 (design) and G4 (architecture) are approved."""
     a = state.get("approvals", {})
     if a.get("g3") and a.get("g4"):
-        return Command(goto="plan", update={"events": [event("join", "design_and_architecture_approved")]})
+        return Command(goto="provision", update={"events": [event("join", "design_and_architecture_approved")]})
     return Command(goto=END, update={"events": [event("join", "waiting_for_other_gate")]})
+
+
+PROVISION_DECISIONS = ("retry", "resolved", "abort")
+
+
+def proposed_repos(services, state: FeatureState) -> list[dict]:
+    ref = (state.get("artifacts") or {}).get("HLD")
+    return parse_new_repos(services.artifacts.load(ref)) if ref else []
+
+
+def repo_plans(services, state: FeatureState) -> list[dict]:
+    """What G4 approves and the provision step applies, resolved from the golden path."""
+    import os
+
+    from ..provisioning import plan
+
+    product = services.snapshot(state["product_id"], state.get("governance")).product
+    out = []
+    for p in proposed_repos(services, state):
+        rp = plan(product, p, product.repo_standards or {"defaults": {}, "roles": {}})
+        if os.environ.get("VRIXEL_GITHUB_APP_ID"):
+            rp["ruleset"]["bypass_app_id"] = os.environ["VRIXEL_GITHUB_APP_ID"]
+        out.append(rp)
+    return out
+
+
+def make_provision(services):
+    """Create the repos G4 approved, on the golden path, before planning assigns work to them."""
+
+    def provision(state: FeatureState) -> Command:
+        plans = repo_plans(services, state)
+        if not plans:
+            return Command(goto="plan")
+        snap = services.snapshot(state["product_id"], state.get("governance"))
+        entry = services.settings.entry(state["product_id"])
+        gov = entry.governance
+        src = services.governance.source
+        manifest = src.read(gov.org, gov.repo, "product.yaml", src.resolve(gov.org, gov.repo, gov.ref)) or ""
+        done = {r["repo"]: r for r in state.get("new_repos") or [] if r.get("status") == "provisioned"}
+        results = [done[p["repo"]] if p["repo"] in done else
+                   services.provisioner.provision(snap.product, p, feature_id=state["feature_id"],
+                                                  governance_repo=gov.full_name, manifest_text=manifest)
+                   for p in plans]
+        events = [event("provision", "repo_provisioned", r["repo"], url=r["url"], governance_pr=r["governance_pr"])
+                  for r in results if r["status"] == "provisioned" and r["repo"] not in done]
+        failed = [r for r in results if r["status"] != "provisioned"]
+        if not failed:
+            return Command(goto="plan", update={"new_repos": results, "events": events})
+
+        reason = "; ".join(f"{r['repo']}: " + next((f"{s['step']} failed ({s['error']})" for s in r["steps"]
+                                                    if not s["ok"]), "failed") for r in failed)
+        d = normalize(interrupt({
+            "type": "escalation", "phase": "provisioning", "feature_id": state["feature_id"],
+            "product_id": state["product_id"], "title": state["title"],
+            "reason": f"Couldn't finish setting up new repositories: {reason}",
+            "findings": [f"{r['repo']}: {s['step']}: {s['error']}" for r in failed for s in r["steps"] if not s["ok"]],
+            "new_repos": results, "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
+            "budget_usd": state.get("token_budget_usd"), "allowed": list(PROVISION_DECISIONS)}), PROVISION_DECISIONS)
+        rec = _record("escalation:provisioning", "provisioning", d)
+        if d["decision"] == "abort":
+            return Command(goto=END, update={"new_repos": results, "gate_decisions": [rec], "status": "aborted",
+                                             "events": events + [event("provision", "aborted", d["feedback"],
+                                                                       approver=d["approver"])]})
+        if d["decision"] == "retry":
+            return Command(goto="provision", update={"new_repos": results, "gate_decisions": [rec],
+                                                     "events": events + [event("provision", "retry", d["feedback"],
+                                                                               approver=d["approver"])]})
+        # resolved: a person finished the setup by hand
+        fixed = [{**r, "status": "provisioned", "completed_by": d["approver"]} if r["status"] != "provisioned" else r
+                 for r in results]
+        return Command(goto="plan", update={"new_repos": fixed, "gate_decisions": [rec],
+                                            "events": events + [event("provision", "resolved", d["feedback"],
+                                                                      approver=d["approver"])]})
+
+    return provision, ("plan", "provision", END)
 
 
 def oc_target(lane, repo: str) -> dict:
@@ -290,7 +367,7 @@ def make_merge_train(services):
     def merge_train(state: FeatureState) -> dict:
         cs = dict(state.get("change_set") or {})
         risk = state.get("risk_tier", "low")
-        lanes = services.snapshot(state["product_id"], state.get("governance")).lane_of_repo()
+        lanes = services.feature_snapshot(state).lane_of_repo()
         g5 = [g for g in state.get("gate_decisions", []) if g["gate"] == "g5" and g["decision"] in ("approve", "handback")]
         actor = g5[-1]["approver"] if (risk != "low" and g5) else "agent:merge-train"
         merged, published, runs = {}, list(cs.get("published") or []), dict(cs.get("runs") or {})
@@ -339,7 +416,7 @@ def quality_packet(services, state: FeatureState, wait: str, targets: list[dict]
     from ..quality import WAIT_STAGE
 
     stage = WAIT_STAGE[wait]
-    policy = services.snapshot(state["product_id"], state.get("governance")).product.quality or {}
+    policy = services.feature_snapshot(state).product.quality or {}
     mine = {k: v for k, v in policy.items() if v.get("stage") == stage}
     if not mine or not targets:
         return None
@@ -490,7 +567,7 @@ def make_deploy(stage: str, services, nxt: str):
     """Agents deploy to dev and staging only (VX-3); each component in its own product's runtime."""
 
     def deploy(state: FeatureState) -> Command:
-        lanes = services.snapshot(state["product_id"], state.get("governance")).lane_of_repo()
+        lanes = services.feature_snapshot(state).lane_of_repo()
         deps, failures = {}, []
         for repo, run in ((state.get("change_set") or {}).get("runs") or {}).items():
             t = oc_target(lanes.get(repo), repo)
@@ -556,7 +633,9 @@ def build_pipeline(services, checkpointer=None):
     for gate in GATES:
         node, dest = make_gate(gate, services)
         g.add_node(gate, node, destinations=dest)
-    g.add_node("join", join, destinations=("plan", END))
+    g.add_node("join", join, destinations=("provision", END))
+    node, dest = make_provision(services)
+    g.add_node("provision", node, destinations=dest)
     g.add_node("merge_train", make_merge_train(services))
     node, dest = make_ci_wait(services)
     g.add_node("ci_wait", node, destinations=dest)

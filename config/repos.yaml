@@ -1,0 +1,63 @@
+# The golden path for new repositories, owned by the tools org. When an approved design (G4)
+# needs a new repo, the pipeline creates it in the product's org with these settings, so the
+# gates downstream (CI, quality suites, merge train, OpenChoreo delivery) work on its first PR.
+# Products may tighten in governance/product.yaml under `repo_standards:`.
+
+naming:
+  # Repo names start with the product's prefix (the part before the first "-" of its existing
+  # repos, e.g. emr- for vrixel-emr/emr-intake-api) and use lowercase words joined by "-".
+  pattern: "^[a-z][a-z0-9]*(-[a-z0-9]+)+$"
+  max_length: 50
+
+defaults:
+  visibility: private
+  default_branch: main
+  merge: { squash: true, merge_commit: false, rebase: false, delete_branch_on_merge: true }
+  security:
+    dependency_graph: true
+    dependabot_alerts: true
+    dependabot_security_updates: true
+    secret_scanning: true
+    push_protection: true
+    code_scanning_default_setup: true      # CodeQL default setup; the sast suite reads its alerts
+  ruleset:
+    name: vrixel-default-branch
+    required_approvals: 1
+    code_owner_review: true
+    dismiss_stale_reviews: true
+    require_last_push_approval: true
+    require_conversation_resolution: true
+    linear_history: true
+    block_force_push: true
+    block_deletion: true
+    code_scanning_merge_protection: high   # block merges that add alerts at or above this severity
+  # Gate approver teams and the access they get on the new repo.
+  team_access:
+    g5: maintain        # tech leads
+    g4: push            # architects
+    security: push
+    g2: pull            # product owners
+  topics: [vrixel, "{product}", "{role}"]
+  # Organization custom properties; an org-level ruleset can target vrixel_managed=true.
+  properties: { vrixel_managed: "true", vrixel_product: "{product}", vrixel_data_class: "{data_class}" }
+
+# Per role: the template to start from (it carries CI whose job names match required_checks and
+# the quality suites), and how the repo becomes an OpenChoreo component.
+roles:
+  provider:
+    template: vrixel-tools/template-service
+    required_checks: [unit, contract, CodeQL]
+    openchoreo: { component_type: deployment/service, workflow: docker }
+  consumer:
+    template: vrixel-tools/template-web
+    required_checks: [unit, CodeQL]
+    openchoreo: { component_type: deployment/web-app, workflow: docker }
+  library:
+    template: vrixel-tools/template-library
+    required_checks: [unit, CodeQL]
+    openchoreo: null                       # libraries publish packages; no runtime component
+
+# Floors per data class: products may tighten, never loosen.
+floors:
+  phi: { required_approvals: 2 }
+  payments: { required_approvals: 2 }

@@ -83,9 +83,30 @@ def _mentions(ctx: dict, repo_name: str) -> bool:
     return any(w in text for w in words)
 
 
+_NEW_SERVICE = re.compile(r"\b(new|separate|dedicated) (micro)?service\b", re.I)
+
+
+def _new_repo(ctx: dict) -> dict | None:
+    """Stub design judgement: a request for a new or separate service gets its own repo. Live
+    architects decide from the HLD's boundaries."""
+    if not _NEW_SERVICE.search(f"{ctx['title']} {ctx.get('description', '')}"):
+        return None
+    own = ctx["repos"][0]["name"]
+    org, first = own.split("/", 1)
+    prefix = first.split("-", 1)[0]
+    words = [w for w in re.findall(r"[a-z0-9]+", ctx["title"].lower()) if w not in ("a", "an", "the", "for", "of", "and", "to")]
+    name = f"{org}/{prefix}-{'-'.join(words[:2]) or 'feature'}-service"
+    return {"name": name, "role": "provider", "lane": ctx["product_id"]}
+
+
 def architecture(ctx: dict, defective: bool) -> str:
     deps = [r for r in ctx.get("dependency_repos", []) if _mentions(ctx, r["name"])]
-    repos = sorted(ctx["repos"] + deps, key=lambda r: (_REPO_ORDER.get(r["role"], 9), r["name"]))
+    new = _new_repo(ctx)
+    known = {r["name"] for r in ctx["repos"]}
+    if new and new["name"] in known:  # already provisioned for this feature (a revision of the HLD)
+        new = None
+    repos = sorted(ctx["repos"] + deps + ([new] if new else []),
+                   key=lambda r: (_REPO_ORDER.get(r["role"], 9), r["name"]))
     own = sorted(ctx["repos"], key=lambda r: _REPO_ORDER.get(r["role"], 9))
     provider = next((r["name"] for r in own if r["role"] == "provider"), own[0]["name"])
     lines = [
@@ -93,8 +114,14 @@ def architecture(ctx: dict, defective: bool) -> str:
         "", "## ADRs",
         f"- ADR-{ctx['feature_id']}-1: Extend the {provider} API with a versioned endpoint (expand, then contract)",
     ]
+    if new:
+        lines.append(f"- ADR-{ctx['feature_id']}-2: Create {new['name']} as its own service: it has its own data, "
+                     f"release cadence and scaling, and no existing repo owns that boundary")
     if not defective:
         lines += ["", "## Affected repos"] + [f"- {r['name']} ({r['role']})" for r in repos]
+    if new:
+        lines += ["", "## New repos",
+                  f"- {new['name']} ({new['role']}): Owns {ctx['title'].lower()} [ADR-{ctx['feature_id']}-2]"]
     if deps:
         lines += ["", "## Dependency lanes"] + [
             f"- {r['name']} ({r['lane']}): new minor version, adopted by this product in the same change set"

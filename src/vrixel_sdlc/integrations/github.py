@@ -27,6 +27,13 @@ DELIVERY_PERMISSIONS = {"contents": "write", "pull_requests": "write", "statuses
                         "secret_scanning_alerts": "read", "vulnerability_alerts": "read"}
 
 
+# Creating repos and applying their settings, used only by the provision step.
+PROVISIONING_PERMISSIONS = {"administration": "write", "contents": "write", "pull_requests": "write",
+                            "security_events": "write", "secret_scanning_alerts": "write",
+                            "vulnerability_alerts": "write", "custom_properties": "write",
+                            "members": "read", "metadata": "read"}
+
+
 class GitHubError(RuntimeError):
     pass
 
@@ -42,6 +49,15 @@ class GitHub(Protocol):
     def code_scanning_alerts(self, *, repo: str, pr: int | None = None, ref: str | None = None) -> list | None: ...
     def dependency_diff(self, *, repo: str, base: str, head: str) -> list | None: ...
     def secret_alerts(self, *, repo: str) -> list | None: ...
+    # Provisioning new repositories (see vrixel_sdlc.provisioning); each call is idempotent.
+    def get_file(self, *, repo: str, path: str, ref: str) -> str | None: ...
+    def create_repo(self, *, repo: str, template: str | None, private: bool, description: str) -> str: ...
+    def update_repo(self, *, repo: str, merge: dict, default_branch: str, description: str) -> None: ...
+    def enable_security(self, *, repo: str, **features: bool) -> None: ...
+    def grant_team(self, *, org: str, team: str, repo: str, permission: str) -> None: ...
+    def set_topics(self, *, repo: str, topics: list[str]) -> None: ...
+    def set_properties(self, *, repo: str, properties: dict[str, str]) -> None: ...
+    def upsert_ruleset(self, *, repo: str, branch: str, spec: dict) -> str: ...
 
 
 class StubGitHub:
@@ -54,6 +70,8 @@ class StubGitHub:
         self.code_alerts: dict[str, list] = {}  # repo -> code-scanning alerts
         self.dep_diffs: dict[str, list] = {}  # repo -> dependency-review diff
         self.secrets: dict[str, list] = {}  # repo -> secret-scanning alerts
+        self.repos: dict[str, dict] = {}  # provisioned repos and the settings applied to them
+        self.fail_steps: set[str] = set()  # tests: provisioning calls that should fail
         self._seq = itertools.count(100)
         self._lock = threading.Lock()
 
@@ -103,6 +121,39 @@ class StubGitHub:
 
     def secret_alerts(self, *, repo):
         return list(self.secrets.get(repo, []))
+
+    def _repo(self, repo: str, call: str) -> dict:
+        if call in self.fail_steps:
+            raise GitHubError(f"GitHub {call} {repo}: 403 Resource not accessible by integration")
+        return self.repos.setdefault(repo, {})
+
+    def get_file(self, *, repo, path, ref):
+        return self.files.get((repo, ref, path))
+
+    def create_repo(self, *, repo, template, private, description) -> str:
+        r = self._repo(repo, "create_repo")
+        created = "created" not in r
+        r.setdefault("created", {"template": template, "private": private, "description": description})
+        return "created" if created else "exists"
+
+    def update_repo(self, *, repo, merge, default_branch, description) -> None:
+        self._repo(repo, "update_repo")["settings"] = {"merge": dict(merge), "default_branch": default_branch}
+
+    def enable_security(self, *, repo, **features) -> None:
+        self._repo(repo, "enable_security")["security"] = dict(features)
+
+    def grant_team(self, *, org, team, repo, permission) -> None:
+        self._repo(repo, "grant_team").setdefault("teams", {})[team] = permission
+
+    def set_topics(self, *, repo, topics) -> None:
+        self._repo(repo, "set_topics")["topics"] = list(topics)
+
+    def set_properties(self, *, repo, properties) -> None:
+        self._repo(repo, "set_properties")["properties"] = dict(properties)
+
+    def upsert_ruleset(self, *, repo, branch, spec) -> str:
+        self._repo(repo, "upsert_ruleset")["ruleset"] = {"branch": branch, **spec}
+        return spec.get("name", "ruleset")
 
 
 class GitHubRest:
@@ -257,3 +308,105 @@ class GitHubRest:
 
     def secret_alerts(self, *, repo):
         return self._maybe(repo, "/secret-scanning/alerts?state=open&per_page=100")
+
+    # -- provisioning
+    def _abs(self, method: str, org: str, path: str, body: dict | None = None, *, ok404: bool = False):
+        data = json.dumps(body).encode() if body is not None else None
+        req = Request(f"{self.api}{path}", data=data, method=method, headers={
+            "Authorization": f"Bearer {self.tokens.token(org)}", "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "vrixel-agentic-sdlc",
+            **({"Content-Type": "application/json"} if data else {}),
+        })
+        try:
+            with self.opener.open(req, timeout=self.timeout) as resp:
+                raw = resp.read().decode("utf-8")
+                return json.loads(raw) if raw else {}
+        except HTTPError as exc:
+            if ok404 and exc.code == 404:
+                return None
+            raise GitHubError(f"GitHub {method} {path}: {exc.code}") from exc
+
+    def get_file(self, *, repo, path, ref):
+        res = self._call("GET", repo, f"/contents/{quote(path)}?ref={quote(ref, safe='')}", ok404=True)
+        if not res or not isinstance(res, dict) or "content" not in res:
+            return None
+        return base64.b64decode(res["content"]).decode("utf-8")
+
+    def create_repo(self, *, repo, template, private, description) -> str:
+        org, name = repo.split("/", 1)
+        if self._abs("GET", org, f"/repos/{repo}", ok404=True):
+            return "exists"
+        if template:
+            self._abs("POST", org, f"/repos/{template}/generate", {
+                "owner": org, "name": name, "description": description, "private": private,
+                "include_all_branches": False})
+        else:
+            self._abs("POST", org, f"/orgs/{quote(org)}/repos", {
+                "name": name, "description": description, "private": private, "auto_init": True})
+        return "created"
+
+    def update_repo(self, *, repo, merge, default_branch, description) -> None:
+        self._call("PATCH", repo, "", {
+            "description": description, "allow_squash_merge": merge.get("squash", True),
+            "allow_merge_commit": merge.get("merge_commit", False), "allow_rebase_merge": merge.get("rebase", False),
+            "delete_branch_on_merge": merge.get("delete_branch_on_merge", True),
+            "squash_merge_commit_title": "PR_TITLE", "squash_merge_commit_message": "PR_BODY"})
+
+    def enable_security(self, *, repo, dependency_graph=True, dependabot_alerts=True,
+                        dependabot_security_updates=True, secret_scanning=True, push_protection=True,
+                        code_scanning_default_setup=True, **_) -> None:
+        def on(flag):
+            return {"status": "enabled" if flag else "disabled"}
+
+        if dependabot_alerts or dependency_graph:
+            self._call("PUT", repo, "/vulnerability-alerts")  # also turns on the dependency graph
+        self._call("PATCH", repo, "", {"security_and_analysis": {
+            "secret_scanning": on(secret_scanning), "secret_scanning_push_protection": on(push_protection),
+            "dependabot_security_updates": on(dependabot_security_updates)}})
+        if code_scanning_default_setup:
+            self._call("PATCH", repo, "/code-scanning/default-setup", {"state": "configured"})
+
+    def grant_team(self, *, org, team, repo, permission) -> None:
+        self._abs("PUT", org, f"/orgs/{quote(org)}/teams/{quote(team)}/repos/{repo}", {"permission": permission})
+
+    def set_topics(self, *, repo, topics) -> None:
+        self._call("PUT", repo, "/topics", {"names": topics})
+
+    def set_properties(self, *, repo, properties) -> None:
+        if properties:
+            self._call("PATCH", repo, "/properties/values", {
+                "properties": [{"property_name": k, "value": v} for k, v in properties.items()]})
+
+    def upsert_ruleset(self, *, repo, branch, spec) -> str:
+        rules = []
+        if spec.get("block_deletion", True):
+            rules.append({"type": "deletion"})
+        if spec.get("block_force_push", True):
+            rules.append({"type": "non_fast_forward"})
+        if spec.get("linear_history"):
+            rules.append({"type": "required_linear_history"})
+        rules.append({"type": "pull_request", "parameters": {
+            "required_approving_review_count": int(spec.get("required_approvals", 1)),
+            "dismiss_stale_reviews_on_push": bool(spec.get("dismiss_stale_reviews", True)),
+            "require_code_owner_review": bool(spec.get("code_owner_review", True)),
+            "require_last_push_approval": bool(spec.get("require_last_push_approval", False)),
+            "required_review_thread_resolution": bool(spec.get("require_conversation_resolution", True))}})
+        if spec.get("required_checks"):
+            rules.append({"type": "required_status_checks", "parameters": {
+                "strict_required_status_checks_policy": False,
+                "required_status_checks": [{"context": c} for c in spec["required_checks"]]}})
+        if spec.get("code_scanning_merge_protection"):
+            rules.append({"type": "code_scanning", "parameters": {"code_scanning_tools": [{
+                "tool": "CodeQL", "alerts_threshold": "errors",
+                "security_alerts_threshold": f"{spec['code_scanning_merge_protection']}_or_higher"}]}})
+        body = {"name": spec.get("name", "vrixel-default-branch"), "target": "branch", "enforcement": "active",
+                "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}, "rules": rules,
+                # The merge train merges after the pipeline's own gates (G5 for high-risk changes).
+                "bypass_actors": ([{"actor_id": int(spec["bypass_app_id"]), "actor_type": "Integration",
+                                    "bypass_mode": "pull_request"}] if spec.get("bypass_app_id") else [])}
+        existing = next((r for r in self._call("GET", repo, "/rulesets") or [] if r.get("name") == body["name"]), None)
+        if existing:
+            self._call("PUT", repo, f"/rulesets/{existing['id']}", body)
+        else:
+            self._call("POST", repo, "/rulesets", body)
+        return body["name"]

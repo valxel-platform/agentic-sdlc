@@ -47,3 +47,18 @@ def parse_tasks(plan: str) -> list[dict]:
     except json.JSONDecodeError:
         return []
     return list(data.get("tasks", []))
+
+
+_NEW_REPO = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+) \((provider|consumer|library|[a-z]+)\):\s*(.*?)"
+                       r"(?:\s*\[(ADR-[^\]]+)\])?\s*$", re.M)
+
+
+def parse_new_repos(hld: str) -> list[dict]:
+    """`## New repos` lines: `- org/name (role): purpose [ADR-id]`. The ADR must exist in the
+    HLD's ADRs section and name the repo, or the proposal carries no ADR."""
+    adrs = {ln.split(":", 1)[0].strip(): ln for ln in bullets(section(hld, "ADRs"))}
+    out = []
+    for name, role, purpose, adr in _NEW_REPO.findall(section(hld, "New repos")):
+        ok = adr if adr and adr in adrs and name in adrs[adr] else ""
+        out.append({"name": name, "role": role, "purpose": purpose.strip(), "adr": ok})
+    return out

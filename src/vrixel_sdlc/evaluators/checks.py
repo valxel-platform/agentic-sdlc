@@ -56,7 +56,18 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     if not bullets(section(text, "ADRs")):
         out.append("HLD records no ADRs")
     repos = parse_affected_repos(text)
+    from ..agents.parse import parse_new_repos
+
+    new = parse_new_repos(text)
     known = {r["name"] for r in ctx.get("repos", []) + ctx.get("dependency_repos", [])}
+    if new:
+        from ..provisioning import check_proposal
+
+        if ctx.get("repo_policy"):
+            out += check_proposal(ctx["repo_policy"], new, known)
+        else:
+            out.append("New repos are proposed, but the platform has no repository standards (config/repos.yaml)")
+    known |= {r["name"] for r in new}
     if not repos:
         out.append("HLD lists no affected repos; impact analysis is required to seed the change set")
     for r in repos:

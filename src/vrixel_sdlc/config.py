@@ -49,6 +49,8 @@ class ProductConfig:
     tools: dict = field(default_factory=dict)
     # Effective test and security policy: suite -> spec (see vrixel_sdlc.quality)
     quality: dict = field(default_factory=dict)
+    # Effective golden-path settings for new repos (see vrixel_sdlc.provisioning)
+    repo_standards: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -160,6 +162,7 @@ class Settings:
     failover: dict[str, list[str]] = field(default_factory=dict)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     quality: Any = None  # vrixel_sdlc.quality.QualityConfig
+    repos: Any = None  # vrixel_sdlc.provisioning.RepoStandards
 
     def entry(self, product_id: str) -> RegistryEntry:
         try:
@@ -225,7 +228,14 @@ def load_settings(
         failover=models_raw.get("failover") or {},
         tools=load_tools(cfg_dir / "tools.yaml"),
         quality=_load_quality(cfg_dir / "quality.yaml"),
+        repos=_load_repos(cfg_dir / "repos.yaml"),
     )
+
+
+def _load_repos(path: Path):
+    from .provisioning import load_standards
+
+    return load_standards(path)
 
 
 def _load_quality(path: Path):
