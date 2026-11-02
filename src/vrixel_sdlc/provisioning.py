@@ -22,7 +22,8 @@ from pathlib import Path
 
 import yaml
 
-ROLES = ("provider", "consumer", "library")
+from .repo_roles import ROLES
+
 PERMISSIONS = ("pull", "triage", "push", "maintain", "admin")
 
 

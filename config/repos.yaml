@@ -43,7 +43,8 @@ defaults:
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in
-# vrixel-tools: Java 21 + Spring Boot (service), React + TypeScript (web), Java library.
+# vrixel-tools: Java 21 + Spring Boot (service), React + TypeScript (web), Java library, and
+# Python for agentic work: a LangGraph workflow agent and an MCP server.
 roles:
   provider:
     template: vrixel-tools/template-service
@@ -53,6 +54,14 @@ roles:
     template: vrixel-tools/template-web
     required_checks: [unit, contract, CodeQL]
     openchoreo: { component_type: deployment/web-app, workflow: docker }
+  mcp-server:
+    template: vrixel-tools/template-mcp-server
+    required_checks: [unit, CodeQL]
+    openchoreo: { component_type: deployment/service, workflow: docker }
+  agent:
+    template: vrixel-tools/template-agent
+    required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR
+    openchoreo: { component_type: deployment/service, workflow: docker }  # needs Postgres and the LLM gateway
   library:
     template: vrixel-tools/template-library
     required_checks: [unit, CodeQL]

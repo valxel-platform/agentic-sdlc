@@ -7,9 +7,9 @@ from __future__ import annotations
 import json
 import re
 
+from ..repo_roles import REPO_ORDER as _REPO_ORDER
 from .parse import parse_acs, parse_affected_repos
 
-_REPO_ORDER = {"library": 0, "provider": 1, "consumer": 2}
 
 
 def _slug(text: str) -> str:
@@ -139,7 +139,8 @@ def _node_id(repo: str) -> str:
 
 
 def _flowchart(ctx: dict, repos: list[dict]) -> str:
-    """Container view: one subgraph per lane, consumers call providers, providers use libraries."""
+    """Container view: one subgraph per lane, consumers call providers, providers use libraries,
+    agents use MCP servers (and models through the gateway), MCP servers call providers."""
     lane_names = {ctx["product_id"]: ctx["product_name"]}
     by_lane: dict[str, list[dict]] = {}
     for r in repos:
@@ -155,6 +156,12 @@ def _flowchart(ctx: dict, repos: list[dict]) -> str:
             out += [f'  {_node_id(r["name"])} -->|"versioned API"| {_node_id(p["name"])}' for p in providers]
         elif r["role"] == "library":
             out += [f'  {_node_id(p["name"])} -->|"uses"| {_node_id(r["name"])}' for p in providers]
+        elif r["role"] == "agent":
+            out += [f'  {_node_id(r["name"])} -->|"MCP tools"| {_node_id(m["name"])}'
+                    for m in repos if m["role"] == "mcp-server"]
+            out.append(f'  {_node_id(r["name"])} -->|"models"| llm_gateway["LLM gateway"]')
+        elif r["role"] == "mcp-server":
+            out += [f'  {_node_id(r["name"])} -->|"versioned API"| {_node_id(p["name"])}' for p in providers]
     return "\n".join(out)
 
 
@@ -169,6 +176,8 @@ def plan(ctx: dict, defective: bool) -> str:
             "provider": [f"src/api/{slug}.py", f"tests/test_{slug}.py"],
             "consumer": [f"src/ui/{slug}.tsx", f"tests/{slug}.test.tsx"],
             "library": [f"contracts/{slug}.yaml"],
+            "mcp-server": [f"src/mcp_server/tools/{slug}.py", f"tests/test_{slug}_tools.py"],
+            "agent": [f"src/agent/prompts/{slug}.md", f"evals/cases/{slug}.jsonl"],
         }.get(repo["role"], [f"src/{slug}.py"])
         if risky and repo["role"] == "provider":
             files.append("src/auth/policy.py")

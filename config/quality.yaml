@@ -32,6 +32,12 @@ suites:
     source: github-checks
     match: { checks: ["contract*", "pact*"] }
     required: false             # required where a lane says so (APIs with consumers)
+  evals:
+    kind: test
+    stage: pr
+    source: github-checks
+    match: { checks: ["evals*"] }
+    required: false             # required on agent repos by their branch ruleset (config/repos.yaml)
   integration:
     kind: test
     stage: dev

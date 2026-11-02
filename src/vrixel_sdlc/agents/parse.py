@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import re
 
+from ..repo_roles import ROLE_PATTERN
+
 _AC = re.compile(r"^- (AC-\d+):\s*(.+)$", re.M)
-_REPO = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+) \((provider|consumer|library)\)\s*$", re.M)
+_REPO = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+) \((" + ROLE_PATTERN + r")\)\s*$", re.M)
 _TRACE = re.compile(r"^- (AC-\d+) -> (TASK-\d+) / (TEST-\d+)\s*$", re.M)
 _JSON_BLOCK = re.compile(r"```json\n(.*?)\n```", re.S)
 
@@ -49,7 +51,7 @@ def parse_tasks(plan: str) -> list[dict]:
     return list(data.get("tasks", []))
 
 
-_NEW_REPO = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+) \((provider|consumer|library|[a-z]+)\):\s*(.*?)"
+_NEW_REPO = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+) \((" + ROLE_PATTERN + r"|[a-z][a-z-]*)\):\s*(.*?)"
                        r"(?:\s*\[(ADR-[^\]]+)\])?\s*$", re.M)
 
 

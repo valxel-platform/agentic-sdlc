@@ -1,6 +1,6 @@
 ---
 name: platform
-version: 1.0.0
+version: 1.1.0
 ---
 # Vrixel platform constitution
 
@@ -17,3 +17,9 @@ Precedence: platform constitution, then product constitution, then ADRs, then PR
 - **VX-8** Every service ships with SLOs, structured logs and traces. (Policy)
 - **VX-9** User-facing UI meets WCAG 2.1 AA. (Test, Rubric)
 - **VX-10** Stay within the per-feature budget; escalate rather than overspend. (Policy)
+
+Agentic features in products (repos with the `agent` and `mcp-server` roles):
+
+- **VX-11** Product agents reach models only through the product's LLM gateway and tools only through MCP servers on an allowlist; they hold no provider keys. (Policy)
+- **VX-12** A product agent's changes to records are approved by a person before they happen, unless an ADR names the action as safe to automate; every tool that changes data is annotated, scoped and idempotent. (Policy, Test)
+- **VX-13** Product agents ship with evals that gate every pull request and run against the real model after each deployment to dev. (Test)

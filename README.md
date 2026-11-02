@@ -208,7 +208,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 
 | Area | Setting |
 | --- | --- |
-| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`), private |
+| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`, `-mcp-server`, `-agent`), private |
 | Merging | Squash only, branches deleted after merge |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
 | Branch ruleset | Pull requests only; 1 approval (2 for PHI and payments); code owner review; stale approvals dismissed; conversations resolved; linear history; no force pushes or deletion; required checks per role; merges blocked on new code-scanning alerts of high or above |
@@ -235,7 +235,8 @@ repo_standards:
 **Setup once per org.**
 1. Publish the templates named in `config/repos.yaml` to `vrixel-tools` and mark each one a
    template repository: `template-service` (Java 21, Spring Boot), `template-web` (React,
-   TypeScript) and `template-library` (Java). Their CI jobs are named for the required checks
+   TypeScript), `template-library` (Java), `template-mcp-server` and `template-agent` (Python).
+   Their CI jobs are named for the required checks
    (`unit`, `contract`) and post `unit / report`-style statuses the quality suites read; their
    `post-deploy.yml` runs integration, e2e and smoke suites when the pipeline dispatches
    `vrixel-deployed` after a deployment is ready.
@@ -247,6 +248,27 @@ repo_standards:
    for these in its own token; delivery tokens stay narrower.
 4. The app is a ruleset bypass actor for pull requests only, so the merge train can merge once
    the pipeline's gates pass; people still can't push to the default branch.
+
+## Agentic features in products
+
+Products build their own agentic features with two more repo roles, so an HLD can propose them
+like any other repo and the provision step creates them on the golden path:
+
+| Role | Template | Required checks | What it is |
+| --- | --- | --- | --- |
+| `mcp-server` | `vrixel-tools/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
+| `agent` | `vrixel-tools/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
+
+Roles merge and deploy in dependency order: library, provider, mcp-server, agent, consumer.
+The `evals` quality suite reads the agent's `evals / report` status on every PR (recorded model
+responses); after a deploy to dev the agent's post-deploy job runs the same evals against the
+real model and reports `integration / report`. Platform articles VX-11 to VX-13 make these
+rules: models only through the gateway, people approve changes, evals gate every PR.
+
+Models are reached through `ss-llm-gateway`, a shared-services package each product deploys in
+its own OpenChoreo project (runtime stays with the product). Its policy follows the product's
+data class: PHI only to providers under a BAA, payments with card data blocked, per-caller keys,
+budgets and model allowlists, and a usage ledger.
 
 ## Delivery: GitHub and OpenChoreo
 
@@ -507,6 +529,7 @@ src/vrixel_sdlc/
   engine.py        start, inbox, decide, view; resolves CI and OpenChoreo waits
   waits.py         checks CI, builds and deployments for waiting features
   provisioning.py  new repos: standards, proposal checks, provisioner
+  repo_roles.py    repo roles (library, provider, mcp-server, agent, consumer) and merge order
   quality/         test and security suites: policy, sources, gate
   worksync.py      keeps the work tracker in step with each feature
   api/app.py       FastAPI service under /api; serves web/dist

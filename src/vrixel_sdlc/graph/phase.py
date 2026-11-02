@@ -23,10 +23,10 @@ from ..provisioning import naming_policy
 from ..evaluators import critique, run_checks
 from ..evaluators.critic import parse_verdict
 from ..gateway import CallTags
+from ..repo_roles import REPO_ORDER
 from ..runtime import AgentResult, AgentTask
 from ..state import FeatureState, PhaseState
 
-REPO_ORDER = {"library": 0, "provider": 1, "consumer": 2}
 
 
 def now() -> str:

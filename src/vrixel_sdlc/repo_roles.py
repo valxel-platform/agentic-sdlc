@@ -1,0 +1,15 @@
+"""Repository roles. A role says what a repo is for, which template creates it, which checks
+guard it and in which order a feature's changes to it merge and deploy (dependencies first).
+
+  library     packages other repos use; no runtime
+  provider    a service with a versioned API
+  mcp-server  product capabilities as MCP tools (often over providers' APIs), for agents
+  agent       a workflow agent: uses MCP tools, models through the LLM gateway, people approve changes
+  consumer    a web app or other client of the APIs and agents
+"""
+
+from __future__ import annotations
+
+ROLES = ("library", "provider", "mcp-server", "agent", "consumer")
+REPO_ORDER = {role: i for i, role in enumerate(ROLES)}
+ROLE_PATTERN = "|".join(ROLES)

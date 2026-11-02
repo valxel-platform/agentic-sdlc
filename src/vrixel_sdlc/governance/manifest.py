@@ -12,9 +12,10 @@ import re
 import yaml
 
 from ..config import Limits, ProductConfig, RegistryEntry, RepoSpec, ToolsConfig
+from ..repo_roles import ROLES
 from .errors import GovernanceError
 
-_ROLES = {"provider", "consumer", "library"}
+_ROLES = set(ROLES)
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
 _APPROVER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}(/[A-Za-z0-9][A-Za-z0-9_.-]*)?$")
 
