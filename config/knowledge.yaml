@@ -1,0 +1,19 @@
+# Design knowledge: what agents are given about the existing design, and what the design check
+# (before G4) compares a new HLD against. Swap a source by naming another class; the pipeline
+# only sees the pack each source returns.
+#
+# Recommended (and the default here): Git is the system of record. Decisions are ADRs in each
+# product's governance repo and contracts are the OpenAPI documents in its API repos; both change
+# only through reviewed pull requests, so what agents read is what people approved. Work trackers
+# (Jira, OpenProject) and diagram tools (Lucid, draw.io) are views the pipeline writes to; they
+# are not read back as truth.
+
+sources:
+  architecture: vrixel_sdlc.knowledge.sources:GovernanceArchitecture   # architecture/ in the governance repo
+  contracts: vrixel_sdlc.knowledge.sources:RepoOpenApi                  # api/openapi.yaml in provider repos
+  capabilities: vrixel_sdlc.knowledge.sources:CatalogCapabilities       # live and in-flight capabilities
+
+settings:
+  architecture_dir: architecture
+  openapi_paths: [api/openapi.yaml, openapi.yaml, src/main/resources/openapi.yaml]
+  max_chars: 12000          # cap on the prompt section; decisions and contracts come first

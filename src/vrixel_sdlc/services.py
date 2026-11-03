@@ -41,6 +41,7 @@ class Services:
     trackers: dict[str, WorkTracker]  # provider -> tracker
     quality: object = None  # vrixel_sdlc.quality.Quality, set by build_services
     provisioner: object = None  # vrixel_sdlc.provisioning.RepoProvisioner, set by build_services
+    knowledge: object = None  # vrixel_sdlc.knowledge.Knowledge, set by build_services
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
@@ -113,6 +114,7 @@ def build_services(
         trackers=trackers if trackers is not None else default_trackers(settings),
     )
     svc.quality = default_quality(svc)
+    svc.knowledge = default_knowledge(svc)
     svc.provisioner = default_provisioner(settings, github, openchoreo)
     return svc
 
@@ -134,6 +136,13 @@ def default_provisioner(settings: Settings, github, openchoreo):
                                         api=settings.github_api, permissions=PROVISIONING_PERMISSIONS)
         return RepoProvisioner(GitHubRest(tokens, api=settings.github_api), openchoreo)
     return RepoProvisioner(github, openchoreo)
+
+
+def default_knowledge(services: Services):
+    from .knowledge import Knowledge
+
+    cfg = services.settings.knowledge
+    return Knowledge(cfg, services) if cfg is not None else None
 
 
 def default_quality(services: Services):

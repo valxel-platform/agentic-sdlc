@@ -10,10 +10,10 @@ from ..config import ProductConfig
 from ..constitution import Constitution
 from ..gateway import PromptLayers, serialize_tools
 
-_BASE_TOOLS = [
-    {"name": "read_artifact", "description": "Read an artifact by ID", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}}},
-    {"name": "search_catalog", "description": "Search the capability catalog", "input_schema": {"type": "object", "properties": {"q": {"type": "string"}}}},
-]
+# Design knowledge (decisions, contracts, catalog) is put in the prompt by the pipeline rather than
+# offered as lookup tools: the corpus per product is small and bounded, and prefetching makes every
+# agent see the same facts that the design check and G4 reviewers see.
+_BASE_TOOLS: list[dict] = []
 _ROLE_TOOLS = {
     "coder": [
         {"name": "code_index_query", "description": "Symbols, callers and tests for a query", "input_schema": {"type": "object", "properties": {"q": {"type": "string"}}}},
@@ -44,7 +44,7 @@ def load_skill(name: str) -> str:
     )
 
 
-def product_pack(product: ProductConfig, context: str = "") -> str:
+def product_pack(product: ProductConfig, context: str = "", design_knowledge: str = "") -> str:
     """L4: the product's own context.md from its governance repo, plus its registered lane."""
     repos = "\n".join(f"- {r.name} ({r.role})" for r in product.repos)
     return (
@@ -55,6 +55,7 @@ def product_pack(product: ProductConfig, context: str = "") -> str:
         "Conventions: contracts first (expand, then contract); every acceptance criterion has a test; "
         "structured logs and traces in every service.\n"
         + (f"\n{context.strip()}\n" if context.strip() else "")
+        + (f"\n{design_knowledge.strip()}\n" if design_knowledge.strip() else "")
     )
 
 
@@ -67,6 +68,7 @@ def build_layers(
     parent_texts: dict[str, str],
     tail: str,
     product_context: str = "",
+    design_knowledge: str = "",
 ) -> PromptLayers:
     tools = serialize_tools(_BASE_TOOLS + _ROLE_TOOLS.get(role, []))
     skill_text = "\n\n".join(load_skill(s) for s in sorted(skills))
@@ -75,7 +77,7 @@ def build_layers(
         tools=tools,
         skills=f"# Role: {role}\n\n{skill_text}",
         constitution=constitution.text,
-        product_context=product_pack(product, product_context),
+        product_context=product_pack(product, product_context, design_knowledge),
         feature_context=feature,
         tail=tail,
     )

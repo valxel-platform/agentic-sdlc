@@ -303,3 +303,6 @@ table.quality td { padding: 7px 8px; border-bottom: 1px solid var(--rule-soft); 
 .step-ok, .step-bad { display: inline-block; margin: 4px 6px 0 0; padding: 1px 7px; border-radius: 10px; font-size: var(--fs-0); }
 .step-ok { background: var(--signal-go-bg); color: var(--signal-go); }
 .step-bad { background: var(--signal-stop-bg); color: var(--signal-stop); }
+.design-review .kv { padding: 8px 0 4px; }
+.design-review .findings { margin-bottom: 8px; }
+.plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }

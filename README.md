@@ -100,6 +100,7 @@ vrixel-tools/                          tools org
   sdlc-governance                      platform/constitution.md (VX- articles)
 vrixel-emr/                            one org per product; each owns its runtime
   governance                           product.yaml · constitution.md · context.md · CODEOWNERS
+                                       architecture/ (overview.md, decisions/ADR-*.md)
   emr-intake-api, emr-web, ...         product code; PRs are opened here
 vrixel-agtech/ · vrixel-pos/ · vrixel-medspa/ · vrixel-apx/   same layout
 vrixel-shared-services/                shared lane: communication, audit framework, security
@@ -269,6 +270,60 @@ Models are reached through `ss-llm-gateway`, a shared-services package each prod
 its own OpenChoreo project (runtime stays with the product). Its policy follows the product's
 data class: PHI only to providers under a BAA, payments with card data blocked, per-caller keys,
 budgets and model allowlists, and a usage ledger.
+
+## Design knowledge: building on what exists
+
+Agents design against what the product has already decided and built, and G4 shows how a new
+design relates to it.
+
+**Where the knowledge lives (recommended practice).** Git is the system of record for design.
+Decisions are lightweight architecture decision records kept in source control next to what they
+govern (Thoughtworks Technology Radar: Adopt), and API contracts are the OpenAPI documents in each
+API repo. Both change only through reviewed pull requests, so what agents read is what people
+approved, versioned with the code. The tools around them are views:
+
+| Source | Holds | How the pipeline uses it |
+| --- | --- | --- |
+| Governance repo, `architecture/` | The current design (`overview.md`) and decisions (`decisions/ADR-*.md`) | Read before every design phase; updated by a pull request after each release |
+| API repos, `api/openapi.yaml` | Contracts as merged on the default branch | Read before design; contract changes are checked against them |
+| Capability catalog (Backstage in the OpenChoreo portal) | What is live, and approved designs still in flight | Read before design; written at G4 and at release |
+| Jira or OpenProject | Intent, scope and status of work | Written by the pipeline (one item per feature and task); not read back as design truth |
+| Lucid or draw.io | Diagrams for reviewers | Generated from the HLD's Mermaid; not read back (the Mermaid in Git is the source) |
+
+Reading design from a wiki, a tracker or a diagram tool through MCP gives agents text that may be
+stale, unreviewed or out of step with the code; reading it from Git ties every decision to a
+commit G4 can cite. To use another store (Confluence, Backstage TechDocs), add a source class and
+name it in `config/knowledge.yaml`; the pipeline only sees the pack each source returns.
+
+**The architecture record**, in each product's governance repo:
+
+```
+architecture/
+  overview.md                 the current design: context, building blocks, key flows, change log
+  decisions/ADR-EMR-0001.md   one ADR per file: YAML front matter (id, title, status, repos,
+                              supersedes, superseded_by) and Context, Decision, Consequences
+```
+
+**What agents get.** Every design and build agent's prompt carries the accepted decisions, the
+current API versions and operations, live and in-flight capabilities, and the overview, bounded
+in size with decisions first. Design knowledge is read at the governance repo's current head, not
+the feature's pin, so it is current; the constitution stays pinned.
+
+**The design check (before G4).** An HLD must:
+- list the ADRs it builds on in `## Builds on` (or `- None: <why>`); each must exist and be accepted,
+  not superseded;
+- override a decision only with a new ADR that says `Supersedes ADR-x`;
+- state each affected API's change from the version actually merged
+  (`vrixel-emr/emr-intake-api: 1.4.0 -> 1.5.0, adds ...`, or `unchanged`); a major bump needs a
+  `## Migration` section (expand, migrate consumers, contract; VX-4).
+
+**What G4 shows.** The decisions the design builds on and overrides, each API change, decisions on
+the same repos the design doesn't mention, other approved designs in flight that change the same
+APIs, and the commit of the record it was compared with.
+
+**After release.** The capability goes live in the catalog with its decisions and API changes, and
+the pipeline opens a pull request in the governance repo that adds the feature's ADRs (accepted),
+marks superseded ones, and logs the change in the overview. People merge it.
 
 ## Delivery: GitHub and OpenChoreo
 
@@ -516,7 +571,7 @@ compliance counsel review the regulatory constitution articles.
 ## Layout
 
 ```
-config/            repos.yaml (golden path for new repos), quality.yaml (test and security suites, floors per data class), tools.yaml (MCP servers, tools allowed per data class), registry.yaml (governance repo per product, platform limits), models.yaml (role registry)
+config/            knowledge.yaml (design knowledge sources), repos.yaml (golden path for new repos), quality.yaml (test and security suites, floors per data class), tools.yaml (MCP servers, tools allowed per data class), registry.yaml (governance repo per product, platform limits), models.yaml (role registry)
 examples/governance/  sample governance repos for the tools org and each product org
 src/vrixel_sdlc/
   governance/      sources (local, GitHub), GitHub App tokens, manifest validation, pinned loader
@@ -531,6 +586,7 @@ src/vrixel_sdlc/
   provisioning.py  new repos: standards, proposal checks, provisioner
   repo_roles.py    repo roles (library, provider, mcp-server, agent, consumer) and merge order
   quality/         test and security suites: policy, sources, gate
+  knowledge/       design knowledge: architecture record, contracts, design check, write-back
   worksync.py      keeps the work tracker in step with each feature
   api/app.py       FastAPI service under /api; serves web/dist
   web/auth.py      GitHub OAuth, signed sessions, approver matching

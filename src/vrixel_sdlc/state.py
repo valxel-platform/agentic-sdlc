@@ -72,6 +72,7 @@ class FeatureState(TypedDict, total=False):
     release: Annotated[dict, last]
     change_set: Annotated[dict, last]
     lanes_touched: Annotated[list[str], last]  # dependency lanes whose repos the HLD changes
+    design: Annotated[dict, last]  # the design review G4 approved: decisions, supersessions, contract changes
 
     artifacts: Annotated[dict[str, ArtifactRef], merge_dict]  # kind -> latest ref
     trace_links: Annotated[list[list[str]], operator.add]  # [parent_id, child_id]

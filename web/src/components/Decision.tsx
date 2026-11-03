@@ -4,7 +4,7 @@ import { api, type PendingItem } from "../api";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
-import { RepoPlans } from "./External";
+import { DesignReviewPanel, RepoPlans } from "./External";
 
 const DELIVERY_FAILED: Record<string, string> = {
   build: "The OpenChoreo build failed", dev: "The dev deployment failed", staging: "The staging deployment failed",
@@ -119,6 +119,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
           <ul className="findings">{item.findings.map((f) => <li key={f}>{f}</li>)}</ul>
         </div>
       )}
+
+      {item.design_review && <DesignReviewPanel review={item.design_review} />}
 
       {item.new_repos && item.new_repos.length > 0 && (
         <div>

@@ -12,6 +12,7 @@ export interface PendingItem {
   blocking?: SecurityFinding[];
   quality?: { suites: QualitySuite[]; waivers: Waiver[] } | null;
   new_repos?: RepoPlan[];
+  design_review?: DesignReview | null;
   targets?: Record<string, unknown>[];
   phase?: string;
   lane?: string;
@@ -80,6 +81,19 @@ export interface Feature extends FeatureSummary {
   new_repos: RepoPlan[];
   runs: Record<string, { repo: string; component: string; run_id: string; sha: string; url?: string; state?: string }>;
   work_tracking: WorkTracking | null;
+}
+
+export interface AdrRef { id: string; title: string; status: string; lane?: string }
+export interface ContractChange { repo: string; current: string; next: string; breaking: boolean; note: string }
+export interface DesignReview {
+  findings: string[];
+  builds_on: AdrRef[];
+  supersedes: { adr: string; supersedes: string; title: string }[];
+  contracts: ContractChange[];
+  related: AdrRef[];
+  in_flight: { feature: string; title: string; repos: string[]; contracts?: { repo: string; next: string }[] }[];
+  record: { repo?: string | null; sha?: string | null };
+  errors: Record<string, string>;
 }
 
 export interface RepoPlan {

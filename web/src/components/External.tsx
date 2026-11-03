@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Diagram, type Feature, type PendingItem, type RepoPlan, type WorkItem, type WorkTracking } from "../api";
+import { api, type DesignReview, type Diagram, type Feature, type PendingItem, type RepoPlan, type WorkItem, type WorkTracking } from "../api";
 import { WAITS } from "../vocab";
 
 const PROVIDER: Record<string, string> = { lucid: "Lucid", drawio: "draw.io", jira: "Jira", openproject: "OpenProject" };
@@ -151,6 +151,69 @@ const SECURITY: Record<string, string> = {
   secret_scanning: "secret scanning", push_protection: "push protection", dependabot_alerts: "Dependabot alerts",
   dependabot_security_updates: "Dependabot updates", code_scanning_default_setup: "CodeQL", dependency_graph: "dependency graph",
 };
+
+/** G4: the design against what the product already has, read from its architecture record and repos. */
+export function DesignReviewPanel({ review }: { review: DesignReview }) {
+  const record = review.record?.repo ? `${review.record.repo}@${(review.record.sha ?? "").slice(0, 7)}` : null;
+  const errors = Object.entries(review.errors ?? {});
+  return (
+    <div className="design-review">
+      <h3>Against the existing design</h3>
+      {review.findings.length > 0 && (
+        <ul className="findings">{review.findings.map((f) => <li key={f}>{f}</li>)}</ul>
+      )}
+      <dl className="kv">
+        <dt>Builds on</dt>
+        <dd>
+          {review.builds_on.length === 0 ? "No existing decisions" : (
+            <ul className="plain-list">{review.builds_on.map((a) => <li key={a.id}><strong>{a.id}</strong> {a.title}</li>)}</ul>
+          )}
+        </dd>
+        {review.supersedes.length > 0 && (<>
+          <dt>Overrides</dt>
+          <dd>{review.supersedes.map((s) => `${s.adr} replaces ${s.supersedes}${s.title ? ` (${s.title})` : ""}`).join("; ")}</dd>
+        </>)}
+        <dt>API changes</dt>
+        <dd>
+          {review.contracts.length === 0 ? "None" : (
+            <ul className="plain-list">
+              {review.contracts.map((c) => (
+                <li key={c.repo}>
+                  {short(c.repo)}: {c.current ? `${c.current} to ${c.next || "?"}` : c.note || "no contract found"}
+                  {c.breaking && <> <span className="chip stop">Breaking</span></>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </dd>
+        {review.related.length > 0 && (<>
+          <dt>Not mentioned</dt>
+          <dd>
+            <ul className="plain-list">{review.related.map((a) => <li key={a.id}><strong>{a.id}</strong> {a.title}</li>)}</ul>
+          </dd>
+        </>)}
+        {review.in_flight.length > 0 && (<>
+          <dt>In flight</dt>
+          <dd>
+            <ul className="plain-list">
+              {review.in_flight.map((f) => (
+                <li key={f.feature}>
+                  {f.feature} ({f.title}) also changes{" "}
+                  {(f.contracts ?? []).filter((c) => f.repos.includes(c.repo))
+                    .map((c) => `${short(c.repo)} to ${c.next}`).join(", ") || f.repos.map(short).join(", ")}
+                </li>
+              ))}
+            </ul>
+          </dd>
+        </>)}
+      </dl>
+      <p className="small muted">
+        {record ? `Read from ${record}.` : "This product has no architecture record yet."}
+        {errors.length > 0 && ` Couldn't read: ${errors.map(([k, v]) => `${k} (${v})`).join("; ")}.`}
+      </p>
+    </div>
+  );
+}
 
 /** What G4 approves: each new repo and the settings it will get. */
 export function RepoPlans({ plans }: { plans: RepoPlan[] }) {

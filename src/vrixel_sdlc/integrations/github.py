@@ -50,7 +50,7 @@ class GitHub(Protocol):
     def dependency_diff(self, *, repo: str, base: str, head: str) -> list | None: ...
     def secret_alerts(self, *, repo: str) -> list | None: ...
     # Provisioning new repositories (see vrixel_sdlc.provisioning); each call is idempotent.
-    def get_file(self, *, repo: str, path: str, ref: str) -> str | None: ...
+    def get_file(self, *, repo: str, path: str, ref: str) -> str | None: ...  # ref '' = default branch
     def create_repo(self, *, repo: str, template: str | None, private: bool, description: str) -> str: ...
     def update_repo(self, *, repo: str, merge: dict, default_branch: str, description: str) -> None: ...
     def enable_security(self, *, repo: str, **features: bool) -> None: ...
@@ -134,7 +134,7 @@ class StubGitHub:
         return self.repos.setdefault(repo, {})
 
     def get_file(self, *, repo, path, ref):
-        return self.files.get((repo, ref, path))
+        return self.files.get((repo, ref or "main", path))
 
     def create_repo(self, *, repo, template, private, description) -> str:
         r = self._repo(repo, "create_repo")
@@ -333,7 +333,8 @@ class GitHubRest:
             raise GitHubError(f"GitHub {method} {path}: {exc.code}") from exc
 
     def get_file(self, *, repo, path, ref):
-        res = self._call("GET", repo, f"/contents/{quote(path)}?ref={quote(ref, safe='')}", ok404=True)
+        query = f"?ref={quote(ref, safe='')}" if ref else ""
+        res = self._call("GET", repo, f"/contents/{quote(path)}{query}", ok404=True)
         if not res or not isinstance(res, dict) or "content" not in res:
             return None
         return base64.b64decode(res["content"]).decode("utf-8")

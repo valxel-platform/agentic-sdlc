@@ -77,6 +77,12 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     if not section(text, "Contracts"):
         out.append("HLD has no contracts section (VX-4)")
     out += _diagram(text, repos)
+    if ctx.get("knowledge"):
+        # Against the existing design: cited decisions are current, overrides are explicit, and
+        # contract changes start from the version actually merged.
+        from ..knowledge import design_review
+
+        out += design_review(text, ctx["knowledge"], ctx.get("feature_id", ""))["findings"]
     return out
 
 

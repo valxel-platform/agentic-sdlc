@@ -37,6 +37,22 @@ def event(node: str, kind: str, detail: str = "", **extra) -> dict:
     return {"at": now(), "node": node, "kind": kind, "detail": detail, **extra}
 
 
+# Phases whose agents design or build, and so need the existing design (decisions, contracts,
+# capabilities). Release and operate work from the change set instead.
+KNOWLEDGE_PHASES = ("discovery", "spec", "design", "architecture", "plan", "build")
+
+
+def design_knowledge(services, snap) -> tuple[dict, str]:
+    """The existing design as data (for checks and G4) and as a prompt section (for agents)."""
+    from ..knowledge import render
+
+    kn = getattr(services, "knowledge", None)
+    if kn is None:
+        return {}, ""
+    pack = kn.collect(snap)
+    return pack, render(pack, int(kn.cfg.settings.get("max_chars", 12000)))
+
+
 def feature_ctx(services, state: FeatureState, phase: str) -> dict:
     """Read-only snapshot a phase needs; artifact bodies are loaded from the store."""
     spec = PHASE_SPECS[phase]
@@ -44,7 +60,10 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
     product, con = snap.product, snap.constitution
     arts = state.get("artifacts", {})
     parents = {k: services.artifacts.load(arts[k]) for k in spec.parents if k in arts}
+    knowledge, knowledge_text = design_knowledge(services, snap) if phase in KNOWLEDGE_PHASES else ({}, "")
     return {
+        "knowledge": knowledge,
+        "knowledge_text": knowledge_text,
         "feature_id": state["feature_id"],
         "product_id": state["product_id"],
         "product_name": product.name,
@@ -85,6 +104,7 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
     layers = build_layers(
         role=role, skills=skills, constitution=snap.constitution, product=product,
         parent_texts=ctx.get("parent_texts", {}), tail=tail, product_context=snap.product_context,
+        design_knowledge=ctx.get("knowledge_text", ""),
     )
     tags = CallTags(
         product_id=ctx["product_id"], feature_id=ctx["feature_id"], phase=phase, role=role,
@@ -322,24 +342,44 @@ def make_phase_node(phase: str, services):
                                 "version": f"{state['feature_id']}", "staging": bool(deployed),
                                 "production": False}
         elif phase == "operate":
-            delta["events"].append(_knowledge_writeback(services, state, ctx))
+            delta["events"] += _knowledge_writeback(services, state, ctx)
         return delta
 
     return node
 
 
-def _knowledge_writeback(services, state: FeatureState, ctx: dict) -> dict:
-    """After a production release, register the capability in the catalog (Knowledge agent)."""
-    cap_id = f"CAP-{state['product_id']}-{templates._slug(state['title']).upper()[:24]}"
+def capability_id(state: FeatureState) -> str:
+    return f"CAP-{state['product_id']}-{templates._slug(state['title']).upper()[:24]}"
+
+
+def _knowledge_writeback(services, state: FeatureState, ctx: dict) -> list[dict]:
+    """After a production release: the capability goes live in the catalog, and the decisions G4
+    approved are proposed to the product's architecture record (a governance pull request)."""
+    cap_id = capability_id(state)
     call_agent(services, role="knowledge", phase="operate", ctx=ctx, skills=("engineering:documentation",),
                tail=f"Summarize capability {cap_id} for the catalog.", stub_text=f"{cap_id}: {state['title']}",
                max_tokens=512)
+    design = dict(state.get("design") or {})
     services.catalog.register({
         "id": cap_id, "product_id": state["product_id"], "name": state["title"], "status": "live",
+        "feature": state["feature_id"], "adrs": design.get("adrs", []),
+        "contracts": [c for c in design.get("contracts", []) if c.get("next")],
         "artifacts": [r["id"] for r in state.get("artifacts", {}).values()],
         "release": state.get("change_set", {}).get("id"),
     })
-    return event("operate", "capability_registered", cap_id)
+    events = [event("operate", "capability_registered", cap_id)]
+    hld_ref = state.get("artifacts", {}).get(PHASE_SPECS["architecture"].kind)
+    if hld_ref and getattr(services, "knowledge", None) is not None:
+        from ..knowledge.writeback import propose_record_update
+
+        try:
+            pr = propose_record_update(services, {**state, "product_name": ctx.get("product_name")},
+                                       services.artifacts.load(hld_ref), design)
+            if pr:
+                events.append(event("operate", "architecture_record_pr", pr["url"], files=pr["files"]))
+        except Exception as exc:  # the record update is a proposal; never fail a released feature on it
+            events.append(event("operate", "architecture_record_failed", f"{type(exc).__name__}: {exc}"))
+    return events
 
 
 PROVIDER_NAMES = {"lucid": "Lucid", "drawio": "draw.io"}

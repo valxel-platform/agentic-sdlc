@@ -163,6 +163,7 @@ class Settings:
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     quality: Any = None  # vrixel_sdlc.quality.QualityConfig
     repos: Any = None  # vrixel_sdlc.provisioning.RepoStandards
+    knowledge: Any = None  # vrixel_sdlc.knowledge.KnowledgeConfig
 
     def entry(self, product_id: str) -> RegistryEntry:
         try:
@@ -228,6 +229,7 @@ def load_settings(
         failover=models_raw.get("failover") or {},
         tools=load_tools(cfg_dir / "tools.yaml"),
         quality=_load_quality(cfg_dir / "quality.yaml"),
+        knowledge=_load_knowledge(cfg_dir / "knowledge.yaml"),
         repos=_load_repos(cfg_dir / "repos.yaml"),
     )
 
@@ -236,6 +238,12 @@ def _load_repos(path: Path):
     from .provisioning import load_standards
 
     return load_standards(path)
+
+
+def _load_knowledge(path: Path):
+    from .knowledge import load_knowledge
+
+    return load_knowledge(path)
 
 
 def _load_quality(path: Path):

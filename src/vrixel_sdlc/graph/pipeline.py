@@ -21,7 +21,7 @@ from ..agents.parse import parse_affected_repos, parse_new_repos, parse_tasks
 from ..integrations.openchoreo import PIPELINE
 from ..state import GATES, PHASES, FeatureState, GateDecision
 from ..waits import LABELS, TIMEOUT_S
-from .phase import event, make_phase_node, now, touched_lanes
+from .phase import capability_id, design_knowledge, event, make_phase_node, now, touched_lanes
 
 GATE_DECISIONS = ("approve", "revise", "takeover", "abort")
 HANDBACK_DECISIONS = ("handback", "abort")
@@ -119,6 +119,10 @@ def make_gate(gate: str, services):
         if gate in CROSS_LANE_GATES:
             approving += [lane for lane in state.get("lanes_touched", []) if lane in lanes]
         ref = state.get("artifacts", {}).get(kind)
+        # G4 reviewers see the design against what exists now: the decisions it builds on or
+        # overrides, the contract changes from the versions actually merged, related decisions it
+        # doesn't mention, and other approved designs in flight that change the same APIs.
+        review = design_review_for(services, snap, ref, state) if gate == "g4" and ref else None
 
         records, d = [], None
         for lane_id in approving:
@@ -137,6 +141,7 @@ def make_gate(gate: str, services):
                 "quality": quality_summary(state) if gate in ("g5", "g6") else None,
                 # Approving G4 approves creating these repos, with these settings.
                 "new_repos": repo_plans(services, state) if gate == "g4" and lane_id == state["product_id"] else [],
+                "design_review": review,
                 # Each lane reviews the PRs in its own org.
                 "pull_requests": sorted(k for k, pr in state.get("pull_requests", {}).items()
                                         if pr["repo"].split("/", 1)[0] == lane.org) if gate == "g5" else [],
@@ -159,6 +164,8 @@ def make_gate(gate: str, services):
                 "events": [event(gate, "revise", d["feedback"], approver=d["approver"])],
             })
         if d["decision"] == "abort":
+            if state.get("design"):  # an approved design is no longer in flight
+                services.catalog.register({**_design_entry(state, state["design"]), "status": "abandoned"})
             return Command(goto=END, update={
                 "gate_decisions": records, "status": "aborted",
                 "events": [event(gate, "aborted", d["feedback"], approver=d["approver"])],
@@ -167,6 +174,12 @@ def make_gate(gate: str, services):
         approvers = ", ".join(r["approver"] for r in records if r["decision"] in ("approve", "handback"))
         update: dict = {"gate_decisions": records, "approvals": {gate: True},
                         "events": [event(gate, "approved", d["feedback"], approver=approvers, lanes=approving)]}
+        if gate == "g4" and review is not None:
+            # Approved designs are visible to every other feature of the product while in flight.
+            design = {k: review[k] for k in ("builds_on", "supersedes", "contracts", "record")}
+            design["adrs"] = _hld_adrs(services.artifacts.load(ref))
+            services.catalog.register({**_design_entry(state, design), "status": "in_design"})
+            update["design"] = design
         if gate == "g6":
             release = dict(state.get("release", {}))
             # VX-3: production promotion is a human action, in each product's own runtime. In
@@ -193,6 +206,36 @@ def make_gate(gate: str, services):
 
     dest = ("production_wait",) if gate == "g6" else (tuple(target) if isinstance(target, list) else (target,))
     return gate_node, (*dest, phase, END)
+
+
+def design_review_for(services, snap, ref, state: FeatureState) -> dict | None:
+    from ..knowledge import design_review
+
+    pack, _ = design_knowledge(services, snap)
+    if not pack:
+        return None
+    return design_review(services.artifacts.load(ref), pack, state["feature_id"])
+
+
+def _hld_adrs(hld: str) -> list[dict]:
+    """The HLD's own ADR lines as {id, title, supersedes}."""
+    import re
+
+    from ..agents.parse import bullets, section
+
+    out = []
+    for line in bullets(section(hld, "ADRs")):
+        m = re.match(r"(ADR-[A-Za-z0-9-]+):\s*(.*)", line)
+        if m:
+            sup = re.search(r"[Ss]upersedes\s+(ADR-[A-Z0-9-]+)", line)
+            out.append({"id": m.group(1), "title": m.group(2).strip(), "supersedes": sup.group(1) if sup else ""})
+    return out
+
+
+def _design_entry(state: FeatureState, design: dict) -> dict:
+    return {"id": capability_id(state), "product_id": state["product_id"], "name": state["title"],
+            "feature": state["feature_id"], "adrs": design.get("adrs", []),
+            "contracts": [c for c in design.get("contracts", []) if c.get("next")]}
 
 
 def make_escalation(phase: str, services):

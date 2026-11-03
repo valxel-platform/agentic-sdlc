@@ -23,6 +23,7 @@ from .errors import GovernanceError
 class GovernanceSource(Protocol):
     def resolve(self, org: str, repo: str, ref: str) -> str: ...
     def read(self, org: str, repo: str, path: str, sha: str, *, optional: bool = False) -> str | None: ...
+    def list(self, org: str, repo: str, directory: str, sha: str) -> list[str]: ...  # file paths, one level
 
 
 class LocalSource:
@@ -72,6 +73,13 @@ class LocalSource:
                 return None
             raise GovernanceError(f"{org}/{repo}@{sha[:7]} has no {path}")
         return tree[path]
+
+    def list(self, org: str, repo: str, directory: str, sha: str) -> list[str]:
+        self.read(org, repo, "", sha, optional=True)  # loads the snapshot, or raises if it is gone
+        with self._lock:
+            tree = self._snapshots[(org, repo, sha)]
+        prefix = directory.strip("/") + "/"
+        return sorted(p for p in tree if p.startswith(prefix) and "/" not in p[len(prefix):])
 
 
 class TokenProvider(Protocol):
@@ -124,6 +132,12 @@ class GitHubSource:
         if text is None and not optional:
             raise GovernanceError(f"{org}/{repo}@{sha[:7]} has no {path}")
         return text
+
+    def list(self, org: str, repo: str, directory: str, sha: str) -> list[str]:
+        raw = self._get(org, f"/repos/{quote(org)}/{quote(repo)}/contents/{quote(directory.strip('/'))}"
+                             f"?ref={quote(sha)}", "application/vnd.github+json")
+        entries = json.loads(raw) if raw else []
+        return sorted(e["path"] for e in entries if isinstance(e, dict) and e.get("type") == "file")
 
 
 class EnvTokenProvider:

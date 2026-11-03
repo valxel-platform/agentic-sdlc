@@ -183,6 +183,10 @@ class FeatureEngine:
             return {"error": self.sync_errors[feature_id]}
 
     def _submit(self, feature_id: str, payload) -> None:
+        # Running from the moment the work is queued, not when a worker picks it up: otherwise a
+        # caller (or a second decision) can see the old state between the two.
+        self.running.add(feature_id)
+
         def run():
             try:
                 self._execute(feature_id, payload)

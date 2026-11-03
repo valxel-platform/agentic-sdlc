@@ -109,8 +109,18 @@ def architecture(ctx: dict, defective: bool) -> str:
                    key=lambda r: (_REPO_ORDER.get(r["role"], 9), r["name"]))
     own = sorted(ctx["repos"], key=lambda r: _REPO_ORDER.get(r["role"], 9))
     provider = next((r["name"] for r in own if r["role"] == "provider"), own[0]["name"])
+    kn = ctx.get("knowledge") or {}
+    names = {r["name"] for r in repos}
+    accepted = [a for a in (kn.get("architecture") or {}).get("adrs", []) if a["status"] == "accepted"]
+    # Stub judgement: build on the accepted decisions about the repos this design touches.
+    builds_on = [a for a in accepted if set(a["repos"]) & names] or accepted[:1]
+    api = ((kn.get("contracts") or {}).get("apis") or {}).get(provider) or {}
     lines = [
         f"# HLD: {ctx['title']}",
+        "", "## Builds on"]
+    lines += ([f"- {a['id']}: {a['title']}" for a in builds_on] if builds_on else
+              ["- None: the architecture record has no accepted decisions yet"])
+    lines += [
         "", "## ADRs",
         f"- ADR-{ctx['feature_id']}-1: Extend the {provider} API with a versioned endpoint (expand, then contract)",
     ]
@@ -127,11 +137,20 @@ def architecture(ctx: dict, defective: bool) -> str:
             f"- {r['name']} ({r['lane']}): new minor version, adopted by this product in the same change set"
             for r in deps]
     lines += [
-        "", "## Contracts", f"- {provider}: OpenAPI minor version bump, backward compatible (VX-4)",
+        "", "## Contracts", f"- {provider}: " + (
+            f"{api['version']} -> {_minor_bump(api['version'])}, adds an endpoint; backward compatible (VX-4)"
+            if api.get("version") else "OpenAPI minor version bump, backward compatible (VX-4)"),
         "", "## Diagram", "```mermaid", _flowchart(ctx, repos), "```",
         "", "## Constitution articles", "- VX-4", "- VX-8",
     ]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _minor_bump(version: str) -> str:
+    from ..knowledge import semver
+
+    v = semver(version)
+    return f"{v[0]}.{v[1] + 1}.0" if v else version
 
 
 def _node_id(repo: str) -> str:
