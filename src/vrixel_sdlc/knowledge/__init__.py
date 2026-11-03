@@ -100,12 +100,21 @@ def render(pack: dict, max_chars: int = 12000) -> str:
             changes = "; ".join(f"{x['repo'].split('/', 1)[-1]} -> {x['next']}" for x in c.get("contracts") or [])
             out.append(f"- {c['id']} (approved design, in flight: {c.get('feature', '')}): {c['name']}"
                        + (f"; changing {changes}" if changes else ""))
+    rm = pack.get("roadmap") or {}
+    if rm.get("goals") or rm.get("initiatives"):
+        out.append("\n## Roadmap (goals and approved initiatives)")
+        out += [f"- {g['id']}: {g['title']}" + (f" (measure: {g['measure']})" if g.get("measure") else "")
+                for g in rm.get("goals", [])]
+        for i in rm.get("initiatives", []):
+            if i.get("status") in ("approved", "active"):
+                out.append(f"- {i['id']} ({i.get('horizon', '?')}): {i['title']}, goal {i.get('goal') or '?'}")
     feats = (pack.get("features") or {}).get("features") or []
     if feats:
         out.append("\n## Features of this product (don't redo one; extend it)")
         for f in feats[-40:]:
             where = {"released": "released", "stopped": "stopped"}.get(f["status"], f"in progress, at {f.get('stage') or '?'}")
-            out.append(f"- {f['feature_id']} ({where}): {f['title']}")
+            out.append(f"- {f['feature_id']} ({where}): {f['title']}"
+                       + (f" [{f['initiative_id']}]" if f.get("initiative_id") else ""))
     if arch.get("overview"):
         out.append("\n## Architecture overview\n" + arch["overview"].strip())
     return _cut("\n".join(out), max_chars) + "\n"

@@ -101,6 +101,7 @@ vrixel-tools/                          tools org
 vrixel-emr/                            one org per product; each owns its runtime
   governance                           product.yaml · constitution.md · context.md · CODEOWNERS
                                        architecture/ (overview.md, decisions/ADR-*.md)
+                                       roadmap/ (goals.yaml, initiatives/, releases/)
   emr-intake-api, emr-web, ...         product code; PRs are opened here
 vrixel-agtech/ · vrixel-pos/ · vrixel-medspa/ · vrixel-apx/   same layout
 vrixel-shared-services/                shared lane: communication, audit framework, security
@@ -350,6 +351,50 @@ entirely different words gets through to G1, where the approver sees the closest
 **After release.** The capability goes live in the catalog with its decisions and API changes, and
 the pipeline opens a pull request in the governance repo that adds the feature's ADRs (accepted),
 marks superseded ones, and logs the change in the overview. People merge it.
+
+## Roadmap: goals, initiatives and releases
+
+Above features sit a product's goals and the initiatives that serve them; beside them, releases
+decide when users see features. Scope is the product today; ids carry the product, goals may name
+a `parent` and the record has a `scope` field, so a portfolio level can sit above products later.
+
+**The record is Git**, in each product's governance repo, changed by pull request like ADRs:
+
+```
+roadmap/
+  goals.yaml                outcomes for a period: id, title, measure, period (parent: later)
+  initiatives/INI-EMR-1.md  one approved initiative: goal, horizon (now/next/later), budget envelope,
+                            lanes, release model, success measure, candidate features
+  releases/REL-EMR-1.md     one release: launch group or release train, features, status, notes, evidence
+```
+
+The tool runs initiatives and releases as threads alongside features, computes progress and spend
+from the features themselves, and mirrors initiatives to Jira or OpenProject (an item one level
+above the feature epics; set `initiative_type` in `tools.work_tracking` if your tracker calls it
+something else) and releases as comments on member epics.
+
+**Initiatives have their own gate, G0.** A strategist agent drafts the initiative from a request:
+the goal it serves (or a proposed new goal with a measure), outcome, success measure, horizon,
+budget envelope (at most `max_initiative_budget_usd`), the lanes that must change, the release
+model and the candidate features. Checks run before G0: the goal exists, lanes are the product or
+its dependencies, candidates don't repeat existing features, and the initiative doesn't repeat
+another. G0 is decided by the product owners (`approvers.g0`, else G1's approvers), then by each
+other lane involved. Approval opens a governance PR that adds the initiative (and any new goal).
+
+**Features under initiatives.** Starting a candidate creates a feature linked to its initiative
+(the duplicate check still applies). G1 shows roadmap fit: the initiative, its horizon and how much
+of its envelope is spent, or "unplanned work" for features without one.
+
+**Releases.** Every feature reaches production behind a feature flag.
+
+| Model | How it ships | Use for |
+| --- | --- | --- |
+| Launch group (default) | Each member goes through G6 and reaches production with its flag off. When all are there, the release gate (G6 approvers of every lane touched) turns the flags on together. | Most work: small deploys, coordinated exposure, rollback by flag |
+| Release train | Members wait after staging instead of asking for G6 each. One release gate approves them together with combined release notes and evidence (suites, accepted risks, G5 approvers); they then promote to production. A cancelled train hands its features back to their own G6. | Regulated or contractual shipments (certification builds, go-lives, cross-lane cutovers) |
+
+A feature that isn't in a release goes live at its own G6. Flags go through
+`integrations/flags.py`; connect the product's flag service (OpenFeature with flagd, Unleash,
+LaunchDarkly) by implementing its two methods; until then a stand-in records them.
 
 ## Delivery: GitHub and OpenChoreo
 
@@ -618,6 +663,7 @@ src/vrixel_sdlc/
   web/auth.py      GitHub OAuth, signed sessions, approver matching
   intake.py        guided intake agent
   duplicates.py    finds features and capabilities a new request repeats
+  roadmap/         goals, initiatives (G0) and releases: record, workflows, views
   events.py        live-update bus
   cli.py           vrixel demo
 web/               React app: decisions, features, intake

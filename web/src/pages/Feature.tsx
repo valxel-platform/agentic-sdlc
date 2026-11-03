@@ -7,7 +7,7 @@ import { ArtifactBody } from "../components/Artifact";
 import { DecisionPanel } from "../components/Decision";
 import { Delivery, Diagrams, NewRepos, WorkItems } from "../components/External";
 import { QualityTable } from "../components/Quality";
-import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
+import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money, threadPath } from "../vocab";
 
 const ORDER = ["OPP", "PRD", "UX", "HLD", "PLAN", "BUILD", "REL", "OPS"];
 
@@ -82,6 +82,11 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
           {f.created_by && <span>Intent from {f.created_by}</span>}
           {f.risk_tier && <span>{RISK[f.risk_tier]}</span>}
           {f.lanes_touched && f.lanes_touched.length > 0 && <span>Also changes {f.lanes_touched.join(", ")}</span>}
+          {f.initiative_id ? <span>Delivers <Link to={threadPath(f.initiative_id)}>{f.initiative_id}</Link></span> : <span>Unplanned work</span>}
+          {f.release?.release_id && <span>In <Link to={threadPath(f.release.release_id)}>{f.release.release_id}</Link></span>}
+          {f.release?.flag && (f.release.flag_on
+            ? <span className="chip go" title={f.release.flag}>Live</span>
+            : <span className="chip wait" title={f.release.flag}>In production, flag off</span>)}
           <span title={f.constitution_version}>Governed by {f.constitution_version?.split("+").length ?? 0} constitutions</span>
         </div>
       </div>

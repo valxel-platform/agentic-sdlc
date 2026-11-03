@@ -26,6 +26,7 @@ limits:
   min_critic_threshold: 0.75       # products may raise it, not lower it
   max_loops: 5                     # products may lower it, not raise it
   max_budget_usd: 500              # per-feature budget ceiling
+  max_initiative_budget_usd: 5000  # ceiling on an initiative's envelope (all its features)
   required_gates: [g1, g2, g3, g4, g5, g6]   # every gate needs named approvers (VX-1)
 
 # kind: product  owns its runtime (OpenChoreo project and environments) and deploys services.

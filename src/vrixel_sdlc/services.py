@@ -43,6 +43,12 @@ class Services:
     provisioner: object = None  # vrixel_sdlc.provisioning.RepoProvisioner, set by build_services
     knowledge: object = None  # vrixel_sdlc.knowledge.Knowledge, set by build_services
     features: object = None  # product_id -> feature summaries, set by the engine
+    initiatives: object = None  # product_id -> initiatives the engine is running, set by the engine
+    feature_titles: object = None  # feature ids -> titles, set by the engine
+    release_waits: object = None  # resolves release waits (feature trains, release readiness), set by the engine
+    release_for: object = None  # feature_id -> the release it belongs to, set by the engine
+    roadmap_fit: object = None  # feature state -> its initiative and budget, set by the engine
+    flags: object = None  # vrixel_sdlc.integrations.flags.FlagService
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
@@ -116,6 +122,9 @@ def build_services(
     )
     svc.quality = default_quality(svc)
     svc.knowledge = default_knowledge(svc)
+    from .integrations.flags import StubFlags
+
+    svc.flags = StubFlags()
     svc.provisioner = default_provisioner(settings, github, openchoreo)
     return svc
 

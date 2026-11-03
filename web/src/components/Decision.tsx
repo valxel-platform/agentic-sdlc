@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type PendingItem } from "../api";
-import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
+import Markdown from "react-markdown";
+import { ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
 import { DesignReviewPanel, RepoPlans, SimilarList } from "./External";
@@ -46,7 +47,13 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     }
   }
 
-  const gate = item.gate ? GATES[item.gate] : undefined;
+  const gate = item.gate === "release"
+    ? (item.model === "launch"
+      ? { name: "Release", question: "Launch these features together?", approve: "Launch" }
+      : { name: "Release", question: "Ship this release train?", approve: "Approve release" })
+    : item.gate ? GATES[item.gate] : undefined;
+  const roadmapGate = item.gate === "g0" || item.gate === "release";
+  const stopLabel = item.gate === "g0" ? "Drop initiative" : item.gate === "release" ? "Cancel release" : "Stop feature";
   const heading =
     item.type === "escalation" && item.phase === "delivery" ? (DELIVERY_FAILED[item.wait ?? ""] ?? "Delivery failed")
     : item.type === "escalation" && item.phase === "security" ? "Security findings block this change"
@@ -64,7 +71,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     <section className="panel decision" aria-labelledby="decision-q">
       <div>
         <p className="muted small">
-          <Link to={`/features/${featureId}`}>{featureId}</Link>{item.title ? ` ${item.title}` : ""}
+          <Link to={threadPath(featureId)}>{featureId}</Link>{item.title ? ` ${item.title}` : ""}
         </p>
         <h2 id="decision-q" className="q">{heading}</h2>
         {item.type === "gate" && (
@@ -89,7 +96,9 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         {item.type === "handback" && <p className="muted">Finish the work yourself, then hand it back so the pipeline continues.</p>}
       </div>
 
-      {item.type !== "handback" && (
+      {item.summary && <p>{item.summary}</p>}
+
+      {item.type !== "handback" && !roadmapGate && (
         <dl className="facts">
           {item.score != null && <div><dt>Evaluator score</dt><dd>{item.score.toFixed(2)}</dd></div>}
           {item.loops != null && <div><dt>Agent attempts</dt><dd>{item.loops}</dd></div>}
@@ -117,6 +126,57 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         <div>
           <h3>{delivery ? "What went wrong" : "What the evaluators found"}</h3>
           <ul className="findings">{item.findings.map((f) => <li key={f}>{f}</li>)}</ul>
+        </div>
+      )}
+
+      {item.gate === "g0" && item.initiative && (
+        <div>
+          <h3>The initiative</h3>
+          <dl className="kv plain-kv">
+            <dt>Goal</dt><dd>{item.initiative.goal || (item.initiative.new_goal ? `New: ${item.initiative.new_goal.title} (measure: ${item.initiative.new_goal.measure})` : "None")}</dd>
+            <dt>Measure</dt><dd>{item.initiative.measure || "None"}</dd>
+            <dt>Horizon</dt><dd>{HORIZONS[item.initiative.horizon] ?? item.initiative.horizon}</dd>
+            <dt>Budget</dt><dd>{money(item.initiative.budget_usd)} for all its features</dd>
+            <dt>Lanes</dt><dd>{item.initiative.lanes.join(", ")}</dd>
+            <dt>Releases as</dt><dd>{MODELS[item.initiative.release_model] ?? item.initiative.release_model}</dd>
+          </dl>
+          <h3>Features it would start</h3>
+          <ol className="plain-ol">{item.initiative.candidates.map((c) => <li key={c.title}><strong>{c.title}</strong>{c.description ? `: ${c.description}` : ""}</li>)}</ol>
+        </div>
+      )}
+
+      {item.gate === "release" && (
+        <div>
+          <dl className="kv plain-kv">
+            <dt>Kind</dt><dd>{MODELS[item.model ?? ""] ?? item.model}</dd>
+            {item.target_date && (<><dt>Target date</dt><dd>{item.target_date}</dd></>)}
+            <dt>Features</dt><dd>{(item.features ?? []).map((f, n) => <span key={f}>{n > 0 && ", "}<Link to={threadPath(f)}>{f}</Link></span>)}</dd>
+            {(item.dropped ?? []).length > 0 && (<><dt>Dropped</dt><dd>{item.dropped!.join(", ")} (stopped before the release)</dd></>)}
+          </dl>
+          {item.evidence && (<><h3>Evidence</h3><div className="md small"><Markdown>{item.evidence}</Markdown></div></>)}
+        </div>
+      )}
+
+      {roadmapGate && item.preview && (
+        <div>
+          <h3 style={{ marginBottom: 8 }}>{item.gate === "g0" ? "Initiative draft" : "Release notes"}</h3>
+          <div className="evidence md"><Markdown>{item.preview}</Markdown></div>
+        </div>
+      )}
+
+      {item.roadmap_fit && (
+        <div>
+          <h3>Roadmap</h3>
+          {item.roadmap_fit.unplanned ? (
+            <p className="small">Unplanned work: this feature isn't part of an approved initiative.</p>
+          ) : (
+            <p className="small">
+              Delivers <Link to={threadPath(item.roadmap_fit.initiative!.id)}>{item.roadmap_fit.initiative!.id}</Link> {item.roadmap_fit.initiative!.title}
+              {" "}({HORIZONS[item.roadmap_fit.initiative!.horizon] ?? item.roadmap_fit.initiative!.horizon}).
+              {" "}Initiative budget: {money(item.roadmap_fit.spent_usd)} spent of {money(item.roadmap_fit.budget_usd)}
+              {item.roadmap_fit.over && <> <span className="chip stop">Over budget</span></>}
+            </p>
+          )}
         </div>
       )}
 
@@ -164,7 +224,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         <>
           {mode === "revise" || mode === "retry" || mode === "abort" ? (
             <label className="field">
-              {mode === "revise" ? "What should the agents change?" : mode === "retry" ? "Guidance for the next attempt (optional)" : "Why stop this feature?"}
+              {mode === "revise" ? "What should the agents change?" : mode === "retry" ? "Guidance for the next attempt (optional)" : item.gate === "g0" ? "Why drop this initiative?" : item.gate === "release" ? "Why cancel this release?" : "Why stop this feature?"}
               <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} autoFocus />
             </label>
           ) : null}
@@ -194,10 +254,10 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             {item.type === "gate" && mode === null && (
               <>
                 <button className="btn go" disabled={busy} onClick={() => send("approve")}>{gate?.approve ?? "Approve"}</button>
-                <button className="btn secondary" disabled={busy} onClick={() => setMode("revise")}>Request changes</button>
-                <button className="btn secondary" disabled={busy} onClick={() => send("takeover")}>Take over</button>
+                {item.gate !== "release" && <button className="btn secondary" disabled={busy} onClick={() => setMode("revise")}>Request changes</button>}
+                {!roadmapGate && <button className="btn secondary" disabled={busy} onClick={() => send("takeover")}>Take over</button>}
                 <span className="spacer" />
-                <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>Stop feature</button>
+                <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>{stopLabel}</button>
               </>
             )}
             {item.type === "handback" && mode === null && (
@@ -245,7 +305,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
               <button className="btn go" disabled={busy} onClick={() => send("resolved", content.trim() ? { artifact_content: content } : {})}>Mark resolved</button>
             )}
             {mode === "abort" && (
-              <button className="btn danger" disabled={busy} onClick={() => send("abort")}>Stop feature</button>
+              <button className="btn danger" disabled={busy} onClick={() => send("abort")}>{stopLabel}</button>
             )}
             {mode !== null && <button className="btn secondary" disabled={busy} onClick={() => setMode(null)}>Cancel</button>}
           </div>

@@ -192,6 +192,8 @@ class WorkSync:
                 if row is None:
                     marker = f"{fid}/{d.key}" if d.key != "epic" else fid  # the summary's [prefix]
                     parent = have.get(d.parent) if d.parent else None
+                    if d.key == "epic" and s.get("initiative_id"):  # the feature sits under its initiative
+                        parent = self.links.get(s["initiative_id"]).get("initiative")
                     ext = tracker.find(cfg, marker) or tracker.create(
                         cfg, kind=d.kind, summary=d.summary, description=d.description, marker=marker,
                         parent=parent)
@@ -216,6 +218,62 @@ class WorkSync:
                         self.links.put(fid, stream, {"count": posted})  # after each, so a retry resumes
                         done["commented"] += 1
             return done
+
+    def sync_initiative(self, s: dict) -> dict:
+        """An approved initiative gets one tracker item (its features' epics sit under it); a dropped
+        one that already has an item is cancelled. Drafts stay in the tool."""
+        cfg, tracker = self.config(s)
+        if not cfg or tracker is None or s.get("status") not in ("approved", "dropped"):
+            return {}
+        iid = s["initiative_id"]
+        with self._lock(iid):
+            have = self.links.get(iid)
+            row = have.get("initiative")
+            if row is None and s["status"] == "approved":
+                d = s.get("draft") or {}
+                desc = (f"{d.get('outcome', '')}\n\nSuccess measure: {d.get('measure', '')}\nHorizon: {d.get('horizon', '')}\n"
+                        f"Budget envelope: {d.get('budget_usd', 0):.0f} USD\n\nTracked by the Vrixel agentic SDLC: "
+                        f"{self.public_url}/initiatives/{iid}")
+                ext = tracker.find(cfg, iid) or tracker.create(cfg, kind="initiative", summary=f"[{iid}] {s['title']}",
+                                                                description=desc, marker=iid, parent=None)
+                row = {**ext, "kind": "initiative", "summary": s["title"], "status": "todo"}
+                self.links.put(iid, "initiative", row)
+            if row is None:
+                return {}
+            want = "in_progress" if s["status"] == "approved" else "cancelled"
+            if STATUS_ORDER[want] > STATUS_ORDER.get(row["status"], 0):
+                tracker.set_status(cfg, row, want)
+                self.links.put(iid, "initiative", {**row, "status": want})
+            return {"provider": cfg["provider"], "initiative": row.get("key") or row.get("id")}
+
+    def sync_release(self, s: dict) -> dict:
+        """Releases are noted on each member feature's epic: when planned, and when approved or cancelled."""
+        cfg, tracker = self.config(s)
+        if not cfg or tracker is None:
+            return {}
+        rid = s["release_id"]
+        kind = "launch group" if s.get("model") == "launch" else "release train"
+        notes = [f"Part of {rid} ({kind}){' targeting ' + s['target_date'] if s.get('target_date') else ''}."]
+        if s.get("status") in ("approved", "shipped"):
+            notes.append(f"{rid} approved by {s.get('approved_by', '')}"
+                         + ("; flags are on, the feature is live." if s.get("status") == "shipped" else "."))
+        elif s.get("status") == "cancelled":
+            notes.append(f"{rid} was cancelled.")
+        posted = 0
+        for fid in s.get("features") or []:
+            with self._lock(fid):
+                have = self.links.get(fid)
+                epic = have.get("epic")
+                if not epic:
+                    continue
+                key = f"_release:{rid}"
+                done = int(have.get(key, {}).get("count", 0))
+                for text in notes[done:]:
+                    tracker.comment(cfg, epic, text)
+                    done += 1
+                    posted += 1
+                    self.links.put(fid, key, {"count": done})
+        return {"provider": cfg["provider"], "commented": posted}
 
     def items(self, feature_id: str) -> list[dict]:
         rows = self.links.get(feature_id)

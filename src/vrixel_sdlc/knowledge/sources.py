@@ -95,6 +95,24 @@ class ProductFeatures:
         return {"features": lookup(snap.product.product_id) if callable(lookup) else []}
 
 
+class ProductRoadmap:
+    """Goals, initiatives and releases: the record in Git plus initiatives the engine is running."""
+
+    def __init__(self, services) -> None:
+        self.services = services
+
+    def collect(self, snap, cfg: dict) -> dict:
+        from ..roadmap import read_roadmap
+
+        pid = snap.product.product_id
+        record = read_roadmap(self.services, pid)
+        lookup = getattr(self.services, "initiatives", None)
+        running = lookup(pid) if callable(lookup) else []
+        known = {i["id"] for i in record["initiatives"]}
+        initiatives = record["initiatives"] + [i for i in running if i["id"] not in known and i["status"] == "approved"]
+        return {"goals": record["goals"], "initiatives": initiatives, "releases": record["releases"]}
+
+
 class CatalogCapabilities:
     def __init__(self, services) -> None:
         self.services = services

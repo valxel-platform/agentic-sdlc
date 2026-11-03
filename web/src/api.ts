@@ -14,6 +14,15 @@ export interface PendingItem {
   new_repos?: RepoPlan[];
   design_review?: DesignReview | null;
   related_features?: SimilarItem[];
+  kind?: "feature" | "initiative" | "release";
+  initiative?: InitiativeDraft;
+  roadmap_fit?: RoadmapFit | null;
+  model?: "launch" | "train";
+  features?: string[];
+  dropped?: string[];
+  evidence?: string;
+  target_date?: string;
+  summary?: string;
   not_duplicate_reason?: string;
   targets?: Record<string, unknown>[];
   phase?: string;
@@ -68,7 +77,9 @@ export interface Feature extends FeatureSummary {
   artifacts: Record<string, string>;
   pull_requests: Record<string, { repo: string; number: number; url: string; state: string; merged_by?: string; review_score?: number; task_id?: string }>;
   change_set: { id?: string; merge_order?: string[]; published?: string[] };
-  release: { components?: string[]; packages?: string[]; production?: boolean; promoted_by?: string };
+  release: { components?: string[]; packages?: string[]; production?: boolean; promoted_by?: string;
+             flag?: string; flag_on?: boolean | null; release_id?: string };
+  initiative_id?: string;
   gate_decisions: GateDecision[];
   scores: Record<string, number>;
   loop_count: Record<string, number>;
@@ -144,6 +155,46 @@ export interface Me {
   lanes: { id: string; name: string }[];
 }
 
+export interface Candidate { title: string; description: string; started?: boolean }
+export interface InitiativeDraft {
+  goal: string; new_goal: { title: string; measure: string } | null; measure: string; horizon: string;
+  budget_usd: number; lanes: string[]; release_model: "launch" | "train"; candidates: Candidate[];
+}
+export interface RoadmapFit {
+  unplanned?: boolean;
+  initiative?: { id: string; title: string; goal: string; horizon: string; release_model: string };
+  budget_usd?: number; spent_usd?: number; remaining_usd?: number; over?: boolean;
+}
+export interface FeatureRow {
+  feature_id: string; title: string; status: "released" | "in_progress" | "stopped" | string; stage: string;
+  initiative_id: string; cost_usd: number; flag_on: boolean | null;
+}
+export interface ThreadBase {
+  feature_id: string; kind: "initiative" | "release"; product_id: string; title: string; created_by: string;
+  status: string; running: boolean; error: string | null; pending: PendingItem[]; events: FeatureEvent[];
+  cost_usd: number; record_pr: { url?: string; error?: string };
+}
+export interface InitiativeView extends ThreadBase {
+  request: string; content: string; draft: InitiativeDraft; findings: string[]; features: FeatureRow[];
+  candidates: Candidate[]; budget_usd: number; spent_usd: number; progress: { released: number; total: number };
+}
+export interface ReleaseView extends ThreadBase {
+  model: "launch" | "train"; target_date: string; initiative: string; notes: string; evidence: string;
+  approved_by: string; dropped: string[]; features: FeatureRow[];
+}
+export interface RoadmapInitiative {
+  id: string; title: string; goal: string; horizon: string; status: string; budget_usd: number; lanes: string[];
+  release_model: string; record: string; spent_usd: number; features: FeatureRow[];
+  progress: { released: number; total: number; planned: number };
+}
+export interface Roadmap {
+  product_id: string; record: { repo: string; sha: string; error: string };
+  goals: { id: string; title: string; measure: string; period: string }[];
+  initiatives: RoadmapInitiative[];
+  releases: { id: string; title: string; model: string; status: string; target_date: string; features: string[]; record: string }[];
+  unplanned: FeatureRow[];
+}
+
 export interface SimilarItem {
   kind: "feature" | "capability"; id: string; title: string; status: string; stage: string;
   score: number; duplicate: boolean;
@@ -188,6 +239,15 @@ export const api = {
   products: () => request<Record<string, { name?: string; kind: string; ok: boolean }>>("GET", "/products"),
   syncWork: (id: string) => request<unknown>("POST", `/features/${encodeURIComponent(id)}/sync`, {}),
   feature: (id: string) => request<Feature>("GET", `/features/${encodeURIComponent(id)}`),
+  initiative: (id: string) => request<InitiativeView>("GET", `/features/${encodeURIComponent(id)}`),
+  release: (id: string) => request<ReleaseView>("GET", `/features/${encodeURIComponent(id)}`),
+  roadmap: (productId: string) => request<Roadmap>("GET", `/roadmap/${encodeURIComponent(productId)}`),
+  createInitiative: (body: { product_id: string; title: string; request: string; measure?: string; horizon?: string }) =>
+    request<{ feature_id: string }>("POST", "/initiatives", body),
+  startCandidate: (id: string, index: number, not_duplicate_reason = "") =>
+    request<{ feature_id: string }>("POST", `/initiatives/${encodeURIComponent(id)}/features`, { index, not_duplicate_reason }),
+  createRelease: (body: { product_id: string; title: string; model: string; features: string[]; target_date?: string; initiative?: string }) =>
+    request<{ feature_id: string }>("POST", "/releases", body),
   artifact: (id: string, kind: string) =>
     request<{ id: string; content: string; version: number; constitution_version: string }>(
       "GET", `/features/${encodeURIComponent(id)}/artifacts/${kind}`),

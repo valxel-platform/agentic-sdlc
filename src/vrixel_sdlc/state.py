@@ -65,6 +65,7 @@ class FeatureState(TypedDict, total=False):
     simulate_faults: dict[str, int]  # stub mode: phase -> number of defective attempts
     related_features: list[dict]  # similar features and capabilities found when it was created
     not_duplicate_reason: str  # why the creator says it isn't a duplicate, when it looked like one
+    initiative_id: str  # the approved initiative this feature delivers ('' = unplanned work)
 
     # Written by single nodes or by parallel branches through reducers
     token_budget_usd: Annotated[float, last]  # an escalation can raise it

@@ -65,6 +65,29 @@ class FeatureIn(BaseModel):
                                             description="Stub mode only: phase -> defective attempts")
     not_duplicate_reason: str = Field("", max_length=1000,
                                       description="Required when the request looks like an existing feature")
+    initiative_id: str = Field("", description="The approved initiative this feature delivers; empty = unplanned")
+
+
+class InitiativeIn(BaseModel):
+    product_id: str
+    title: str = Field(min_length=3, max_length=200)
+    request: str = Field(min_length=10, max_length=4000, description="The outcome wanted and what it involves")
+    measure: str = Field("", max_length=500)
+    horizon: str = Field("", pattern="^(|now|next|later)$")
+
+
+class StartCandidateIn(BaseModel):
+    index: int = Field(ge=0)
+    not_duplicate_reason: str = Field("", max_length=1000)
+
+
+class ReleaseIn(BaseModel):
+    product_id: str
+    title: str = Field(min_length=3, max_length=200)
+    model: str = Field("launch", pattern="^(launch|train)$")
+    features: list[str] = Field(min_length=1)
+    target_date: str = Field("", max_length=20)
+    initiative: str = ""
 
 
 class DecisionIn(BaseModel):
@@ -311,18 +334,77 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             fid = eng().create(product_id=body.product_id, title=body.title, description=body.description,
                                created_by=user.login, simulate_faults=body.simulate_faults,
                                budget_usd=body.budget_usd, background=True,
-                               not_duplicate_reason=body.not_duplicate_reason)
+                               not_duplicate_reason=body.not_duplicate_reason, initiative_id=body.initiative_id)
         except DuplicateIntent as exc:
             raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         except GovernanceError as exc:
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
         except PolicyViolation as exc:
             raise HTTPException(403, str(exc)) from exc
         return {"feature_id": fid}
 
+    # --- roadmap: initiatives and releases ---
+    def member_of(user: User, product_id: str) -> None:
+        if product_id not in lanes_for(user):
+            if product_id not in eng().services.settings.registry:
+                raise HTTPException(404, f"Unknown product {product_id}")
+            raise HTTPException(403, f"You aren't a member of {product_id}'s organization")
+
+    @api.get("/roadmap/{product_id}")
+    def roadmap(product_id: str, user: User = Depends(current_user)) -> dict:
+        from ..roadmap.views import product_roadmap
+
+        member_of(user, product_id)
+        return product_roadmap(eng(), product_id)
+
+    @api.post("/initiatives", status_code=201)
+    def create_initiative(body: InitiativeIn, user: User = Depends(current_user)) -> dict:
+        member_of(user, body.product_id)
+        try:
+            iid = eng().create_initiative(product_id=body.product_id, title=body.title, request=body.request,
+                                          measure=body.measure, horizon=body.horizon, created_by=user.login,
+                                          background=True)
+        except GovernanceError as exc:
+            raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
+        return {"feature_id": iid}
+
+    @api.post("/initiatives/{initiative_id}/features", status_code=201)
+    def start_candidate(initiative_id: str, body: StartCandidateIn, user: User = Depends(current_user)) -> dict:
+        try:
+            v = eng().view(initiative_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        member_of(user, v["product_id"])
+        if v["status"] != "approved":
+            raise HTTPException(409, "Only an approved initiative's features can be started")
+        if body.index >= len(v["candidates"]):
+            raise HTTPException(404, "No such candidate feature")
+        c = v["candidates"][body.index]
+        try:
+            fid = eng().create(product_id=v["product_id"], title=c["title"], description=c["description"],
+                               created_by=user.login, background=True, initiative_id=initiative_id,
+                               not_duplicate_reason=body.not_duplicate_reason)
+        except DuplicateIntent as exc:
+            raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
+        return {"feature_id": fid}
+
+    @api.post("/releases", status_code=201)
+    def create_release(body: ReleaseIn, user: User = Depends(current_user)) -> dict:
+        member_of(user, body.product_id)
+        try:
+            rid = eng().create_release(product_id=body.product_id, title=body.title, model=body.model,
+                                       features=body.features, target_date=body.target_date,
+                                       initiative=body.initiative, created_by=user.login, background=True)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"feature_id": rid}
+
     @api.get("/features")
     def board(user: User = Depends(current_user), product_id: str | None = None) -> list[dict]:
-        rows = [r for r in eng().index.all() if not product_id or r["product_id"] == product_id]
+        rows = [r for r in eng().index.all() if (not product_id or r["product_id"] == product_id)
+                and r.get("kind", "feature") == "feature"]
         out = []
         for r in rows:
             try:

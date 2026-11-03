@@ -9,11 +9,14 @@ const FAILED: Record<string, string> = {
 };
 
 export const WAITS: Record<string, string> = {
+  release_ready: "Waiting for its features", release_train: "Waiting for its release train",
   ci: "Waiting for CI", build: "Building in OpenChoreo", dev: "Deploying to dev",
   staging: "Deploying to staging", production: "Deploying to production",
 };
 
 export const GATES: Record<string, { name: string; question: string; approve: string }> = {
+  g0: { name: "Initiative", question: "Commit to this initiative?", approve: "Approve initiative" },
+  release: { name: "Release", question: "Approve this release?", approve: "Approve release" },
   g1: { name: "Intent", question: "Is this worth building?", approve: "Approve intent" },
   g2: { name: "Scope", question: "Is the scope right?", approve: "Approve scope" },
   g3: { name: "Experience", question: "Is the experience right?", approve: "Approve design" },
@@ -31,9 +34,19 @@ export const RISK: Record<string, string> = {
   low: "Low risk", high: "High risk", regulated: "Regulated",
 };
 
+export const HORIZONS: Record<string, string> = { now: "Now", next: "Next", later: "Later" };
+export const MODELS: Record<string, string> = { launch: "Launch group", train: "Release train" };
+
+/** Where a thread lives in the app: features, initiatives and releases share ids like EMR-INI-1. */
+export function threadPath(id: string): string {
+  const kind = id.split("-")[1];
+  return kind === "INI" ? `/initiatives/${id}` : kind === "REL" ? `/releases/${id}` : `/features/${id}`;
+}
+
 export function gateLabel(gate?: string): string {
   if (!gate) return "";
   const g = GATES[gate];
+  if (gate === "release") return "Release";
   return g ? `${gate.toUpperCase()} ${g.name}` : gate.toUpperCase();
 }
 

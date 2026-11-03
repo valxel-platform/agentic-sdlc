@@ -13,6 +13,7 @@ sources:
   contracts: vrixel_sdlc.knowledge.sources:RepoOpenApi                  # api/openapi.yaml in provider repos
   capabilities: vrixel_sdlc.knowledge.sources:CatalogCapabilities       # live and in-flight capabilities
   features: vrixel_sdlc.knowledge.sources:ProductFeatures              # features run so far: released, in progress, stopped
+  roadmap: vrixel_sdlc.knowledge.sources:ProductRoadmap                # goals, initiatives and releases (roadmap/ in Git)
 
 settings:
   architecture_dir: architecture

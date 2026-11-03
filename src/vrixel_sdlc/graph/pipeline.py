@@ -124,9 +124,26 @@ def make_gate(gate: str, services):
         # doesn't mention, and other approved designs in flight that change the same APIs.
         review = design_review_for(services, snap, ref, state) if gate == "g4" and ref else None
 
+        # A feature in a release train is approved with its train: it waits here until the train's
+        # release gate decides, then promotes like any approved G6 (a cancelled train falls back to G6).
+        preset = None
+        if gate == "g6":
+            rel = services.release_for(state["feature_id"]) if callable(getattr(services, "release_for", None)) else None
+            if rel and rel["model"] == "train":
+                res = interrupt({"type": "external", "wait": "release_train", "release_id": rel["id"],
+                                 "label": f"Waiting for release train {rel['id']} to be approved",
+                                 "feature_id": state["feature_id"], "product_id": state["product_id"], "since": now()})
+                if res.get("status") == "success":
+                    preset = {"decision": "approve", "approver": res.get("approver", ""), "active_minutes": 0.0,
+                              "feedback": f"Approved with release train {rel['id']}"}
+
         records, d = [], None
         for lane_id in approving:
             lane = lanes[lane_id]
+            if preset is not None:
+                d = dict(preset)
+                records.append(_record(gate, phase, d, lane_id))
+                continue
             packet = {
                 "type": "gate", "gate": gate, "phase": phase, "lane": lane_id, "lanes": approving,
                 "feature_id": state["feature_id"], "product_id": state["product_id"], "title": state["title"],
@@ -144,6 +161,10 @@ def make_gate(gate: str, services):
                 "design_review": review,
                 # G1 decides whether this intent is new: what the product already has that looks like it.
                 "related_features": list(state.get("related_features") or []) if gate == "g1" else [],
+                # G1 also decides whether the work fits the roadmap: its initiative and what's left of
+                # the initiative's budget, or that it is unplanned.
+                "roadmap_fit": (services.roadmap_fit(state) if gate == "g1" and callable(getattr(services, "roadmap_fit", None))
+                                else None),
                 "not_duplicate_reason": state.get("not_duplicate_reason", "") if gate == "g1" else "",
                 # Each lane reviews the PRs in its own org.
                 "pull_requests": sorted(k for k, pr in state.get("pull_requests", {}).items()
@@ -185,6 +206,15 @@ def make_gate(gate: str, services):
             update["design"] = design
         if gate == "g6":
             release = dict(state.get("release", {}))
+            # Every feature reaches production behind a flag. In a launch group it stays off until the
+            # launch is approved; otherwise (alone, or in an approved train) it goes on now.
+            from ..integrations.flags import flag_key
+
+            rel = services.release_for(state["feature_id"]) if callable(getattr(services, "release_for", None)) else None
+            key = flag_key(state["product_id"], state["feature_id"], state["title"])
+            dark = bool(rel and rel["model"] == "launch" and rel["status"] != "cancelled")
+            services.flags.set(state["product_id"], key, not dark, actor=d["approver"])
+            release |= {"flag": key, "flag_on": not dark, "release_id": rel["id"] if rel else ""}
             # VX-3: production promotion is a human action, in each product's own runtime. In
             # production the approver promotes in the OpenChoreo portal and a watcher resumes this
             # thread; the stub records it here.

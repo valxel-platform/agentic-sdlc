@@ -128,6 +128,7 @@ class Limits:
     min_critic_threshold: float = 0.75
     max_loops: int = 5
     max_budget_usd: float = 500.0
+    max_initiative_budget_usd: float = 5000.0
     required_gates: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5", "g6")
 
 
@@ -223,6 +224,7 @@ def load_settings(
             min_critic_threshold=float(lim.get("min_critic_threshold", 0.75)),
             max_loops=int(lim.get("max_loops", 5)),
             max_budget_usd=float(lim.get("max_budget_usd", 500)),
+            max_initiative_budget_usd=float(lim.get("max_initiative_budget_usd", 5000)),
             required_gates=tuple(lim.get("required_gates", Limits.required_gates)),
         ),
         registry=registry,

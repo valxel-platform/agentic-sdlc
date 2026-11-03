@@ -70,3 +70,26 @@ def test_released_features_and_the_duplicate_check_survive_a_restart(settings):
         assert [f["status"] for f in restarted.feature_summaries("EMR") if f["feature_id"] == fid] == ["released"]
         with pytest.raises(DuplicateIntent, match="already released"):
             restarted.create(product_id="EMR", title="Medication reconciliation at discharge")
+
+
+def test_initiatives_and_releases_share_the_index_and_survive_a_restart(settings):
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        with pool.connection() as conn:
+            conn.execute("DROP TABLE IF EXISTS vrixel_features")
+            # An index created before initiatives existed: no kind column yet.
+            conn.execute("""CREATE TABLE vrixel_features (feature_id TEXT PRIMARY KEY, product_id TEXT NOT NULL,
+                            title TEXT NOT NULL, seq INT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())""")
+            conn.execute("INSERT INTO vrixel_features VALUES ('EMR-FEAT-1', 'EMR', 'Old feature', 1, now())")
+        first = _engine(settings, pool)
+        iid = first.create_initiative(product_id="EMR", title="Walk-in intake",
+                                      request="Register walk-in patients; Capture consent at registration")
+        assert iid == "EMR-INI-1"
+        fid = first.create(product_id="EMR", title="Lab results viewer")
+        assert fid == "EMR-FEAT-2"  # numbering per kind; the old row counts as a feature
+
+        restarted = _engine(settings, pool)
+        assert restarted.view(iid)["status"] == "awaiting_approval"
+        assert [i["kind"] for i in restarted.inbox("EMR") if i["feature_id"] == iid] == ["initiative"]

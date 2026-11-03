@@ -15,6 +15,7 @@ roles:
   knowledge:  { runtime: generic,     model: anthropic/claude-haiku-5-5 }
   router:     { runtime: generic,     model: anthropic/claude-haiku-5-5 }
   intake:     { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
+  strategist: { runtime: generic,     model: anthropic/claude-opus-5-5 }    # initiatives: goals, outcomes, breakdown
 
 # Which providers may see each data class. PHI and payment work stays with providers
 # under the right agreements; self-hosted models are the in-boundary fallback.

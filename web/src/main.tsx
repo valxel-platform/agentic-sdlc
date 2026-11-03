@@ -9,6 +9,8 @@ import { Inbox } from "./pages/Inbox";
 import { Board } from "./pages/Board";
 import { FeaturePage } from "./pages/Feature";
 import { Intake } from "./pages/Intake";
+import { RoadmapPage } from "./pages/Roadmap";
+import { InitiativePage, ReleasePage } from "./pages/Thread";
 
 function Mark() {
   return (
@@ -32,6 +34,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         <div className="brand"><Mark /> Vrixel SDLC</div>
         <nav className="nav" aria-label="Main">
           <NavLink to="/inbox">Decisions {mine > 0 && <span className="count" aria-label={`${mine} waiting on you`}>{mine}</span>}</NavLink>
+          <NavLink to="/roadmap">Roadmap</NavLink>
           <NavLink to="/board">Features</NavLink>
           <NavLink to="/intake">New intent</NavLink>
         </nav>
@@ -50,6 +53,9 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/board" element={<Board me={me} />} />
           <Route path="/features/:id" element={<FeaturePage canSync={(pid) => me.lanes.some((l) => l.id === pid)} />} />
+          <Route path="/roadmap" element={<RoadmapPage me={me} />} />
+          <Route path="/initiatives/:id" element={<InitiativePage />} />
+          <Route path="/releases/:id" element={<ReleasePage />} />
           <Route path="/intake" element={<Intake me={me} />} />
           <Route path="/intake/:sid" element={<Intake me={me} />} />
           <Route path="*" element={<Navigate to="/inbox" replace />} />
