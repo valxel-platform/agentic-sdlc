@@ -522,10 +522,12 @@ class FeatureEngine:
             if s.get("status") == "aborted":
                 dropped.append(fid)
                 continue
+            waiting = any(p.get("wait") == "release_train" for p in self.pending(fid))
             if packet["model"] == "launch":
-                ok = bool((s.get("release") or {}).get("production"))
+                # In production with its flag off, or (no flag) held after staging like a train.
+                ok = bool((s.get("release") or {}).get("production")) or waiting
             else:
-                ok = any(p.get("wait") == "release_train" for p in self.pending(fid))
+                ok = waiting
             if not ok:
                 return None
             ready.append(fid)
@@ -648,6 +650,7 @@ class FeatureEngine:
                         "release_id": (s.get("release") or {}).get("release_id")
                         or (self.release_for(feature_id, active=True) or {}).get("id", "")},
             "initiative_id": s.get("initiative_id", ""),
+            "flag": s.get("flag", ""),
             "gate_decisions": s.get("gate_decisions", []),
             "pending": pending,
             "cost_usd": round(float(s.get("cost_usd", 0.0)), 4),

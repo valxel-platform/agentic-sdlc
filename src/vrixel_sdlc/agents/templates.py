@@ -236,20 +236,24 @@ def code_task(ctx: dict, task: dict, passed: bool) -> str:
         f"## Patch for {task['id']}", f"Repo: {task['repo']}", f"Branch: feature/{ctx['feature_id']}",
         "Files:", *[f"- {f}" for f in task["files"]],
         f"Acceptance criteria: {', '.join(task['acs']) or 'none'}",
+        *([f"Feature flag: {ctx['flag']} (default off; tests cover on and off)"]
+          if ctx.get("flag") and task.get("role") in ("provider", "consumer", "agent", "mcp-server") else []),
         f"Tests: {'passed' if passed else 'failed: test_' + _slug(task['id'])}",
     ]) + "\n"
 
 
 def release(ctx: dict, defective: bool) -> str:
-    flag = f"ff_{_slug(ctx['title'])}"
-    rollback = "- [ ] Rollback plan" if defective else "- [x] Rollback plan: flag off, then revert in reverse merge order"
+    flag = ctx.get("flag")
+    rollback = ("- [ ] Rollback plan" if defective else
+                "- [x] Rollback plan: " + ("flag off, then " if flag else "") + "revert in reverse merge order")
     comps = ctx.get("components") or []
     lines = [
         f"# Release: {ctx['title']}",
         "", "## Checklist",
         "- [x] CI green on every change-set PR",
         "- [x] Database migrations reviewed",
-        f"- [x] Feature flag defined: {flag}",
+        f"- [x] Feature flag: {flag}, off in production until G6 or its launch" if flag else
+        "- [x] No feature flag: this product has no flag service; G6 releases the change directly",
         rollback,
         "- [x] SLOs, alerts and dashboards defined (VX-8)",
         "", "## Staging",

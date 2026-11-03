@@ -386,16 +386,50 @@ other lane involved. Approval opens a governance PR that adds the initiative (an
 (the duplicate check still applies). G1 shows roadmap fit: the initiative, its horizon and how much
 of its envelope is spent, or "unplanned work" for features without one.
 
-**Releases.** Every feature reaches production behind a feature flag.
+**Releases.** Every feature reaches production behind a feature flag when its product has a flag service (see below).
 
 | Model | How it ships | Use for |
 | --- | --- | --- |
 | Launch group (default) | Each member goes through G6 and reaches production with its flag off. When all are there, the release gate (G6 approvers of every lane touched) turns the flags on together. | Most work: small deploys, coordinated exposure, rollback by flag |
 | Release train | Members wait after staging instead of asking for G6 each. One release gate approves them together with combined release notes and evidence (suites, accepted risks, G5 approvers); they then promote to production. A cancelled train hands its features back to their own G6. | Regulated or contractual shipments (certification builds, go-lives, cross-lane cutovers) |
 
-A feature that isn't in a release goes live at its own G6. Flags go through
-`integrations/flags.py`; connect the product's flag service (OpenFeature with flagd, Unleash,
-LaunchDarkly) by implementing its two methods; until then a stand-in records them.
+A feature that isn't in a release goes live at its own G6.
+
+### Feature flags (Flipt)
+
+Each product runs its own [Flipt](https://docs.flipt.io/v2) (v2, self-hosted, Git-backed) in its
+own runtime, and names it in `product.yaml`:
+
+```yaml
+tools:
+  flags:
+    provider: flipt
+    url: https://flipt.emr.example.com
+    namespace: emr                 # optional; default: the product id in lower case
+    environments:                  # optional; runtime environment -> Flipt environment
+      production: production
+```
+
+The platform holds one Flipt client token per product in `VRIXEL_FLIPT_TOKEN_<PRODUCT_ID>`
+(a static token in the product's Flipt config, allowed to read and change that namespace).
+
+| When | What happens to the flag |
+| --- | --- |
+| G4 approved | The tool creates `<product>.<feature-id>.<title>` in every environment: on before production (testers see it), off in production. |
+| Build | Coders put the new behavior behind the flag, read through OpenFeature with default `false`; the reviewer checks it, and the build fails its check if no repo users reach uses it. Libraries don't need it. |
+| G6, alone | The flag turns on in production. |
+| G6, in a launch group | It stays off; the release gate turns the group's flags on together. |
+| Incident | On-call can approve "turn the flag off" as the first mitigation. |
+
+The product's code reads flags with OpenFeature's OFREP provider pointed at its Flipt
+(`x-flipt-environment` and `x-flipt-namespace` headers); the templates set this up, and with no
+flag server configured every flag reads as its default, off. The tool changes flags through
+Flipt's environments API (`/api/v2/environments/{env}/namespaces/{ns}/resources`), so each change
+is a commit in the product's flag repo.
+
+**Without a flag service** a product still ships: features get no flag, a launch-group member
+waits after staging until its launch is approved (like a train), and incidents roll back instead.
+With stub delivery, products without Flipt get in-memory flags so the demo works end to end.
 
 ## Production issues: incidents, hotfixes and intent changes
 
@@ -677,6 +711,7 @@ effect once the other is also decided. An earlier approval of the other gate sti
 | Stub | Replace with | Interface |
 | --- | --- | --- |
 | `InMemoryCatalog` | The Backstage catalog in the OpenChoreo portal | `integrations/catalog.py` |
+| `StubFlags` (stub delivery only) | Each product's Flipt (`tools.flags` in product.yaml) | `integrations/flags.py` |
 | Phase templates | Real agent output in live mode; keep the section structure the checks read | `agents/templates.py` |
 | Build tasks | Coder agents in sandboxed containers with a checkout of one repo each | `runtime/claude_code.py` |
 

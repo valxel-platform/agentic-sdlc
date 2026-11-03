@@ -337,15 +337,26 @@ def build_release_graph(services, checkpointer=None):
         approvers = ", ".join(r.get("approver", "") for r in records)
         events = [event("release", "approved", approver=approvers, lanes=order)]
         status = "approved"
+        note = " Its features now promote to production."
         if state["model"] == "launch":
+            failed = []
             for fid, key in (state.get("flags") or {}).items():
-                services.flags.set(state["product_id"], key, True, actor=approvers)
-                events.append(event("release", "flag_on", key, feature=fid))
+                try:
+                    services.flags.set(state["product_id"], key, True, actor=approvers)
+                    events.append(event("release", "flag_on", key, feature=fid))
+                except Exception as exc:
+                    failed.append(key)
+                    events.append(event("release", "flag_failed", f"Couldn't turn on {key}: {exc}", feature=fid))
+            held = [f for f in state.get("features") or [] if f not in (state.get("flags") or {})
+                    and f not in (state.get("dropped") or [])]
             status = "shipped"
+            note = " Flags are on: the features are live."
+            if held:
+                note += f" {', '.join(held)} had no flag and now promote{'s' if len(held) == 1 else ''} to production."
+            if failed:
+                note += f" Turn on {', '.join(failed)} in Flipt: the pipeline couldn't."
         done = {**state, "approved_by": approvers}
-        events += record(done, status, f"{state['release_id']} approved by {approvers}." +
-                         (" Flags are on: the features are live." if status == "shipped" else
-                          " Its features now promote to production."))
+        events += record(done, status, f"{state['release_id']} approved by {approvers}." + note)
         return Command(goto=END, update={"gate_decisions": records, "status": status, "approved_by": approvers,
                                          "events": events})
 

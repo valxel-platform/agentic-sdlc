@@ -44,6 +44,8 @@ function describe(e: FeatureEvent): string {
     case "diagram_published": return `Architecture diagram v${e.version ?? ""} published`;
     case "diagram_withheld": return "Architecture diagram kept off the diagram tool";
     case "diagram_failed": return "Architecture diagram couldn't be published";
+    case "flag": return "Feature flag";
+    case "flag_failed": return "Feature flag couldn't be changed";
     default: return `${name}: ${e.kind.replace(/_/g, " ")}`;
   }
 }
@@ -84,9 +86,10 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
           {f.lanes_touched && f.lanes_touched.length > 0 && <span>Also changes {f.lanes_touched.join(", ")}</span>}
           {f.initiative_id ? <span>Delivers <Link to={threadPath(f.initiative_id)}>{f.initiative_id}</Link></span> : <span>Unplanned work</span>}
           {f.release?.release_id && <span>In <Link to={threadPath(f.release.release_id)}>{f.release.release_id}</Link></span>}
-          {f.release?.flag && (f.release.flag_on
+          {f.release?.production && f.release.flag && (f.release.flag_on
             ? <span className="chip go" title={f.release.flag}>Live</span>
             : <span className="chip wait" title={f.release.flag}>In production, flag off</span>)}
+          {f.flag && <span>Feature flag <code>{f.flag}</code></span>}
           <span title={f.constitution_version}>Governed by {f.constitution_version?.split("+").length ?? 0} constitutions</span>
         </div>
       </div>

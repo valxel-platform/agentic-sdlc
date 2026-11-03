@@ -118,7 +118,7 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         elif entry.kind == "shared" and registry[dep].kind != "shared":
             problems.append(f"shared lane may not depend on product {dep}")
 
-    chosen_tools = _tools(raw.get("tools"), entry, tools, problems)
+    chosen_tools = _tools(raw.get("tools"), entry, tools, problems, runtime)
     policy = {}
     if quality is not None:
         from ..quality import effective_policy
@@ -169,9 +169,10 @@ _TRACKER_DEFAULTS = {
 }
 
 
-def _tools(raw, entry: RegistryEntry, tools: ToolsConfig | None, problems: list[str]) -> dict:
-    """tools.diagrams and tools.work_tracking: the provider must be one the platform runs, and one
-    the lane's data class may send design content to."""
+def _tools(raw, entry: RegistryEntry, tools: ToolsConfig | None, problems: list[str],
+           runtime: dict | None = None) -> dict:
+    """tools.diagrams, tools.work_tracking and tools.flags: the provider must be one the platform
+    runs, and one the lane's data class may send design content to."""
     if not raw:
         return {}
     if not isinstance(raw, dict):
@@ -179,7 +180,7 @@ def _tools(raw, entry: RegistryEntry, tools: ToolsConfig | None, problems: list[
         return {}
     tools = tools or ToolsConfig()
     out: dict = {}
-    for capability in ("diagrams", "work_tracking"):
+    for capability in ("diagrams", "work_tracking", "flags"):
         spec = raw.get(capability)
         if spec is None:
             continue
@@ -199,8 +200,42 @@ def _tools(raw, entry: RegistryEntry, tools: ToolsConfig | None, problems: list[
             defaults = _TRACKER_DEFAULTS.get(provider, {})
             spec = {**defaults, **spec,
                     "statuses": {**defaults.get("statuses", {}), **(spec.get("statuses") or {})}}
+        if capability == "flags":
+            spec = _flags(spec, entry, runtime, problems)
+            if spec is None:
+                continue
         out[capability] = spec
-    unknown = set(raw) - {"diagrams", "work_tracking"}
+    unknown = set(raw) - {"diagrams", "work_tracking", "flags"}
     if unknown:
         problems.append(f"tools has unknown keys {sorted(unknown)}")
     return out
+
+
+def _flags(spec: dict, entry: RegistryEntry, runtime: dict | None, problems: list[str]) -> dict | None:
+    """tools.flags: the product's own flag service (Flipt), running in its own runtime.
+
+    `url` is the Flipt server; `namespace` defaults to the product id in lower case;
+    `environments` maps each runtime environment to a Flipt environment (default: same name).
+    The client token is a platform secret, VRIXEL_FLIPT_TOKEN_<PRODUCT_ID>."""
+    if entry.kind == "shared" or runtime is None:
+        problems.append("tools.flags needs a runtime: flags live in the product that runs the code")
+        return None
+    url = str(spec.get("url") or "")
+    if not re.match(r"^https?://[^\s/]+", url):
+        problems.append("tools.flags.url must be the product's Flipt server, e.g. https://flipt.emr.example.com")
+        return None
+    pipeline = list(runtime.get("pipeline") or [])
+    envs = spec.get("environments") or {}
+    if not isinstance(envs, dict):
+        problems.append("tools.flags.environments must map runtime environments to Flipt environments")
+        return None
+    stray = sorted(set(envs) - set(pipeline))
+    if stray:
+        problems.append(f"tools.flags.environments maps {stray}, which are not in runtime.pipeline {pipeline}")
+        return None
+    namespace = str(spec.get("namespace") or entry.product_id.lower())
+    if not re.match(r"^[A-Za-z0-9_-]+$", namespace):
+        problems.append(f"tools.flags.namespace {namespace!r} may only hold letters, digits, - and _")
+        return None
+    return {"provider": spec["provider"], "url": url.rstrip("/"), "namespace": namespace,
+            "environments": {e: str(envs.get(e, e)) for e in pipeline}}

@@ -33,7 +33,7 @@ from ..gateway import InMemoryLedger, PolicyViolation, PostgresLedger
 from ..governance import GovernanceError
 from ..graph import InvalidDecision
 from ..intake import IntakeAgent, IntakeStore
-from ..services import build_services, integration_modes
+from ..services import build_services, flag_modes, integration_modes
 from ..worksync import PostgresLinkStore, WorkSync
 from ..web.auth import (
     ESCALATION_GATE,
@@ -385,6 +385,10 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                 modes = integration_modes(services)
                 row |= {"tools": {cap: {**spec, "mode": modes.get(spec["provider"], "stub")}
                                   for cap, spec in p.tools.items()}}
+                if p.runtime:  # flags: this product's Flipt, in-memory flags, or none
+                    mode = flag_modes(services, [pid]).get(pid, "stub")
+                    row["tools"]["flags"] = {**row["tools"].get("flags", {"provider": "none"}),
+                                             "mode": "live" if mode == "flipt" else mode}
                 row |= {"name": p.name, "repos": [r.name for r in p.repos], "budget_usd": p.budget_usd,
                         "depends_on": list(p.depends_on), "runtime": p.runtime,
                         "constitution_version": snap.version, "articles": list(snap.constitution.article_ids),

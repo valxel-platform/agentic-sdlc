@@ -130,11 +130,27 @@ def build_services(
     )
     svc.quality = default_quality(svc)
     svc.knowledge = default_knowledge(svc)
-    from .integrations.flags import StubFlags
-
-    svc.flags = StubFlags()
+    svc.flags = default_flags(settings, svc)
     svc.provisioner = default_provisioner(settings, github, openchoreo)
     return svc
+
+
+def default_flags(settings: Settings, svc: Services):
+    """Each product's own Flipt, from its product.yaml; see integrations/flags.py."""
+    import os
+
+    from .integrations.flags import ProductFlags
+
+    def product_flags(product_id: str):
+        try:
+            product = svc.snapshot(product_id).product
+        except Exception:
+            return None
+        return (product.tools or {}).get("flags") or {}, product.runtime or {}
+
+    spec = (settings.tools.providers.get("flags", {}).get("flipt") or {})
+    return ProductFlags(product_flags, live=os.environ.get("VRIXEL_DELIVERY", "stub").lower() == "live",
+                        token_prefix=spec.get("token_env_prefix", "VRIXEL_FLIPT_TOKEN_"))
 
 
 def default_provisioner(settings: Settings, github, openchoreo):
@@ -218,6 +234,12 @@ def integration_modes(services: Services) -> dict[str, str]:
     for name, tr in services.trackers.items():
         modes[name] = "stub" if isinstance(tr, StubTracker) else "live"
     return modes
+
+
+def flag_modes(services: Services, product_ids) -> dict[str, str]:
+    """product id -> "flipt", "stub" or "none", for the admin view."""
+    describe = getattr(services.flags, "describe", None)
+    return {pid: describe(pid) for pid in product_ids} if callable(describe) else {}
 
 
 class DeliveryConfigError(RuntimeError):

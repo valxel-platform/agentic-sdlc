@@ -44,11 +44,16 @@ providers:
   work_tracking:
     jira: { server: atlassian }
     openproject: { server: openproject }
+  # Feature flags. Each product runs its own Flipt (v2) in its own runtime and names it in
+  # product.yaml (tools.flags.url); the platform holds one client token per product in
+  # VRIXEL_FLIPT_TOKEN_<PRODUCT_ID>, allowed to read and change that product's flags.
+  flags:
+    flipt: { token_env_prefix: VRIXEL_FLIPT_TOKEN_ }
 
 # Which providers may receive content from a lane of each data class. Agents never put PHI or
 # card data in diagrams or tickets, but design detail of regulated systems still leaves the
 # platform, so add a SaaS provider here only once a vendor agreement (BAA, DPA) covers it.
 data_classes:
-  general: [lucid, drawio, jira, openproject]
-  phi: [drawio, openproject]
-  payments: [drawio, openproject]
+  general: [lucid, drawio, jira, openproject, flipt]
+  phi: [drawio, openproject, flipt]          # Flipt is self-hosted in the product's runtime
+  payments: [drawio, openproject, flipt]

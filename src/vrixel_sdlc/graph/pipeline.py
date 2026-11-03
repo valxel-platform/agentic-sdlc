@@ -167,13 +167,15 @@ def make_gate(gate: str, services):
         preset = None
         if gate == "g6":
             rel = services.release_for(state["feature_id"]) if callable(getattr(services, "release_for", None)) else None
-            if rel and rel["model"] == "train":
+            # A launch-group member without a flag can't go to production dark: it waits like a train.
+            if rel and (rel["model"] == "train" or (rel["model"] == "launch" and not state.get("flag"))):
                 res = interrupt({"type": "external", "wait": "release_train", "release_id": rel["id"],
-                                 "label": f"Waiting for release train {rel['id']} to be approved",
+                                 "label": (f"Waiting for release train {rel['id']} to be approved" if rel["model"] == "train" else
+                          f"Waiting for launch {rel['id']} to be approved: no feature flag, so it can't ship dark"),
                                  "feature_id": state["feature_id"], "product_id": state["product_id"], "since": now()})
                 if res.get("status") == "success":
                     preset = {"decision": "approve", "approver": res.get("approver", ""), "active_minutes": 0.0,
-                              "feedback": f"Approved with release train {rel['id']}"}
+                              "feedback": f"Approved with release {rel['id']}"}
 
         records, d = [], None
         for lane_id in approving:
@@ -246,17 +248,27 @@ def make_gate(gate: str, services):
             design["adrs"] = _hld_adrs(services.artifacts.load(ref))
             services.catalog.register({**_design_entry(state, design), "status": "in_design"})
             update["design"] = design
+            # The feature's flag exists before any code does, so the coder builds behind it.
+            update["flag"], note = assign_flag(services, state, approvers)
+            update["events"].append(note)
         if gate == "g6":
             release = dict(state.get("release", {}))
             # Every feature reaches production behind a flag. In a launch group it stays off until the
             # launch is approved; otherwise (alone, or in an approved train) it goes on now.
-            from ..integrations.flags import flag_key
-
             rel = services.release_for(state["feature_id"]) if callable(getattr(services, "release_for", None)) else None
-            key = flag_key(state["product_id"], state["feature_id"], state["title"])
+            key = state.get("flag", "")
             dark = bool(rel and rel["model"] == "launch" and rel["status"] != "cancelled")
-            services.flags.set(state["product_id"], key, not dark, actor=d["approver"])
-            release |= {"flag": key, "flag_on": not dark, "release_id": rel["id"] if rel else ""}
+            flag_on = False
+            if key:
+                try:
+                    if not dark:
+                        services.flags.set(state["product_id"], key, True, actor=d["approver"])
+                    flag_on = not dark
+                except Exception as exc:  # the release still goes out, dark; say so plainly
+                    update["events"].append(event(gate, "flag_failed",
+                                                  f"Couldn't turn on {key}: {exc}. Turn it on in Flipt.",
+                                                  approver=d["approver"]))
+            release |= {"flag": key, "flag_on": flag_on if key else None, "release_id": rel["id"] if rel else ""}
             # VX-3: production promotion is a human action, in each product's own runtime. In
             # production the approver promotes in the OpenChoreo portal and a watcher resumes this
             # thread; the stub records it here.
@@ -281,6 +293,27 @@ def make_gate(gate: str, services):
 
     dest = ("production_wait",) if gate == "g6" else (tuple(target) if isinstance(target, list) else (target,))
     return gate_node, (*dest, phase, END)
+
+
+def assign_flag(services, state: FeatureState, actor: str) -> tuple[str, dict]:
+    """Create the feature's flag (off in production, on before it) and return its key and an event.
+    No flag service, or a failure, means no flag: the feature ships without one, and a launch
+    holds it after staging instead of shipping it dark."""
+    from ..integrations.flags import flag_key
+
+    pid = state["product_id"]
+    if state.get("flag"):
+        return state["flag"], event("g4", "flag", f"Keeps feature flag {state['flag']}")
+    if not services.flags.available(pid):
+        return "", event("g4", "flag", "No flag service for this product: the feature ships without a flag")
+    key = flag_key(pid, state["feature_id"], state["title"])
+    try:
+        services.flags.ensure(pid, key, name=f"{state['feature_id']} {state['title']}",
+                              description=f"Vrixel feature {state['feature_id']}: {state['title']}", actor=actor)
+    except Exception as exc:
+        return "", event("g4", "flag_failed", f"Couldn't create feature flag {key}: {exc}. "
+                         "The feature continues without a flag.")
+    return key, event("g4", "flag", f"Created feature flag {key}: off in production, on before it")
 
 
 def design_review_for(services, snap, ref, state: FeatureState) -> dict | None:

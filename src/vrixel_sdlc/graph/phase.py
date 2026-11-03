@@ -94,6 +94,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "quality": dict(state.get("quality") or {}),
         "repo_policy": (naming_policy(services.settings.repos, product) if services.settings.repos else None),
         "waivers": list(state.get("waivers") or []),
+        # The feature's flag (created at G4): the coder builds behind it, the reviewer checks it.
+        "flag": state.get("flag", ""),
     }
 
 
@@ -168,6 +170,28 @@ def build_phase_subgraph(phase: str, services):
     return g.compile(name=f"phase_{phase}")
 
 
+# Repos whose code runs where users reach it: their changes go behind the feature's flag.
+FLAGGED_ROLES = ("provider", "consumer", "agent", "mcp-server")
+
+
+def flag_instruction(ctx: dict, task: dict) -> str:
+    if not ctx.get("flag") or task.get("role") not in FLAGGED_ROLES:
+        return ""
+    return (f" Put the new behavior behind feature flag {ctx['flag']}: read it through OpenFeature as a boolean"
+            " with default false (the repo's flags module), and keep today's behavior when it is off. Tests"
+            " cover both. Name the flag key in the patch summary.")
+
+
+def flag_findings(ctx: dict, results: dict) -> list[str]:
+    """Deterministic: a feature with a flag must use it in at least one repo users reach."""
+    flag = ctx.get("flag")
+    runtime = [r for r in results.values() if r.get("role") in FLAGGED_ROLES and r.get("tests_passed")]
+    if not flag or not runtime or any(flag in (r.get("summary") or "") for r in runtime):
+        return []
+    return [f"No task builds behind feature flag {flag}: gate the new behavior in "
+            + ", ".join(sorted({r['repo'] for r in runtime}))]
+
+
 def build_build_subgraph(services):
     """Build fans out one coder agent per task (Send), then a reviewer agent per PR."""
     spec = PHASE_SPECS["build"]
@@ -189,7 +213,8 @@ def build_build_subgraph(services):
         res = call_agent(
             services, role="coder", phase="build", ctx=ctx, skills=spec.skills,
             tail=(f"Implement {task['id']} in {task['repo']} on branch feature/{ctx['feature_id']}. "
-                  f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run tests; return the patch summary."),
+                  f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run tests; return the patch summary."
+                  + flag_instruction(ctx, task)),
             stub_text=templates.code_task(ctx, task, passed=not fail),
         )
         result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
@@ -214,7 +239,10 @@ def build_build_subgraph(services):
             )
             res = call_agent(
                 services, role="reviewer", phase="build", ctx=ctx, skills=spec.critic_skills,
-                tail=f"Review {pr['url']} against the plan and constitution. Reply with JSON score and notes.\n\n{r['summary']}",
+                tail=(f"Review {pr['url']} against the plan and constitution."
+                      + (f" Check that what users see changes only when feature flag {ctx['flag']} is on, and that"
+                         " the code reads it with default false." if ctx.get("flag") and r.get("role") in FLAGGED_ROLES else "")
+                      + f" Reply with JSON score and notes.\n\n{r['summary']}"),
                 stub_text=json.dumps({"score": 0.9, "notes": []}), max_tokens=1024,
             )
             score, notes = parse_verdict(res.text)
@@ -228,6 +256,7 @@ def build_build_subgraph(services):
                     if not results.get(t["id"], {}).get("tests_passed")]
         findings += [f"{tid}: review score {rv['score']:.2f} is below {s['threshold']:.2f}"
                      for tid, rv in reviews.items() if rv["score"] < s["threshold"]]
+        findings += flag_findings(s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]
         lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}"
                   for tid, rv in sorted(reviews.items())]

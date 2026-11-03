@@ -123,7 +123,7 @@ def test_a_hotfix_starts_at_planning_and_on_call_approves_merge_and_release(tmp_
         eng.decide(hid, p[0]["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
     assert set(seen) <= {"g5", "g6"} and seen["g6"] == ["vrixel-emr/oncall"]
     v = eng.auto_drive(hid)
-    assert v["status"] == "done" and v["release"]["flag_on"] is True
+    assert v["status"] == "done" and v["release"]["flag"] == "" and v["release"]["flag_on"] is None  # a fix has no flag of its own
     assert not [c for c in svc.catalog.lookup("EMR") if c.get("feature") == hid]  # a fix is not a capability
 
 

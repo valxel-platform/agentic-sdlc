@@ -85,6 +85,7 @@ export interface Feature extends FeatureSummary {
   release: { components?: string[]; packages?: string[]; production?: boolean; promoted_by?: string;
              flag?: string; flag_on?: boolean | null; release_id?: string };
   initiative_id?: string;
+  flag?: string;
   gate_decisions: GateDecision[];
   scores: Record<string, number>;
   loop_count: Record<string, number>;
