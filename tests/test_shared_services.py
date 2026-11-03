@@ -163,5 +163,6 @@ def test_shared_amendment_mid_feature_does_not_change_the_pinned_version(engine,
     edit(con, "version: 1.0.0", "version: 2.0.0")
     v = engine.auto_drive(first["feature_id"])
     assert "shared-services@1.0.0" in v["constitution_version"]
-    second = engine.start(product_id="EMR", title="Consent audit v2")
+    second = engine.start(product_id="EMR", title="Consent audit v2",
+                          not_duplicate_reason="A second round after the shared lane amended its constitution")
     assert "shared-services@2.0.0" in second["constitution_version"]

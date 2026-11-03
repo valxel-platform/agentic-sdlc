@@ -100,6 +100,12 @@ def render(pack: dict, max_chars: int = 12000) -> str:
             changes = "; ".join(f"{x['repo'].split('/', 1)[-1]} -> {x['next']}" for x in c.get("contracts") or [])
             out.append(f"- {c['id']} (approved design, in flight: {c.get('feature', '')}): {c['name']}"
                        + (f"; changing {changes}" if changes else ""))
+    feats = (pack.get("features") or {}).get("features") or []
+    if feats:
+        out.append("\n## Features of this product (don't redo one; extend it)")
+        for f in feats[-40:]:
+            where = {"released": "released", "stopped": "stopped"}.get(f["status"], f"in progress, at {f.get('stage') or '?'}")
+            out.append(f"- {f['feature_id']} ({where}): {f['title']}")
     if arch.get("overview"):
         out.append("\n## Architecture overview\n" + arch["overview"].strip())
     return _cut("\n".join(out), max_chars) + "\n"

@@ -63,6 +63,8 @@ class FeatureState(TypedDict, total=False):
     governance: dict  # commit pins of the platform and product governance repos, set at intake
     constitution_version: str
     simulate_faults: dict[str, int]  # stub mode: phase -> number of defective attempts
+    related_features: list[dict]  # similar features and capabilities found when it was created
+    not_duplicate_reason: str  # why the creator says it isn't a duplicate, when it looked like one
 
     # Written by single nodes or by parallel branches through reducers
     token_budget_usd: Annotated[float, last]  # an escalation can raise it

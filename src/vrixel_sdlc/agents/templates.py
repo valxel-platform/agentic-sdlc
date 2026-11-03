@@ -26,8 +26,16 @@ def _feedback(ctx: dict) -> list[str]:
 
 
 def discovery(ctx: dict, defective: bool) -> str:
-    caps = ctx.get("capabilities") or []
-    cap = f"Extends: {caps[0]['id']} ({caps[0]['name']})" if caps else "New capability: no existing capability covers this"
+    # Stub judgement from what intake found: extend the closest related feature or capability,
+    # or say why this is new (the reason the creator gave when it looked like a duplicate).
+    related = ctx.get("related_features") or []
+    reason = ctx.get("not_duplicate_reason", "")
+    if related and reason:
+        cap = f"New capability: {reason} (related: {related[0]['id']} {related[0]['title']})"
+    elif related:
+        cap = f"Extends: {related[0]['id']} ({related[0]['title']})"
+    else:
+        cap = "New capability: nothing in the product covers this yet"
     lines = [
         f"# Opportunity brief: {ctx['title']}",
         f"Feature: {ctx['feature_id']} · Product: {ctx['product_name']}",

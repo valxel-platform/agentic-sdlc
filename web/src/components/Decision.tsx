@@ -4,7 +4,7 @@ import { api, type PendingItem } from "../api";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
-import { DesignReviewPanel, RepoPlans } from "./External";
+import { DesignReviewPanel, RepoPlans, SimilarList } from "./External";
 
 const DELIVERY_FAILED: Record<string, string> = {
   build: "The OpenChoreo build failed", dev: "The dev deployment failed", staging: "The staging deployment failed",
@@ -117,6 +117,14 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         <div>
           <h3>{delivery ? "What went wrong" : "What the evaluators found"}</h3>
           <ul className="findings">{item.findings.map((f) => <li key={f}>{f}</li>)}</ul>
+        </div>
+      )}
+
+      {item.related_features && item.related_features.length > 0 && (
+        <div>
+          <h3>Already in this product</h3>
+          {item.not_duplicate_reason && <p className="small">The creator says it's different: {item.not_duplicate_reason}</p>}
+          <SimilarList items={item.related_features} />
         </div>
       )}
 

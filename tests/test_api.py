@@ -130,16 +130,43 @@ def test_guided_intake_conversation_submits_a_feature(client, engine):
     assert client.get(f"/api/intake/{s['id']}").status_code == 404  # conversations are private
 
 
-def test_intake_detects_the_product_and_flags_overlapping_capabilities(client):
+def test_intake_stops_a_duplicate_until_the_creator_says_how_it_differs(client, engine):
     sign_in(client, "maria", orgs=["vrixel-emr"])
+    first = engine.create(product_id="EMR", title="Faster patient intake for walk-ins",
+                          description="Front desk needs faster patient intake for walk-ins")
     s = client.post("/api/intake", json={}).json()
     s = client.post(f"/api/intake/{s['id']}/messages",
                     json={"text": "Front desk needs faster patient intake for walk-ins"}).json()
     assert s["draft"]["product_id"] == "EMR"  # only one lane: chosen without asking
     for text in ("Front-desk staff at busy clinics", "Check-in time under 3 minutes"):
         s = client.post(f"/api/intake/{s['id']}/messages", json={"text": text}).json()
-    assert s["draft"]["related_capability"] == "CAP-EMR-INTAKE (Patient intake)"
-    assert "CAP-EMR-INTAKE" in s["messages"][-1]["text"]
+    assert s["draft"]["similar"][0]["id"] == first and s["draft"]["similar"][0]["duplicate"]
+    assert f"This looks like {first}" in s["messages"][-1]["text"] and s["ready"] is False
+    r = client.post(f"/api/intake/{s['id']}/submit", json={})
+    assert r.status_code == 409 and r.json()["detail"]["similar"][0]["id"] == first
+
+    s = client.post(f"/api/intake/{s['id']}/messages",
+                    json={"text": "This one is for walk-ins without an appointment; the other is pre-registration"}).json()
+    assert s["ready"] is True and "without an appointment" in s["messages"][-1]["text"]
+    s = client.post(f"/api/intake/{s['id']}/submit", json={}).json()
+    v = wait_idle(engine, s["feature_id"])
+    assert "Not a duplicate because: This one is for walk-ins" in v["description"]
+    g1 = next(p for p in v["pending"] if p.get("gate") == "g1")
+    assert g1["related_features"][0]["id"] == first and "walk-ins" in g1["not_duplicate_reason"]
+
+
+def test_creating_a_duplicate_feature_needs_a_reason(client, engine):
+    sign_in(client, "maria", orgs=["vrixel-emr"])
+    body = {"product_id": "EMR", "title": "Lab results viewer", "description": "Show lab results to clinicians"}
+    first = client.post("/api/features", json=body).json()["feature_id"]
+    wait_idle(engine, first)
+    again = client.post("/api/features", json=body)
+    assert again.status_code == 409 and again.json()["detail"]["similar"][0]["id"] == first
+    ok = client.post("/api/features", json={**body, "not_duplicate_reason": "For patients, not clinicians"})
+    assert ok.status_code == 201
+    unrelated = client.post("/api/features", json={"product_id": "EMR", "title": "Referral triage",
+                                                   "description": "Route incoming referrals to the right clinic"})
+    assert unrelated.status_code == 201
 
 
 def test_mutations_must_be_json(client):

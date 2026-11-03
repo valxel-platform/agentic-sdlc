@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from ..duplicates import DuplicateIntent
 from ..config import load_settings
 from ..engine import FeatureEngine, InMemoryIndex, PostgresIndex
 from ..gateway import InMemoryLedger, PolicyViolation, PostgresLedger
@@ -62,6 +63,8 @@ class FeatureIn(BaseModel):
     budget_usd: float | None = Field(default=None, gt=0)
     simulate_faults: dict[str, int] = Field(default_factory=dict,
                                             description="Stub mode only: phase -> defective attempts")
+    not_duplicate_reason: str = Field("", max_length=1000,
+                                      description="Required when the request looks like an existing feature")
 
 
 class DecisionIn(BaseModel):
@@ -101,7 +104,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
                               kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
         saver = PostgresSaver(pool)
         saver.setup()
-        services = build_services(settings, ledger=PostgresLedger(pool))
+        from ..integrations.catalog import PostgresCatalog
+
+        services = build_services(settings, ledger=PostgresLedger(pool), catalog=PostgresCatalog(pool))
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
@@ -305,7 +310,10 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         try:
             fid = eng().create(product_id=body.product_id, title=body.title, description=body.description,
                                created_by=user.login, simulate_faults=body.simulate_faults,
-                               budget_usd=body.budget_usd, background=True)
+                               budget_usd=body.budget_usd, background=True,
+                               not_duplicate_reason=body.not_duplicate_reason)
+        except DuplicateIntent as exc:
+            raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
         except GovernanceError as exc:
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
         except PolicyViolation as exc:
@@ -442,9 +450,16 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(422, f"Still needed: {', '.join(s.draft.missing())}")
         if s.draft.product_id not in lanes_for(user):
             raise HTTPException(403, f"You aren't a member of {s.draft.product_id}'s organization")
+        if s.duplicate:
+            raise HTTPException(409, {"message": "This looks like an existing feature. Add to it, or say how this one is "
+                                      "different.", "similar": s.draft.similar})
         try:
             s.feature_id = eng().create(product_id=s.draft.product_id, title=s.draft.title,
-                                        description=s.draft.description(), created_by=user.login, background=True)
+                                        description=s.draft.description(), created_by=user.login, background=True,
+                                        not_duplicate_reason=s.draft.not_duplicate_reason)
+        except DuplicateIntent as exc:  # a matching feature appeared since the check
+            s.draft.similar, s.overlap_checked = exc.matches, True
+            raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
         except GovernanceError as exc:
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
         s.messages.append({"role": "agent", "text": f"Submitted as {s.feature_id}. Agents are on the discovery phase now.",

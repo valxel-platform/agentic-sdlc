@@ -13,6 +13,8 @@ export interface PendingItem {
   quality?: { suites: QualitySuite[]; waivers: Waiver[] } | null;
   new_repos?: RepoPlan[];
   design_review?: DesignReview | null;
+  related_features?: SimilarItem[];
+  not_duplicate_reason?: string;
   targets?: Record<string, unknown>[];
   phase?: string;
   lane?: string;
@@ -142,9 +144,13 @@ export interface Me {
   lanes: { id: string; name: string }[];
 }
 
+export interface SimilarItem {
+  kind: "feature" | "capability"; id: string; title: string; status: string; stage: string;
+  score: number; duplicate: boolean;
+}
 export interface Draft {
   product_id: string; title: string; problem: string; users: string; success_metric: string;
-  related_capability: string;
+  related_capability: string; similar: SimilarItem[]; not_duplicate_reason: string;
 }
 export interface IntakeSession {
   id: string; owner: string; lanes: string[]; draft: Draft; ready: boolean; missing: string[];
@@ -166,7 +172,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     let msg = res.statusText;
     try {
       const j = await res.json();
-      msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+      msg = typeof j.detail === "string" ? j.detail : j.detail?.message ?? JSON.stringify(j.detail);
     } catch { /* not JSON */ }
     throw new ApiError(res.status, msg);
   }

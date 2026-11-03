@@ -78,6 +78,8 @@ class FeatureEngine:
         self.services = services
         self.graph = build_pipeline(services, checkpointer=checkpointer)
         self.index = index or InMemoryIndex()
+        self._create_lock = threading.Lock()
+        services.features = self.feature_summaries  # what the product has built, for agents and G4
         self.bus = bus or EventBus()
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="feature")
         self._locks: dict[str, threading.Lock] = {}
@@ -194,16 +196,50 @@ class FeatureEngine:
                 pass  # recorded in self.errors by _execute
         self._pool.submit(run)
 
+    def feature_summaries(self, product_id: str) -> list[dict]:
+        """Every feature of a product the pipeline has run, with where it got to: released, in
+        progress (and at which station), or stopped. Read from the durable index and checkpoints,
+        so it survives restarts."""
+        out = []
+        for row in self.index.all():
+            if row["product_id"] != product_id:
+                continue
+            snap = self.graph.get_state(self._config(row["feature_id"]))
+            s = snap.values or {}
+            pending = [{"interrupt_id": i.id, **i.value} for i in snap.interrupts]
+            stations = rail(s, pending, running=row["feature_id"] in self.running) if s else []
+            stage = next((x["key"] for x in stations if x["state"] in ("waiting", "current", "stopped")), "")
+            status = ("stopped" if s.get("status") == "aborted" else
+                      "released" if s.get("status") == "done" or (s.get("release") or {}).get("production") else
+                      "in_progress")
+            out.append({"feature_id": row["feature_id"], "title": s.get("title") or row["title"],
+                        "description": s.get("description", ""), "status": status,
+                        "stage": "" if status != "in_progress" else stage.upper() if stage.startswith("g") else stage})
+        return out
+
+    def similar(self, product_id: str, title: str, description: str = "", exclude: str = "") -> list[dict]:
+        from .duplicates import find_similar
+
+        return find_similar(title, description, self.feature_summaries(product_id),
+                            self.services.catalog.lookup(product_id), exclude=exclude)
+
     def create(self, *, product_id: str, title: str, description: str = "", created_by: str = "",
                simulate_faults: dict[str, int] | None = None, budget_usd: float | None = None,
-               background: bool = False) -> str:
+               background: bool = False, not_duplicate_reason: str = "") -> str:
+        from .duplicates import DuplicateIntent
+
         # Read and validate the product's governance from its own org, and pin the commits.
         snap = self.services.snapshot(product_id)
-        seq = self.index.next_number(product_id)
-        feature_id = f"{product_id}-FEAT-{seq}"
-        self.index.add(feature_id, product_id, title, seq)
+        with self._create_lock:  # two identical requests at once must not both pass the check
+            similar = self.similar(product_id, title, description)
+            if any(m["duplicate"] for m in similar) and not not_duplicate_reason.strip():
+                raise DuplicateIntent(similar)
+            seq = self.index.next_number(product_id)
+            feature_id = f"{product_id}-FEAT-{seq}"
+            self.index.add(feature_id, product_id, title, seq)
         inp = {"feature_id": feature_id, "product_id": product_id, "title": title, "description": description,
-               "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins}
+               "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins,
+               "related_features": similar, "not_duplicate_reason": not_duplicate_reason.strip()}
         if budget_usd:
             inp["token_budget_usd"] = float(budget_usd)
         self.bus.publish({"type": "feature.created", "feature_id": feature_id, "product_id": product_id})

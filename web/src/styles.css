@@ -306,3 +306,5 @@ table.quality td { padding: 7px 8px; border-bottom: 1px solid var(--rule-soft); 
 .design-review .kv { padding: 8px 0 4px; }
 .design-review .findings { margin-bottom: 8px; }
 .plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.similar { margin-top: 4px; }
+.need .similar, .note .similar { font-size: var(--fs-0); }

@@ -77,6 +77,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "capabilities": services.catalog.lookup(state["product_id"]),
         "repos": [{"name": r.name, "role": r.role} for r in product.repos],
         "org": product.org,
+        "related_features": list(state.get("related_features") or []),
+        "not_duplicate_reason": state.get("not_duplicate_reason", ""),
         "repo_prefix": product.repo_prefix,
         # Repos of the lanes this product depends on (shared services, APX): they may join the
         # change set when the architecture needs them.

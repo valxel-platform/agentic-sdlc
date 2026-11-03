@@ -1,8 +1,9 @@
 """Guided intake: a chat that turns an intent creator's idea into a feature.
 
 The agent asks for what the pipeline needs (lane, problem, users, success measure), drafts the
-title and description, checks the capability catalog for overlap, and submits only when the
-creator confirms. In stub mode it is a deterministic interviewer; in live mode it is a Claude call
+title and description, checks what the product already has (features in flight, released or
+stopped, and live capabilities), and submits only when the creator confirms. A draft that looks
+like an existing feature can be submitted only with a reason it is different. In stub mode it is a deterministic interviewer; in live mode it is a Claude call
 through the model gateway that returns JSON, merged with the same validation.
 """
 
@@ -39,7 +40,9 @@ class Draft:
     problem: str = ""
     users: str = ""
     success_metric: str = ""
-    related_capability: str = ""
+    related_capability: str = ""  # the closest related feature or capability, noted in the description
+    similar: list = field(default_factory=list)  # matches from vrixel_sdlc.duplicates
+    not_duplicate_reason: str = ""
 
     def missing(self) -> list[str]:
         return [f for f in FIELDS if not getattr(self, f)]
@@ -47,7 +50,9 @@ class Draft:
     def description(self) -> str:
         parts = [self.problem.strip(), "", f"Users: {self.users.strip()}", f"Success measure: {self.success_metric.strip()}"]
         if self.related_capability:
-            parts.append(f"Related capability: {self.related_capability}")
+            parts.append(f"Related: {self.related_capability}")
+        if self.not_duplicate_reason:
+            parts.append(f"Not a duplicate because: {self.not_duplicate_reason}")
         return "\n".join(parts).strip()
 
 
@@ -64,8 +69,13 @@ class IntakeSession:
     created_at: str = field(default_factory=now)
 
     @property
+    def duplicate(self) -> bool:
+        """Looks like an existing feature and has no reason why it is different."""
+        return any(m["duplicate"] for m in self.draft.similar) and not self.draft.not_duplicate_reason
+
+    @property
     def ready(self) -> bool:
-        return not self.draft.missing() and not self.feature_id
+        return not self.draft.missing() and not self.feature_id and not self.duplicate
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -135,13 +145,27 @@ class IntakeAgent:
         return hits[0] if len(hits) == 1 else ""
 
     def _overlap(self, d: Draft) -> str:
+        """Find what the product already has that looks like this draft; returns the closest
+        related item for the description (duplicates are handled by the caller)."""
+        from .duplicates import describe, find_similar
+
         if not d.product_id:
+            d.similar = []
             return ""
-        text = set(w for w in _WORD.findall(f"{d.title} {d.problem}".lower()) if len(w) >= 5)
-        for cap in self.services.catalog.lookup(d.product_id):
-            if text & set(w for w in _WORD.findall(cap["name"].lower()) if len(w) >= 5):
-                return f"{cap['id']} ({cap['name']})"
-        return ""
+        lookup = getattr(self.services, "features", None)
+        features = lookup(d.product_id) if callable(lookup) else []
+        d.similar = find_similar(d.title, d.problem, features, self.services.catalog.lookup(d.product_id))
+        related = [m for m in d.similar if not m["duplicate"]]
+        return describe(related[0]) if related else ""
+
+    def _duplicate_question(self, s: IntakeSession) -> str:
+        from .duplicates import describe
+
+        s.awaiting = "not_duplicate_reason"
+        dups = [m for m in s.draft.similar if m["duplicate"]]
+        return ("This looks like " + "; ".join(describe(m) for m in dups) + ". If it's the same need, add to that "
+                "feature instead of starting a new one. If it's different, tell me how, and I'll note it for the "
+                "G1 approver.")
 
     def _next_question(self, s: IntakeSession) -> str:
         for f in FIELDS:
@@ -157,7 +181,9 @@ class IntakeAgent:
         name = self.lane_names([d.product_id]).get(d.product_id, d.product_id)
         lines = [f"Here's the intent for {name}:", f"“{d.title}”"]
         if d.related_capability:
-            lines.append(f"It looks related to {d.related_capability}, so I've noted that it extends it.")
+            lines.append(f"It looks related to {d.related_capability}; I've noted that so the agents build on it.")
+        if d.not_duplicate_reason:
+            lines.append(f"I've noted why it's different: {d.not_duplicate_reason}")
         lines.append("Submit it when it looks right, or tell me what to change.")
         return "\n".join(lines)
 
@@ -165,6 +191,12 @@ class IntakeAgent:
         if s.feature_id:
             return f"This intent was submitted as {s.feature_id}. Start a new conversation for another one."
         s.messages.append({"role": "user", "text": text, "at": now()})
+        if s.awaiting == "not_duplicate_reason":  # the creator's answer to "this looks like X"
+            s.draft.not_duplicate_reason = text.strip()
+            s.awaiting = ""
+            reply = self._summary(s)
+            s.messages.append({"role": "agent", "text": reply, "at": now()})
+            return reply
         if self.services.settings.mode == "live":
             reply = self._respond_live(s)
         else:
@@ -200,6 +232,8 @@ class IntakeAgent:
         if not d.missing() and not s.overlap_checked:
             s.overlap_checked = True
             d.related_capability = self._overlap(d)
+        if not d.missing() and s.duplicate:
+            return self._duplicate_question(s)
         question = self._next_question(s)
         if question:
             lead = "Got it. " if len(s.messages) > 1 else "Thanks. I'll draft this as we go. "
@@ -234,6 +268,8 @@ class IntakeAgent:
         if not s.draft.missing() and not s.overlap_checked:
             s.overlap_checked = True
             s.draft.related_capability = self._overlap(s.draft)
+        if not s.draft.missing() and s.duplicate:
+            return self._duplicate_question(s)
         return str(data.get("reply") or "Could you say a bit more about what you need?")
 
     def update_draft(self, s: IntakeSession, changes: dict) -> None:
@@ -245,4 +281,8 @@ class IntakeAgent:
             if k == "product_id" and v and v not in s.lanes:
                 raise PermissionError(f"You can't submit intents for {v}")
             setattr(s.draft, k, str(v).strip())
-        s.overlap_checked = False
+        if set(changes) & {"product_id", "title", "problem"}:
+            s.overlap_checked = False  # what it looks like may have changed
+            s.draft.not_duplicate_reason = ""
+            s.draft.related_capability = self._overlap(s.draft)
+            s.overlap_checked = True

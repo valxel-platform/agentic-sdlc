@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Draft, type IntakeSession, type Me } from "../api";
+import { SimilarList } from "../components/External";
 
 const FIELD_LABEL: Record<string, string> = {
   product_id: "Product", problem: "Problem", users: "Users", success_metric: "Success measure",
@@ -108,8 +109,15 @@ export function Intake({ me }: { me: Me }) {
           <label className="field">Success measure
             <input value={s.draft.success_metric} disabled={submitted} onChange={(e) => edit("success_metric", e.target.value)} onBlur={() => save("success_metric")} />
           </label>
-          {s.draft.related_capability && (
-            <p className="note">Extends an existing capability: {s.draft.related_capability}. Agents will build on it rather than start over.</p>
+          {(s.draft.similar ?? []).length > 0 && (
+            <div className={s.draft.similar.some((m) => m.duplicate) && !s.draft.not_duplicate_reason ? "need" : "note"}>
+              <p>{s.draft.similar.some((m) => m.duplicate)
+                ? s.draft.not_duplicate_reason
+                  ? `Looks like an existing feature; you said why it's different: ${s.draft.not_duplicate_reason}`
+                  : "Looks like an existing feature. Add to it, or tell the agent how this one is different before submitting."
+                : "Related work the agents will build on:"}</p>
+              <SimilarList items={s.draft.similar} />
+            </div>
           )}
           {!submitted && s.missing.length > 0 && (
             <p className="need">Still needed: {s.missing.map((m) => FIELD_LABEL[m] ?? m).join(", ")}</p>

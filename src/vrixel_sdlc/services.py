@@ -42,6 +42,7 @@ class Services:
     quality: object = None  # vrixel_sdlc.quality.Quality, set by build_services
     provisioner: object = None  # vrixel_sdlc.provisioning.RepoProvisioner, set by build_services
     knowledge: object = None  # vrixel_sdlc.knowledge.Knowledge, set by build_services
+    features: object = None  # product_id -> feature summaries, set by the engine
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime

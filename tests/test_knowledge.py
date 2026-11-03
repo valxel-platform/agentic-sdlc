@@ -137,7 +137,7 @@ def test_agents_get_the_record_contracts_and_catalog(tmp_path, gov_root):
     text = render(p)
     assert "ADR-EMR-0001 (accepted): FHIR R4 at every system boundary" in text
     assert f"{API}: EMR intake API 1.4.0" in text and "GET /fhir/Patient" in text
-    assert "CAP-EMR-INTAKE (live)" in text and "## Architecture overview" in text
+    assert "## Architecture overview" in text and "Capabilities" not in text  # nothing invented
     # Bounded, decisions first.
     short = render(p, max_chars=400)
     assert len(short) <= 401 and "ADR-EMR-0001" in short
@@ -260,3 +260,44 @@ def test_products_without_a_record_still_work(tmp_path, gov_root):
     fid = eng.start(product_id="AG", title="Offline crop log")["feature_id"]
     g4 = until_gate(eng, fid, "g4")
     assert g4["design_review"]["findings"] == [] and g4["design_review"]["builds_on"] == []
+
+
+# --------------------------------------------------------------------------- features the product has
+
+
+def test_the_tool_knows_every_feature_it_ran_and_where_it_got_to(tmp_path, gov_root):
+    eng, svc = make(tmp_path, gov_root)
+    done = eng.start(product_id="EMR", title="Consent capture at intake")["feature_id"]
+    eng.auto_drive(done)
+    stopped = eng.start(product_id="EMR", title="Referral triage")["feature_id"]
+    p = eng.pending(stopped)[0]
+    eng.decide(stopped, p["interrupt_id"], {"decision": "abort", "approver": "po", "feedback": "not now"})
+    waiting = eng.start(product_id="EMR", title="Lab results viewer")["feature_id"]
+    feats = {f["feature_id"]: f for f in eng.feature_summaries("EMR")}
+    assert feats[done]["status"] == "released"
+    assert feats[stopped]["status"] == "stopped"
+    assert feats[waiting]["status"] == "in_progress" and feats[waiting]["stage"] == "G1"
+    text = render(svc.knowledge.collect(svc.snapshot("EMR")))
+    assert f"- {done} (released): Consent capture at intake" in text
+    assert f"- {waiting} (in progress, at G1): Lab results viewer" in text
+    caps = svc.catalog.lookup("EMR")
+    assert [c["status"] for c in caps if c.get("feature") == done] == ["live"]
+
+
+def test_duplicates_are_caught_whatever_state_the_original_is_in(tmp_path, gov_root):
+    from vrixel_sdlc.duplicates import DuplicateIntent
+
+    eng, _ = make(tmp_path, gov_root)
+    first = eng.start(product_id="EMR", title="Consent capture at intake",
+                      description="Capture patient consent during intake")["feature_id"]
+    with pytest.raises(DuplicateIntent) as exc:  # in progress
+        eng.create(product_id="EMR", title="Capture consent when patients register",
+                   description="Record patient consent at registration")
+    assert exc.value.matches[0]["id"] == first
+    eng.auto_drive(first)
+    with pytest.raises(DuplicateIntent, match="already released"):  # released
+        eng.create(product_id="EMR", title="Consent capture at intake")
+    other = eng.create(product_id="EMR", title="Consent capture at intake",
+                       not_duplicate_reason="Paper consent forms scanned at the front desk")
+    assert eng.view(other)["pending"][0]["related_features"][0]["id"] == first
+    assert eng.create(product_id="EMR", title="Referral triage")  # unrelated: no friction

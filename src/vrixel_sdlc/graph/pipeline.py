@@ -142,6 +142,9 @@ def make_gate(gate: str, services):
                 # Approving G4 approves creating these repos, with these settings.
                 "new_repos": repo_plans(services, state) if gate == "g4" and lane_id == state["product_id"] else [],
                 "design_review": review,
+                # G1 decides whether this intent is new: what the product already has that looks like it.
+                "related_features": list(state.get("related_features") or []) if gate == "g1" else [],
+                "not_duplicate_reason": state.get("not_duplicate_reason", "") if gate == "g1" else "",
                 # Each lane reviews the PRs in its own org.
                 "pull_requests": sorted(k for k, pr in state.get("pull_requests", {}).items()
                                         if pr["repo"].split("/", 1)[0] == lane.org) if gate == "g5" else [],

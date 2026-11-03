@@ -60,9 +60,9 @@ Three screens, all updated live over server-sent events (`/api/events`):
   it is waiting for. A feature's page adds the timeline, artifacts, pull requests, decisions and
   cost.
 - **New intent** is a chat with the intake agent. It asks for the product, the problem, the users
-  and a success measure, drafts the intent alongside the conversation, and checks the capability
-  catalog for features it extends. You can edit the draft directly and submit it when it is
-  complete. Submitting starts discovery.
+  and a success measure, drafts the intent alongside the conversation, and checks what the
+  product already has (see [Duplicate requests](#duplicate-requests)). You can edit the draft
+  directly and submit it when it is complete. Submitting starts discovery.
 
 ### Sign-in and who can decide
 
@@ -324,6 +324,28 @@ the feature's pin, so it is current; the constitution stays pinned.
 **What G4 shows.** The decisions the design builds on and overrides, each API change, decisions on
 the same repos the design doesn't mention, other approved designs in flight that change the same
 APIs, and the commit of the record it was compared with.
+
+**What the product has built.** Agents also get the list of every feature the pipeline has run
+for the product and where it got to (released, in progress at a station, or stopped), and the
+capability catalog: designs approved at G4 (in flight) and released capabilities (live). Both are
+kept in the platform database, so they survive restarts; the catalog starts empty and holds only
+what the pipeline actually designed and released.
+
+### Duplicate requests
+
+A request that looks like something the product already has is caught before it becomes a
+feature. The check compares the title and description with every feature of the product (in
+progress, released or stopped) and every live capability:
+
+| Where | What happens |
+| --- | --- |
+| Intake chat | The agent names the match ("This looks like EMR-FEAT-1, in progress at G2") and asks the creator to add to that feature or say how this one differs; submit stays off until they do |
+| `POST /api/features` | A likely duplicate is refused (409, with the matches) unless `not_duplicate_reason` is given |
+| G1 | The approver sees the matches and the creator's reason, and decides |
+
+Matching uses shared words (title words weighted double, common words ignored, word endings
+reduced), so it catches repeats and rewordings. A request that describes the same thing in
+entirely different words gets through to G1, where the approver sees the closest matches.
 
 **After release.** The capability goes live in the catalog with its decisions and API changes, and
 the pipeline opens a pull request in the governance repo that adds the feature's ADRs (accepted),
@@ -595,6 +617,7 @@ src/vrixel_sdlc/
   api/app.py       FastAPI service under /api; serves web/dist
   web/auth.py      GitHub OAuth, signed sessions, approver matching
   intake.py        guided intake agent
+  duplicates.py    finds features and capabilities a new request repeats
   events.py        live-update bus
   cli.py           vrixel demo
 web/               React app: decisions, features, intake

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { api, type DesignReview, type Diagram, type Feature, type PendingItem, type RepoPlan, type WorkItem, type WorkTracking } from "../api";
+import { Link } from "react-router-dom";
+import { api, type DesignReview, type SimilarItem, type Diagram, type Feature, type PendingItem, type RepoPlan, type WorkItem, type WorkTracking } from "../api";
 import { WAITS } from "../vocab";
 
 const PROVIDER: Record<string, string> = { lucid: "Lucid", drawio: "draw.io", jira: "Jira", openproject: "OpenProject" };
@@ -151,6 +152,23 @@ const SECURITY: Record<string, string> = {
   secret_scanning: "secret scanning", push_protection: "push protection", dependabot_alerts: "Dependabot alerts",
   dependabot_security_updates: "Dependabot updates", code_scanning_default_setup: "CodeQL", dependency_graph: "dependency graph",
 };
+
+const WHERE: Record<string, string> = { released: "released", stopped: "stopped", live: "live" };
+
+/** What the product already has that looks like a request: at intake and at G1. */
+export function SimilarList({ items }: { items: SimilarItem[] }) {
+  return (
+    <ul className="plain-list similar">
+      {items.map((m) => (
+        <li key={m.id}>
+          {m.kind === "feature" ? <Link to={`/features/${m.id}`}>{m.id}</Link> : <strong>{m.id}</strong>} {m.title}{" "}
+          <span className="muted small">({WHERE[m.status] ?? `in progress${m.stage ? `, at ${m.stage}` : ""}`})</span>
+          {m.duplicate && <> <span className="chip stop">Likely the same</span></>}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /** G4: the design against what the product already has, read from its architecture record and repos. */
 export function DesignReviewPanel({ review }: { review: DesignReview }) {

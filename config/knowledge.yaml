@@ -12,6 +12,7 @@ sources:
   architecture: vrixel_sdlc.knowledge.sources:GovernanceArchitecture   # architecture/ in the governance repo
   contracts: vrixel_sdlc.knowledge.sources:RepoOpenApi                  # api/openapi.yaml in provider repos
   capabilities: vrixel_sdlc.knowledge.sources:CatalogCapabilities       # live and in-flight capabilities
+  features: vrixel_sdlc.knowledge.sources:ProductFeatures              # features run so far: released, in progress, stopped
 
 settings:
   architecture_dir: architecture

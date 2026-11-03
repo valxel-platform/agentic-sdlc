@@ -5,6 +5,7 @@ Backstage TechDocs or Confluence) without touching the pipeline.
   architecture   the product's architecture record in its governance repo (Git, the system of record)
   contracts      each API repo's OpenAPI document, as merged on its default branch
   capabilities   the capability catalog: what is live, and which designs are approved and in flight
+  features       the features the pipeline has run for the product, and where each got to
 """
 
 from __future__ import annotations
@@ -81,6 +82,17 @@ class RepoOpenApi:
                     entry["error"] = f"{type(exc).__name__}: {exc}"
                 out[r.name] = entry
         return {"apis": out}
+
+
+class ProductFeatures:
+    """Every feature the pipeline has run for this product: released, in progress, stopped."""
+
+    def __init__(self, services) -> None:
+        self.services = services
+
+    def collect(self, snap, cfg: dict) -> dict:
+        lookup = getattr(self.services, "features", None)
+        return {"features": lookup(snap.product.product_id) if callable(lookup) else []}
 
 
 class CatalogCapabilities:
