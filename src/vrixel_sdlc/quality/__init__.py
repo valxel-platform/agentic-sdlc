@@ -146,7 +146,7 @@ def effective_policy(cfg: QualityConfig, data_class: str, overrides: dict | None
         if "block_on" in raw and sev_rank(raw["block_on"]) > sev_rank(floor.get("block_on", "critical")):
             problems.append(f"quality.{name}.block_on {raw['block_on']} is looser than the platform's {floor.get('block_on')}")
         if "min_coverage" in raw and float(raw["min_coverage"]) < float(floor.get("min_coverage") or 0):
-            problems.append(f"quality.{name}.min_coverage {raw['min_coverage']} is below the platform's {floor.get('min_coverage')}")
+            problems.append(f"quality.{name}.min_coverage {raw['min_coverage']} is below the platform's {float(floor.get('min_coverage')):g}%")
         merged = {**base, **{k: v for k, v in raw.items() if k in _KEYS}}
         if "required" in raw:
             merged["required"] = bool(raw["required"]) or bool(floor.get("required"))

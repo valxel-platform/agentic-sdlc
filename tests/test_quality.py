@@ -46,7 +46,7 @@ def add_quality(gov_root, org, block):
 def test_data_class_floors_tighten_the_recommended_profile():
     general = effective_policy(CFG, "general", {})
     phi = effective_policy(CFG, "phi", {})
-    assert general["unit"]["min_coverage"] == 70 and phi["unit"]["min_coverage"] == 80
+    assert general["unit"]["min_coverage"] == 90 and phi["unit"]["min_coverage"] == 90  # VX-11
     assert general["dast"]["required"] is False and phi["dast"]["required"] is True
     assert general["dependencies"]["block_on"] == "high"  # the floor (critical) only limits loosening
     assert phi["sast"]["block_on"] == "high" and phi["secrets"]["block_on"] == "low"
@@ -56,13 +56,15 @@ def test_products_change_tools_and_tighten_but_never_loosen():
     problems = []
     p = effective_policy(CFG, "phi", {
         "sast": {"match": {"tools": ["Semgrep", "CodeQL"]}, "block_on": "medium"},
-        "unit": {"match": {"checks": ["vitest*"]}, "min_coverage": 90},
+        "unit": {"match": {"checks": ["vitest*"]}, "min_coverage": 95},
         "license": {"kind": "security", "stage": "pr", "source": "github-checks",
                     "match": {"checks": ["license*"]}, "required": True, "block_on": "high"},
     }, problems)
     assert problems == []
     assert p["sast"]["match"]["tools"] == ["Semgrep", "CodeQL"] and p["sast"]["block_on"] == "medium"
-    assert p["unit"]["min_coverage"] == 90 and p["license"]["required"] is True
+    assert p["unit"]["min_coverage"] == 95 and p["license"]["required"] is True
+    effective_policy(CFG, "general", {"unit": {"min_coverage": 85}}, problems)
+    assert problems == ["quality.unit.min_coverage 85 is below the platform's 90%"]
 
     problems = []
     effective_policy(CFG, "phi", {
@@ -87,14 +89,14 @@ def test_governance_rejects_a_looser_quality_block(tmp_path, gov_root):
 
 def test_gate_outcomes_and_waivers():
     policy = effective_policy(CFG, "general", {})
-    ok_unit = SuiteResult(suite="unit", kind="test", stage="pr", state="passed", repo="o/a", coverage=75)
+    ok_unit = SuiteResult(suite="unit", kind="test", stage="pr", state="passed", repo="o/a", coverage=92)
     clean = [ok_unit] + [SuiteResult(suite=s, kind="security", stage="pr", state="passed", repo="o/a")
                          for s in ("sast", "dependencies", "secrets")]
     assert evaluate("pr", policy, clean, [])["status"] == "passed"
 
     low_cov = [SuiteResult(suite="unit", kind="test", stage="pr", state="passed", repo="o/a", coverage=61)] + clean[1:]
     res = evaluate("pr", policy, low_cov, [])
-    assert res["status"] == "failed" and "unit coverage 61.0% is below 70%" in res["test_failures"][0]
+    assert res["status"] == "failed" and "unit coverage 61.0% is below 90%" in res["test_failures"][0]
 
     no_unit = evaluate("pr", policy, clean[1:], [])
     assert no_unit["status"] == "failed" and "unit did not report" in no_unit["test_failures"][0]
@@ -226,7 +228,7 @@ def test_failing_tests_go_back_to_the_build_escalation(tmp_path, gov_root):
         suite="unit", kind="test", stage="pr", state="passed", repo=repo, passed=40, failed=0, coverage=55.0)
     v = drive_gates(eng, eng.start(product_id="AG", title="Offline crop log", description="x")["feature_id"])
     (esc,) = eng.pending(v["feature_id"])
-    assert esc["phase"] == "build" and "unit coverage 55.0% is below 70%" in esc["reason"]
+    assert esc["phase"] == "build" and "unit coverage 55.0% is below 90%" in esc["reason"]
 
 
 def test_e2e_failure_in_staging_asks_release_managers(tmp_path, gov_root):

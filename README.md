@@ -262,7 +262,7 @@ like any other repo and the provision step creates them on the golden path:
 Roles merge and deploy in dependency order: library, provider, mcp-server, agent, consumer.
 The `evals` quality suite reads the agent's `evals / report` status on every PR (recorded model
 responses); after a deploy to dev the agent's post-deploy job runs the same evals against the
-real model and reports `integration / report`. Platform articles VX-11 to VX-13 make these
+real model and reports `integration / report`. Platform articles VX-12 to VX-14 make these
 rules: models only through the gateway, people approve changes, evals gate every PR.
 
 Models are reached through `ss-llm-gateway`, a shared-services package each product deploys in
@@ -335,7 +335,7 @@ SAMM and NIST SSDF practices:
 
 | Stage | Suite | Recommended tool | Read from | Default rule |
 | --- | --- | --- | --- | --- |
-| Pull request | Unit tests | Your test runner, reporting counts and coverage | Check runs `unit*`, `test` | Required, coverage 70% (80% for PHI and payments) |
+| Pull request | Unit tests | Your test runner, reporting counts and coverage | Check runs `unit*`, `test` | Required, line coverage 90% for every data class (VX-11) |
 | Pull request | Contract tests | Pact | Check runs `contract*`, `pact*` | Optional; required where a lane says so |
 | Pull request | Code scanning (SAST) | CodeQL, or Semgrep (SARIF) | GitHub code scanning | Required, blocks high and above |
 | Pull request | Dependency review (SCA) | GitHub dependency review, Dependabot | Dependency diff of the PR | Required, blocks high (general may relax to critical) |
@@ -368,7 +368,7 @@ GitHub code scanning (any scanner). That is what keeps tools swappable.
 | Change | Where |
 | --- | --- |
 | Swap a tool (Semgrep for CodeQL, Vitest for Jest, Snyk for Dependabot) | `match` of the suite: tool names or check names |
-| Tighten a product (coverage 90%, block on medium, make DAST required) | `quality:` in the product's `governance/product.yaml` |
+| Tighten a product (coverage 95%, block on medium, make DAST required) | `quality:` in the product's `governance/product.yaml` |
 | Add a suite (license scan, performance budget, accessibility) | A new entry with `kind`, `stage`, `source`, `match` |
 | Raise or lower a floor for a data class | `floors` in `config/quality.yaml` (tools org) |
 | A tool that reports somewhere new (a SonarQube API, a test-results bucket) | One class with `collect()` in `quality/sources.py` or your own package, registered under `sources` |
@@ -382,7 +382,7 @@ approvers:
   security: [vrixel-emr/security]
 quality:
   sast: { match: { tools: [CodeQL, Semgrep] }, block_on: medium }
-  unit: { match: { checks: ["vitest*"] }, min_coverage: 85 }
+  unit: { match: { checks: ["vitest*"] }, min_coverage: 95 }
   license:
     kind: security
     stage: pr

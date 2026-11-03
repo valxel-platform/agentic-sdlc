@@ -25,7 +25,7 @@ suites:
     source: github-checks
     match: { checks: ["unit*", "test", "tests", "*unit tests*"] }
     required: true
-    min_coverage: 70            # read from the check's summary, e.g. "Coverage: 82.4%"
+    min_coverage: 90            # line coverage, read from the check's summary, e.g. "Coverage: 92.4%" (VX-11)
   contract:
     kind: test
     stage: pr
@@ -103,14 +103,14 @@ suites:
 # suite required, add suites, change tools) but may not go below these.
 floors:
   general:
-    unit: { min_coverage: 70 }
+    unit: { min_coverage: 90 }   # VX-11: every data class
     dependencies: { block_on: critical }
   phi:
-    unit: { min_coverage: 80 }
+    unit: { min_coverage: 90 }
     dast: { required: true }
     container: { required: true }
   payments:
-    unit: { min_coverage: 80 }
+    unit: { min_coverage: 90 }
     dast: { required: true }
     container: { required: true }
     secrets: { block_on: info }
