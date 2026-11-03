@@ -51,6 +51,8 @@ class ProductConfig:
     quality: dict = field(default_factory=dict)
     # Effective golden-path settings for new repos (see vrixel_sdlc.provisioning)
     repo_standards: dict = field(default_factory=dict)
+    # Name prefix for new repos (e.g. 'emr-'). Required while a product has no repos yet.
+    repo_prefix: str = ""
 
 
 @dataclass(frozen=True)

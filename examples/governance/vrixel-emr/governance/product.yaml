@@ -23,6 +23,9 @@ tools:
 budget_usd: 150
 critic_threshold: 0.8
 max_loops: 3
+# Sample repos so the demo and tests have a product with code. A new product lists none and sets
+# repo_prefix instead (e.g. `repos: []` and `repo_prefix: emr-`): its first feature's HLD proposes
+# the repos, G4 approves them and the provision step creates them.
 repos:
 - name: vrixel-emr/emr-intake-api
   role: provider

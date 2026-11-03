@@ -87,15 +87,19 @@ _NEW_SERVICE = re.compile(r"\b(new|separate|dedicated) (micro)?service\b", re.I)
 
 
 def _new_repo(ctx: dict) -> dict | None:
-    """Stub design judgement: a request for a new or separate service gets its own repo. Live
-    architects decide from the HLD's boundaries."""
-    if not _NEW_SERVICE.search(f"{ctx['title']} {ctx.get('description', '')}"):
+    """Stub design judgement: a request for a new or separate service gets its own repo, and so
+    does a product's first feature (it has no repos yet). Live architects decide from the HLD's
+    boundaries."""
+    greenfield = not ctx["repos"]
+    if not greenfield and not _NEW_SERVICE.search(f"{ctx['title']} {ctx.get('description', '')}"):
         return None
-    own = ctx["repos"][0]["name"]
-    org, first = own.split("/", 1)
-    prefix = first.split("-", 1)[0]
+    if greenfield:
+        org, prefix = ctx["org"], ctx.get("repo_prefix") or "app-"
+    else:
+        org, first = ctx["repos"][0]["name"].split("/", 1)
+        prefix = first.split("-", 1)[0] + "-"
     words = [w for w in re.findall(r"[a-z0-9]+", ctx["title"].lower()) if w not in ("a", "an", "the", "for", "of", "and", "to")]
-    name = f"{org}/{prefix}-{'-'.join(words[:2]) or 'feature'}-service"
+    name = f"{org}/{prefix}{'-'.join(words[:2]) or 'feature'}-service"
     return {"name": name, "role": "provider", "lane": ctx["product_id"]}
 
 
@@ -107,7 +111,7 @@ def architecture(ctx: dict, defective: bool) -> str:
         new = None
     repos = sorted(ctx["repos"] + deps + ([new] if new else []),
                    key=lambda r: (_REPO_ORDER.get(r["role"], 9), r["name"]))
-    own = sorted(ctx["repos"], key=lambda r: _REPO_ORDER.get(r["role"], 9))
+    own = sorted(ctx["repos"] + ([new] if new else []), key=lambda r: _REPO_ORDER.get(r["role"], 9))
     provider = next((r["name"] for r in own if r["role"] == "provider"), own[0]["name"])
     kn = ctx.get("knowledge") or {}
     names = {r["name"] for r in repos}
@@ -122,7 +126,9 @@ def architecture(ctx: dict, defective: bool) -> str:
               ["- None: the architecture record has no accepted decisions yet"])
     lines += [
         "", "## ADRs",
-        f"- ADR-{ctx['feature_id']}-1: Extend the {provider} API with a versioned endpoint (expand, then contract)",
+        (f"- ADR-{ctx['feature_id']}-1: Start {provider} with a versioned API (/api/v1) for {ctx['title'].lower()}"
+         if not ctx["repos"] else
+         f"- ADR-{ctx['feature_id']}-1: Extend the {provider} API with a versioned endpoint (expand, then contract)"),
     ]
     if new:
         lines.append(f"- ADR-{ctx['feature_id']}-2: Create {new['name']} as its own service: it has its own data, "
@@ -139,7 +145,8 @@ def architecture(ctx: dict, defective: bool) -> str:
     lines += [
         "", "## Contracts", f"- {provider}: " + (
             f"{api['version']} -> {_minor_bump(api['version'])}, adds an endpoint; backward compatible (VX-4)"
-            if api.get("version") else "OpenAPI minor version bump, backward compatible (VX-4)"),
+            if api.get("version") else "new API, starts at 1.0.0 (VX-4)" if new and provider == new["name"]
+            else "OpenAPI minor version bump, backward compatible (VX-4)"),
         "", "## Diagram", "```mermaid", _flowchart(ctx, repos), "```",
         "", "## Constitution articles", "- VX-4", "- VX-8",
     ]

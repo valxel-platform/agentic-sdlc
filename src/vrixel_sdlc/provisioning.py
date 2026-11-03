@@ -87,6 +87,8 @@ def effective_standards(std: RepoStandards, data_class: str, overrides: dict | N
 
 
 def prefix_of(product) -> str:
+    if getattr(product, "repo_prefix", ""):
+        return product.repo_prefix
     names = [r.name.split("/", 1)[1] for r in product.repos]
     return names[0].split("-", 1)[0] + "-" if names else ""
 

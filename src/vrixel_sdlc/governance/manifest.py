@@ -16,6 +16,7 @@ from ..repo_roles import ROLES
 from .errors import GovernanceError
 
 _ROLES = set(ROLES)
+_PREFIX = re.compile(r"^[a-z][a-z0-9]*-$")
 _REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$")
 _APPROVER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}(/[A-Za-z0-9][A-Za-z0-9_.-]*)?$")
 
@@ -66,8 +67,14 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         if role not in _ROLES:
             problems.append(f"repo {name} has role {role!r}; expected one of {sorted(_ROLES)}")
         repos.append(RepoSpec(name=str(name), role=str(role)))
-    if not repos:
-        problems.append("no repos listed")
+    # A new product may start with no repos: its first feature's HLD proposes them, G4 approves
+    # them and the provision step creates them. It then needs the prefix new repo names start with.
+    repo_prefix = str(raw.get("repo_prefix") or "")
+    if repo_prefix and not _PREFIX.match(repo_prefix):
+        problems.append(f"repo_prefix {repo_prefix!r} must be lowercase letters and digits ending in '-', e.g. 'emr-'")
+    if not repos and not repo_prefix:
+        problems.append("no repos listed: list the product's repos, or set repo_prefix (e.g. 'emr-') so its first "
+                        "feature can propose them")
 
     approvers = {k: [str(a).lstrip("@") for a in (v or [])] for k, v in (raw.get("approvers") or {}).items()}
     for gate in limits.required_gates:
@@ -147,6 +154,7 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         tools=chosen_tools,
         quality=policy,
         repo_standards=standards,
+        repo_prefix=repo_prefix,
     )
     files = {"constitution": str(raw.get("constitution") or "constitution.md"),
              "context": str(raw.get("context") or "context.md")}

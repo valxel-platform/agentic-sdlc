@@ -46,7 +46,9 @@ def load_skill(name: str) -> str:
 
 def product_pack(product: ProductConfig, context: str = "", design_knowledge: str = "") -> str:
     """L4: the product's own context.md from its governance repo, plus its registered lane."""
-    repos = "\n".join(f"- {r.name} ({r.role})" for r in product.repos)
+    repos = "\n".join(f"- {r.name} ({r.role})" for r in product.repos) or (
+        f"- None yet. Propose them in the HLD's 'New repos' section, named {product.org}/"
+        f"{product.repo_prefix or '<prefix>'}<words>, each with an ADR.")
     return (
         f"# Product context: {product.name} ({product.product_id}, org {product.org})\n"
         f"Data class: {product.data_class}\n"

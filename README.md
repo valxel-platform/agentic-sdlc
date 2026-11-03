@@ -201,6 +201,10 @@ OpenChoreo delivery then work on it from its first pull request, with no manual 
 - vrixel-emr/emr-consent-registry-service (provider): Owns patient consent records [ADR-EMR-FEAT-4-2]
 ```
 
+**A new product starts with no repos.** Its `product.yaml` lists `repos: []` and sets
+`repo_prefix: emr-`; the first feature's HLD proposes the repos it needs, each with an ADR, and the
+same approval and provisioning apply. Don't list repos before a design calls for them.
+
 **Checked before G4.** The repo must be in the product's own org, follow the naming rule (the
 product's prefix, lowercase words joined by "-"), have a role with a template, not exist
 already, and have an ADR that names it. G4 shows exactly what approval will create.

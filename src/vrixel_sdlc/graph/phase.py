@@ -76,6 +76,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "constitution_version": con.version,
         "capabilities": services.catalog.lookup(state["product_id"]),
         "repos": [{"name": r.name, "role": r.role} for r in product.repos],
+        "org": product.org,
+        "repo_prefix": product.repo_prefix,
         # Repos of the lanes this product depends on (shared services, APX): they may join the
         # change set when the architecture needs them.
         "dependency_repos": [{"name": r.name, "role": r.role, "lane": lane_id}
@@ -409,7 +411,9 @@ def publish_diagram(services, state: FeatureState, content: str) -> tuple[str, d
 
     version = len(state.get("diagrams") or []) + 1
     own = sorted(snap.product.repos, key=lambda r: REPO_ORDER.get(r.role, 9))
-    repo = next((r.name for r in own if r.role == "provider"), own[0].name)
+    # Before a new product's first repos exist, the diagram is committed to its governance repo.
+    repo = next((r.name for r in own if r.role == "provider"), own[0].name if own else
+                services.settings.entry(snap.product.product_id).governance.full_name)
     req = DiagramRequest(
         feature_id=state["feature_id"], title=f"{state['feature_id']} {state['title']}: architecture v{version}",
         mermaid=extract_mermaid(section(content, "Diagram")), repo=repo, branch=f"feature/{state['feature_id']}",
