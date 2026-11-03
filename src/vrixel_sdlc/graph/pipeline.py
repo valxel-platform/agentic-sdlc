@@ -94,6 +94,44 @@ def make_intake(services):
     return intake
 
 
+def make_hotfix_brief(services):
+    """An incident's hotfix skips discovery to architecture: on-call already decided it is needed.
+    It starts at planning from a short spec and design written from the incident, so planning,
+    tests, security and the merge and release gates still apply."""
+
+    def hotfix_brief(state: FeatureState) -> dict:
+        h = state.get("hotfix") or {}
+        snap = services.feature_snapshot(state)
+        repo = h.get("repo", "")
+        role = next((r.role for lane in snap.lanes().values() for r in lane.repos if r.name == repo), "provider")
+        inc = h.get("incident_id", "the incident")
+        prd = "\n".join([
+            f"# Hotfix spec: {state['title']}", "", "## Goals", f"- Stop the failure behind {inc}", "",
+            "## Non-goals", "- New behaviour beyond the fix", "", "## Acceptance criteria",
+            f"- AC-1: Given the conditions of {inc}, when the fix is deployed, then the failure no longer occurs "
+            "and its alerts resolve",
+            "- AC-2: Given the existing tests, when the fix is built, then they still pass", "",
+            "## Constitution articles", "- VX-5", "", "## Change", h.get("change", ""), ""])
+        hld = "\n".join([
+            f"# Hotfix design: {state['title']}", "", "## Builds on", f"- None: a fix within the existing design ({inc})",
+            "", "## ADRs", f"- ADR-{state['feature_id']}-1: Fix forward in {repo} for {inc}; no design change", "",
+            "## Affected repos", f"- {repo} ({role})", "", "## Contracts", f"- {repo}: unchanged", ""])
+        arts, version = {}, snap.version
+        for kind, phase, content in (("PRD", "spec", prd), ("HLD", "architecture", hld)):
+            arts[kind] = services.artifacts.save(feature_id=state["feature_id"], kind=kind, phase=phase,
+                                                 content=content, parents=[], constitution_version=version)
+        by = h.get("approved_by", "")
+        return {
+            "artifacts": arts,
+            "approvals": {g: True for g in ("g1", "g2", "g3", "g4")},
+            "phase_status": {p: "skipped" for p in ("discovery", "spec", "design", "architecture")},
+            "lanes_touched": touched_lanes(snap, [repo]),
+            "events": [event("hotfix", "expedited", f"Hotfix for {inc}, approved by on-call {by}", approver=by)],
+        }
+
+    return hotfix_brief
+
+
 CROSS_LANE_GATES = ("g4", "g5", "g6")
 
 
@@ -152,7 +190,11 @@ def make_gate(gate: str, services):
                 "score": state.get("scores", {}).get(phase), "loops": state.get("loop_count", {}).get(phase),
                 "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
                 "budget_usd": state.get("token_budget_usd"),
-                "approvers": lane.approvers.get(gate, []),
+                # On-call decides an incident's hotfix at G5 and G6.
+                "approvers": (list(lane.approvers.get("oncall") or lane.approvers.get(gate, []))
+                              if state.get("track") == "hotfix" and gate in ("g5", "g6")
+                              else lane.approvers.get(gate, [])),
+                "track": state.get("track", "standard"),
                 "risk_tier": state.get("risk_tier"),
                 # G5 and G6 see the evidence: every suite run so far, and any accepted risks.
                 "quality": quality_summary(state) if gate in ("g5", "g6") else None,
@@ -726,8 +768,11 @@ def build_pipeline(services, checkpointer=None):
     g.add_node("production_wait", node, destinations=dest)
     g.add_node("finalize", finalize)
 
+    g.add_node("hotfix_brief", make_hotfix_brief(services))
     g.add_edge(START, "intake")
-    g.add_edge("intake", "discovery")
+    g.add_conditional_edges("intake", lambda s: "hotfix_brief" if s.get("track") == "hotfix" else "discovery",
+                            ["hotfix_brief", "discovery"])
+    g.add_edge("hotfix_brief", "plan")
     for phase in PHASES:
         g.add_conditional_edges(phase, _route(phase), _route_targets(phase))
     g.add_edge("merge_train", "build_wait")

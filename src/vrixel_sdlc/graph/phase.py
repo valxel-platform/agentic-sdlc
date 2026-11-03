@@ -360,6 +360,8 @@ def _knowledge_writeback(services, state: FeatureState, ctx: dict) -> list[dict]
     """After a production release: the capability goes live in the catalog, and the decisions G4
     approved are proposed to the product's architecture record (a governance pull request)."""
     cap_id = capability_id(state)
+    if state.get("track") == "hotfix":  # a fix is not a new capability; the incident's postmortem records it
+        return [event("operate", "hotfix_released", (state.get("hotfix") or {}).get("incident_id", ""))]
     call_agent(services, role="knowledge", phase="operate", ctx=ctx, skills=("engineering:documentation",),
                tail=f"Summarize capability {cap_id} for the catalog.", stub_text=f"{cap_id}: {state['title']}",
                max_tokens=512)

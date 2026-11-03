@@ -332,3 +332,6 @@ fieldset.field legend { margin-bottom: 4px; }
 .plain-ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
 .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 16px; }
 @media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+.action-list li { padding: 2px 0; }
+h3.pad { padding-top: 4px; }
+.radio input { width: auto; flex: none; margin-top: 3px; }

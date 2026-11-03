@@ -11,6 +11,7 @@ import { FeaturePage } from "./pages/Feature";
 import { Intake } from "./pages/Intake";
 import { RoadmapPage } from "./pages/Roadmap";
 import { InitiativePage, ReleasePage } from "./pages/Thread";
+import { IncidentPage, IncidentsPage } from "./pages/Incidents";
 
 function Mark() {
   return (
@@ -36,6 +37,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <NavLink to="/inbox">Decisions {mine > 0 && <span className="count" aria-label={`${mine} waiting on you`}>{mine}</span>}</NavLink>
           <NavLink to="/roadmap">Roadmap</NavLink>
           <NavLink to="/board">Features</NavLink>
+          <NavLink to="/incidents">Incidents</NavLink>
           <NavLink to="/intake">New intent</NavLink>
         </nav>
         <div className="side-foot">
@@ -56,6 +58,8 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <Route path="/roadmap" element={<RoadmapPage me={me} />} />
           <Route path="/initiatives/:id" element={<InitiativePage />} />
           <Route path="/releases/:id" element={<ReleasePage />} />
+          <Route path="/incidents" element={<IncidentsPage me={me} />} />
+          <Route path="/incidents/:id" element={<IncidentPage />} />
           <Route path="/intake" element={<Intake me={me} />} />
           <Route path="/intake/:sid" element={<Intake me={me} />} />
           <Route path="*" element={<Navigate to="/inbox" replace />} />

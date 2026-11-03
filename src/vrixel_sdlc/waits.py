@@ -67,7 +67,7 @@ class WaitChecker:
     def check(self, packet: dict) -> dict | None:
         """The resume value once the wait is over (success or failure), else None."""
         wait = packet["wait"]
-        if wait in ("release_ready", "release_train"):  # resolved from the engine's own threads
+        if wait in ("release_ready", "release_train", "incident_recovery"):  # resolved from the engine's own threads
             fn = getattr(self.services, "release_waits", None)
             return fn(packet) if callable(fn) else None
         results = []

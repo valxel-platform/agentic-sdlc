@@ -36,6 +36,11 @@ class OpenChoreo(Protocol):
     def environment(self, component: str) -> str | None: ...  # furthest environment requested so far
     def register_component(self, *, component: str, project: str | None, namespace: str | None,
                            component_type: str, workflow: str | None, repo_url: str, branch: str) -> str: ...
+    # Operations: what a component is doing in an environment, and putting its previous release back.
+    def observe(self, *, component: str, env: str, project: str | None = None, namespace: str | None = None,
+                minutes: int = 60) -> dict: ...  # {"available", "logs": [str], "metrics": {...}}
+    def rollback(self, *, component: str, env: str, actor: str, actor_type: str, project: str | None = None,
+                 namespace: str | None = None) -> dict: ...  # {"from", "to"}
 
 
 def check_promotion(env: str, actor_type: str, pipeline: tuple[str, ...]) -> None:
@@ -57,6 +62,8 @@ class StubOpenChoreo:
         self.deploy_results: dict[tuple[str, str], str] = {}
         self.run_tasks: dict[str, list[dict]] = {}  # component -> build steps
         self.components: dict[str, dict] = {}  # registered by provisioning
+        self.observations: dict[tuple[str, str], dict] = {}  # (component, env) -> what observe returns
+        self.rollbacks: list[dict] = []
         self._seq = itertools.count(1)
         self._lock = threading.Lock()
 
@@ -98,6 +105,17 @@ class StubOpenChoreo:
                    "release": f"{component.rsplit('/', 1)[-1]}-r1"}
             self.promotions.append(rec)
             return dict(rec)
+
+    def observe(self, *, component, env, project=None, namespace=None, minutes=60) -> dict:
+        return dict(self.observations.get((component, env)) or {"available": True, "logs": [], "metrics": {}})
+
+    def rollback(self, *, component, env, actor, actor_type, project=None, namespace=None) -> dict:
+        if actor_type != "human":
+            raise PermissionError("Only a person can roll back production (VX-3)")
+        with self._lock:
+            rec = {"component": component, "env": env, "from": "r2", "to": "r1", "actor": actor}
+            self.rollbacks.append(rec)
+        return dict(rec)
 
     def deployment(self, *, component, env, project=None, namespace=None) -> dict:
         with self._lock:
@@ -285,6 +303,47 @@ class OpenChoreoMcp:
     def environment(self, component: str) -> str | None:
         with self._lock:
             return self._requested.get(component)
+
+    # -- operations
+    def observe(self, *, component, env, project=None, namespace=None, minutes=60) -> dict:
+        """Recent logs and metrics from OpenChoreo's observability plane. Servers without these
+        tools report available=False; triage then works from the alerts alone."""
+        scope = {**self._scope(component, project, namespace), _ENV: env,
+                 ("since_minutes", "minutes", "duration_minutes", "window_minutes"): minutes}
+        out: dict = {"available": False, "logs": [], "metrics": {}}
+        try:
+            res = self._call(("get_component_logs", "query_component_logs", "get_logs"),
+                             {**scope, ("limit", "max_lines"): 200})
+            lines = _list(res) if not isinstance(res, str) else [{"log": x} for x in res.splitlines()]
+            out["logs"] = [str(_get(x, "log", "message", "line") or x)[:500] for x in lines][:200]
+            out["available"] = True
+        except McpError:
+            pass
+        try:
+            res = self._call(("get_component_metrics", "query_component_metrics", "get_metrics"), scope)
+            out["metrics"] = res if isinstance(res, dict) else {"raw": str(res)[:2000]}
+            out["available"] = True
+        except McpError:
+            pass
+        return out
+
+    def rollback(self, *, component, env, actor, actor_type, project=None, namespace=None) -> dict:
+        """Point the environment's release binding at the release before the current one."""
+        if actor_type != "human":
+            raise PermissionError("Only a person can roll back production (VX-3)")
+        scope = self._scope(component, project, namespace)
+        binding = next((b for b in self._bindings(component, project, namespace) if self._env_of(b) == env), None)
+        if binding is None:
+            raise ValueError(f"{component} has nothing deployed to {env}")
+        current = self._release_of(binding)
+        names = [str(_get(r, "name", "metadata.name")) for r in _list(self._call(("list_component_releases",), scope))]
+        if current not in names or names.index(current) == 0:
+            raise ValueError(f"{component}: no release before {current or 'the current one'} to roll back to")
+        previous = names[names.index(current) - 1]
+        self._call(("update_release_binding",), {
+            **scope, _ENV: env, ("binding", "release_binding", "name", "binding_name"): _get(binding, "name", "metadata.name"),
+            _RELEASE: previous, ("release_state", "state"): "Active"})
+        return {"component": component, "env": env, "from": current, "to": previous, "actor": actor}
 
     def _console(self, project, component, namespace) -> str:
         if not self.console_url:

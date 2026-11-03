@@ -102,6 +102,7 @@ vrixel-emr/                            one org per product; each owns its runtim
   governance                           product.yaml · constitution.md · context.md · CODEOWNERS
                                        architecture/ (overview.md, decisions/ADR-*.md)
                                        roadmap/ (goals.yaml, initiatives/, releases/)
+                                       incidents/ (postmortems)
   emr-intake-api, emr-web, ...         product code; PRs are opened here
 vrixel-agtech/ · vrixel-pos/ · vrixel-medspa/ · vrixel-apx/   same layout
 vrixel-shared-services/                shared lane: communication, audit framework, security
@@ -396,6 +397,50 @@ A feature that isn't in a release goes live at its own G6. Flags go through
 `integrations/flags.py`; connect the product's flag service (OpenFeature with flagd, Unleash,
 LaunchDarkly) by implementing its two methods; until then a stand-in records them.
 
+## Production issues: incidents, hotfixes and intent changes
+
+The tool watches production through the signals a product already emits, opens an incident,
+has agents investigate, and does what on-call approves: mitigate, fix, or change the intent.
+Agents never act on production by themselves (VX-1, VX-3); every action is a person's decision.
+
+**Signals in.**
+
+| Source | Endpoint | Auth |
+| --- | --- | --- |
+| Prometheus (Alertmanager webhook; SLO burn-rate and error alerts) | `POST /api/signals/alertmanager` | `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
+| Sentry (internal integration: issues created or regressed, alert rules) | `POST /api/signals/sentry` | `Sentry-Hook-Signature`, HMAC with `VRIXEL_SENTRY_CLIENT_SECRET` |
+| Support tickets (any tool that can post JSON) | `POST /api/signals/ticket` | `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
+| People in the web app | "Report a problem" on the Incidents page | signed-in member of the product's org |
+
+Each signal is tied to a product (a `vrixel_product` label or tag, else its `component` matched to
+the product's repos and OpenChoreo components) and a severity (SEV1 to SEV4 from `severity` or the
+Sentry level). A signal joins the open incident for the same alert, issue or component; otherwise a
+firing one opens a new incident. Signals are stored in the platform database.
+
+**The incident.**
+
+1. *Triage* (ops agent): the signals; the released features that changed the component, most recent
+   first, with their flags; recent logs and metrics from OpenChoreo's observability plane. It writes a
+   summary, impact, likely cause and proposed actions.
+2. *On-call decides* (`approvers.oncall`, else G6's approvers): approve some or all actions, ask
+   triage to look again, or close it without action.
+3. *Act*, as approved:
+   - **Turn a feature's flag off**: the fastest mitigation for a recent launch.
+   - **Roll back** the component to its previous release in production (a person's action in OpenChoreo).
+   - **Start a hotfix**: an expedited feature that skips discovery to architecture (on-call has already
+     decided it is needed) but keeps planning, build, tests, security scans, G5 and G6, which on-call
+     approves. A short spec and design are written from the incident.
+   - **Change the intent**: when the product works as built but not as users need, a new feature
+     (G1) or initiative (G0) starts with the incident as evidence, linked to the original work.
+4. *Monitor*: wait until its alerts and issues resolve. Still firing after the window (SEV1 30 minutes,
+   SEV2 1 hour, SEV3 4 hours, SEV4 1 day) sends it back to on-call. Reported problems skip this.
+5. *Postmortem* (agent, blameless) and *close*: on-call approves it, and a governance pull request
+   records it in `incidents/`.
+
+Incidents appear in Decisions and on the Incidents page, get a tracker item (a Bug, set
+`incident_type` to change it) with a comment per action, and agents designing new work see recent
+incidents and their causes.
+
 ## Delivery: GitHub and OpenChoreo
 
 From build to production, the pipeline works in the product's own GitHub org and OpenChoreo
@@ -664,6 +709,7 @@ src/vrixel_sdlc/
   intake.py        guided intake agent
   duplicates.py    finds features and capabilities a new request repeats
   roadmap/         goals, initiatives (G0) and releases: record, workflows, views
+  ops/             production signals, incidents, hotfixes and intent changes
   events.py        live-update bus
   cli.py           vrixel demo
 web/               React app: decisions, features, intake

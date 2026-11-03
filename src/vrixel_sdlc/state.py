@@ -66,6 +66,8 @@ class FeatureState(TypedDict, total=False):
     related_features: list[dict]  # similar features and capabilities found when it was created
     not_duplicate_reason: str  # why the creator says it isn't a duplicate, when it looked like one
     initiative_id: str  # the approved initiative this feature delivers ('' = unplanned work)
+    track: str  # standard | hotfix (an incident's fix: starts at planning, on-call approves G5 and G6)
+    hotfix: dict  # {incident_id, repo, change, severity, approved_by} for the hotfix track
 
     # Written by single nodes or by parallel branches through reducers
     token_budget_usd: Annotated[float, last]  # an escalation can raise it

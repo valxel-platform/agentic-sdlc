@@ -76,6 +76,14 @@ class InitiativeIn(BaseModel):
     horizon: str = Field("", pattern="^(|now|next|later)$")
 
 
+class ProblemIn(BaseModel):
+    product_id: str
+    title: str = Field(min_length=3, max_length=200)
+    description: str = Field("", max_length=4000)
+    component: str = Field("", max_length=100)
+    severity: str = Field("sev3", pattern="^sev[1-4]$")
+
+
 class StartCandidateIn(BaseModel):
     index: int = Field(ge=0)
     not_duplicate_reason: str = Field("", max_length=1000)
@@ -96,6 +104,7 @@ class DecisionIn(BaseModel):
     active_minutes: float = Field(default=0.0, ge=0)
     budget_usd: float | None = Field(default=None, gt=0, description="Escalations only: raise the feature budget")
     artifact_content: str | None = Field(default=None, description="Escalations only: the human's finished artifact")
+    action_ids: list[str] | None = Field(default=None, description="Incidents only: which proposed actions to approve")
 
 
 class DevLoginIn(BaseModel):
@@ -128,8 +137,10 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         saver = PostgresSaver(pool)
         saver.setup()
         from ..integrations.catalog import PostgresCatalog
+        from ..ops.signals import PostgresSignalStore
 
         services = build_services(settings, ledger=PostgresLedger(pool), catalog=PostgresCatalog(pool))
+        services.signals = PostgresSignalStore(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
@@ -273,6 +284,65 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         return {"ok": True, "mode": eng().services.settings.mode, "auth": auth.mode,
                 "delivery": os.environ.get("VRIXEL_DELIVERY", "stub")}
 
+    # --- production signals ---
+    def bearer_ok(request: Request) -> None:
+        import hmac
+
+        token = os.environ.get("VRIXEL_SIGNALS_TOKEN", "")
+        if not token:
+            raise HTTPException(404, "Signal webhooks are not configured")
+        if not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {token}"):
+            raise HTTPException(401, "Bad token")
+
+    def ingest(signals: list[dict]) -> dict:
+        touched = eng().ingest(signals)
+        return {"signals": len(signals), "incidents": touched}
+
+    @api.post("/signals/alertmanager", status_code=202)
+    async def alertmanager(request: Request) -> dict:
+        """Alertmanager webhook receiver (http_config.authorization: Bearer VRIXEL_SIGNALS_TOKEN)."""
+        from ..ops.signals import from_alertmanager
+
+        bearer_ok(request)
+        try:
+            payload = json.loads(await request.body() or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        return ingest(from_alertmanager(payload))
+
+    @api.post("/signals/sentry", status_code=202)
+    async def sentry(request: Request) -> dict:
+        """Sentry internal integration webhook, verified with its client secret (Sentry-Hook-Signature)."""
+        import hashlib
+        import hmac
+
+        from ..ops.signals import from_sentry
+
+        secret = os.environ.get("VRIXEL_SENTRY_CLIENT_SECRET", "")
+        if not secret:
+            raise HTTPException(404, "Sentry webhooks are not configured")
+        body = await request.body()
+        expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, request.headers.get("sentry-hook-signature", "")):
+            raise HTTPException(401, "Bad signature")
+        try:
+            payload = json.loads(body or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        return ingest(from_sentry(payload, request.headers.get("sentry-hook-resource", "")))
+
+    @api.post("/signals/ticket", status_code=202)
+    async def ticket(request: Request) -> dict:
+        """A support tool's webhook: {product_id, title, description, component?, severity?, url?, id?}."""
+        from ..ops.signals import from_ticket
+
+        bearer_ok(request)
+        try:
+            payload = json.loads(await request.body() or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        return ingest(from_ticket(payload))
+
     @api.post("/webhooks/github", status_code=202)
     async def github_webhook(request: Request) -> dict:
         """CI and pull-request events from the product orgs' GitHub App. Verified with the app's
@@ -344,6 +414,32 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except PolicyViolation as exc:
             raise HTTPException(403, str(exc)) from exc
         return {"feature_id": fid}
+
+    # --- incidents ---
+    @api.post("/incidents", status_code=201)
+    def report_problem(body: ProblemIn, user: User = Depends(current_user)) -> dict:
+        from ..ops.signals import from_ticket
+
+        member_of(user, body.product_id)
+        touched = eng().ingest(from_ticket({**body.model_dump(), "reporter": user.login}))
+        if not touched:
+            raise HTTPException(422, "Couldn't tie this problem to the product")
+        return {"feature_id": touched[0]}
+
+    @api.get("/incidents")
+    def incidents(user: User = Depends(current_user), product_id: str | None = None) -> list[dict]:
+        lanes = set(lanes_for(user))
+        rows = [r for r in eng().index.all() if r.get("kind") == "incident" and r["product_id"] in lanes
+                and (not product_id or r["product_id"] == product_id)]
+        out = []
+        for r in reversed(rows):
+            try:
+                v = eng().view(r["feature_id"])
+            except KeyError:
+                continue
+            out.append({k: v.get(k) for k in ("feature_id", "product_id", "title", "severity", "status", "component",
+                                              "opened_at", "firing", "links")})
+        return out
 
     # --- roadmap: initiatives and releases ---
     def member_of(user: User, product_id: str) -> None:

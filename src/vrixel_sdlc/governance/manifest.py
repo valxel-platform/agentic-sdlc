@@ -162,9 +162,9 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
 
 
 _TRACKER_DEFAULTS = {
-    "jira": {"initiative_type": "Initiative", "epic_type": "Epic", "story_type": "Story", "task_type": "Task",
+    "jira": {"incident_type": "Bug", "initiative_type": "Initiative", "epic_type": "Epic", "story_type": "Story", "task_type": "Task",
              "statuses": {"in_progress": "In Progress", "done": "Done", "cancelled": "Done"}},
-    "openproject": {"initiative_type": "Initiative", "epic_type": "Epic", "story_type": "User story", "task_type": "Task",
+    "openproject": {"incident_type": "Bug", "initiative_type": "Initiative", "epic_type": "Epic", "story_type": "User story", "task_type": "Task",
                     "statuses": {"in_progress": "In progress", "done": "Closed", "cancelled": "Rejected"}},
 }
 

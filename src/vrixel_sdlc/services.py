@@ -49,6 +49,14 @@ class Services:
     release_for: object = None  # feature_id -> the release it belongs to, set by the engine
     roadmap_fit: object = None  # feature state -> its initiative and budget, set by the engine
     flags: object = None  # vrixel_sdlc.integrations.flags.FlagService
+    signals: object = None  # vrixel_sdlc.ops.signals.SignalStore
+    incident_signals: object = None  # incident id -> its signals, set by the engine
+    suspects: object = None  # (product, repo) -> released features that changed it, set by the engine
+    flag_of: object = None  # feature id -> its flag key, set by the engine
+    start_hotfix: object = None  # starts an expedited fix feature, set by the engine
+    start_intent_change: object = None  # starts a feature or initiative from an incident, set by the engine
+    close_incident: object = None  # set by the engine
+    incidents: object = None  # product_id -> recent incidents, set by the engine
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime

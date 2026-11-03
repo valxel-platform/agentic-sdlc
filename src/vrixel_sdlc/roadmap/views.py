@@ -30,6 +30,15 @@ def thread_view(engine, thread_id: str) -> dict:
     if not s:
         raise KeyError(f"Unknown {kind} {thread_id}")
     out = _common(engine, thread_id, s, kind)
+    if kind == "incident":
+        from ..ops.signals import still_firing
+
+        signals = engine.services.signals.for_incident(thread_id)
+        return out | {"severity": s.get("severity"), "component": s.get("component", ""),
+                      "opened_at": s.get("opened_at", ""), "triage": s.get("triage", ""),
+                      "actions": s.get("actions", []), "taken": s.get("taken", []), "links": s.get("links", {}),
+                      "postmortem": s.get("postmortem", ""), "signals": signals, "firing": len(still_firing(signals)),
+                      "suspects": engine.suspects(s["product_id"], s.get("component", ""))[:5]}
     feats = engine.feature_summaries(s["product_id"])
     if kind == "initiative":
         d = s.get("draft") or {}

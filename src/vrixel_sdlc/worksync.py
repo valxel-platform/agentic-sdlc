@@ -246,6 +246,36 @@ class WorkSync:
                 self.links.put(iid, "initiative", {**row, "status": want})
             return {"provider": cfg["provider"], "initiative": row.get("key") or row.get("id")}
 
+    def sync_incident(self, s: dict) -> dict:
+        """One tracker item per incident (a Bug by default), in progress until closed, with a comment
+        for each action taken. Details stay out: titles of alerts, never patient data."""
+        cfg, tracker = self.config(s)
+        if not cfg or tracker is None:
+            return {}
+        iid = s["incident_id"]
+        with self._lock(iid):
+            have = self.links.get(iid)
+            row = have.get("incident")
+            if row is None:
+                desc = (f"Severity {s.get('severity')}. {s.get('title')}\n\nTracked by the Vrixel agentic SDLC: "
+                        f"{self.public_url}/incidents/{iid}")
+                ext = tracker.find(cfg, iid) or tracker.create(cfg, kind="incident", summary=f"[{iid}] {s['title']}",
+                                                                description=desc, marker=iid, parent=None)
+                row = {**ext, "kind": "incident", "summary": s["title"], "status": "todo"}
+                self.links.put(iid, "incident", row)
+            want = "done" if s.get("status") == "closed" else "in_progress"
+            if STATUS_ORDER[want] > STATUS_ORDER.get(row["status"], 0):
+                tracker.set_status(cfg, row, want)
+                row = {**row, "status": want}
+                self.links.put(iid, "incident", row)
+            notes = [f"{t['type']} by {t.get('by', '')}: {t.get('result', '')}" for t in s.get("taken") or []]
+            posted = int(have.get("_actions", {}).get("count", 0))
+            for text in notes[posted:]:
+                tracker.comment(cfg, row, text)
+                posted += 1
+                self.links.put(iid, "_actions", {"count": posted})
+            return {"provider": cfg["provider"], "incident": row.get("key") or row.get("id")}
+
     def sync_release(self, s: dict) -> dict:
         """Releases are noted on each member feature's epic: when planned, and when approved or cancelled."""
         cfg, tracker = self.config(s)

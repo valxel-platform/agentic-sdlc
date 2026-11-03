@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type PendingItem } from "../api";
 import Markdown from "react-markdown";
-import { ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, gateLabel, money, threadPath } from "../vocab";
+import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
 import { DesignReviewPanel, RepoPlans, SimilarList } from "./External";
@@ -24,12 +24,13 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   const [budget, setBudget] = useState("");
   const [days, setDays] = useState("");
   const [content, setContent] = useState("");
+  const [picked, setPicked] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   useEffect(() => {
     opened.current = Date.now();
-    setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(""); setErr("");
+    setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(""); setErr(""); setPicked(null);
   }, [item.interrupt_id]);
 
   async function send(decision: string, extra: Record<string, unknown> = {}) {
@@ -52,8 +53,10 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       ? { name: "Release", question: "Launch these features together?", approve: "Launch" }
       : { name: "Release", question: "Ship this release train?", approve: "Approve release" })
     : item.gate ? GATES[item.gate] : undefined;
-  const roadmapGate = item.gate === "g0" || item.gate === "release";
+  const incidentGate = item.gate === "incident" || item.gate === "postmortem";
+  const roadmapGate = item.gate === "g0" || item.gate === "release" || incidentGate;
   const stopLabel = item.gate === "g0" ? "Drop initiative" : item.gate === "release" ? "Cancel release" : "Stop feature";
+  const chosen = picked ?? (item.actions ?? []).map((a) => a.id);
   const heading =
     item.type === "escalation" && item.phase === "delivery" ? (DELIVERY_FAILED[item.wait ?? ""] ?? "Delivery failed")
     : item.type === "escalation" && item.phase === "security" ? "Security findings block this change"
@@ -145,6 +148,41 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         </div>
       )}
 
+      {item.gate === "incident" && (
+        <div>
+          <dl className="kv plain-kv">
+            <dt>Severity</dt><dd><span className={`chip ${item.severity === "sev1" || item.severity === "sev2" ? "stop" : "wait"}`}>{SEVERITY[item.severity ?? ""] ?? item.severity}</span></dd>
+            <dt>Still firing</dt><dd>{item.firing ?? 0} alert{item.firing === 1 ? "" : "s"} or issue{item.firing === 1 ? "" : "s"}</dd>
+            {(item.suspects ?? []).length > 0 && (<><dt>Recent changes</dt><dd>
+              {item.suspects!.map((s, n) => <span key={s.feature_id}>{n > 0 && ", "}<Link to={threadPath(s.feature_id)}>{s.feature_id}</Link> {s.title}</span>)}
+            </dd></>)}
+          </dl>
+          <h3>Proposed actions</h3>
+          {(item.actions ?? []).length === 0 ? <p className="small muted">None proposed.</p> : (
+            <ul className="plain-list action-list">
+              {item.actions!.map((a) => (
+                <li key={a.id}>
+                  <label className="radio">
+                    <input type="checkbox" disabled={!item.can_decide} checked={chosen.includes(a.id)}
+                      onChange={(e) => setPicked(e.target.checked ? [...chosen, a.id] : chosen.filter((x) => x !== a.id))} />
+                    <span><strong>{ACTION_LABEL[a.type] ?? a.type}</strong>{a.text ? `: ${a.text}` : ""}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+          <h3>Signals</h3>
+          <ul className="plain-list small">
+            {(item.signals ?? []).slice(-8).map((s, n) => (
+              <li key={`${s.fingerprint}-${n}`}>
+                <span className={`chip ${s.status === "firing" ? "stop" : "go"}`}>{s.status}</span>{" "}
+                {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a> : s.title} <span className="faint">({s.source})</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {item.gate === "release" && (
         <div>
           <dl className="kv plain-kv">
@@ -159,7 +197,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
 
       {roadmapGate && item.preview && (
         <div>
-          <h3 style={{ marginBottom: 8 }}>{item.gate === "g0" ? "Initiative draft" : "Release notes"}</h3>
+          <h3 style={{ marginBottom: 8 }}>{item.gate === "g0" ? "Initiative draft" : item.gate === "incident" ? "Triage"
+            : item.gate === "postmortem" ? "Postmortem" : "Release notes"}</h3>
           <div className="evidence md"><Markdown>{item.preview}</Markdown></div>
         </div>
       )}
@@ -224,7 +263,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         <>
           {mode === "revise" || mode === "retry" || mode === "abort" ? (
             <label className="field">
-              {mode === "revise" ? "What should the agents change?" : mode === "retry" ? "Guidance for the next attempt (optional)" : item.gate === "g0" ? "Why drop this initiative?" : item.gate === "release" ? "Why cancel this release?" : "Why stop this feature?"}
+              {mode === "revise" ? (item.gate === "incident" ? "What should triage look at?" : "What should the agents change?") : mode === "retry" ? "Guidance for the next attempt (optional)" : item.gate === "incident" ? "Why is no action needed?" : item.gate === "g0" ? "Why drop this initiative?" : item.gate === "release" ? "Why cancel this release?" : "Why stop this feature?"}
               <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} autoFocus />
             </label>
           ) : null}
@@ -253,11 +292,15 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
           <div className="actions">
             {item.type === "gate" && mode === null && (
               <>
-                <button className="btn go" disabled={busy} onClick={() => send("approve")}>{gate?.approve ?? "Approve"}</button>
-                {item.gate !== "release" && <button className="btn secondary" disabled={busy} onClick={() => setMode("revise")}>Request changes</button>}
+                <button className="btn go" disabled={busy || (item.gate === "incident" && chosen.length === 0)}
+                  onClick={() => send("approve", item.gate === "incident" ? { action_ids: chosen } : {})}>
+                  {item.gate === "incident" ? `Approve ${chosen.length} action${chosen.length === 1 ? "" : "s"}` : gate?.approve ?? "Approve"}</button>
+                {item.gate !== "release" && <button className="btn secondary" disabled={busy} onClick={() => setMode("revise")}>
+                  {item.gate === "incident" ? "Look again" : item.gate === "postmortem" ? "Rewrite" : "Request changes"}</button>}
                 {!roadmapGate && <button className="btn secondary" disabled={busy} onClick={() => send("takeover")}>Take over</button>}
                 <span className="spacer" />
-                <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>{stopLabel}</button>
+                {item.gate === "incident" && <button className="btn secondary" disabled={busy} onClick={() => setMode("abort")}>No action needed</button>}
+                {!incidentGate && <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>{stopLabel}</button>}
               </>
             )}
             {item.type === "handback" && mode === null && (
@@ -304,9 +347,9 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             {mode === "resolve" && (
               <button className="btn go" disabled={busy} onClick={() => send("resolved", content.trim() ? { artifact_content: content } : {})}>Mark resolved</button>
             )}
-            {mode === "abort" && (
-              <button className="btn danger" disabled={busy} onClick={() => send("abort")}>{stopLabel}</button>
-            )}
+            {mode === "abort" && (item.gate === "incident"
+              ? <button className="btn" disabled={busy} onClick={() => send("resolve")}>Close without action</button>
+              : <button className="btn danger" disabled={busy} onClick={() => send("abort")}>{stopLabel}</button>)}
             {mode !== null && <button className="btn secondary" disabled={busy} onClick={() => setMode(null)}>Cancel</button>}
           </div>
         </>

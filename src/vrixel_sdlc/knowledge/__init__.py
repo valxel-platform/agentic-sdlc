@@ -115,6 +115,11 @@ def render(pack: dict, max_chars: int = 12000) -> str:
             where = {"released": "released", "stopped": "stopped"}.get(f["status"], f"in progress, at {f.get('stage') or '?'}")
             out.append(f"- {f['feature_id']} ({where}): {f['title']}"
                        + (f" [{f['initiative_id']}]" if f.get("initiative_id") else ""))
+    incs = (pack.get("incidents") or {}).get("incidents") or []
+    if incs:
+        out.append("\n## Recent production incidents (avoid repeating their causes)")
+        out += [f"- {i['id']} ({i.get('severity')}, {i.get('status')}): {i['title']}"
+                + (f". Cause: {i['cause']}" if i.get("cause") else "") for i in incs[:10]]
     if arch.get("overview"):
         out.append("\n## Architecture overview\n" + arch["overview"].strip())
     return _cut("\n".join(out), max_chars) + "\n"

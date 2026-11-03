@@ -10,6 +10,7 @@ const FAILED: Record<string, string> = {
 
 export const WAITS: Record<string, string> = {
   release_ready: "Waiting for its features", release_train: "Waiting for its release train",
+  incident_recovery: "Waiting for alerts to resolve",
   ci: "Waiting for CI", build: "Building in OpenChoreo", dev: "Deploying to dev",
   staging: "Deploying to staging", production: "Deploying to production",
 };
@@ -17,6 +18,8 @@ export const WAITS: Record<string, string> = {
 export const GATES: Record<string, { name: string; question: string; approve: string }> = {
   g0: { name: "Initiative", question: "Commit to this initiative?", approve: "Approve initiative" },
   release: { name: "Release", question: "Approve this release?", approve: "Approve release" },
+  incident: { name: "Incident", question: "What should we do about this incident?", approve: "Approve actions" },
+  postmortem: { name: "Postmortem", question: "Close the incident with this postmortem?", approve: "Close incident" },
   g1: { name: "Intent", question: "Is this worth building?", approve: "Approve intent" },
   g2: { name: "Scope", question: "Is the scope right?", approve: "Approve scope" },
   g3: { name: "Experience", question: "Is the experience right?", approve: "Approve design" },
@@ -34,19 +37,28 @@ export const RISK: Record<string, string> = {
   low: "Low risk", high: "High risk", regulated: "Regulated",
 };
 
+export const SEVERITY: Record<string, string> = { sev1: "SEV1", sev2: "SEV2", sev3: "SEV3", sev4: "SEV4" };
+export const ACTION_LABEL: Record<string, string> = {
+  flag_off: "Turn the feature's flag off", rollback: "Roll back to the previous release", hotfix: "Start a hotfix",
+  intent_change: "Change the intent", monitor: "Keep watching",
+};
+
 export const HORIZONS: Record<string, string> = { now: "Now", next: "Next", later: "Later" };
 export const MODELS: Record<string, string> = { launch: "Launch group", train: "Release train" };
 
 /** Where a thread lives in the app: features, initiatives and releases share ids like EMR-INI-1. */
 export function threadPath(id: string): string {
   const kind = id.split("-")[1];
-  return kind === "INI" ? `/initiatives/${id}` : kind === "REL" ? `/releases/${id}` : `/features/${id}`;
+  return kind === "INI" ? `/initiatives/${id}` : kind === "REL" ? `/releases/${id}`
+    : kind === "INC" ? `/incidents/${id}` : `/features/${id}`;
 }
 
 export function gateLabel(gate?: string): string {
   if (!gate) return "";
   const g = GATES[gate];
   if (gate === "release") return "Release";
+  if (gate === "incident") return "On-call decision";
+  if (gate === "postmortem") return "Postmortem";
   return g ? `${gate.toUpperCase()} ${g.name}` : gate.toUpperCase();
 }
 

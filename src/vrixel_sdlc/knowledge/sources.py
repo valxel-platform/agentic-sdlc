@@ -113,6 +113,17 @@ class ProductRoadmap:
         return {"goals": record["goals"], "initiatives": initiatives, "releases": record["releases"]}
 
 
+class RecentIncidents:
+    """Recent production incidents and their likely causes: designs should not repeat them."""
+
+    def __init__(self, services) -> None:
+        self.services = services
+
+    def collect(self, snap, cfg: dict) -> dict:
+        lookup = getattr(self.services, "incidents", None)
+        return {"incidents": lookup(snap.product.product_id) if callable(lookup) else []}
+
+
 class CatalogCapabilities:
     def __init__(self, services) -> None:
         self.services = services

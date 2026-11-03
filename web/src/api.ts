@@ -23,6 +23,11 @@ export interface PendingItem {
   evidence?: string;
   target_date?: string;
   summary?: string;
+  severity?: string;
+  actions?: IncidentAction[];
+  signals?: Signal[];
+  firing?: number;
+  suspects?: Suspect[];
   not_duplicate_reason?: string;
   targets?: Record<string, unknown>[];
   phase?: string;
@@ -155,6 +160,26 @@ export interface Me {
   lanes: { id: string; name: string }[];
 }
 
+export interface IncidentAction {
+  id: string; type: "flag_off" | "rollback" | "hotfix" | "intent_change" | "monitor"; text: string;
+  feature_id?: string; component?: string; repo?: string; change?: string; scope?: string; intent?: string;
+  ok?: boolean; result?: string; by?: string; at?: string;
+}
+export interface Signal {
+  source: "prometheus" | "sentry" | "ticket"; status: "firing" | "resolved"; severity: string; title: string;
+  detail: string; fingerprint: string; url: string; at: string; component: string;
+}
+export interface Suspect { feature_id: string; title: string; released_at: string; flag: string; flag_on: boolean | null }
+export interface IncidentView extends Omit<ThreadBase, "kind"> {
+  kind: "incident"; severity: string; component: string; opened_at: string; triage: string;
+  actions: IncidentAction[]; taken: IncidentAction[]; links: Record<string, string>; postmortem: string;
+  signals: Signal[]; firing: number; suspects: Suspect[];
+}
+export interface IncidentRow {
+  feature_id: string; product_id: string; title: string; severity: string; status: string; component: string;
+  opened_at: string; firing: number; links: Record<string, string>;
+}
+
 export interface Candidate { title: string; description: string; started?: boolean }
 export interface InitiativeDraft {
   goal: string; new_goal: { title: string; measure: string } | null; measure: string; horizon: string;
@@ -241,6 +266,10 @@ export const api = {
   feature: (id: string) => request<Feature>("GET", `/features/${encodeURIComponent(id)}`),
   initiative: (id: string) => request<InitiativeView>("GET", `/features/${encodeURIComponent(id)}`),
   release: (id: string) => request<ReleaseView>("GET", `/features/${encodeURIComponent(id)}`),
+  incident: (id: string) => request<IncidentView>("GET", `/features/${encodeURIComponent(id)}`),
+  incidents: () => request<IncidentRow[]>("GET", "/incidents"),
+  reportProblem: (body: { product_id: string; title: string; description: string; severity: string; component?: string }) =>
+    request<{ feature_id: string }>("POST", "/incidents", body),
   roadmap: (productId: string) => request<Roadmap>("GET", `/roadmap/${encodeURIComponent(productId)}`),
   createInitiative: (body: { product_id: string; title: string; request: string; measure?: string; horizon?: string }) =>
     request<{ feature_id: string }>("POST", "/initiatives", body),

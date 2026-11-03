@@ -18,7 +18,7 @@ from .waits import WaitChecker
 from .worksync import InMemoryLinkStore, WorkSync
 
 
-KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release"}
+KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release", "INC": "incident"}
 
 
 def kind_of(thread_id: str) -> str:
@@ -92,12 +92,17 @@ class FeatureEngine:
     def __init__(self, services: Services, checkpointer, index: FeatureIndex | None = None,
                  bus: EventBus | None = None, workers: int = 4, work: WorkSync | None = None) -> None:
         self.services = services
+        from .ops.incident import build_incident_graph
+        from .ops.signals import InMemorySignalStore
         from .roadmap.graphs import build_initiative_graph, build_release_graph
 
         self.graph = build_pipeline(services, checkpointer=checkpointer)
         self.graphs = {"feature": self.graph,
                        "initiative": build_initiative_graph(services, checkpointer=checkpointer),
-                       "release": build_release_graph(services, checkpointer=checkpointer)}
+                       "release": build_release_graph(services, checkpointer=checkpointer),
+                       "incident": build_incident_graph(services, checkpointer=checkpointer)}
+        if getattr(services, "signals", None) is None:
+            services.signals = InMemorySignalStore()
         self.index = index or InMemoryIndex()
         self._create_lock = threading.Lock()
         services.features = self.feature_summaries  # what the product has built, for agents and G4
@@ -106,6 +111,13 @@ class FeatureEngine:
         services.release_waits = self._release_waits
         services.release_for = self.release_for
         services.roadmap_fit = self.roadmap_fit
+        services.incident_signals = lambda iid: services.signals.for_incident(iid)
+        services.suspects = self.suspects
+        services.flag_of = lambda fid: (self._state(fid).get("release") or {}).get("flag", "")
+        services.start_hotfix = self.start_hotfix
+        services.start_intent_change = self.start_intent_change
+        services.close_incident = lambda iid: services.signals.close(iid)
+        services.incidents = self.incident_summaries
         self.bus = bus or EventBus()
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="feature")
         self._locks: dict[str, threading.Lock] = {}
@@ -238,7 +250,8 @@ class FeatureEngine:
             s = self._state(feature_id)
             kind = kind_of(feature_id)
             result = ({} if not s else self.work.sync(s) if kind == "feature" else
-                      self.work.sync_initiative(s) if kind == "initiative" else self.work.sync_release(s))
+                      self.work.sync_initiative(s) if kind == "initiative" else
+                      self.work.sync_incident(s) if kind == "incident" else self.work.sync_release(s))
             self.sync_errors.pop(feature_id, None)
             return result
         except Exception as exc:
@@ -288,11 +301,14 @@ class FeatureEngine:
         return [r for r in self.index.all() if r["product_id"] == product_id and r.get("kind", "feature") == kind]
 
     def _new_id(self, product_id: str, kind: str, title: str) -> str:
-        tag = {v: k for k, v in KINDS.items()}[kind]
         with self._create_lock:
-            seq = self.index.next_number(product_id, kind)
-            thread_id = f"{product_id}-{tag}-{seq}"
-            self.index.add(thread_id, product_id, title, seq, kind)
+            return self._new_id_locked(product_id, kind, title)
+
+    def _new_id_locked(self, product_id: str, kind: str, title: str) -> str:
+        tag = {v: k for k, v in KINDS.items()}[kind]
+        seq = self.index.next_number(product_id, kind)
+        thread_id = f"{product_id}-{tag}-{seq}"
+        self.index.add(thread_id, product_id, title, seq, kind)
         return thread_id
 
     def initiative_summaries(self, product_id: str) -> list[dict]:
@@ -382,7 +398,115 @@ class FeatureEngine:
         (self._submit if background else self._execute)(rid, inp)
         return rid
 
+    # --- operations: production signals and incidents --------------------------------------
+    def ingest(self, signals: list[dict]) -> list[str]:
+        """Attach each signal to the open incident it belongs to (same alert, issue or component),
+        or open a new incident for a firing one. Returns the incidents touched."""
+        from .ops.signals import resolve_product
+
+        touched: list[str] = []
+        for sig in signals:
+            product_id, repo = resolve_product(self.services, sig)
+            if not product_id:
+                continue  # a signal for no product we know: nothing to do
+            sig = {**sig, "product_id": product_id, "component": repo or sig.get("component", "")}
+            with self._create_lock:
+                iid = self.services.signals.open_incident_for(product_id, sig["fingerprint"], repo)
+                created = False
+                if iid is None and sig["status"] == "firing":
+                    iid = self._new_id_locked(product_id, "incident", sig["title"])
+                    created = True
+                if iid is None:
+                    continue  # a resolution for an incident already closed
+                self.services.signals.add(iid, product_id, sig)
+            if created:
+                inp = {"incident_id": iid, "product_id": product_id, "title": sig["title"], "severity": sig["severity"],
+                       "component": repo, "opened_at": sig["at"], "status": "triaging"}
+                self.bus.publish({"type": "feature.created", "feature_id": iid, "product_id": product_id})
+                self._execute(iid, inp)
+            else:
+                self.poke_now(iid)  # a resolution may end its recovery wait
+            touched.append(iid)
+        return list(dict.fromkeys(touched))
+
+    def incident_summaries(self, product_id: str, limit: int = 20) -> list[dict]:
+        out = []
+        for row in reversed(self._rows(product_id, "incident")):
+            s = self._state(row["feature_id"])
+            cause = ""
+            from .ops.incident import section
+
+            cause = section(s.get("triage", ""), "Likely cause").split("\n")[0][:300]
+            out.append({"id": row["feature_id"], "title": s.get("title") or row["title"], "severity": s.get("severity"),
+                        "status": s.get("status"), "component": s.get("component", ""), "cause": cause,
+                        "links": s.get("links") or {}})
+            if len(out) >= limit:
+                break
+        return out
+
+    def poke_now(self, thread_id: str) -> None:
+        if thread_id in self.running:
+            return
+        try:
+            cmd = self._ready_wait(thread_id)
+        except Exception:
+            return
+        if cmd is not None:
+            try:
+                self._execute(thread_id, cmd)
+            except Exception:
+                pass
+
+    def suspects(self, product_id: str, repo: str = "") -> list[dict]:
+        """Released features that changed the component, most recent first (all recent ones when the
+        component is unknown): the first places triage looks."""
+        out = []
+        for row in self._rows(product_id, "feature"):
+            s = self._state(row["feature_id"])
+            rel = s.get("release") or {}
+            if not rel.get("production"):
+                continue
+            repos = set((s.get("change_set") or {}).get("merge_order") or []) | \
+                {pr["repo"] for pr in (s.get("pull_requests") or {}).values()}
+            if repo and repo not in repos:
+                continue
+            at = next((g["at"] for g in reversed(s.get("gate_decisions") or []) if g["gate"] == "g6"), "")
+            out.append({"feature_id": row["feature_id"], "title": s.get("title", ""), "released_at": at,
+                        "flag": rel.get("flag", ""), "flag_on": self._flag_on(s), "repos": sorted(repos),
+                        "track": s.get("track", "standard")})
+        return sorted(out, key=lambda x: x["released_at"], reverse=True)
+
+    def start_hotfix(self, incident: dict, *, repo: str, change: str, approver: str) -> str:
+        if not repo:
+            raise ValueError("A hotfix needs the repo to change")
+        return self.create(product_id=incident["product_id"], title=f"Hotfix: {change}"[:150],
+                           description=f"Fix for incident {incident['incident_id']} ({incident['severity']}): "
+                                       f"{incident['title']}.\n\n{change}",
+                           created_by=approver, background=True, track="hotfix",
+                           hotfix={"incident_id": incident["incident_id"], "repo": repo, "change": change,
+                                   "severity": incident["severity"], "approved_by": approver})
+
+    def start_intent_change(self, incident: dict, *, scope: str, intent: str, approver: str) -> str:
+        signals = self.services.signals.for_incident(incident["incident_id"])
+        evidence = "\n".join(f"- {s['source']}: {s['title']}" for s in signals[:10])
+        request = (f"{intent}\n\nRaised by incident {incident['incident_id']} ({incident['severity']}): "
+                   f"{incident['title']}.\nWhat users reported or what failed:\n{evidence}")
+        if scope == "initiative":
+            return self.create_initiative(product_id=incident["product_id"], title=intent[:120], request=request,
+                                          created_by=approver, background=True)
+        suspects = self.suspects(incident["product_id"], incident.get("component", ""))
+        initiative = next((self._state(x["feature_id"]).get("initiative_id") for x in suspects
+                           if self._state(x["feature_id"]).get("initiative_id")), "")
+        return self.create(product_id=incident["product_id"], title=intent[:150], description=request,
+                           created_by=approver, background=True, initiative_id=initiative or "",
+                           not_duplicate_reason=f"Changes what was built, after incident {incident['incident_id']}")
+
     def _release_waits(self, packet: dict) -> dict | None:
+        if packet["wait"] == "incident_recovery":
+            from .ops.incident import recovery
+
+            return recovery(self.services.signals.for_incident(packet["feature_id"]), packet["since"],
+                            int(packet.get("minutes") or 240))
         if packet["wait"] == "release_train":  # a feature waiting for its train's approval
             s = self._state(packet["release_id"])
             if s.get("status") in ("approved", "shipped"):
@@ -425,7 +549,8 @@ class FeatureEngine:
 
     def create(self, *, product_id: str, title: str, description: str = "", created_by: str = "",
                simulate_faults: dict[str, int] | None = None, budget_usd: float | None = None,
-               background: bool = False, not_duplicate_reason: str = "", initiative_id: str = "") -> str:
+               background: bool = False, not_duplicate_reason: str = "", initiative_id: str = "",
+               track: str = "standard", hotfix: dict | None = None) -> str:
         from .duplicates import DuplicateIntent
 
         # Read and validate the product's governance from its own org, and pin the commits.
@@ -434,6 +559,8 @@ class FeatureEngine:
             raise ValueError(f"{initiative_id} is not an approved initiative of {product_id}")
         with self._create_lock:  # two identical requests at once must not both pass the check
             similar = self.similar(product_id, title, description)
+            if track == "hotfix":  # a fix for an incident, decided by on-call: not a new intent
+                not_duplicate_reason = not_duplicate_reason or f"Hotfix for {(hotfix or {}).get('incident_id', 'an incident')}"
             if any(m["duplicate"] for m in similar) and not not_duplicate_reason.strip():
                 raise DuplicateIntent(similar)
             seq = self.index.next_number(product_id)
@@ -442,7 +569,7 @@ class FeatureEngine:
         inp = {"feature_id": feature_id, "product_id": product_id, "title": title, "description": description,
                "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins,
                "related_features": similar, "not_duplicate_reason": not_duplicate_reason.strip(),
-               "initiative_id": initiative_id}
+               "initiative_id": initiative_id, "track": track, "hotfix": dict(hotfix or {})}
         if budget_usd:
             inp["token_budget_usd"] = float(budget_usd)
         self.bus.publish({"type": "feature.created", "feature_id": feature_id, "product_id": product_id})
@@ -608,7 +735,9 @@ RAIL = [("discovery", "phase"), ("g1", "gate"), ("spec", "phase"), ("g2", "gate"
         ("g5", "gate"), ("release", "phase"), ("g6", "gate"), ("operate", "phase")]
 
 
-WAIT_STATION = {"ci": "build", "build": "build", "dev": "build", "staging": "release", "production": "operate"}
+WAIT_STATION = {"ci": "build", "build": "build", "dev": "build", "staging": "release", "production": "operate",
+                "release_train": "g6"}
+EXPEDITED = ("discovery", "g1", "spec", "g2", "design", "g3", "architecture", "g4")
 
 
 def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
@@ -645,6 +774,8 @@ def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
                 st = "done"
             else:
                 st = "todo"
+        if s.get("track") == "hotfix" and key in EXPEDITED:
+            st = "skipped"  # an incident's hotfix starts at planning
         stations.append({"key": key, "kind": kind, "state": st})
     for p in pending:  # CI or OpenChoreo: work in progress, not a person's turn
         if p["type"] == "external":

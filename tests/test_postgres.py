@@ -93,3 +93,27 @@ def test_initiatives_and_releases_share_the_index_and_survive_a_restart(settings
         restarted = _engine(settings, pool)
         assert restarted.view(iid)["status"] == "awaiting_approval"
         assert [i["kind"] for i in restarted.inbox("EMR") if i["feature_id"] == iid] == ["initiative"]
+
+
+def test_incidents_and_their_signals_survive_a_restart(settings):
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from vrixel_sdlc.ops.signals import PostgresSignalStore, from_alertmanager
+
+    alert = {"alerts": [{"status": "firing", "fingerprint": "pg1", "startsAt": "2026-11-03T21:00:00Z",
+                         "labels": {"alertname": "HighErrorRate", "severity": "critical", "component": "emr-intake-api"},
+                         "annotations": {"summary": "5xx"}}]}
+    with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        with pool.connection() as conn:
+            conn.execute("DROP TABLE IF EXISTS vrixel_signals")
+            conn.execute("DROP TABLE IF EXISTS vrixel_features")
+        first = _engine(settings, pool)
+        first.services.signals = PostgresSignalStore(pool)
+        [iid] = first.ingest(from_alertmanager(alert))
+
+        restarted = _engine(settings, pool)
+        restarted.services.signals = PostgresSignalStore(pool)
+        assert restarted.ingest(from_alertmanager(alert)) == [iid]  # joins the open incident
+        assert len(restarted.services.signals.for_incident(iid)) == 2
+        assert [p["gate"] for p in restarted.pending(iid)] == ["incident"]
