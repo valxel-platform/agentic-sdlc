@@ -232,3 +232,16 @@ def test_repo_state_without_advanced_security_and_org_properties():
     gh.enable_security(repo="o/r", secret_scanning=False, push_protection=False, code_scanning_default_setup=False,
                        dependabot_security_updates=True)
     assert ("PATCH", "/repos/o/r/code-scanning/default-setup") not in api.calls
+
+
+def test_the_platform_app_keeps_its_merge_train_bypass_on_lane_repos(svc, monkeypatch):
+    monkeypatch.setenv("VRIXEL_GITHUB_APP_ID", "424242")
+    gh = StubGitHub()
+    existing(gh, "vrixel-emr/emr-intake-api")
+    existing(gh, "vrixel-emr/emr-governance")
+    for repo in ("vrixel-emr/emr-intake-api", "vrixel-emr/emr-governance"):
+        rs.reconcile(gh, target(svc, repo), apply=True)
+    lane = gh.repos["vrixel-emr/emr-intake-api"]["state"]["rulesets"]["vrixel-default-branch"]["bypass_actors"]
+    gov = gh.repos["vrixel-emr/emr-governance"]["state"]["rulesets"]["vrixel-default-branch"]["bypass_actors"]
+    assert {"actor_id": 424242, "actor_type": "Integration", "bypass_mode": "pull_request"} in lane
+    assert all(a["actor_type"] != "Integration" for a in gov)  # governance changes are people's to merge

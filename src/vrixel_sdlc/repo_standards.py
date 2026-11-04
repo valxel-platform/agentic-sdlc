@@ -100,6 +100,14 @@ def targets(services, only: list[str] | None = None) -> list[Target]:
     for repo, spec in (std.platform_repos or {}).items():
         out[repo] = Target(repo, spec.get("kind", "tool"), spec.get("product", "platform"),
                            _platform_plan(std, repo, spec))
+    # The platform's GitHub App merges for the merge train once the pipeline's gates pass, so it
+    # may bypass the review rules (pull requests only) wherever the pipeline merges: lane repos.
+    import os
+
+    app_id = os.environ.get("VRIXEL_GITHUB_APP_ID", "")
+    for t in out.values():
+        if app_id and t.kind == "lane":
+            t.plan["ruleset"]["bypass_app_id"] = app_id
     wanted = set(only or [])
     return [t for name, t in sorted(out.items()) if not wanted or name in wanted]
 
