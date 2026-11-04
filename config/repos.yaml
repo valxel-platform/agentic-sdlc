@@ -70,13 +70,15 @@ defaults:
 #   kind: governance  reviewed by its owners (CODEOWNERS); no CI checks
 #   kind: tool        the tools org's own code
 platform_repos:
-  vrixel-tools/agentic-sdlc: { kind: tool, product: platform, required_checks: [test, web] }
+  # The tool and the templates are public: nothing in them is secret, and public repos get
+  # rulesets, CodeQL and secret scanning on any GitHub plan.
+  vrixel-tools/agentic-sdlc: { kind: tool, product: platform, required_checks: [test, web], visibility: public }
   vrixel-tools/sdlc-governance: { kind: governance, product: platform }
-  vrixel-tools/template-service: { kind: template, role: provider }
-  vrixel-tools/template-web: { kind: template, role: consumer }
-  vrixel-tools/template-library: { kind: template, role: library }
-  vrixel-tools/template-agent: { kind: template, role: agent }
-  vrixel-tools/template-mcp-server: { kind: template, role: mcp-server }
+  vrixel-tools/template-service: { kind: template, role: provider, visibility: public }
+  vrixel-tools/template-web: { kind: template, role: consumer, visibility: public }
+  vrixel-tools/template-library: { kind: template, role: library, visibility: public }
+  vrixel-tools/template-agent: { kind: template, role: agent, visibility: public }
+  vrixel-tools/template-mcp-server: { kind: template, role: mcp-server, visibility: public }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in

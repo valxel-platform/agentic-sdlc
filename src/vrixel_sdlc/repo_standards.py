@@ -140,6 +140,8 @@ def _platform_plan(std, repo: str, spec: dict) -> dict:
     p["ruleset"]["required_checks"] = list(checks)
     p["is_template"] = kind == "template"
     p["codeowners"] = None
+    if spec.get("visibility"):
+        p["visibility"] = spec["visibility"]
     return p
 
 

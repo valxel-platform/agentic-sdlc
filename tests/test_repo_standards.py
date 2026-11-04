@@ -50,6 +50,8 @@ def test_managed_repos_come_from_governance_the_registry_and_the_platform_list(s
     assert ts["vrixel-emr/emr-intake-api"].kind == "lane"
     assert ts["vrixel-tools/template-service"].kind == "template" and ts["vrixel-tools/template-service"].plan["is_template"]
     assert ts["vrixel-tools/agentic-sdlc"].plan["ruleset"]["required_checks"] == ["test", "web"]
+    assert ts["vrixel-tools/agentic-sdlc"].plan["visibility"] == "public"
+    assert ts["vrixel-tools/sdlc-governance"].plan["visibility"] == "private"
     assert ts["vrixel-tools/template-agent"].plan["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
     gov = ts["vrixel-emr/emr-governance"].plan
     assert gov["ruleset"]["required_checks"] == [] and gov["tag_ruleset"] == {}
