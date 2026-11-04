@@ -250,10 +250,15 @@ def test_the_platform_app_keeps_its_merge_train_bypass_on_lane_repos(svc, monkey
 def test_missing_app_permissions_are_named():
     from vrixel_sdlc.governance.sources import missing_permissions
 
-    granted = {"administration": "write", "contents": "write", "custom_properties": "read", "metadata": "read"}
-    assert missing_permissions({"administration": "write", "custom_properties": "write",
+    from vrixel_sdlc.integrations.github import PROVISIONING_PERMISSIONS
+
+    granted = {"administration": "write", "contents": "write", "repository_custom_properties": "read",
+               "metadata": "read"}
+    assert missing_permissions({"administration": "write", "repository_custom_properties": "write",
                                 "organization_custom_properties": "admin", "metadata": "read"}, granted) == [
-        "custom_properties: write", "organization_custom_properties: admin"]
+        "organization_custom_properties: admin", "repository_custom_properties: write"]
+    # GitHub's names for the permissions (as an installation reports them).
+    assert {"repository_custom_properties", "organization_custom_properties", "members"} <= set(PROVISIONING_PERMISSIONS)
 
 
 def test_a_repo_that_fails_doesnt_stop_the_run(svc):

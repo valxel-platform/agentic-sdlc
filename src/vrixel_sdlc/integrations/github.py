@@ -30,7 +30,7 @@ DELIVERY_PERMISSIONS = {"contents": "write", "pull_requests": "write", "statuses
 # Creating repos and applying their settings, used only by the provision step.
 PROVISIONING_PERMISSIONS = {"administration": "write", "contents": "write", "pull_requests": "write",
                             "security_events": "write", "secret_scanning_alerts": "write",
-                            "vulnerability_alerts": "write", "custom_properties": "write",
+                            "vulnerability_alerts": "write", "repository_custom_properties": "write",
                             "organization_custom_properties": "admin", "members": "read", "metadata": "read"}
 
 
