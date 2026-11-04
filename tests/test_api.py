@@ -251,7 +251,8 @@ def test_tampered_session_cookies_are_rejected(client):
     # Change the first character of the signature: the last one of a base64 string can carry
     # unused bits, so changing it doesn't always change the signature.
     payload, sig = token.rsplit(".", 1)
-    client.cookies.set("vrixel_session", f"{payload}.{'B' if sig[0] != 'B' else 'C'}{sig[1:]}")
-    assert client.get("/api/me").status_code == 401
-    client.cookies.set("vrixel_session", f"{payload[:-2]}xx.{sig}")  # a changed payload, too
-    assert client.get("/api/me").status_code == 401
+    for forged in (f"{payload}.{'B' if sig[0] != 'B' else 'C'}{sig[1:]}", f"{payload[:-2]}xx.{sig}"):
+        # Replace the cookie outright: setting it again can add a second cookie for another
+        # domain, and some httpx versions send the original one.
+        client.cookies.clear()
+        assert client.get("/api/me", headers={"Cookie": f"vrixel_session={forged}"}).status_code == 401
