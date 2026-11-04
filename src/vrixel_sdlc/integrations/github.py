@@ -469,9 +469,10 @@ class GitHubRest:
         the plan lacks, e.g. without Advanced Security, is not switched off by the reconciler)."""
         if dependabot_alerts or dependency_graph:
             self._call("PUT", repo, "/vulnerability-alerts")  # also turns on the dependency graph
+        if dependabot_security_updates:
+            self._call("PUT", repo, "/automated-security-fixes")
         sa = {k: {"status": "enabled"} for k, on in (
-            ("secret_scanning", secret_scanning), ("secret_scanning_push_protection", push_protection),
-            ("dependabot_security_updates", dependabot_security_updates)) if on}
+            ("secret_scanning", secret_scanning), ("secret_scanning_push_protection", push_protection)) if on}
         if sa:
             self._call("PATCH", repo, "", {"security_and_analysis": sa})
         if code_scanning_default_setup:
@@ -517,6 +518,8 @@ class GitHubRest:
         ghas_code = public or bool(status("code_security", "advanced_security"))
         ghas_secrets = public or bool(status("secret_protection", "advanced_security"))
         alerts = self._call("GET", repo, "/vulnerability-alerts", ok404=True) is not None
+        # Read from its own endpoint: security_and_analysis is empty for private repos on GitHub Free.
+        fixes = bool((self._call("GET", repo, "/automated-security-fixes", ok404=True) or {}).get("enabled"))
         try:
             cs = (self._call("GET", repo, "/code-scanning/default-setup", ok404=True) or {}).get("state") == "configured"
         except GitHubError as exc:
@@ -550,7 +553,7 @@ class GitHubRest:
             "visibility": info.get("visibility") or ("private" if info.get("private") else "public"),
             "archived": bool(info.get("archived")),
             "security": {"dependabot_alerts": alerts, "dependency_graph": alerts,
-                         "dependabot_security_updates": bool(status("dependabot_security_updates")),
+                         "dependabot_security_updates": fixes,
                          "secret_scanning": bool(status("secret_scanning")),
                          "push_protection": bool(status("secret_scanning_push_protection")),
                          "code_scanning_default_setup": cs},

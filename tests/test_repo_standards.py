@@ -173,6 +173,8 @@ class FakeApi:
                                     "security_and_analysis": sa}).encode())
         if path == f"{repo}/vulnerability-alerts":
             return Resp(b"")
+        if path == f"{repo}/automated-security-fixes":
+            return Resp(b'{"enabled": true, "paused": false}')
         if path == f"{repo}/code-scanning/default-setup":
             if not self.ghas:
                 raise HTTPError(req.full_url, 403, "f", {}, BytesIO(b'{"message": "Advanced Security must be enabled"}'))
@@ -234,6 +236,7 @@ def test_repo_state_without_advanced_security_and_org_properties():
     gh.enable_security(repo="o/r", secret_scanning=False, push_protection=False, code_scanning_default_setup=False,
                        dependabot_security_updates=True)
     assert ("PATCH", "/repos/o/r/code-scanning/default-setup") not in api.calls
+    assert ("PUT", "/repos/o/r/automated-security-fixes") in api.calls
 
 
 def test_the_platform_app_keeps_its_merge_train_bypass_on_lane_repos(svc, monkeypatch):
@@ -284,3 +287,7 @@ def test_private_repos_on_github_free_have_no_rulesets(svc):
     assert rep.ok and rep.errors == [] and "ruleset" not in rep.applied and "settings" in rep.applied
     [d] = [d for d in rep.drift if d.area == "ruleset"]
     assert d.fix == "unavailable" and "GitHub Team" in d.line()
+    # GitHub ignores auto-merge on a private repo without a paid plan: it's reported, not retried.
+    gh.repos[repo]["state"]["allow_auto_merge"] = False
+    again = rs.reconcile(gh, target(svc, repo), apply=False)
+    assert again.ok and [d.fix for d in again.drift if d.item == "allow_auto_merge"] == ["unavailable"]

@@ -201,9 +201,14 @@ def compare(t: Target, state: dict | None) -> list[Drift]:
     if state["visibility"] != p["visibility"]:
         out.append(Drift("visibility", "visibility", p["visibility"], state["visibility"], "manual"))
     want = repo_settings_body(p["merge"], p["default_branch"], None, p.get("features"), p.get("is_template"))
+    free_private = state["available"].get("rulesets") is False  # GitHub Free, private repo
     for k, v in want.items():
         if state["settings"].get(k) != v:
-            out.append(Drift("settings", k, v, state["settings"].get(k)))
+            if k == "allow_auto_merge" and free_private:
+                out.append(Drift("settings", k, v, state["settings"].get(k), "unavailable",
+                                 "GitHub Team, or a public repo: GitHub Free has no auto-merge on private repos"))
+            else:
+                out.append(Drift("settings", k, v, state["settings"].get(k)))
     avail = state["available"]
     for k, v in p["security"].items():
         if not v or state["security"].get(k):
