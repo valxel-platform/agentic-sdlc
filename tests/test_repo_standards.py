@@ -55,7 +55,9 @@ def test_managed_repos_come_from_governance_the_registry_and_the_platform_list(s
     assert ts["vrixel-tools/template-agent"].plan["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
     gov = ts["vrixel-emr/emr-governance"].plan
     assert gov["ruleset"]["required_checks"] == [] and gov["tag_ruleset"] == {}
-    assert ts["vrixel-emr/emr-intake-api"].plan["ruleset"]["required_approvals"] == 2  # PHI floor
+    # No GitHub review: people approve in the pipeline's gates, and pull requests merge on checks.
+    rules = ts["vrixel-emr/emr-intake-api"].plan["ruleset"]
+    assert rules["required_approvals"] == 0 and not rules["code_owner_review"] and not rules["require_last_push_approval"]
 
 
 def test_apply_brings_a_hand_made_repo_on_standard(svc):
@@ -79,7 +81,7 @@ def test_apply_brings_a_hand_made_repo_on_standard(svc):
     assert state["allow_merge_commit"] is False and state["has_wiki"] is False
     branch = state["rulesets"]["vrixel-default-branch"]
     rules = {r["type"]: r.get("parameters") for r in branch["rules"]}
-    assert rules["pull_request"]["required_approving_review_count"] == 2
+    assert rules["pull_request"]["required_approving_review_count"] == 0  # pull requests only; checks decide
     assert [c["context"] for c in rules["required_status_checks"]["required_status_checks"]] == ["unit", "contract", "CodeQL"]
     assert {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"} in branch["bypass_actors"]
     assert gh.org_properties["vrixel-emr"] == ["vrixel_data_class", "vrixel_managed", "vrixel_product"]
@@ -108,11 +110,11 @@ def test_drift_after_someone_changes_a_setting_is_reported_and_fixed(svc):
     rs.reconcile(gh, t, apply=True)
     gh.repos[repo]["state"]["delete_branch_on_merge"] = False  # someone turned it off
     rules = gh.repos[repo]["state"]["rulesets"]["vrixel-default-branch"]["rules"]
-    next(r for r in rules if r["type"] == "pull_request")["parameters"]["require_code_owner_review"] = False
+    next(r for r in rules if r["type"] == "pull_request")["parameters"]["required_approving_review_count"] = 1
     rep = rs.reconcile(gh, t, apply=False)
     assert {(d.area, d.item, str(d.want)) for d in rep.drift if d.fix == "apply"} == {
         ("settings", "delete_branch_on_merge", "True"),
-        ("ruleset", "vrixel-default-branch", "pull_request.require_code_owner_review")}
+        ("ruleset", "vrixel-default-branch", "pull_request.required_approving_review_count")}
     # Missing files are reported, never written: they come with a pull request.
     assert {d.item for d in rep.drift if d.fix == "manual"} == {".github/CODEOWNERS", "SECURITY.md"}
     assert rs.reconcile(gh, t, apply=True).ok

@@ -221,7 +221,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 | Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
 | Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
-| Branch ruleset | Pull requests only; 1 approval (2 for PHI and payments); code owner review; stale approvals dismissed; approval of the last push; conversations resolved; linear history; no force pushes or deletion; required checks per role; merges blocked on new code-scanning alerts of high or above; repository admins may merge a pull request that hasn't met the rules (for lanes with a single approver) |
+| Branch ruleset | Pull requests only, merged when their required checks pass: no GitHub review, because people approve in the pipeline's gates (G1, G4, G6; G5 for high-risk and regulated changes) and agents push and merge under one App identity; linear history; no force pushes or deletion; required checks per role; merges blocked on new code-scanning alerts of high or above; repository admins may merge a pull request whose checks haven't passed |
 | Release tags | `v*` tags can't be moved or deleted |
 | Ownership | CODEOWNERS from the gate approvers (tech leads own everything; security owns the high-risk paths) |
 | Access | Teams from the approvers: tech leads maintain, architects and security push, product owners read |
@@ -234,13 +234,14 @@ risk tier, builds and deployments include them. Every step is idempotent. If one
 architects (G4 approvers) can retry, finish it by hand and carry on, or stop the feature.
 
 Products tighten in `<product>-governance/product.yaml`: their own templates, extra required checks, more
-approvals, broader team access. Lowering approvals or turning off a security feature is rejected.
+GitHub reviews on top of the gates (`required_approvals`), broader team access. Turning off a security
+feature is rejected.
 
 ```yaml
 repo_standards:
   templates: { provider: vrixel-emr/template-fhir-service }
   extra_required_checks: [fhir-conformance]
-  required_approvals: 3
+  required_approvals: 1   # also require a GitHub review (needs a second identity)
 ```
 
 **Setup once per org.**

@@ -55,7 +55,7 @@ def ruleset_body(spec: dict, *, target: str = "branch") -> dict:
         if spec.get("linear_history"):
             rules.append({"type": "required_linear_history"})
         rules.append({"type": "pull_request", "parameters": {
-            "required_approving_review_count": int(spec.get("required_approvals", 1)),
+            "required_approving_review_count": int(spec.get("required_approvals", 0)),
             "dismiss_stale_reviews_on_push": bool(spec.get("dismiss_stale_reviews", True)),
             "require_code_owner_review": bool(spec.get("code_owner_review", True)),
             "require_last_push_approval": bool(spec.get("require_last_push_approval", False)),
