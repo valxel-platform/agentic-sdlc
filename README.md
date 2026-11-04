@@ -218,9 +218,11 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 | Area | Setting |
 | --- | --- |
 | Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`, `-mcp-server`, `-agent`), private |
-| Merging | Squash only, branches deleted after merge |
+| Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
+| Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
-| Branch ruleset | Pull requests only; 1 approval (2 for PHI and payments); code owner review; stale approvals dismissed; conversations resolved; linear history; no force pushes or deletion; required checks per role; merges blocked on new code-scanning alerts of high or above |
+| Branch ruleset | Pull requests only; 1 approval (2 for PHI and payments); code owner review; stale approvals dismissed; approval of the last push; conversations resolved; linear history; no force pushes or deletion; required checks per role; merges blocked on new code-scanning alerts of high or above; repository admins may merge a pull request that hasn't met the rules (for lanes with a single approver) |
+| Release tags | `v*` tags can't be moved or deleted |
 | Ownership | CODEOWNERS from the gate approvers (tech leads own everything; security owns the high-risk paths) |
 | Access | Teams from the approvers: tech leads maintain, architects and security push, product owners read |
 | Labels | Topics, and org custom properties (`vrixel_managed`, `vrixel_product`, `vrixel_data_class`) that org-level rulesets can target |
@@ -492,6 +494,34 @@ The pipeline holds designs and builds to it. In PHI and payments products an HLD
 repo users reach must have an `## Audit` section naming its audited actions
 (`- consent.read: consent`); coders are told to publish those records, reviewers to check them,
 and the build fails its check if an action the HLD names appears in no task.
+
+## Keeping repos on the standards
+
+The provision step applies the standards to repos it creates; `vrixel repos` keeps every managed
+repo on them afterwards, including ones created by hand:
+
+```bash
+vrixel repos check                    # report drift; exits 1 if any repo needs fixing
+vrixel repos apply                    # change what differs (safe to repeat)
+vrixel repos check --repo vrixel-emr/emr-governance --json
+```
+
+Managed repos are each lane's repos (from its governance manifest), each lane's governance repo
+(from `registry.yaml`) and the platform's own repos (`platform_repos` in `config/repos.yaml`:
+the tool, `sdlc-governance` and the templates). Governance repos get reviews and code owners
+but no required checks; templates are marked as templates and require their role's checks.
+
+| Never changed automatically | Why |
+| --- | --- |
+| A repo that's public but should be private | Visibility changes are a person's decision |
+| Missing CODEOWNERS, `dependabot.yml`, `SECURITY.md` | Files arrive through pull requests, like any change |
+| Secret scanning and CodeQL on private repos without GitHub Advanced Security | They're paid features; the report says which repos need them. Until then CodeQL is not a required check and there's no code-scanning merge rule, so pull requests aren't blocked by a check that never runs |
+
+The `repo-standards` workflow runs the check daily and fails when a repo drifts; run it by hand
+with `apply` to fix. It needs the platform's GitHub App installed in every org with administration
+rights (secrets `VRIXEL_GITHUB_APP_ID`, `VRIXEL_GITHUB_APP_PRIVATE_KEY`); the App also needs
+organization custom properties (admin) to define `vrixel_managed`, `vrixel_product` and
+`vrixel_data_class`.
 
 ## Delivery: GitHub and OpenChoreo
 

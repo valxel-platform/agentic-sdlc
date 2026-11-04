@@ -31,11 +31,73 @@ DELIVERY_PERMISSIONS = {"contents": "write", "pull_requests": "write", "statuses
 PROVISIONING_PERMISSIONS = {"administration": "write", "contents": "write", "pull_requests": "write",
                             "security_events": "write", "secret_scanning_alerts": "write",
                             "vulnerability_alerts": "write", "custom_properties": "write",
-                            "members": "read", "metadata": "read"}
+                            "organization_custom_properties": "admin", "members": "read", "metadata": "read"}
 
 
 class GitHubError(RuntimeError):
-    pass
+    def __init__(self, message: str, status: int = 0) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def ruleset_body(spec: dict, *, target: str = "branch") -> dict:
+    """A repository ruleset as GitHub's API takes it, from the standards' ruleset or tag_ruleset."""
+    rules: list[dict] = []
+    if target == "tag":
+        rules = [{"type": "deletion"}, {"type": "non_fast_forward"}, {"type": "update"}]
+        include = [f"refs/tags/{spec.get('pattern', 'v*')}"]
+    else:
+        include = ["~DEFAULT_BRANCH"]
+        if spec.get("block_deletion", True):
+            rules.append({"type": "deletion"})
+        if spec.get("block_force_push", True):
+            rules.append({"type": "non_fast_forward"})
+        if spec.get("linear_history"):
+            rules.append({"type": "required_linear_history"})
+        rules.append({"type": "pull_request", "parameters": {
+            "required_approving_review_count": int(spec.get("required_approvals", 1)),
+            "dismiss_stale_reviews_on_push": bool(spec.get("dismiss_stale_reviews", True)),
+            "require_code_owner_review": bool(spec.get("code_owner_review", True)),
+            "require_last_push_approval": bool(spec.get("require_last_push_approval", False)),
+            "required_review_thread_resolution": bool(spec.get("require_conversation_resolution", True))}})
+        if spec.get("required_checks"):
+            rules.append({"type": "required_status_checks", "parameters": {
+                "strict_required_status_checks_policy": bool(spec.get("up_to_date_before_merge", False)),
+                "required_status_checks": [{"context": c} for c in spec["required_checks"]]}})
+        if spec.get("code_scanning_merge_protection"):
+            rules.append({"type": "code_scanning", "parameters": {"code_scanning_tools": [{
+                "tool": "CodeQL", "alerts_threshold": "errors",
+                "security_alerts_threshold": f"{spec['code_scanning_merge_protection']}_or_higher"}]}})
+    bypass = []
+    # The merge train merges after the pipeline's own gates (G5 for high-risk changes).
+    if spec.get("bypass_app_id"):
+        bypass.append({"actor_id": int(spec["bypass_app_id"]), "actor_type": "Integration", "bypass_mode": "pull_request"})
+    if spec.get("admin_bypass", "none") != "none" and target == "branch":
+        bypass.append({"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": spec["admin_bypass"]})
+    return {"name": spec.get("name", "vrixel-default-branch" if target == "branch" else "vrixel-release-tags"),
+            "target": target, "enforcement": "active",
+            "conditions": {"ref_name": {"include": include, "exclude": []}}, "rules": rules,
+            "bypass_actors": bypass}
+
+
+def repo_settings_body(merge: dict, default_branch: str, description: str | None = None,
+                       features: dict | None = None, is_template: bool | None = None) -> dict:
+    body = {
+        "allow_squash_merge": merge.get("squash", True), "allow_merge_commit": merge.get("merge_commit", False),
+        "allow_rebase_merge": merge.get("rebase", False),
+        "delete_branch_on_merge": merge.get("delete_branch_on_merge", True),
+        "allow_auto_merge": merge.get("allow_auto_merge", False),
+        "allow_update_branch": merge.get("allow_update_branch", False),
+        "squash_merge_commit_title": merge.get("squash_title", "PR_TITLE"),
+        "squash_merge_commit_message": merge.get("squash_message", "PR_BODY"),
+        "default_branch": default_branch,
+    }
+    body.update({k: bool(v) for k, v in (features or {}).items()})
+    if is_template is not None:
+        body["is_template"] = bool(is_template)
+    if description is not None:
+        body["description"] = description
+    return body
 
 
 class GitHub(Protocol):
@@ -142,11 +204,19 @@ class StubGitHub:
         r.setdefault("created", {"template": template, "private": private, "description": description})
         return "created" if created else "exists"
 
-    def update_repo(self, *, repo, merge, default_branch, description) -> None:
-        self._repo(repo, "update_repo")["settings"] = {"merge": dict(merge), "default_branch": default_branch}
+    def update_repo(self, *, repo, merge, default_branch, description=None, features=None, is_template=None) -> None:
+        r = self._repo(repo, "update_repo")
+        r["settings"] = {"merge": dict(merge), "default_branch": default_branch}
+        r.setdefault("state", {}).update(repo_settings_body(merge, default_branch, description, features, is_template))
 
     def enable_security(self, *, repo, **features) -> None:
-        self._repo(repo, "enable_security")["security"] = dict(features)
+        r = self._repo(repo, "enable_security")
+        avail = (r.get("state") or {}).get("available") or {}
+        if features.get("code_scanning_default_setup") and avail.get("code_scanning") is False:
+            raise GitHubError(f"GitHub PATCH {repo}/code-scanning/default-setup: 403 Advanced Security must be enabled", 403)
+        merged = {**(r.get("security") or {}), **{k: v for k, v in features.items() if v}}
+        r["security"] = merged
+        r.setdefault("state", {})["security"] = merged
 
     def grant_team(self, *, org, team, repo, permission) -> None:
         self._repo(repo, "grant_team").setdefault("teams", {})[team] = permission
@@ -157,9 +227,41 @@ class StubGitHub:
     def set_properties(self, *, repo, properties) -> None:
         self._repo(repo, "set_properties")["properties"] = dict(properties)
 
-    def upsert_ruleset(self, *, repo, branch, spec) -> str:
-        self._repo(repo, "upsert_ruleset")["ruleset"] = {"branch": branch, **spec}
-        return spec.get("name", "ruleset")
+    def upsert_ruleset(self, *, repo, branch, spec, target: str = "branch") -> str:
+        r = self._repo(repo, "upsert_ruleset")
+        body = ruleset_body(spec, target=target)
+        if target == "branch":
+            r["ruleset"] = {"branch": branch, **spec}
+        r.setdefault("state", {}).setdefault("rulesets", {})[body["name"]] = body
+        return body["name"]
+
+    def repo_state(self, *, repo) -> dict | None:
+        """Tests describe a repo's current state in repos[repo]["state"] (see repo_standards)."""
+        r = self.repos.get(repo)
+        if r is None:
+            return None
+        st = r.setdefault("state", {})
+        sec = dict(st.get("security") or r.get("security") or {})
+        return {
+            "settings": {k: v for k, v in st.items() if k not in (
+                "rulesets", "security", "available", "topics", "properties", "teams", "files", "visibility",
+                "archived", "description")},
+            "visibility": st.get("visibility", "private"), "archived": st.get("archived", False),
+            "security": {k: bool(sec.get(k)) for k in (
+                "dependency_graph", "dependabot_alerts", "dependabot_security_updates", "secret_scanning",
+                "push_protection", "code_scanning_default_setup")},
+            "available": dict(st.get("available") or {"code_scanning": True, "secret_scanning": True}),
+            "rulesets": dict(st.get("rulesets") or {}),
+            "topics": list(r.get("topics") or st.get("topics") or []),
+            "properties": dict(r.get("properties") or st.get("properties") or {}),
+            "teams": dict(r.get("teams") or st.get("teams") or {}),
+            "files": {p: self.files.get((repo, "main", p)) for p in (".github/CODEOWNERS", ".github/dependabot.yml",
+                                                                    "SECURITY.md")},
+            "org": repo.split("/", 1)[0],
+        }
+
+    def ensure_org_properties(self, *, org, names) -> None:
+        self.org_properties = {**getattr(self, "org_properties", {}), org: sorted(set(names))}
 
 
 class GitHubRest:
@@ -194,7 +296,7 @@ class GitHubRest:
                 detail = json.loads(exc.read().decode("utf-8")).get("message", "")
             except Exception:
                 pass
-            raise GitHubError(f"GitHub {method} {repo}{path}: {exc.code} {detail}".strip()) from exc
+            raise GitHubError(f"GitHub {method} {repo}{path}: {exc.code} {detail}".strip(), exc.code) from exc
 
     def _default_branch(self, repo: str) -> str:
         return self._call("GET", repo, "")["default_branch"]
@@ -330,7 +432,12 @@ class GitHubRest:
         except HTTPError as exc:
             if ok404 and exc.code == 404:
                 return None
-            raise GitHubError(f"GitHub {method} {path}: {exc.code}") from exc
+            detail = ""
+            try:
+                detail = json.loads(exc.read().decode("utf-8")).get("message", "")
+            except Exception:
+                pass
+            raise GitHubError(f"GitHub {method} {path}: {exc.code} {detail}".strip(), exc.code) from exc
 
     def get_file(self, *, repo, path, ref):
         query = f"?ref={quote(ref, safe='')}" if ref else ""
@@ -352,24 +459,21 @@ class GitHubRest:
                 "name": name, "description": description, "private": private, "auto_init": True})
         return "created"
 
-    def update_repo(self, *, repo, merge, default_branch, description) -> None:
-        self._call("PATCH", repo, "", {
-            "description": description, "allow_squash_merge": merge.get("squash", True),
-            "allow_merge_commit": merge.get("merge_commit", False), "allow_rebase_merge": merge.get("rebase", False),
-            "delete_branch_on_merge": merge.get("delete_branch_on_merge", True),
-            "squash_merge_commit_title": "PR_TITLE", "squash_merge_commit_message": "PR_BODY"})
+    def update_repo(self, *, repo, merge, default_branch, description=None, features=None, is_template=None) -> None:
+        self._call("PATCH", repo, "", repo_settings_body(merge, default_branch, description, features, is_template))
 
     def enable_security(self, *, repo, dependency_graph=True, dependabot_alerts=True,
                         dependabot_security_updates=True, secret_scanning=True, push_protection=True,
                         code_scanning_default_setup=True, **_) -> None:
-        def on(flag):
-            return {"status": "enabled" if flag else "disabled"}
-
+        """Turn on the features asked for. Features passed False are left as they are (a feature
+        the plan lacks, e.g. without Advanced Security, is not switched off by the reconciler)."""
         if dependabot_alerts or dependency_graph:
             self._call("PUT", repo, "/vulnerability-alerts")  # also turns on the dependency graph
-        self._call("PATCH", repo, "", {"security_and_analysis": {
-            "secret_scanning": on(secret_scanning), "secret_scanning_push_protection": on(push_protection),
-            "dependabot_security_updates": on(dependabot_security_updates)}})
+        sa = {k: {"status": "enabled"} for k, on in (
+            ("secret_scanning", secret_scanning), ("secret_scanning_push_protection", push_protection),
+            ("dependabot_security_updates", dependabot_security_updates)) if on}
+        if sa:
+            self._call("PATCH", repo, "", {"security_and_analysis": sa})
         if code_scanning_default_setup:
             self._call("PATCH", repo, "/code-scanning/default-setup", {"state": "configured"})
 
@@ -384,39 +488,77 @@ class GitHubRest:
             self._call("PATCH", repo, "/properties/values", {
                 "properties": [{"property_name": k, "value": v} for k, v in properties.items()]})
 
-    def upsert_ruleset(self, *, repo, branch, spec) -> str:
-        rules = []
-        if spec.get("block_deletion", True):
-            rules.append({"type": "deletion"})
-        if spec.get("block_force_push", True):
-            rules.append({"type": "non_fast_forward"})
-        if spec.get("linear_history"):
-            rules.append({"type": "required_linear_history"})
-        rules.append({"type": "pull_request", "parameters": {
-            "required_approving_review_count": int(spec.get("required_approvals", 1)),
-            "dismiss_stale_reviews_on_push": bool(spec.get("dismiss_stale_reviews", True)),
-            "require_code_owner_review": bool(spec.get("code_owner_review", True)),
-            "require_last_push_approval": bool(spec.get("require_last_push_approval", False)),
-            "required_review_thread_resolution": bool(spec.get("require_conversation_resolution", True))}})
-        if spec.get("required_checks"):
-            rules.append({"type": "required_status_checks", "parameters": {
-                "strict_required_status_checks_policy": False,
-                "required_status_checks": [{"context": c} for c in spec["required_checks"]]}})
-        if spec.get("code_scanning_merge_protection"):
-            rules.append({"type": "code_scanning", "parameters": {"code_scanning_tools": [{
-                "tool": "CodeQL", "alerts_threshold": "errors",
-                "security_alerts_threshold": f"{spec['code_scanning_merge_protection']}_or_higher"}]}})
-        body = {"name": spec.get("name", "vrixel-default-branch"), "target": "branch", "enforcement": "active",
-                "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}}, "rules": rules,
-                # The merge train merges after the pipeline's own gates (G5 for high-risk changes).
-                "bypass_actors": ([{"actor_id": int(spec["bypass_app_id"]), "actor_type": "Integration",
-                                    "bypass_mode": "pull_request"}] if spec.get("bypass_app_id") else [])}
+    def upsert_ruleset(self, *, repo, branch, spec, target: str = "branch") -> str:
+        body = ruleset_body(spec, target=target)
         existing = next((r for r in self._call("GET", repo, "/rulesets") or [] if r.get("name") == body["name"]), None)
         if existing:
             self._call("PUT", repo, f"/rulesets/{existing['id']}", body)
         else:
             self._call("POST", repo, "/rulesets", body)
         return body["name"]
+
+    # -- reading what a repo has now, for the standards reconciler (vrixel_sdlc.repo_standards)
+    def repo_state(self, *, repo) -> dict | None:
+        """The repo's settings, security features, rulesets, topics, properties, team access and
+        standard files, normalized for comparison with the standards. None if it doesn't exist."""
+        info = self._call("GET", repo, "", ok404=True)
+        if info is None:
+            return None
+        org = repo.split("/", 1)[0]
+        sa = info.get("security_and_analysis") or {}
+
+        def status(*keys):
+            for k in keys:
+                if (sa.get(k) or {}).get("status"):
+                    return sa[k]["status"] == "enabled"
+            return None
+
+        public = info.get("visibility") == "public" or info.get("private") is False
+        ghas_code = public or bool(status("code_security", "advanced_security"))
+        ghas_secrets = public or bool(status("secret_protection", "advanced_security"))
+        alerts = self._call("GET", repo, "/vulnerability-alerts", ok404=True) is not None
+        try:
+            cs = (self._call("GET", repo, "/code-scanning/default-setup", ok404=True) or {}).get("state") == "configured"
+        except GitHubError as exc:
+            if exc.status not in (403, 422):
+                raise
+            cs, ghas_code = False, False
+        rulesets = {}
+        for r in self._call("GET", repo, "/rulesets") or []:
+            if r.get("source_type", "Repository") == "Repository":
+                rulesets[r["name"]] = self._call("GET", repo, f"/rulesets/{r['id']}")
+        teams = {t["slug"]: t.get("permission", "pull") for t in self._call("GET", repo, "/teams") or []}
+        props = {p["property_name"]: p.get("value") for p in
+                 (self._call("GET", repo, "/properties/values", ok404=True) or [])}
+        files = {}
+        for path in (".github/CODEOWNERS", ".github/dependabot.yml", "SECURITY.md"):
+            files[path] = self.get_file(repo=repo, path=path, ref="")
+        return {
+            "settings": {k: info.get(k) for k in (
+                "allow_squash_merge", "allow_merge_commit", "allow_rebase_merge", "delete_branch_on_merge",
+                "allow_auto_merge", "allow_update_branch", "squash_merge_commit_title",
+                "squash_merge_commit_message", "default_branch", "has_wiki", "has_projects", "has_discussions",
+                "is_template")},
+            "visibility": info.get("visibility") or ("private" if info.get("private") else "public"),
+            "archived": bool(info.get("archived")),
+            "security": {"dependabot_alerts": alerts, "dependency_graph": alerts,
+                         "dependabot_security_updates": bool(status("dependabot_security_updates")),
+                         "secret_scanning": bool(status("secret_scanning")),
+                         "push_protection": bool(status("secret_scanning_push_protection")),
+                         "code_scanning_default_setup": cs},
+            "available": {"code_scanning": ghas_code, "secret_scanning": ghas_secrets},
+            "rulesets": rulesets, "topics": list((self._call("GET", repo, "/topics") or {}).get("names") or []),
+            "properties": props, "teams": teams, "files": files, "org": org,
+        }
+
+    def ensure_org_properties(self, *, org, names) -> None:
+        """Define the organization's custom properties the standards set (string values)."""
+        have = {p["property_name"] for p in self._abs("GET", org, f"/orgs/{quote(org)}/properties/schema") or []}
+        missing = [n for n in names if n not in have]
+        if missing:
+            self._abs("PATCH", org, f"/orgs/{quote(org)}/properties/schema", {"properties": [
+                {"property_name": n, "value_type": "string",
+                 "description": "Set by the Vrixel agentic SDLC repo standards"} for n in missing]})
 
     def dispatch(self, *, repo, event_type, payload) -> None:
         """repository_dispatch: starts the repo's post-deploy workflow (templates ship one)."""

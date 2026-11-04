@@ -12,11 +12,26 @@ naming:
 defaults:
   visibility: private
   default_branch: main
-  merge: { squash: true, merge_commit: false, rebase: false, delete_branch_on_merge: true }
+  # Squash only, titled after the pull request; branches go when they merge (so a stacked pull
+  # request is retargeted to main instead of merging into a branch that's already merged).
+  merge:
+    squash: true
+    merge_commit: false
+    rebase: false
+    delete_branch_on_merge: true
+    allow_auto_merge: true            # merge once reviews and checks pass
+    allow_update_branch: true         # "Update branch" button on pull requests
+    squash_title: PR_TITLE
+    squash_message: PR_BODY
+  # Work is tracked in the product's tracker and documented in the repo: no wikis or projects.
+  features: { has_wiki: false, has_projects: false, has_discussions: false }
   security:
     dependency_graph: true
     dependabot_alerts: true
     dependabot_security_updates: true
+    # Secret scanning and CodeQL on private repos need GitHub Advanced Security (Secret Protection,
+    # Code Security). Without it the reconciler reports them as unavailable, leaves them off and
+    # doesn't require the CodeQL check, so pull requests aren't blocked by a check that never runs.
     secret_scanning: true
     push_protection: true
     code_scanning_default_setup: true      # CodeQL default setup; the sast suite reads its alerts
@@ -30,7 +45,13 @@ defaults:
     linear_history: true
     block_force_push: true
     block_deletion: true
+    up_to_date_before_merge: false         # true makes every merge wait for a rebase; auto-merge handles it
     code_scanning_merge_protection: high   # block merges that add alerts at or above this severity
+    # Repository admins may merge a pull request that hasn't met the rules (never push directly).
+    # Needed while a lane has a single approver, who can't approve their own pull requests.
+    admin_bypass: pull_request             # pull_request | always | none
+  # Release tags (v1.2.3) can't be moved or deleted once pushed.
+  tag_ruleset: { name: vrixel-release-tags, pattern: "v*" }
   # Gate approver teams and the access they get on the new repo.
   team_access:
     g5: maintain        # tech leads
@@ -40,6 +61,22 @@ defaults:
   topics: [vrixel, "{product}", "{role}"]
   # Organization custom properties; an org-level ruleset can target vrixel_managed=true.
   properties: { vrixel_managed: "true", vrixel_product: "{product}", vrixel_data_class: "{data_class}" }
+  # Files every repo carries; the reconciler reports any that are missing.
+  files: [.github/CODEOWNERS, .github/dependabot.yml, SECURITY.md]
+
+# Repos that belong to no lane but follow the same standards (`vrixel repos check`). Lane repos
+# come from each governance manifest, and each product's governance repo from registry.yaml.
+#   kind: template    a golden-path template; marked as a template, checks of the role it serves
+#   kind: governance  reviewed by its owners (CODEOWNERS); no CI checks
+#   kind: tool        the tools org's own code
+platform_repos:
+  vrixel-tools/agentic-sdlc: { kind: tool, product: platform, required_checks: [test, web] }
+  vrixel-tools/sdlc-governance: { kind: governance, product: platform }
+  vrixel-tools/template-service: { kind: template, role: provider }
+  vrixel-tools/template-web: { kind: template, role: consumer }
+  vrixel-tools/template-library: { kind: template, role: library }
+  vrixel-tools/template-agent: { kind: template, role: agent }
+  vrixel-tools/template-mcp-server: { kind: template, role: mcp-server }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in

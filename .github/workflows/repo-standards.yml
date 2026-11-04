@@ -1,0 +1,60 @@
+# Keeps every managed repo on the standards in config/repos.yaml.
+# Daily: report drift (the run fails when a repo needs fixing). By hand: check or apply.
+# Needs the platform's GitHub App, installed in every org with administration rights:
+#   secrets VRIXEL_GITHUB_APP_ID and VRIXEL_GITHUB_APP_PRIVATE_KEY
+name: repo-standards
+on:
+  schedule:
+    - cron: "17 11 * * *"   # daily, 11:17 UTC
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "check reports drift; apply fixes it"
+        type: choice
+        options: [check, apply]
+        default: check
+      repo:
+        description: "Only this repo (org/repo); empty for all"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-standards
+  cancel-in-progress: false
+
+jobs:
+  standards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VRIXEL_GITHUB_APP_ID: ${{ secrets.VRIXEL_GITHUB_APP_ID }}
+      VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE: ${{ runner.temp }}/app.pem
+      VRIXEL_GOVERNANCE_SOURCE: github
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[github]"
+      - name: App key
+        env:
+          KEY: ${{ secrets.VRIXEL_GITHUB_APP_PRIVATE_KEY }}
+        run: |
+          printf '%s\n' "$KEY" > "$VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE"
+          chmod 600 "$VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE"
+      - name: ${{ inputs.action || 'check' }}
+        env:
+          ACTION: ${{ inputs.action || 'check' }}
+          ONLY: ${{ inputs.repo }}
+        run: |
+          set -o pipefail
+          args=(repos "$ACTION")
+          if [ -n "$ONLY" ]; then args+=(--repo "$ONLY"); fi
+          status=0
+          vrixel "${args[@]}" | tee standards.txt || status=$?
+          { echo '```'; cat standards.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+      - if: always()
+        run: rm -f "$VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE"

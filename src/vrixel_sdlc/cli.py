@@ -1,5 +1,10 @@
 """`vrixel demo`: run one feature through the whole pipeline in stub mode, answering gates
-automatically, and print the timeline, gates and token usage."""
+automatically, and print the timeline, gates and token usage.
+
+`vrixel repos check|apply`: compare every managed repo with the standards in config/repos.yaml
+and report (check) or fix (apply) what differs. Uses the GitHub App (VRIXEL_GITHUB_APP_ID,
+VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE) with administration rights, and reads governance from GitHub
+(VRIXEL_GOVERNANCE_SOURCE=github) or the local examples."""
 
 from __future__ import annotations
 
@@ -38,7 +43,37 @@ def _demo(args: argparse.Namespace) -> int:
     return 0 if view["status"] == "done" else 1
 
 
-def main(argv: list[str] | None = None) -> int:
+def _repos(args: argparse.Namespace, github=None) -> int:
+    from . import repo_standards
+
+    settings = load_settings(mode="stub", database_url="")
+    services = build_services(settings)
+    gh = github or _admin_github(settings)
+    reports = repo_standards.run(services, gh, apply=args.action == "apply", only=args.repo or None)
+    if args.json:
+        print(json.dumps([r.as_dict() for r in reports], indent=2, default=str))
+    else:
+        print(repo_standards.summary(reports))
+    return 0 if all(r.ok for r in reports) else 1
+
+
+def _admin_github(settings):
+    import os
+    from pathlib import Path
+
+    from .governance.sources import GitHubAppTokenProvider
+    from .integrations.github import PROVISIONING_PERMISSIONS, GitHubRest
+
+    missing = [v for v in ("VRIXEL_GITHUB_APP_ID", "VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE") if not os.environ.get(v)]
+    if missing:
+        raise SystemExit(f"vrixel repos needs the GitHub App: set {', '.join(missing)}")
+    tokens = GitHubAppTokenProvider(os.environ["VRIXEL_GITHUB_APP_ID"],
+                                    Path(os.environ["VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE"]).read_text(),
+                                    api=settings.github_api, permissions=PROVISIONING_PERMISSIONS)
+    return GitHubRest(tokens, api=settings.github_api)
+
+
+def main(argv: list[str] | None = None, *, github=None) -> int:
     p = argparse.ArgumentParser(prog="vrixel")
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo", help="Run one feature end to end with auto-approved gates")
@@ -49,7 +84,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="Make the first N attempts of PHASE defective, e.g. spec=1")
     d.add_argument("--revise", action="store_true", help="Send the design back once at G3")
     d.add_argument("--artifacts", help="Directory for artifacts (default: a temp dir)")
+    r = sub.add_parser("repos", help="Check or apply the repo standards (config/repos.yaml) on every managed repo")
+    r.add_argument("action", choices=["check", "apply"])
+    r.add_argument("--repo", action="append", default=[], metavar="ORG/REPO", help="Only these repos")
+    r.add_argument("--json", action="store_true", help="Print the reports as JSON")
     args = p.parse_args(argv)
+    if args.cmd == "repos":
+        return _repos(args, github)
     return _demo(args)
 
 

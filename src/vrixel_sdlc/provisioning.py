@@ -33,6 +33,7 @@ class RepoStandards:
     defaults: dict = field(default_factory=dict)
     roles: dict = field(default_factory=dict)
     floors: dict = field(default_factory=dict)
+    platform_repos: dict = field(default_factory=dict)  # repo -> {kind, role?, product?, required_checks?}
 
 
 def load_standards(path: Path) -> RepoStandards:
@@ -40,7 +41,8 @@ def load_standards(path: Path) -> RepoStandards:
         return RepoStandards()
     raw = yaml.safe_load(path.read_text()) or {}
     return RepoStandards(naming=dict(raw.get("naming") or {}), defaults=dict(raw.get("defaults") or {}),
-                         roles=dict(raw.get("roles") or {}), floors=dict(raw.get("floors") or {}))
+                         roles=dict(raw.get("roles") or {}), floors=dict(raw.get("floors") or {}),
+                         platform_repos=dict(raw.get("platform_repos") or {}))
 
 
 def effective_standards(std: RepoStandards, data_class: str, overrides: dict | None,
@@ -162,6 +164,8 @@ def plan(product, proposal: dict, standards: dict) -> dict:
         "repo": proposal["name"], "role": proposal["role"], "purpose": proposal.get("purpose", ""),
         "template": role.get("template"), "visibility": d.get("visibility", "private"),
         "default_branch": d.get("default_branch", "main"), "merge": dict(d.get("merge") or {}),
+        "features": dict(d.get("features") or {}), "is_template": None,
+        "tag_ruleset": dict(d.get("tag_ruleset") or {}), "files": list(d.get("files") or []),
         "security": dict(d.get("security") or {}), "ruleset": {**(d.get("ruleset") or {}),
                                                               "required_checks": list(role.get("required_checks") or [])},
         "teams": teams, "codeowners": "\n".join(codeowners) + "\n",
@@ -216,7 +220,7 @@ class RepoProvisioner:
         ok = step("create", lambda: gh.create_repo(repo=repo, template=p["template"], private=p["visibility"] != "public",
                                                    description=p["purpose"]))
         ok = ok and step("settings", lambda: gh.update_repo(repo=repo, merge=p["merge"], default_branch=p["default_branch"],
-                                                            description=p["purpose"]))
+                                                            description=p["purpose"], features=p.get("features")))
         ok = ok and step("security", lambda: gh.enable_security(repo=repo, **p["security"]))
         ok = ok and step("codeowners", lambda: gh.put_file(repo=repo, branch=p["default_branch"], path=".github/CODEOWNERS",
                                                            content=p["codeowners"],
@@ -224,8 +228,12 @@ class RepoProvisioner:
         ok = ok and step("teams", lambda: [gh.grant_team(org=org, team=t, repo=repo, permission=perm)
                                            for t, perm in sorted(p["teams"].items())])
         ok = ok and step("labels", lambda: (gh.set_topics(repo=repo, topics=p["topics"]),
+                                            gh.ensure_org_properties(org=org, names=sorted(p["properties"])),
                                             gh.set_properties(repo=repo, properties=p["properties"])))
         ok = ok and step("ruleset", lambda: gh.upsert_ruleset(repo=repo, branch=p["default_branch"], spec=p["ruleset"]))
+        if ok and p.get("tag_ruleset"):
+            ok = step("tags", lambda: gh.upsert_ruleset(repo=repo, branch=p["default_branch"], spec=p["tag_ruleset"],
+                                                        target="tag"))
         oc = p.get("openchoreo")
         if ok and oc and product.runtime:
             rt = product.runtime
