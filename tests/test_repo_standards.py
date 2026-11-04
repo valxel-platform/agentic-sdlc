@@ -173,6 +173,8 @@ class FakeApi:
                                     "security_and_analysis": sa}).encode())
         if path == f"{repo}/vulnerability-alerts":
             return Resp(b"")
+        if path == f"{repo}/private-vulnerability-reporting":
+            return Resp(b'{"enabled": true}')
         if path == f"{repo}/automated-security-fixes":
             return Resp(b'{"enabled": true, "paused": false}')
         if path == f"{repo}/code-scanning/default-setup":
@@ -292,3 +294,17 @@ def test_private_repos_on_github_free_have_no_rulesets(svc):
     gh.repos[repo]["state"]["allow_auto_merge"] = False
     again = rs.reconcile(gh, target(svc, repo), apply=False)
     assert again.ok and [d.fix for d in again.drift if d.item == "allow_auto_merge"] == ["unavailable"]
+
+
+def test_codeowners_at_the_root_counts_and_public_repos_take_vulnerability_reports(svc):
+    gh = StubGitHub()
+    repo = "vrixel-emr/emr-governance"
+    existing(gh, repo, files=False)
+    gh.files[(repo, "main", "CODEOWNERS")] = "* @vrixel-emr/product-owners"
+    gh.files[(repo, "main", "SECURITY.md")] = "x"
+    rep = rs.reconcile(gh, target(svc, repo), apply=True)
+    assert rep.ok and rep.drift == []
+    assert gh.repos[repo]["state"]["security"]["private_vulnerability_reporting"] is True
+    existing(gh, "vrixel-emr/emr-web", visibility="private")
+    rep = rs.reconcile(gh, target(svc, "vrixel-emr/emr-web"), apply=False)
+    assert [d.fix for d in rep.drift if d.item == "private_vulnerability_reporting"] == ["unavailable"]

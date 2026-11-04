@@ -215,7 +215,9 @@ def compare(t: Target, state: dict | None) -> list[Drift]:
             continue
         needs = {"code_scanning_default_setup": "code_scanning", "secret_scanning": "secret_scanning",
                  "push_protection": "secret_scanning"}.get(k)
-        if needs and not avail.get(needs):
+        if k == "private_vulnerability_reporting" and state["visibility"] != "public":
+            out.append(Drift("security", k, True, False, "unavailable", "a public repo"))
+        elif needs and not avail.get(needs):
             out.append(Drift("security", k, True, False, "unavailable",
                              "GitHub Advanced Security (Code Security)" if needs == "code_scanning" else
                              "GitHub Advanced Security (Secret Protection)"))

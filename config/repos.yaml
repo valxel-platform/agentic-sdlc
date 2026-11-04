@@ -38,6 +38,7 @@ defaults:
     secret_scanning: true
     push_protection: true
     code_scanning_default_setup: true      # CodeQL default setup; the sast suite reads its alerts
+    private_vulnerability_reporting: true  # "Report a vulnerability" on public repos (SECURITY.md points there)
   ruleset:
     name: vrixel-default-branch
     required_approvals: 1
@@ -64,7 +65,8 @@ defaults:
   topics: [vrixel, "{product}", "{role}"]
   # Organization custom properties; an org-level ruleset can target vrixel_managed=true.
   properties: { vrixel_managed: "true", vrixel_product: "{product}", vrixel_data_class: "{data_class}" }
-  # Files every repo carries; the reconciler reports any that are missing.
+  # Files every repo carries; the reconciler reports any that are missing. CODEOWNERS may be in
+  # .github/, the root or docs/ (wherever GitHub reads it).
   files: [.github/CODEOWNERS, .github/dependabot.yml, SECURITY.md]
 
 # Repos that belong to no lane but follow the same standards (`vrixel repos check`). Lane repos

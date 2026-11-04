@@ -249,14 +249,15 @@ class StubGitHub:
             "visibility": st.get("visibility", "private"), "archived": st.get("archived", False),
             "security": {k: bool(sec.get(k)) for k in (
                 "dependency_graph", "dependabot_alerts", "dependabot_security_updates", "secret_scanning",
-                "push_protection", "code_scanning_default_setup")},
+                "push_protection", "code_scanning_default_setup", "private_vulnerability_reporting")},
             "available": {"rulesets": True, **dict(st.get("available") or {"code_scanning": True, "secret_scanning": True})},
             "rulesets": dict(st.get("rulesets") or {}),
             "topics": list(r.get("topics") or st.get("topics") or []),
             "properties": dict(r.get("properties") or st.get("properties") or {}),
             "teams": dict(r.get("teams") or st.get("teams") or {}),
-            "files": {p: self.files.get((repo, "main", p)) for p in (".github/CODEOWNERS", ".github/dependabot.yml",
-                                                                    "SECURITY.md")},
+            "files": {".github/CODEOWNERS": self.files.get((repo, "main", ".github/CODEOWNERS"))
+                      or self.files.get((repo, "main", "CODEOWNERS")),
+                      **{p: self.files.get((repo, "main", p)) for p in (".github/dependabot.yml", "SECURITY.md")}},
             "org": repo.split("/", 1)[0],
         }
 
@@ -464,13 +465,15 @@ class GitHubRest:
 
     def enable_security(self, *, repo, dependency_graph=True, dependabot_alerts=True,
                         dependabot_security_updates=True, secret_scanning=True, push_protection=True,
-                        code_scanning_default_setup=True, **_) -> None:
+                        code_scanning_default_setup=True, **extra) -> None:
         """Turn on the features asked for. Features passed False are left as they are (a feature
         the plan lacks, e.g. without Advanced Security, is not switched off by the reconciler)."""
         if dependabot_alerts or dependency_graph:
             self._call("PUT", repo, "/vulnerability-alerts")  # also turns on the dependency graph
         if dependabot_security_updates:
             self._call("PUT", repo, "/automated-security-fixes")
+        if extra.get("private_vulnerability_reporting"):
+            self._call("PUT", repo, "/private-vulnerability-reporting")
         sa = {k: {"status": "enabled"} for k, on in (
             ("secret_scanning", secret_scanning), ("secret_scanning_push_protection", push_protection)) if on}
         if sa:
@@ -542,8 +545,15 @@ class GitHubRest:
         props = {p["property_name"]: p.get("value") for p in
                  (self._call("GET", repo, "/properties/values", ok404=True) or [])}
         files = {}
-        for path in (".github/CODEOWNERS", ".github/dependabot.yml", "SECURITY.md"):
+        for path in (".github/dependabot.yml", "SECURITY.md"):
             files[path] = self.get_file(repo=repo, path=path, ref="")
+        # GitHub reads CODEOWNERS from .github/, the root or docs/.
+        files[".github/CODEOWNERS"] = next((c for c in (self.get_file(repo=repo, path=p, ref="") for p in (
+            ".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")) if c is not None), None)
+        try:
+            pvr = bool((self._call("GET", repo, "/private-vulnerability-reporting", ok404=True) or {}).get("enabled"))
+        except GitHubError:
+            pvr = False
         return {
             "settings": {k: info.get(k) for k in (
                 "allow_squash_merge", "allow_merge_commit", "allow_rebase_merge", "delete_branch_on_merge",
@@ -554,6 +564,7 @@ class GitHubRest:
             "archived": bool(info.get("archived")),
             "security": {"dependabot_alerts": alerts, "dependency_graph": alerts,
                          "dependabot_security_updates": fixes,
+                         "private_vulnerability_reporting": pvr,
                          "secret_scanning": bool(status("secret_scanning")),
                          "push_protection": bool(status("secret_scanning_push_protection")),
                          "code_scanning_default_setup": cs},
