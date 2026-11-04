@@ -22,7 +22,7 @@ defaults:
     merge_commit: false
     rebase: false
     delete_branch_on_merge: true
-    allow_auto_merge: true            # merge once reviews and checks pass
+    allow_auto_merge: true            # the merge train merges once checks pass
     allow_update_branch: true         # "Update branch" button on pull requests
     squash_title: PR_TITLE
     squash_message: PR_BODY
@@ -39,20 +39,25 @@ defaults:
     push_protection: true
     code_scanning_default_setup: true      # CodeQL default setup; the sast suite reads its alerts
     private_vulnerability_reporting: true  # "Report a vulnerability" on public repos (SECURITY.md points there)
+  # The default branch takes pull requests only, and a pull request merges when its required
+  # checks pass: no GitHub review. People approve in the pipeline's gates instead (G1, G4 and G6
+  # always; G5 code review for high-risk and regulated changes), recorded with their identity,
+  # and the merge train merges after them. Agents open and merge pull requests under one GitHub
+  # App identity, so "another person must approve" rules would only block them. A product that
+  # wants GitHub reviews as well raises repo_standards.required_approvals.
   ruleset:
     name: vrixel-default-branch
-    required_approvals: 1
-    code_owner_review: true
-    dismiss_stale_reviews: true
-    require_last_push_approval: true
-    require_conversation_resolution: true
+    required_approvals: 0
+    code_owner_review: false
+    dismiss_stale_reviews: false
+    require_last_push_approval: false
+    require_conversation_resolution: false
     linear_history: true
     block_force_push: true
     block_deletion: true
     up_to_date_before_merge: false         # true makes every merge wait for a rebase; auto-merge handles it
     code_scanning_merge_protection: high   # block merges that add alerts at or above this severity
-    # Repository admins may merge a pull request that hasn't met the rules (never push directly).
-    # Needed while a lane has a single approver, who can't approve their own pull requests.
+    # Repository admins may merge a pull request whose checks haven't passed (never push directly).
     admin_bypass: pull_request             # pull_request | always | none
   # Release tags (v1.2.3) can't be moved or deleted once pushed.
   tag_ruleset: { name: vrixel-release-tags, pattern: "v*" }
@@ -109,7 +114,6 @@ roles:
     required_checks: [unit, CodeQL]
     openchoreo: null                       # libraries publish packages; no runtime component
 
-# Floors per data class: products may tighten, never loosen.
-floors:
-  phi: { required_approvals: 2 }
-  payments: { required_approvals: 2 }
+# Floors per data class: products may tighten, never loosen. Regulated (PHI, payments) changes
+# get their human review at G5 in the pipeline (risk tier "regulated"), not as GitHub reviews.
+floors: {}

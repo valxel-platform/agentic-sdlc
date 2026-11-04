@@ -56,13 +56,13 @@ def effective_standards(std: RepoStandards, data_class: str, overrides: dict | N
     rs = out["defaults"].setdefault("ruleset", {})
     floor = std.floors.get(data_class, {})
     if floor.get("required_approvals"):
-        rs["required_approvals"] = max(int(rs.get("required_approvals", 1)), int(floor["required_approvals"]))
+        rs["required_approvals"] = max(int(rs.get("required_approvals", 0)), int(floor["required_approvals"]))
     o = overrides or {}
     unknown = set(o) - {"templates", "required_approvals", "extra_required_checks", "team_access", "security"}
     if unknown:
         problems.append(f"repo_standards has unknown keys {sorted(unknown)}")
     if "required_approvals" in o:
-        if int(o["required_approvals"]) < int(rs.get("required_approvals", 1)):
+        if int(o["required_approvals"]) < int(rs.get("required_approvals", 0)):
             problems.append(f"repo_standards.required_approvals {o['required_approvals']} is below the platform's "
                             f"{rs.get('required_approvals')}")
         else:

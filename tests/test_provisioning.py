@@ -63,7 +63,7 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     assert v["status"] == "done"
 
     (plan,) = seen["g4"]["new_repos"]  # G4 sees exactly what it approves
-    assert plan["repo"] == NEW and plan["ruleset"]["required_approvals"] == 2  # PHI floor
+    assert plan["repo"] == NEW and plan["ruleset"]["required_approvals"] == 0  # gates, not GitHub reviews
     assert plan["ruleset"]["required_checks"] == ["unit", "contract", "CodeQL"]
 
     repo = svc.github.repos[NEW]
@@ -73,7 +73,7 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     assert repo["teams"] == {"tech-leads": "maintain", "architects": "push", "security": "push",
                              "product-owners": "pull"}
     assert repo["properties"]["vrixel_data_class"] == "phi" and "emr" in repo["topics"]
-    assert repo["ruleset"]["branch"] == "main" and repo["ruleset"]["code_owner_review"]
+    assert repo["ruleset"]["branch"] == "main" and not repo["ruleset"]["code_owner_review"]
     codeowners = svc.github.files[(NEW, "main", ".github/CODEOWNERS")]
     assert "* @vrixel-emr/tech-leads" in codeowners and "/src/phi/ @vrixel-emr/security" in codeowners
     assert svc.openchoreo.components[NEW]["component_type"] == "deployment/service"
@@ -96,7 +96,7 @@ def test_general_products_get_the_platform_default_approvals(tmp_path, gov_root)
     approve_gates(eng, start_new_service(eng, "AG", "Yield forecasting"), seen)
     (plan,) = seen["g4"]["new_repos"]
     assert plan["repo"] == "vrixel-agtech/agtech-yield-forecasting-service"
-    assert plan["ruleset"]["required_approvals"] == 1
+    assert plan["ruleset"]["required_approvals"] == 0
 
 
 def test_a_failed_step_goes_to_architects_and_retry_resumes(tmp_path, gov_root):
@@ -142,7 +142,7 @@ def test_proposals_are_checked_against_the_standards(tmp_path, gov_root):
 
 
 @pytest.mark.parametrize("block,message", [
-    ("repo_standards:\n  required_approvals: 1\n", "required_approvals 1 is below the platform's 2"),
+    ("repo_standards:\n  required_approvals: -1\n", "required_approvals -1 is below the platform's 0"),
     ("repo_standards:\n  security:\n    secret_scanning: false\n", "secret_scanning cannot be turned off"),
 ])
 def test_products_cannot_loosen_repo_standards(tmp_path, gov_root, block, message):

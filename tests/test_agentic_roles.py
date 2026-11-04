@@ -55,7 +55,7 @@ def test_new_agent_and_mcp_server_repos_are_planned_with_their_checks():
     agent = plan(Product, proposals[1], standards)
     assert agent["template"] == "vrixel-tools/template-agent"
     assert agent["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
-    assert agent["ruleset"]["required_approvals"] == 2  # PHI floor
+    assert agent["ruleset"]["required_approvals"] == 0  # people approve at the gates, not in GitHub
     assert agent["openchoreo"]["component_type"] == "deployment/service"
     assert "agent" in agent["topics"]
     mcp = plan(Product, proposals[0], standards)
