@@ -36,6 +36,14 @@ def parse_affected_repos(hld: str) -> list[dict]:
     return [{"name": n, "role": r} for n, r in _REPO.findall(section(hld, "Affected repos"))]
 
 
+_AUDIT = re.compile(r"^- ([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+)\s*:\s*(.+?)\s*$", re.M)
+
+
+def parse_audit(hld: str) -> list[dict]:
+    """'## Audit' bullets: '- patient.read: patient (who opened which chart)' -> action and record type."""
+    return [{"action": a, "record": r.split("(", 1)[0].strip()} for a, r in _AUDIT.findall(section(hld, "Audit"))]
+
+
 def parse_trace(plan: str) -> list[tuple[str, str, str]]:
     return _TRACE.findall(section(plan, "Traceability"))
 

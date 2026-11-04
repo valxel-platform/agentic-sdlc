@@ -76,6 +76,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
                        "it needs a provisioning ADR or a depends_on entry")
     if not section(text, "Contracts"):
         out.append("HLD has no contracts section (VX-4)")
+    out += _audit(text, repos, ctx)
     out += _diagram(text, repos)
     if ctx.get("knowledge"):
         # Against the existing design: cited decisions are current, overrides are explicit, and
@@ -84,6 +85,21 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 
         out += design_review(text, ctx["knowledge"], ctx.get("feature_id", ""))["findings"]
     return out
+
+
+RUNTIME_ROLES = ("provider", "consumer", "agent", "mcp-server")
+
+
+def _audit(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """VX-15: in PHI and payments products, the design names what gets audited."""
+    from ..agents.parse import parse_audit
+
+    if ctx.get("data_class") not in ("phi", "payments") or not any(r["role"] in RUNTIME_ROLES for r in repos):
+        return []
+    if not parse_audit(text):
+        return ["HLD has no Audit section naming the actions that read or change records, each as "
+                "'- <record>.<verb>: <record type>' (VX-15)"]
+    return []
 
 
 def _diagram(text: str, repos: list[dict]) -> list[str]:

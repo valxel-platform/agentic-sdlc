@@ -96,7 +96,15 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "waivers": list(state.get("waivers") or []),
         # The feature's flag (created at G4): the coder builds behind it, the reviewer checks it.
         "flag": state.get("flag", ""),
+        # What the approved design says gets audited (VX-15); the build must publish those records.
+        "audit": _audit_actions(services, arts),
     }
+
+
+def _audit_actions(services, arts: dict) -> list[dict]:
+    from ..agents.parse import parse_audit
+
+    return parse_audit(services.artifacts.load(arts["HLD"])) if "HLD" in arts else []
 
 
 def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str, ...], tail: str,
@@ -182,6 +190,30 @@ def flag_instruction(ctx: dict, task: dict) -> str:
             " cover both. Name the flag key in the patch summary.")
 
 
+# Repos that serve or change records: they publish the audit records the HLD names (VX-15).
+AUDITED_ROLES = ("provider", "agent", "mcp-server")
+
+
+def audit_instruction(ctx: dict, task: dict) -> str:
+    if not ctx.get("audit") or task.get("role") not in AUDITED_ROLES:
+        return ""
+    actions = "; ".join(f"{a['action']} ({a['record']})" for a in ctx["audit"])
+    return (f" Publish an audit record with the repo's auditor for each of these that the task touches: {actions}."
+            " Ids only, never field values; if the record can't be published the request fails. List the"
+            " actions after 'Audit:' in the patch summary.")
+
+
+def audit_findings(ctx: dict, results: dict) -> list[str]:
+    """Deterministic: the actions the design says are audited are audited somewhere in the build."""
+    wanted = [a["action"] for a in ctx.get("audit") or []]
+    runtime = [r for r in results.values() if r.get("role") in AUDITED_ROLES and r.get("tests_passed")]
+    if not wanted or not runtime:
+        return []
+    said = " ".join(r.get("summary") or "" for r in runtime)
+    missing = [a for a in wanted if a not in said]
+    return [f"No task publishes the audit records the HLD names: {', '.join(missing)} (VX-15)"] if missing else []
+
+
 def flag_findings(ctx: dict, results: dict) -> list[str]:
     """Deterministic: a feature with a flag must use it in at least one repo users reach."""
     flag = ctx.get("flag")
@@ -214,7 +246,7 @@ def build_build_subgraph(services):
             services, role="coder", phase="build", ctx=ctx, skills=spec.skills,
             tail=(f"Implement {task['id']} in {task['repo']} on branch feature/{ctx['feature_id']}. "
                   f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run tests; return the patch summary."
-                  + flag_instruction(ctx, task)),
+                  + flag_instruction(ctx, task) + audit_instruction(ctx, task)),
             stub_text=templates.code_task(ctx, task, passed=not fail),
         )
         result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
@@ -242,6 +274,10 @@ def build_build_subgraph(services):
                 tail=(f"Review {pr['url']} against the plan and constitution."
                       + (f" Check that what users see changes only when feature flag {ctx['flag']} is on, and that"
                          " the code reads it with default false." if ctx.get("flag") and r.get("role") in FLAGGED_ROLES else "")
+                      + (" Check that every read and change of records publishes an audit record with ids only"
+                         " (no field values), that the request fails when the record can't be published, and that"
+                         " new calls keep the trace context (VX-8, VX-15)."
+                         if ctx.get("audit") and r.get("role") in AUDITED_ROLES else "")
                       + f" Reply with JSON score and notes.\n\n{r['summary']}"),
                 stub_text=json.dumps({"score": 0.9, "notes": []}), max_tokens=1024,
             )
@@ -257,6 +293,7 @@ def build_build_subgraph(services):
         findings += [f"{tid}: review score {rv['score']:.2f} is below {s['threshold']:.2f}"
                      for tid, rv in reviews.items() if rv["score"] < s["threshold"]]
         findings += flag_findings(s["ctx"], results)
+        findings += audit_findings(s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]
         lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}"
                   for tid, rv in sorted(reviews.items())]

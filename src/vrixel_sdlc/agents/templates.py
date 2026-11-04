@@ -156,8 +156,13 @@ def architecture(ctx: dict, defective: bool) -> str:
             if api.get("version") else "new API, starts at 1.0.0 (VX-4)" if new and provider == new["name"]
             else "OpenAPI minor version bump, backward compatible (VX-4)"),
         "", "## Diagram", "```mermaid", _flowchart(ctx, repos), "```",
-        "", "## Constitution articles", "- VX-4", "- VX-8",
     ]
+    if not defective or ctx.get("data_class") not in ("phi", "payments"):
+        record = _slug(ctx["title"]).split("-", 1)[0] or "record"
+        lines += ["", "## Audit",
+                  f"- {record}.read: {record} (who opened which {record}, through which service)",
+                  f"- {record}.change: {record} (who changed it, on whose behalf, approved by whom)"]
+    lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
 
 
@@ -238,6 +243,8 @@ def code_task(ctx: dict, task: dict, passed: bool) -> str:
         f"Acceptance criteria: {', '.join(task['acs']) or 'none'}",
         *([f"Feature flag: {ctx['flag']} (default off; tests cover on and off)"]
           if ctx.get("flag") and task.get("role") in ("provider", "consumer", "agent", "mcp-server") else []),
+        *([f"Audit: {', '.join(a['action'] for a in ctx['audit'])} (ids only; fails closed)"]
+          if ctx.get("audit") and task.get("role") in ("provider", "agent", "mcp-server") else []),
         f"Tests: {'passed' if passed else 'failed: test_' + _slug(task['id'])}",
     ]) + "\n"
 

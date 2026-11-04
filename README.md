@@ -475,6 +475,22 @@ Incidents appear in Decisions and on the Incidents page, get a tracker item (a B
 `incident_type` to change it) with a comment per action, and agents designing new work see recent
 incidents and their causes.
 
+## Tracing and the audit trail (VX-8, VX-15)
+
+The templates give every product the same instrumentation:
+
+| | How | Where |
+| --- | --- | --- |
+| Traces | OpenTelemetry, exported over OTLP to the data plane's collector; incoming `traceparent` is honored and passed on, so one trace runs from the browser through services, agents, MCP servers and the LLM gateway. Agent spans follow the GenAI conventions and never carry prompt or result text. | every template |
+| Logs | JSON with `trace.id` and `span.id` | every template |
+| Audit | Who did what to which records, as CloudEvents (`vrixel.audit.v1`) on the product's Kafka audit topic. A request whose record Kafka doesn't acknowledge fails. | service, agent, MCP server, LLM gateway |
+| Audit store | `ss-audit-sink` copies the topic into an append-only, hash-chained Postgres table (one consumer group) and archives it to object storage under Object Lock (another), so neither destination holds up the other; `audit-sink verify` checks the chain and `restore` rebuilds Postgres from the archive. | each product's runtime |
+
+The pipeline holds designs and builds to it. In PHI and payments products an HLD that changes a
+repo users reach must have an `## Audit` section naming its audited actions
+(`- consent.read: consent`); coders are told to publish those records, reviewers to check them,
+and the build fails its check if an action the HLD names appears in no task.
+
 ## Delivery: GitHub and OpenChoreo
 
 From build to production, the pipeline works in the product's own GitHub org and OpenChoreo
