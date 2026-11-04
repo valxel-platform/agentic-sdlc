@@ -10,7 +10,10 @@ naming:
   max_length: 50
 
 defaults:
-  visibility: private
+  # Every repo is public: code, designs and governance are open, and public repos get rulesets,
+  # auto-merge, CodeQL and secret scanning on any GitHub plan. Nothing secret or patient-related
+  # is ever committed (push protection blocks secrets; PHI never leaves the product's runtime).
+  visibility: public
   default_branch: main
   # Squash only, titled after the pull request; branches go when they merge (so a stacked pull
   # request is retargeted to main instead of merging into a branch that's already merged).
@@ -29,7 +32,7 @@ defaults:
     dependency_graph: true
     dependabot_alerts: true
     dependabot_security_updates: true
-    # Secret scanning and CodeQL on private repos need GitHub Advanced Security (Secret Protection,
+    # On a private repo, secret scanning and CodeQL need GitHub Advanced Security (Secret Protection,
     # Code Security). Without it the reconciler reports them as unavailable, leaves them off and
     # doesn't require the CodeQL check, so pull requests aren't blocked by a check that never runs.
     secret_scanning: true
@@ -70,15 +73,13 @@ defaults:
 #   kind: governance  reviewed by its owners (CODEOWNERS); no CI checks
 #   kind: tool        the tools org's own code
 platform_repos:
-  # The tool and the templates are public: nothing in them is secret, and public repos get
-  # rulesets, CodeQL and secret scanning on any GitHub plan.
-  vrixel-tools/agentic-sdlc: { kind: tool, product: platform, required_checks: [test, web], visibility: public }
+  vrixel-tools/agentic-sdlc: { kind: tool, product: platform, required_checks: [test, web] }
   vrixel-tools/sdlc-governance: { kind: governance, product: platform }
-  vrixel-tools/template-service: { kind: template, role: provider, visibility: public }
-  vrixel-tools/template-web: { kind: template, role: consumer, visibility: public }
-  vrixel-tools/template-library: { kind: template, role: library, visibility: public }
-  vrixel-tools/template-agent: { kind: template, role: agent, visibility: public }
-  vrixel-tools/template-mcp-server: { kind: template, role: mcp-server, visibility: public }
+  vrixel-tools/template-service: { kind: template, role: provider }
+  vrixel-tools/template-web: { kind: template, role: consumer }
+  vrixel-tools/template-library: { kind: template, role: library }
+  vrixel-tools/template-agent: { kind: template, role: agent }
+  vrixel-tools/template-mcp-server: { kind: template, role: mcp-server }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in

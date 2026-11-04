@@ -30,7 +30,7 @@ def svc(tmp_path):
 
 def existing(gh: StubGitHub, repo: str, *, ghas: bool = True, files: bool = True, **state) -> None:
     """A repo as someone set it up by hand: GitHub's defaults, nothing from the standards."""
-    gh.repos[repo] = {"state": {"allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True,
+    gh.repos[repo] = {"state": {"visibility": "public", "allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True,
                                 "delete_branch_on_merge": False, "default_branch": "main", "has_wiki": True,
                                 "has_projects": True, "has_discussions": False, "is_template": False,
                                 "available": {"code_scanning": ghas, "secret_scanning": ghas}, **state}}
@@ -51,7 +51,7 @@ def test_managed_repos_come_from_governance_the_registry_and_the_platform_list(s
     assert ts["vrixel-tools/template-service"].kind == "template" and ts["vrixel-tools/template-service"].plan["is_template"]
     assert ts["vrixel-tools/agentic-sdlc"].plan["ruleset"]["required_checks"] == ["test", "web"]
     assert ts["vrixel-tools/agentic-sdlc"].plan["visibility"] == "public"
-    assert ts["vrixel-tools/sdlc-governance"].plan["visibility"] == "private"
+    assert all(t.plan["visibility"] == "public" for t in ts.values())  # every repo is public
     assert ts["vrixel-tools/template-agent"].plan["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
     gov = ts["vrixel-emr/emr-governance"].plan
     assert gov["ruleset"]["required_checks"] == [] and gov["tag_ruleset"] == {}
@@ -120,9 +120,9 @@ def test_drift_after_someone_changes_a_setting_is_reported_and_fixed(svc):
 
 def test_what_is_never_changed_automatically(svc):
     gh = StubGitHub()
-    existing(gh, "vrixel-emr/emr-web", visibility="public")
+    existing(gh, "vrixel-emr/emr-web", visibility="private")
     rep = rs.reconcile(gh, target(svc, "vrixel-emr/emr-web"), apply=True)
-    assert ("visibility", "manual") in {(d.area, d.fix) for d in rep.drift}
+    assert ("visibility", "manual") in {(d.area, d.fix) for d in rep.drift}  # never flipped automatically
     missing = rs.reconcile(gh, target(svc, "vrixel-emr/emr-intake-api"), apply=True)
     assert not missing.exists and not missing.ok and missing.applied == []
     existing(gh, "vrixel-apx/apx-governance", archived=True)
@@ -282,7 +282,8 @@ def test_a_repo_that_fails_doesnt_stop_the_run(svc):
 def test_private_repos_on_github_free_have_no_rulesets(svc):
     gh = StubGitHub()
     repo = "vrixel-emr/emr-governance"
-    existing(gh, repo, available={"code_scanning": False, "secret_scanning": False, "rulesets": False})
+    existing(gh, repo, visibility="private",
+             available={"code_scanning": False, "secret_scanning": False, "rulesets": False})
     rep = rs.reconcile(gh, target(svc, repo), apply=True)
     assert rep.ok and rep.errors == [] and "ruleset" not in rep.applied and "settings" in rep.applied
     [d] = [d for d in rep.drift if d.area == "ruleset"]

@@ -67,7 +67,7 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     assert plan["ruleset"]["required_checks"] == ["unit", "contract", "CodeQL"]
 
     repo = svc.github.repos[NEW]
-    assert repo["created"]["template"] == "vrixel-tools/template-service" and repo["created"]["private"]
+    assert repo["created"]["template"] == "vrixel-tools/template-service" and not repo["created"]["private"]
     assert repo["security"]["secret_scanning"] and repo["security"]["push_protection"]
     assert repo["security"]["code_scanning_default_setup"]
     assert repo["teams"] == {"tech-leads": "maintain", "architects": "push", "security": "push",

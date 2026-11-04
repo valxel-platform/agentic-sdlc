@@ -162,7 +162,7 @@ def plan(product, proposal: dict, standards: dict) -> dict:
             codeowners.append(f"/{path.strip('/')}/ " + " ".join(f"@{a}" for a in owners))
     return {
         "repo": proposal["name"], "role": proposal["role"], "purpose": proposal.get("purpose", ""),
-        "template": role.get("template"), "visibility": d.get("visibility", "private"),
+        "template": role.get("template"), "visibility": d.get("visibility", "public"),
         "default_branch": d.get("default_branch", "main"), "merge": dict(d.get("merge") or {}),
         "features": dict(d.get("features") or {}), "is_template": None,
         "tag_ruleset": dict(d.get("tag_ruleset") or {}), "files": list(d.get("files") or []),

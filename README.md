@@ -217,7 +217,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 
 | Area | Setting |
 | --- | --- |
-| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`, `-mcp-server`, `-agent`), private |
+| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`, `-mcp-server`, `-agent`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
 | Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
 | Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
@@ -513,9 +513,9 @@ but no required checks; templates are marked as templates and require their role
 
 | Never changed automatically | Why |
 | --- | --- |
-| A repo that's public but should be private | Visibility changes are a person's decision |
+| A repo whose visibility differs from the standard (public) | Visibility changes are a person's decision |
 | Missing CODEOWNERS, `dependabot.yml`, `SECURITY.md` | Files arrive through pull requests, like any change |
-| Secret scanning and CodeQL on private repos without GitHub Advanced Security | They're paid features; the report says which repos need them. Until then CodeQL is not a required check and there's no code-scanning merge rule, so pull requests aren't blocked by a check that never runs |
+| Secret scanning and CodeQL on a private repo without GitHub Advanced Security | They're paid features; the report says which repos need them. Until then CodeQL is not a required check and there's no code-scanning merge rule, so pull requests aren't blocked by a check that never runs |
 
 The `repo-standards` workflow runs the check daily and fails when a repo drifts; run it by hand
 with `apply` to fix. It needs the platform's GitHub App installed in every org with administration
