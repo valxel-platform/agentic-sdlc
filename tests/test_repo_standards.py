@@ -173,6 +173,8 @@ class FakeApi:
                                     "security_and_analysis": sa}).encode())
         if path == f"{repo}/vulnerability-alerts":
             return Resp(b"")
+        if path == f"{repo}/automated-security-fixes":
+            return Resp(b'{"enabled": true, "paused": false}')
         if path == f"{repo}/code-scanning/default-setup":
             if not self.ghas:
                 raise HTTPError(req.full_url, 403, "f", {}, BytesIO(b'{"message": "Advanced Security must be enabled"}'))
@@ -234,6 +236,7 @@ def test_repo_state_without_advanced_security_and_org_properties():
     gh.enable_security(repo="o/r", secret_scanning=False, push_protection=False, code_scanning_default_setup=False,
                        dependabot_security_updates=True)
     assert ("PATCH", "/repos/o/r/code-scanning/default-setup") not in api.calls
+    assert ("PUT", "/repos/o/r/automated-security-fixes") in api.calls
 
 
 def test_the_platform_app_keeps_its_merge_train_bypass_on_lane_repos(svc, monkeypatch):
