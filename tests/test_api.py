@@ -248,5 +248,10 @@ def test_github_sign_in_flow(engine):
 def test_tampered_session_cookies_are_rejected(client):
     sign_in(client, "maria", teams=EMR_TEAMS)
     token = client.cookies.get("vrixel_session")
-    client.cookies.set("vrixel_session", token[:-1] + ("0" if token[-1] != "0" else "1"))
+    # Change the first character of the signature: the last one of a base64 string can carry
+    # unused bits, so changing it doesn't always change the signature.
+    payload, sig = token.rsplit(".", 1)
+    client.cookies.set("vrixel_session", f"{payload}.{'B' if sig[0] != 'B' else 'C'}{sig[1:]}")
+    assert client.get("/api/me").status_code == 401
+    client.cookies.set("vrixel_session", f"{payload[:-2]}xx.{sig}")  # a changed payload, too
     assert client.get("/api/me").status_code == 401
