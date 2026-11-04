@@ -46,9 +46,10 @@ class Drift:
     want: object
     have: object
     fix: str = "apply"  # apply | manual | unavailable
+    needs: str = ""  # for unavailable: the GitHub plan or product it needs
 
     def line(self) -> str:
-        how = {"manual": " (fix by hand)", "unavailable": " (needs GitHub Advanced Security)"}.get(self.fix, "")
+        how = {"manual": " (fix by hand)", "unavailable": f" (needs {self.needs or 'a paid GitHub feature'})"}.get(self.fix, "")
         return f"{self.area}.{self.item}: want {self.want!r}, have {self.have!r}{how}"
 
 
@@ -207,14 +208,22 @@ def compare(t: Target, state: dict | None) -> list[Drift]:
             continue
         needs = {"code_scanning_default_setup": "code_scanning", "secret_scanning": "secret_scanning",
                  "push_protection": "secret_scanning"}.get(k)
-        out.append(Drift("security", k, True, False, "unavailable" if needs and not avail.get(needs) else "apply"))
-    body = ruleset_body(desired_ruleset(p, state))
-    for what in _rules_differ(body, state["rulesets"].get(body["name"])):
-        out.append(Drift("ruleset", body["name"], what, "differs" if what != "missing" else None))
+        if needs and not avail.get(needs):
+            out.append(Drift("security", k, True, False, "unavailable",
+                             "GitHub Advanced Security (Code Security)" if needs == "code_scanning" else
+                             "GitHub Advanced Security (Secret Protection)"))
+        else:
+            out.append(Drift("security", k, True, False))
+    rulesets = [("ruleset", ruleset_body(desired_ruleset(p, state)))]
     if p.get("tag_ruleset"):
-        tags = ruleset_body(p["tag_ruleset"], target="tag")
-        for what in _rules_differ(tags, state["rulesets"].get(tags["name"])):
-            out.append(Drift("tags", tags["name"], what, "differs" if what != "missing" else None))
+        rulesets.append(("tags", ruleset_body(p["tag_ruleset"], target="tag")))
+    for area, body in rulesets:
+        if avail.get("rulesets") is False:
+            out.append(Drift(area, body["name"], "present", "not available", "unavailable",
+                             "GitHub Team, or a public repo: GitHub Free has no rulesets on private repos"))
+            continue
+        for what in _rules_differ(body, state["rulesets"].get(body["name"])):
+            out.append(Drift(area, body["name"], what, "differs" if what != "missing" else None))
     for team, perm in sorted(p["teams"].items()):
         if state["teams"].get(team) != perm:
             out.append(Drift("teams", team, perm, state["teams"].get(team)))

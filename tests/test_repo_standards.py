@@ -209,7 +209,7 @@ def test_repo_state_reads_github():
     assert st["visibility"] == "private" and st["settings"]["delete_branch_on_merge"] is True
     assert st["security"]["dependabot_alerts"] and st["security"]["dependabot_security_updates"]
     assert st["security"]["code_scanning_default_setup"] and not st["security"]["secret_scanning"]
-    assert st["available"] == {"code_scanning": True, "secret_scanning": True}
+    assert st["available"] == {"code_scanning": True, "secret_scanning": True, "rulesets": True}
     assert list(st["rulesets"]) == ["vrixel-default-branch"]  # org rulesets are the org's business
     assert st["teams"] == {"tech-leads": "maintain"} and st["topics"] == ["vrixel"]
     assert st["files"]["SECURITY.md"] is None and st["files"][".github/CODEOWNERS"] == "x"
@@ -225,7 +225,7 @@ def test_repo_state_without_advanced_security_and_org_properties():
     api = FakeApi(ghas=False)
     gh = GitHubRest(Tokens(), opener=api)
     st = gh.repo_state(repo="o/r")
-    assert st["available"] == {"code_scanning": False, "secret_scanning": False}
+    assert st["available"] == {"code_scanning": False, "secret_scanning": False, "rulesets": True}
     assert st["security"]["code_scanning_default_setup"] is False
     gh.ensure_org_properties(org="o", names=["vrixel_managed", "vrixel_product"])
     assert ("PATCH", "/orgs/o/properties/schema") in api.calls
@@ -272,3 +272,13 @@ def test_a_repo_that_fails_doesnt_stop_the_run(svc):
     reports = {r.repo: r for r in rs.run(svc, gh, apply=False)}
     assert reports["vrixel-emr/emr-governance"].errors == ["RuntimeError: App lacks members: read"]
     assert len(reports) > 20  # the rest were still checked
+
+
+def test_private_repos_on_github_free_have_no_rulesets(svc):
+    gh = StubGitHub()
+    repo = "vrixel-emr/emr-governance"
+    existing(gh, repo, available={"code_scanning": False, "secret_scanning": False, "rulesets": False})
+    rep = rs.reconcile(gh, target(svc, repo), apply=True)
+    assert rep.ok and rep.errors == [] and "ruleset" not in rep.applied and "settings" in rep.applied
+    [d] = [d for d in rep.drift if d.area == "ruleset"]
+    assert d.fix == "unavailable" and "GitHub Team" in d.line()

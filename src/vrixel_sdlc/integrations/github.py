@@ -250,7 +250,7 @@ class StubGitHub:
             "security": {k: bool(sec.get(k)) for k in (
                 "dependency_graph", "dependabot_alerts", "dependabot_security_updates", "secret_scanning",
                 "push_protection", "code_scanning_default_setup")},
-            "available": dict(st.get("available") or {"code_scanning": True, "secret_scanning": True}),
+            "available": {"rulesets": True, **dict(st.get("available") or {"code_scanning": True, "secret_scanning": True})},
             "rulesets": dict(st.get("rulesets") or {}),
             "topics": list(r.get("topics") or st.get("topics") or []),
             "properties": dict(r.get("properties") or st.get("properties") or {}),
@@ -523,8 +523,16 @@ class GitHubRest:
             if exc.status not in (403, 422):
                 raise
             cs, ghas_code = False, False
-        rulesets = {}
-        for r in self._call("GET", repo, "/rulesets") or []:
+        rulesets, has_rulesets = {}, True
+        try:
+            listed = self._call("GET", repo, "/rulesets") or []
+        except GitHubError as exc:
+            # Private repos on GitHub Free have no rulesets (or branch protection): "Upgrade to
+            # GitHub Pro or make this repository public".
+            if exc.status != 403:
+                raise
+            listed, has_rulesets = [], False
+        for r in listed:
             if r.get("source_type", "Repository") == "Repository":
                 rulesets[r["name"]] = self._call("GET", repo, f"/rulesets/{r['id']}")
         teams = {t["slug"]: t.get("permission", "pull") for t in self._call("GET", repo, "/teams") or []}
@@ -546,7 +554,7 @@ class GitHubRest:
                          "secret_scanning": bool(status("secret_scanning")),
                          "push_protection": bool(status("secret_scanning_push_protection")),
                          "code_scanning_default_setup": cs},
-            "available": {"code_scanning": ghas_code, "secret_scanning": ghas_secrets},
+            "available": {"code_scanning": ghas_code, "secret_scanning": ghas_secrets, "rulesets": has_rulesets},
             "rulesets": rulesets, "topics": list((self._call("GET", repo, "/topics") or {}).get("names") or []),
             "properties": props, "teams": teams, "files": files, "org": org,
         }
