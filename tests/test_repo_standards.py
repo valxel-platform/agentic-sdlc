@@ -284,3 +284,7 @@ def test_private_repos_on_github_free_have_no_rulesets(svc):
     assert rep.ok and rep.errors == [] and "ruleset" not in rep.applied and "settings" in rep.applied
     [d] = [d for d in rep.drift if d.area == "ruleset"]
     assert d.fix == "unavailable" and "GitHub Team" in d.line()
+    # GitHub ignores auto-merge on a private repo without a paid plan: it's reported, not retried.
+    gh.repos[repo]["state"]["allow_auto_merge"] = False
+    again = rs.reconcile(gh, target(svc, repo), apply=False)
+    assert again.ok and [d.fix for d in again.drift if d.item == "allow_auto_merge"] == ["unavailable"]
