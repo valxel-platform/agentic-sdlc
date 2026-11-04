@@ -245,3 +245,25 @@ def test_the_platform_app_keeps_its_merge_train_bypass_on_lane_repos(svc, monkey
     gov = gh.repos["vrixel-emr/emr-governance"]["state"]["rulesets"]["vrixel-default-branch"]["bypass_actors"]
     assert {"actor_id": 424242, "actor_type": "Integration", "bypass_mode": "pull_request"} in lane
     assert all(a["actor_type"] != "Integration" for a in gov)  # governance changes are people's to merge
+
+
+def test_missing_app_permissions_are_named():
+    from vrixel_sdlc.governance.sources import missing_permissions
+
+    granted = {"administration": "write", "contents": "write", "custom_properties": "read", "metadata": "read"}
+    assert missing_permissions({"administration": "write", "custom_properties": "write",
+                                "organization_custom_properties": "admin", "metadata": "read"}, granted) == [
+        "custom_properties: write", "organization_custom_properties: admin"]
+
+
+def test_a_repo_that_fails_doesnt_stop_the_run(svc):
+    class Broken(StubGitHub):
+        def repo_state(self, *, repo):
+            if repo.endswith("emr-governance"):
+                raise RuntimeError("App lacks members: read")
+            return super().repo_state(repo=repo)
+
+    gh = Broken()
+    reports = {r.repo: r for r in rs.run(svc, gh, apply=False)}
+    assert reports["vrixel-emr/emr-governance"].errors == ["RuntimeError: App lacks members: read"]
+    assert len(reports) > 20  # the rest were still checked

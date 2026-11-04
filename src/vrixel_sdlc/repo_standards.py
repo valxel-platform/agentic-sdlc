@@ -36,6 +36,7 @@ class Target:
     kind: str
     product: str  # lane id, or "platform"
     plan: dict  # what the standards ask for (vrixel_sdlc.provisioning.plan, plus kind-specific settings)
+    error: str = ""  # why the lane's own repos couldn't be listed (its governance couldn't be read)
 
 
 @dataclass
@@ -84,13 +85,13 @@ def targets(services, only: list[str] | None = None) -> list[Target]:
     out: dict[str, Target] = {}
     for pid, entry in services.settings.registry.items():
         gov = entry.governance.full_name
-        lane = None
+        lane, error = None, ""
         try:
             lane = services.snapshot(pid).product
-        except Exception:  # an unreadable lane still has a governance repo to keep on standards
-            pass
+        except Exception as exc:  # an unreadable lane still has a governance repo to keep on standards
+            error = f"couldn't read {pid}'s governance, so its repos weren't checked: {exc}"
         out[gov] = Target(gov, "governance", pid, _governance_plan(std, gov, pid, entry.data_class,
-                                                                  lane.approvers if lane else {}))
+                                                                  lane.approvers if lane else {}), error)
         if lane is None:
             continue
         standards = lane.repo_standards or effective_standards(std, lane.data_class, {})
@@ -234,10 +235,12 @@ def compare(t: Target, state: dict | None) -> list[Drift]:
 
 def reconcile(gh, t: Target, *, apply: bool) -> Report:
     rep = Report(t.repo, t.kind)
+    if t.error:
+        rep.errors.append(t.error)
     try:
         state = gh.repo_state(repo=t.repo)
-    except GitHubError as exc:
-        rep.errors.append(str(exc))
+    except Exception as exc:  # one repo's problem (e.g. missing App permissions) doesn't stop the run
+        rep.errors.append(f"{type(exc).__name__}: {exc}" if not isinstance(exc, GitHubError) else str(exc))
         return rep
     if state is None:
         rep.exists = False

@@ -156,6 +156,15 @@ class EnvTokenProvider:
         return tok
 
 
+_LEVELS = {"read": 1, "write": 2, "admin": 3}
+
+
+def missing_permissions(wanted: dict[str, str], granted: dict[str, str]) -> list[str]:
+    """Permissions asked for that the installation hasn't been granted, as 'name: level'."""
+    return [f"{k}: {v}" for k, v in sorted(wanted.items())
+            if _LEVELS.get(granted.get(k, ""), 0) < _LEVELS.get(v, 1)]
+
+
 class GitHubAppTokenProvider:
     """One GitHub App installed in the tools org and every product org. Mints a short-lived
     installation token per org, narrowed to `permissions` (contents:read for governance reads;
@@ -188,7 +197,13 @@ class GitHubAppTokenProvider:
             with self.opener.open(req, timeout=10) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as exc:
-            raise GovernanceError(f"GitHub App {method} {path} failed with {exc.code}") from exc
+            detail = ""
+            try:
+                detail = json.loads(exc.read().decode("utf-8")).get("message", "")
+            except Exception:
+                pass
+            raise GovernanceError(f"GitHub App {method} {path} failed with {exc.code}"
+                                  + (f": {detail}" if detail else "")) from exc
 
     def token(self, org: str) -> str:
         with self._lock:
@@ -196,7 +211,19 @@ class GitHubAppTokenProvider:
             if cached and cached[1] - 300 > self.clock():
                 return cached[0]
         app_jwt = self._jwt()
-        inst = self._call("GET", f"/orgs/{quote(org)}/installation", app_jwt)
+        try:
+            inst = self._call("GET", f"/orgs/{quote(org)}/installation", app_jwt)
+        except GovernanceError as exc:
+            if "404" in str(exc):
+                raise GovernanceError(f"The GitHub App isn't installed in {org}: install it there "
+                                      "(App settings > Install App), with access to all repositories") from exc
+            raise
+        missing = missing_permissions(self.permissions, inst["permissions"]) if "permissions" in inst else []
+        if missing:
+            raise GovernanceError(
+                f"The GitHub App's installation in {org} lacks " + ", ".join(missing)
+                + ". Add them in the App's settings (Permissions & events), then accept the new permissions"
+                f" in {org} (Settings > GitHub Apps > the App > Review request).")
         tok = self._call("POST", f"/app/installations/{inst['id']}/access_tokens", app_jwt,
                          {"permissions": self.permissions})
         from datetime import datetime
