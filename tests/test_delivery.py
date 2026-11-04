@@ -405,7 +405,7 @@ def test_openchoreo_adapter_builds_deploys_and_promotes():
 
 
 def test_runtime_component_names_are_validated(tmp_path, gov_root):
-    path = gov_root / "vrixel-agtech" / "governance" / "product.yaml"
+    path = gov_root / "vrixel-agtech" / "ag-governance" / "product.yaml"
     path.write_text(path.read_text().replace(
         "  pipeline: [dev, staging, production]",
         "  pipeline: [dev, staging, production]\n  namespace: vrixel\n  components:\n"
@@ -417,7 +417,7 @@ def test_runtime_component_names_are_validated(tmp_path, gov_root):
 
 
 def test_component_mapping_and_namespace_reach_openchoreo(tmp_path, gov_root):
-    path = gov_root / "vrixel-agtech" / "governance" / "product.yaml"
+    path = gov_root / "vrixel-agtech" / "ag-governance" / "product.yaml"
     path.write_text(path.read_text().replace(
         "  pipeline: [dev, staging, production]",
         "  pipeline: [dev, staging, production]\n  namespace: vrixel\n  components:\n"

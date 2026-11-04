@@ -109,7 +109,7 @@ def test_an_alert_opens_an_incident_and_on_call_turns_the_new_feature_off_and_st
 
 def test_a_hotfix_starts_at_planning_and_on_call_approves_merge_and_release(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
-    gov = gov_root / "vrixel-emr" / "governance" / "product.yaml"
+    gov = gov_root / "vrixel-emr" / "emr-governance" / "product.yaml"
     gov.write_text(gov.read_text().replace("approvers:\n", "approvers:\n  oncall:\n  - vrixel-emr/oncall\n", 1))
     incident = {"incident_id": "EMR-INC-9", "product_id": "EMR", "title": "5xx on intake", "severity": "sev2"}
     hid = eng.create(product_id="EMR", title="Hotfix: guard null consent", track="hotfix",
@@ -150,7 +150,7 @@ def test_recovery_leads_to_a_postmortem_recorded_in_git(tmp_path, gov_root):
     eng.decide(iid, pm["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
     v = eng.view(iid)
     assert v["status"] == "closed"
-    assert ("vrixel-emr/governance", f"vrixel/{iid}", f"incidents/{iid}.md") in svc.github.files
+    assert ("vrixel-emr/emr-governance", f"vrixel/{iid}", f"incidents/{iid}.md") in svc.github.files
     # closed: a new firing of the same alert opens a new incident
     [again] = eng.ingest(from_alertmanager(alert()))
     assert again != iid

@@ -9,7 +9,7 @@
   risk for a limited time (a waiver), or stop the feature.
 
 Policy is config: platform defaults and per-data-class floors in config/quality.yaml, product
-tightening in governance/product.yaml (`quality:`). Changing tools is a config edit; a new kind
+tightening in <product>-governance/product.yaml (`quality:`). Changing tools is a config edit; a new kind
 of source is one class named in config/quality.yaml.
 """
 

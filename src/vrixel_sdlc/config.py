@@ -203,7 +203,7 @@ def load_settings(
     registry = {
         pid: RegistryEntry(
             product_id=pid,
-            governance=RepoPointer(org=p["org"], repo=p.get("repo", "governance"), ref=p.get("ref", "main")),
+            governance=RepoPointer(org=p["org"], repo=p.get("repo", f"{pid.lower()}-governance"), ref=p.get("ref", "main")),
             data_class=p["data_class"],
             workspace=p["workspace"],
             kind=p.get("kind", "product"),

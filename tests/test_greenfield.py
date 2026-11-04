@@ -24,7 +24,7 @@ def gov_root(tmp_path):
 
 
 def set_repos(gov_root, block: str):
-    path = gov_root / "vrixel-emr" / "governance" / "product.yaml"
+    path = gov_root / "vrixel-emr" / "emr-governance" / "product.yaml"
     text = re.sub(r"^repos:\n(?:- .*\n(?:  .*\n)*)+", block, path.read_text(), flags=re.M)
     path.write_text(text)
 
@@ -57,7 +57,7 @@ def test_first_feature_proposes_creates_and_builds_the_first_repo(tmp_path, gov_
     assert plan["repo"] == new and plan["template"] == "vrixel-tools/template-service"
     assert new in svc.github.repos  # created on the golden path
     assert any(pr["repo"] == new for pr in svc.github.prs.values())  # the build worked in it
-    gov_pr = [pr for pr in svc.github.prs.values() if pr["repo"] == "vrixel-emr/governance" and "repos" in pr["branch"]]
+    gov_pr = [pr for pr in svc.github.prs.values() if pr["repo"] == "vrixel-emr/emr-governance" and "repos" in pr["branch"]]
     assert gov_pr and new in gov_pr[0]["body"]
 
 

@@ -36,7 +36,9 @@ def engine_for(tmp_path, gov_root):
 
 
 def add_quality(gov_root, org, block):
-    path = gov_root / org / "governance" / "product.yaml"
+    prefix = {"vrixel-emr": "emr", "vrixel-agtech": "ag", "vrixel-pos": "pos", "vrixel-medspa": "ms",
+              "vrixel-apx": "apx", "vrixel-shared-services": "ss"}[org]
+    path = gov_root / org / f"{prefix}-governance" / "product.yaml"
     path.write_text(path.read_text() + "\nquality:\n" + block)
 
 

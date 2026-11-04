@@ -80,7 +80,7 @@ HttpOnly session cookie and discards the GitHub token.
 
 - **Submitting an intent** requires membership of the product's GitHub org.
 - **Deciding a gate** requires matching one of the gate's approvers in that product's
-  `governance/product.yaml`. An approver is a team (`vrixel-emr/product-owners`) or a login.
+  `<product>-governance/product.yaml`. An approver is a team (`vrixel-emr/product-owners`) or a login.
   Cross-lane gates (G4, G5, G6) ask each touched lane in turn, using that lane's approvers.
 - **Resolving an escalation** uses the approvers of the gate that follows the stuck phase.
 
@@ -92,22 +92,24 @@ Postgres, so a restart loses only open intake chats.
 ## Organizations and product governance
 
 The tool lives in the tools org. It holds no product constitutions or product settings: each
-product owns a governance repo in its own GitHub organization, and the tool reads it.
+product owns a governance repo in its own GitHub organization, and the tool reads it. Governance
+repos are named after the product id: `emr-governance`, `ag-governance`, `ss-governance`
+(`repo:` in `config/registry.yaml`; that name is the default when it's left out).
 
 ```
 vrixel-tools/                          tools org
   agentic-sdlc                         this repo: registry.yaml points at every governance repo
   sdlc-governance                      platform/constitution.md (VX- articles)
 vrixel-emr/                            one org per product; each owns its runtime
-  governance                           product.yaml · constitution.md · context.md · CODEOWNERS
+  emr-governance                       product.yaml · constitution.md · context.md · CODEOWNERS
                                        architecture/ (overview.md, decisions/ADR-*.md)
                                        roadmap/ (goals.yaml, initiatives/, releases/)
                                        incidents/ (postmortems)
   emr-intake-api, emr-web, ...         product code; PRs are opened here
 vrixel-agtech/ · vrixel-pos/ · vrixel-medspa/ · vrixel-apx/   same layout
-vrixel-shared-services/                shared lane: communication, audit framework, security
-  governance                           same files, but no runtime
-  ss-communication, ss-audit-framework, ss-security   libraries and frameworks
+vrixel-shared-services/                shared lane: services and libraries every product runs
+  ss-governance                        same files, but no runtime
+  ss-llm-gateway, ss-audit-sink, ...   shipped as packages; each product runs them itself
 ```
 
 ### Lanes: products and shared services
@@ -155,7 +157,7 @@ workspace. It also keeps the platform limits a product may tighten but never loo
 | `CODEOWNERS` | Product owners | Amendments are PRs the product owner approves |
 
 `examples/governance/` holds one sample per org. Copy each folder into its org as the starting
-`governance` repo.
+`<product>-governance` repo.
 
 **Validation.** At feature intake the tool rejects a manifest or constitution that:
 - names a different `product_id` than the registry
@@ -229,7 +231,7 @@ Until that governance PR merges, the feature carries its new repos itself, so it
 risk tier, builds and deployments include them. Every step is idempotent. If one fails, the
 architects (G4 approvers) can retry, finish it by hand and carry on, or stop the feature.
 
-Products tighten in `governance/product.yaml`: their own templates, extra required checks, more
+Products tighten in `<product>-governance/product.yaml`: their own templates, extra required checks, more
 approvals, broader team access. Lowering approvals or turning off a security feature is rejected.
 
 ```yaml
@@ -519,7 +521,7 @@ webhook. When one fails or times out:
 Agents bind only dev and staging (VX-3). Production is bound after G6, recorded under the
 approver's name, and OpenChoreo's own authorization is the backstop.
 
-**Product runtime** (`governance/product.yaml`):
+**Product runtime** (`<product>-governance/product.yaml`):
 
 ```yaml
 runtime:
@@ -589,7 +591,7 @@ GitHub code scanning (any scanner). That is what keeps tools swappable.
 | Change | Where |
 | --- | --- |
 | Swap a tool (Semgrep for CodeQL, Vitest for Jest, Snyk for Dependabot) | `match` of the suite: tool names or check names |
-| Tighten a product (coverage 95%, block on medium, make DAST required) | `quality:` in the product's `governance/product.yaml` |
+| Tighten a product (coverage 95%, block on medium, make DAST required) | `quality:` in the product's `<product>-governance/product.yaml` |
 | Add a suite (license scan, performance budget, accessibility) | A new entry with `kind`, `stage`, `source`, `match` |
 | Raise or lower a floor for a data class | `floors` in `config/quality.yaml` (tools org) |
 | A tool that reports somewhere new (a SonarQube API, a test-results bucket) | One class with `collect()` in `quality/sources.py` or your own package, registered under `sources` |
@@ -598,7 +600,7 @@ Products can only tighten: the platform rejects a manifest that lowers coverage,
 blocking severity, or makes a required suite optional for its data class.
 
 ```yaml
-# governance/product.yaml
+# <product>-governance/product.yaml
 approvers:
   security: [vrixel-emr/security]
 quality:
@@ -618,7 +620,7 @@ In stub delivery mode every suite passes with sample numbers; tests inject resul
 
 ## Diagrams and work tracking
 
-Each product chooses its tools in `governance/product.yaml`. The tools org runs the connections
+Each product chooses its tools in `<product>-governance/product.yaml`. The tools org runs the connections
 and holds the credentials (`config/tools.yaml`), and limits which tools may receive content from
 each data class:
 

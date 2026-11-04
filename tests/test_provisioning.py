@@ -78,10 +78,10 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     assert "* @vrixel-emr/tech-leads" in codeowners and "/src/phi/ @vrixel-emr/security" in codeowners
     assert svc.openchoreo.components[NEW]["component_type"] == "deployment/service"
 
-    manifest = svc.github.files[("vrixel-emr/governance", "vrixel/EMR-FEAT-1-repos", "product.yaml")]
+    manifest = svc.github.files[("vrixel-emr/emr-governance", "vrixel/EMR-FEAT-1-repos", "product.yaml")]
     assert {"name": NEW, "role": "provider"} in yaml.safe_load(manifest)["repos"]
     (rec,) = v["new_repos"]
-    assert rec["status"] == "provisioned" and rec["governance_pr"].startswith("https://github.com/vrixel-emr/governance/pull/")
+    assert rec["status"] == "provisioned" and rec["governance_pr"].startswith("https://github.com/vrixel-emr/emr-governance/pull/")
 
     # The rest of the pipeline treats it like any repo: tasks, PRs, builds, deployments.
     tasks = eng.graph.get_state({"configurable": {"thread_id": v["feature_id"]}}).values["tasks"]
@@ -146,7 +146,7 @@ def test_proposals_are_checked_against_the_standards(tmp_path, gov_root):
     ("repo_standards:\n  security:\n    secret_scanning: false\n", "secret_scanning cannot be turned off"),
 ])
 def test_products_cannot_loosen_repo_standards(tmp_path, gov_root, block, message):
-    path = gov_root / "vrixel-emr" / "governance" / "product.yaml"
+    path = gov_root / "vrixel-emr" / "emr-governance" / "product.yaml"
     path.write_text(path.read_text() + block)
     eng, svc = make(tmp_path, gov_root)
     with pytest.raises(GovernanceError, match=message):
@@ -154,7 +154,7 @@ def test_products_cannot_loosen_repo_standards(tmp_path, gov_root, block, messag
 
 
 def test_products_choose_their_own_templates_and_extra_checks(tmp_path, gov_root):
-    path = gov_root / "vrixel-emr" / "governance" / "product.yaml"
+    path = gov_root / "vrixel-emr" / "emr-governance" / "product.yaml"
     path.write_text(path.read_text() + "repo_standards:\n  templates:\n    provider: vrixel-emr/template-fhir-service\n"
                                        "  extra_required_checks: [fhir-conformance]\n  required_approvals: 3\n")
     eng, svc = make(tmp_path, gov_root)

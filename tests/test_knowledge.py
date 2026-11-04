@@ -54,7 +54,7 @@ def until_gate(eng, fid, gate):
 
 
 def pack(adrs=(), apis=None, in_design=()):
-    return {"architecture": {"repo": "vrixel-emr/governance", "sha": "abc1234", "adrs": list(adrs), "overview": ""},
+    return {"architecture": {"repo": "vrixel-emr/emr-governance", "sha": "abc1234", "adrs": list(adrs), "overview": ""},
             "contracts": {"apis": apis or {}}, "capabilities": {"live": [], "in_design": list(in_design)}, "errors": {}}
 
 
@@ -227,7 +227,7 @@ def test_g4_shows_the_review_and_approved_designs_are_visible_to_other_features(
     assert {b["id"] for b in review["builds_on"]} >= {"ADR-EMR-0001", "ADR-EMR-0003"}
     assert review["contracts"][0] == {"repo": API, "current": "1.4.0", "next": "1.5.0", "breaking": False,
                                       "note": review["contracts"][0]["note"]}
-    assert review["record"]["repo"] == "vrixel-emr/governance"
+    assert review["record"]["repo"] == "vrixel-emr/emr-governance"
     eng.decide(first, g4["interrupt_id"], {"decision": "approve", "approver": "arch"})
     [entry] = [c for c in svc.catalog.lookup("EMR") if c.get("feature") == first]
     assert entry["status"] == "in_design" and entry["contracts"][0]["next"] == "1.5.0"
@@ -244,13 +244,13 @@ def test_release_proposes_the_decisions_to_the_architecture_record(tmp_path, gov
     assert v["status"] == "done"
     [entry] = [c for c in svc.catalog.lookup("EMR") if c.get("feature") == fid]
     assert entry["status"] == "live" and entry["adrs"][0]["id"] == f"ADR-{fid}-1"
-    [pr] = [p for p in svc.github.prs.values() if p["repo"] == "vrixel-emr/governance" and "architecture" in p["branch"]]
+    [pr] = [p for p in svc.github.prs.values() if p["repo"] == "vrixel-emr/emr-governance" and "architecture" in p["branch"]]
     assert f"ADR-{fid}-1" in pr["body"] and "1.4.0 -> 1.5.0" in pr["body"]
     branch = pr["branch"]
-    adr_text = svc.github.files[("vrixel-emr/governance", branch, f"architecture/decisions/ADR-{fid}-1.md")]
+    adr_text = svc.github.files[("vrixel-emr/emr-governance", branch, f"architecture/decisions/ADR-{fid}-1.md")]
     a = parse_adr(adr_text)
     assert a["status"] == "accepted" and a["feature"] == fid and API in a["repos"]
-    overview = svc.github.files[("vrixel-emr/governance", branch, "architecture/overview.md")]
+    overview = svc.github.files[("vrixel-emr/emr-governance", branch, "architecture/overview.md")]
     assert f"{fid}: Consent capture at intake" in overview and overview.startswith("# Healthcare EMR")
     assert any(e["kind"] == "architecture_record_pr" for e in v["events"])
 

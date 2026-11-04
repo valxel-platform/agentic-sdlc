@@ -1,7 +1,7 @@
 # The golden path for new repositories, owned by the tools org. When an approved design (G4)
 # needs a new repo, the pipeline creates it in the product's org with these settings, so the
 # gates downstream (CI, quality suites, merge train, OpenChoreo delivery) work on its first PR.
-# Products may tighten in governance/product.yaml under `repo_standards:`.
+# Products may tighten in <product>-governance/product.yaml under `repo_standards:`.
 
 naming:
   # Repo names start with the product's prefix (the part before the first "-" of its existing

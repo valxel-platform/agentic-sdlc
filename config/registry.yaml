@@ -35,9 +35,9 @@ limits:
 # A shared lane serves regulated products, so its data class is phi: changes to it always go
 # through G5, and only providers approved for PHI see its code.
 products:
-  EMR: { kind: product, org: vrixel-emr,             repo: governance, ref: main, data_class: phi,      workspace: wrkspc-emr }
-  AG:  { kind: product, org: vrixel-agtech,          repo: governance, ref: main, data_class: general,  workspace: wrkspc-shared }
-  POS: { kind: product, org: vrixel-pos,             repo: governance, ref: main, data_class: payments, workspace: wrkspc-shared }
-  MS:  { kind: product, org: vrixel-medspa,          repo: governance, ref: main, data_class: phi,      workspace: wrkspc-medspa }
-  APX: { kind: product, org: vrixel-apx,             repo: governance, ref: main, data_class: payments, workspace: wrkspc-apx }
-  SS:  { kind: shared,  org: vrixel-shared-services, repo: governance, ref: main, data_class: phi,      workspace: wrkspc-shared-services }
+  EMR: { kind: product, org: vrixel-emr,             repo: emr-governance, ref: main, data_class: phi,      workspace: wrkspc-emr }
+  AG:  { kind: product, org: vrixel-agtech,          repo: ag-governance, ref: main, data_class: general,  workspace: wrkspc-shared }
+  POS: { kind: product, org: vrixel-pos,             repo: pos-governance, ref: main, data_class: payments, workspace: wrkspc-shared }
+  MS:  { kind: product, org: vrixel-medspa,          repo: ms-governance, ref: main, data_class: phi,      workspace: wrkspc-medspa }
+  APX: { kind: product, org: vrixel-apx,             repo: apx-governance, ref: main, data_class: payments, workspace: wrkspc-apx }
+  SS:  { kind: shared,  org: vrixel-shared-services, repo: ss-governance, ref: main, data_class: phi,      workspace: wrkspc-shared-services }

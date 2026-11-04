@@ -1,5 +1,5 @@
 # External tools the agents work in, owned by the tools org. Products choose a provider in
-# their governance/product.yaml (tools.diagrams, tools.work_tracking); credentials stay here,
+# their <product>-governance/product.yaml (tools.diagrams, tools.work_tracking); credentials stay here,
 # with the platform, as environment variables issued to a service account.
 
 servers:

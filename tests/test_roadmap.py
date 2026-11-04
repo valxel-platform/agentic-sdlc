@@ -68,7 +68,7 @@ def test_an_initiative_is_drafted_checked_approved_at_g0_and_recorded_in_git(tmp
     v = eng.view(iid)
     assert v["status"] == "approved" and v["record_pr"]["url"]
     pr = next(p for p in svc.github.prs.values() if p["branch"] == f"vrixel/{iid}")
-    record = parse_initiative(svc.github.files[("vrixel-emr/governance", pr["branch"], f"roadmap/initiatives/{iid}.md")])
+    record = parse_initiative(svc.github.files[("vrixel-emr/emr-governance", pr["branch"], f"roadmap/initiatives/{iid}.md")])
     assert record["status"] == "approved" and record["goal"] == "GOAL-EMR-1" and record["budget_usd"] > 0
     assert len(record["candidates"]) == 3
 
@@ -190,7 +190,7 @@ def test_a_launch_group_ships_dark_and_turns_on_together(tmp_path, gov_root):
     assert eng.view(a)["release"]["flag_on"] is True and eng.view(b)["release"]["flag_on"] is True
     files = [p for (repo, br, p) in svc.github.files if br == f"vrixel/{rid}"]
     assert files == [f"roadmap/releases/{rid}.md"]
-    rec = parse_release(svc.github.files[("vrixel-agtech/governance", f"vrixel/{rid}", f"roadmap/releases/{rid}.md")])
+    rec = parse_release(svc.github.files[("vrixel-agtech/ag-governance", f"vrixel/{rid}", f"roadmap/releases/{rid}.md")])
     assert rec["status"] == "shipped" and rec["approved_by"] == "rm" and rec["features"] == [a, b]
 
 
@@ -257,7 +257,7 @@ def test_a_stopped_member_drops_out_of_its_release(tmp_path, gov_root):
 
 
 def test_the_roadmap_is_read_from_the_governance_repo(tmp_path, gov_root):
-    d = gov_root / "vrixel-emr" / "governance" / "roadmap" / "initiatives"
+    d = gov_root / "vrixel-emr" / "emr-governance" / "roadmap" / "initiatives"
     d.mkdir(parents=True)
     (d / "EMR-INI-7.md").write_text("""---
 id: EMR-INI-7

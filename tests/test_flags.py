@@ -79,7 +79,7 @@ def gov_root(tmp_path):
 
 
 def with_flipt(gov_root, extra=AG_FLAGS):
-    p = gov_root / "vrixel-agtech" / "governance" / "product.yaml"
+    p = gov_root / "vrixel-agtech" / "ag-governance" / "product.yaml"
     p.write_text(p.read_text().replace("tools:\n", "tools:" + extra, 1))
 
 

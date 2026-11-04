@@ -69,13 +69,13 @@ def test_snapshot_reads_platform_and_product_from_their_orgs(services):
     ("product_id: EMR", "product_id: POS", "the registry expects 'EMR'"),
 ])
 def test_manifest_cannot_loosen_platform_limits(local_services, gov_root, old, new, message):
-    edit(gov_root / "vrixel-emr/governance/product.yaml", old, new)
+    edit(gov_root / "vrixel-emr/emr-governance/product.yaml", old, new)
     with pytest.raises(GovernanceError, match=message):
         local_services.snapshot("EMR")
 
 
 def test_product_constitution_cannot_redefine_platform_articles(local_services, gov_root):
-    con = gov_root / "vrixel-emr/governance/constitution.md"
+    con = gov_root / "vrixel-emr/emr-governance/constitution.md"
     con.write_text(con.read_text() + "\n- **VX-3** Agents may promote to production. (Policy)\n")
     with pytest.raises(GovernanceError, match="may not define platform articles: VX-3"):
         local_services.snapshot("EMR")
@@ -86,7 +86,7 @@ def test_missing_governance_repo_blocks_intake(tmp_path, gov_root):
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a",
                       governance_source="local", governance_root=gov_root)
     engine = FeatureEngine(build_services(s), InMemorySaver())
-    with pytest.raises(GovernanceError, match="vrixel-pos/governance not found"):
+    with pytest.raises(GovernanceError, match="vrixel-pos/pos-governance not found"):
         engine.start(product_id="POS", title="Tip jar")
     assert engine.index.all() == []  # nothing registered for a product it could not govern
 
@@ -96,7 +96,7 @@ def test_a_feature_keeps_its_pinned_constitution_after_an_amendment(local_servic
     first = engine.start(product_id="EMR", title="Consent check")
     pinned_version = first["constitution_version"]
 
-    con = gov_root / "vrixel-emr/governance/constitution.md"
+    con = gov_root / "vrixel-emr/emr-governance/constitution.md"
     edit(con, "version: 1.0.0", "version: 1.1.0")
     con.write_text(con.read_text() + "\n- **EMR-9** New consent rule. (Test)\n")
 
@@ -160,8 +160,8 @@ def _repo_files(org_repo: str) -> dict[str, str]:
 
 
 def test_github_source_uses_a_token_per_org_and_pins_by_sha(tmp_path):
-    repos = ["vrixel-tools/sdlc-governance", "vrixel-emr/governance", "vrixel-shared-services/governance",
-             "vrixel-apx/governance"]
+    repos = ["vrixel-tools/sdlc-governance", "vrixel-emr/emr-governance", "vrixel-shared-services/ss-governance",
+             "vrixel-apx/apx-governance"]
     fake = FakeGitHub({r: _repo_files(r) for r in repos})
     tokens = EnvTokenProvider({"VRIXEL_GITHUB_TOKEN__VRIXEL_TOOLS": "tok-tools",
                                "VRIXEL_GITHUB_TOKEN__VRIXEL_EMR": "tok-emr",

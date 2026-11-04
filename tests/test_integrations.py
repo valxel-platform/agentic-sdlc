@@ -341,14 +341,14 @@ def test_openproject_over_its_mcp_tools(tmp_path, gov_root):
     ("    project: emr\n", "", "tools.work_tracking.project is required"),
 ])
 def test_tool_choices_are_validated(tmp_path, gov_root, old, new, message):
-    edit(gov_root / "vrixel-emr" / "governance" / "product.yaml", old, new)
+    edit(gov_root / "vrixel-emr" / "emr-governance" / "product.yaml", old, new)
     eng, svc = make_engine(tmp_path, gov_root)
     with pytest.raises(GovernanceError, match=message):
         svc.snapshot("EMR")
 
 
 def test_products_without_tools_skip_publishing_and_tracking(tmp_path, gov_root):
-    path = gov_root / "vrixel-agtech" / "governance" / "product.yaml"
+    path = gov_root / "vrixel-agtech" / "ag-governance" / "product.yaml"
     text = path.read_text()
     start = text.index("# Where agents publish work")
     path.write_text(text[:start] + text[text.index("budget_usd:"):])

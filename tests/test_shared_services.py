@@ -49,23 +49,23 @@ def test_shared_lane_is_governed_from_its_own_org_without_a_runtime(services):
 
 
 def test_a_shared_lane_may_not_declare_a_runtime(services, gov_root):
-    edit(gov_root / "vrixel-shared-services/governance/product.yaml", "max_loops: 3\n",
+    edit(gov_root / "vrixel-shared-services/ss-governance/product.yaml", "max_loops: 3\n",
          "max_loops: 3\nruntime:\n  openchoreo_project: shared\n")
     with pytest.raises(GovernanceError, match="a shared lane owns no runtime"):
         services.snapshot("SS")
 
 
 def test_a_product_must_own_its_runtime(services, gov_root):
-    edit(gov_root / "vrixel-pos/governance/product.yaml", "  openchoreo_project: pos\n", "")
+    edit(gov_root / "vrixel-pos/pos-governance/product.yaml", "  openchoreo_project: pos\n", "")
     with pytest.raises(GovernanceError, match="runtime.openchoreo_project is required"):
         services.snapshot("POS")
 
 
 def test_unknown_or_upward_dependencies_are_rejected(services, gov_root):
-    edit(gov_root / "vrixel-agtech/governance/product.yaml", "depends_on: [SS, APX]", "depends_on: [SS, NOPE]")
+    edit(gov_root / "vrixel-agtech/ag-governance/product.yaml", "depends_on: [SS, APX]", "depends_on: [SS, NOPE]")
     with pytest.raises(GovernanceError, match="'NOPE' is not a registered lane"):
         services.snapshot("AG")
-    edit(gov_root / "vrixel-shared-services/governance/product.yaml", "max_loops: 3\n",
+    edit(gov_root / "vrixel-shared-services/ss-governance/product.yaml", "max_loops: 3\n",
          "max_loops: 3\ndepends_on: [EMR]\n")
     with pytest.raises(GovernanceError, match="shared lane may not depend on product EMR"):
         services.snapshot("SS")
@@ -159,7 +159,7 @@ def test_shared_lane_feature_publishes_a_stable_package_and_deploys_nothing(engi
 
 def test_shared_amendment_mid_feature_does_not_change_the_pinned_version(engine, gov_root):
     first = engine.start(product_id="EMR", title="Consent audit", description="Audit consent changes")
-    con = gov_root / "vrixel-shared-services/governance/constitution.md"
+    con = gov_root / "vrixel-shared-services/ss-governance/constitution.md"
     edit(con, "version: 1.0.0", "version: 2.0.0")
     v = engine.auto_drive(first["feature_id"])
     assert "shared-services@1.0.0" in v["constitution_version"]

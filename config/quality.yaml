@@ -1,7 +1,7 @@
 # Test and security policy, owned by the tools org. Each suite says WHAT must be verified, at
 # WHICH stage, and HOW to read its results (a source). Tools are named only in `match`, so moving
 # from, say, Semgrep to CodeQL, or Jest to Vitest, is an edit here or in a product's
-# governance/product.yaml, never a code change. A new kind of source is one adapter class,
+# <product>-governance/product.yaml, never a code change. A new kind of source is one adapter class,
 # registered under `sources` below.
 #
 # Stages: pr (each pull request head), build (the OpenChoreo build of the merge commit),
