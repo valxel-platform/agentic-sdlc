@@ -60,10 +60,17 @@ def ruleset_body(spec: dict, *, target: str = "branch") -> dict:
             "require_code_owner_review": bool(spec.get("code_owner_review", True)),
             "require_last_push_approval": bool(spec.get("require_last_push_approval", False)),
             "required_review_thread_resolution": bool(spec.get("require_conversation_resolution", True))}})
-        if spec.get("required_checks"):
+        checks = [{"context": c} for c in spec.get("required_checks") or []]
+        if spec.get("gates_check"):
+            # Only the platform's App may set the gates status, when its id is known.
+            gates = {"context": spec["gates_check"]}
+            if spec.get("bypass_app_id"):
+                gates["integration_id"] = int(spec["bypass_app_id"])
+            checks.append(gates)
+        if checks:
             rules.append({"type": "required_status_checks", "parameters": {
                 "strict_required_status_checks_policy": bool(spec.get("up_to_date_before_merge", False)),
-                "required_status_checks": [{"context": c} for c in spec["required_checks"]]}})
+                "required_status_checks": checks}})
         if spec.get("code_scanning_merge_protection"):
             rules.append({"type": "code_scanning", "parameters": {"code_scanning_tools": [{
                 "tool": "CodeQL", "alerts_threshold": "errors",
@@ -102,7 +109,8 @@ def repo_settings_body(merge: dict, default_branch: str, description: str | None
 
 class GitHub(Protocol):
     def open_pr(self, *, repo: str, branch: str, title: str, body: str, files: list[str], labels: list[str]) -> dict: ...
-    def merge(self, *, repo: str, number: int, actor: str) -> dict: ...
+    # sha: the head the gates approved; GitHub refuses the merge if the branch has moved since.
+    def merge(self, *, repo: str, number: int, actor: str, sha: str = "") -> dict: ...
     def put_file(self, *, repo: str, branch: str, path: str, content: str, message: str) -> dict: ...
     def checks(self, *, repo: str, sha: str) -> dict: ...  # {"state": pending|success|failure, "checks": [...]}
     def set_status(self, *, repo: str, sha: str, context: str, state: str, description: str,
@@ -153,9 +161,11 @@ class StubGitHub:
             self.prs[f"{repo}#{number}"] = pr
             return dict(pr)
 
-    def merge(self, *, repo, number, actor) -> dict:
+    def merge(self, *, repo, number, actor, sha="") -> dict:
         with self._lock:
             pr = self.prs[f"{repo}#{number}"]
+            if pr["state"] != "merged" and sha and sha != pr["head_sha"]:
+                raise GitHubError(f"{repo}#{number}: head branch was modified since {sha[:7]}", 409)
             if pr["state"] != "merged":
                 pr.update(state="merged", merged_by=actor,
                           merge_sha=hashlib.sha1(f"merge:{repo}#{number}".encode()).hexdigest())
@@ -352,12 +362,13 @@ class GitHubRest:
             pr = {**pr, "labels": [{"name": n} for n in labels]}
         return self._pr(repo, pr)
 
-    def merge(self, *, repo, number, actor) -> dict:
+    def merge(self, *, repo, number, actor, sha="") -> dict:
         pr = self._call("GET", repo, f"/pulls/{number}")
         if not pr.get("merged"):
-            # Branch protection still applies: required checks and reviews must pass, or GitHub refuses.
+            # Branch protection still applies: required checks must pass, or GitHub refuses. With the
+            # approved sha, GitHub also refuses if anything was pushed after the gates approved.
             self._call("PUT", repo, f"/pulls/{number}/merge", {
-                "merge_method": self.merge_method, "sha": pr["head"]["sha"],
+                "merge_method": self.merge_method, "sha": sha or pr["head"]["sha"],
                 "commit_title": f"{pr['title']} (#{number})",
                 "commit_message": f"Merged by the Vrixel merge train. Approved by {actor}."})
             pr = self._call("GET", repo, f"/pulls/{number}")
@@ -379,7 +390,7 @@ class GitHubRest:
             out.append({"name": r["name"], "state": state, "url": r.get("html_url", ""),
                         "summary": " ".join(filter(None, [output.get("title"), output.get("summary")]))})
         for st in combined.get("statuses", []):
-            if st["context"].startswith("openchoreo/"):
+            if st["context"].startswith(("openchoreo/", "vrixel/")):
                 continue  # our own reports, not CI
             state = {"success": "success", "pending": "pending"}.get(st["state"], "failure")
             out.append({"name": st["context"], "state": state, "url": st.get("target_url") or "",

@@ -182,3 +182,45 @@ def test_apx_merges_library_before_provider_before_consumer(engine):
     assert v["change_set"]["merge_order"] == ["vrixel-apx/apx-contracts", "vrixel-apx/apx-ledger",
                                               "vrixel-apx/apx-gateway"]
     assert all(pr["url"].startswith("https://github.com/vrixel-apx/") for pr in v["pull_requests"].values())
+
+
+def _gates_statuses(services, pr):
+    return [s["state"] for s in services.github.statuses
+            if s["context"] == "vrixel/gates" and s["repo"] == pr["repo"] and s["sha"] == pr["head_sha"]]
+
+
+def test_github_sees_when_the_gates_have_passed(engine, services):
+    """Each pull request carries vrixel/gates: pending while the pipeline decides, success just
+    before the merge train merges the exact commit the gates saw."""
+    fid = engine.start(product_id="EMR", title="Consent check on intake")["feature_id"]
+    for gate in ("g1", "g2", "g3", "g4"):
+        v = approve(engine, fid, gate)
+    prs = list(v["pull_requests"].values())
+    assert prs and all(_gates_statuses(services, pr) == ["pending"] for pr in prs)
+
+    v = approve(engine, fid, "g5")
+    for pr in v["pull_requests"].values():
+        assert _gates_statuses(services, pr) == ["pending", "success"]
+    done = next(s for s in services.github.statuses if s["context"] == "vrixel/gates" and s["state"] == "success")
+    assert "G1, G2, G3, G4, G5 approved" in done["description"]
+
+
+def test_an_aborted_change_fails_its_gates_status(engine, services):
+    fid = engine.start(product_id="EMR", title="Consent check on intake")["feature_id"]
+    for gate in ("g1", "g2", "g3", "g4"):
+        v = approve(engine, fid, gate)
+    (g5,) = engine.pending(fid)
+    v = engine.decide(fid, g5["interrupt_id"], {"decision": "abort", "approver": "lead", "feedback": "not now"})
+    assert v["status"] == "aborted"
+    for pr in v["pull_requests"].values():
+        assert pr["state"] != "merged" and _gates_statuses(services, pr) == ["pending", "failure"]
+
+
+def test_the_merge_train_merges_only_what_the_gates_saw(services):
+    from vrixel_sdlc.integrations.github import GitHubError
+
+    gh = services.github
+    pr = gh.open_pr(repo="o/r", branch="b", title="t", body="b", files=[], labels=[])
+    with pytest.raises(GitHubError):
+        gh.merge(repo="o/r", number=pr["number"], actor="a", sha="0" * 40)  # pushed to after the gates
+    assert gh.merge(repo="o/r", number=pr["number"], actor="a", sha=pr["head_sha"])["state"] == "merged"

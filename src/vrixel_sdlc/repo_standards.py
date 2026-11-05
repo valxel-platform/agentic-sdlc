@@ -122,6 +122,7 @@ def _base(std, repo: str, product: str, data_class: str, approvers: dict, role: 
 def _governance_plan(std, repo: str, pid: str, data_class: str, approvers: dict) -> dict:
     p = _base(std, repo, pid, data_class, approvers, "governance")
     p["ruleset"]["required_checks"] = []
+    p["ruleset"]["gates_check"] = None  # the pipeline doesn't deliver here
     p["ruleset"]["code_scanning_merge_protection"] = None
     p["security"]["code_scanning_default_setup"] = False  # no code to scan
     p["tag_ruleset"] = {}
@@ -138,6 +139,7 @@ def _platform_plan(std, repo: str, spec: dict) -> dict:
     p = _base(std, repo, spec.get("product", "platform"), spec.get("data_class", "general"), {}, role)
     checks = spec.get("required_checks") or (std.roles.get(role) or {}).get("required_checks") or []
     p["ruleset"]["required_checks"] = list(checks)
+    p["ruleset"]["gates_check"] = None  # the pipeline doesn't deliver here
     p["is_template"] = kind == "template"
     p["codeowners"] = None
     if spec.get("visibility"):
@@ -177,7 +179,8 @@ def _rules_differ(want: dict, have: dict | None) -> list[str]:
         hp = have_rules[t]
         for k, v in params.items():
             if k == "required_status_checks":
-                if sorted(c["context"] for c in v) != sorted(c.get("context") for c in hp.get(k) or []):
+                pair = lambda c: (c.get("context"), int(c.get("integration_id") or 0))  # noqa: E731
+                if sorted(map(pair, v)) != sorted(map(pair, hp.get(k) or [])):
                     out.append(f"{t}.{k}")
             elif k == "code_scanning_tools":
                 if [(x["tool"], x["security_alerts_threshold"]) for x in v] != \
