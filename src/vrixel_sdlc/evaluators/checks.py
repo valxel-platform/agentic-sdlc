@@ -77,6 +77,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     if not section(text, "Contracts"):
         out.append("HLD has no contracts section (VX-4)")
     out += _audit(text, repos, ctx)
+    out += _events(text, repos)
     out += _diagram(text, repos)
     if ctx.get("knowledge"):
         # Against the existing design: cited decisions are current, overrides are explicit, and
@@ -87,7 +88,17 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     return out
 
 
-RUNTIME_ROLES = ("provider", "consumer", "agent", "mcp-server")
+RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server")
+
+
+def _events(text: str, repos: list[dict]) -> list[str]:
+    """VX-16: a design with event workers names the events they apply."""
+    from ..agents.parse import parse_events
+
+    if not any(r["role"] == "event-worker" for r in repos) or parse_events(text):
+        return []
+    return ["HLD has event workers but no Events section naming the events, each as "
+            "'- vrixel.<entity>.<what happened>.v1: <who publishes it, who applies it>' (VX-16)"]
 
 
 def _audit(text: str, repos: list[dict], ctx: dict) -> list[str]:

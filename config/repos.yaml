@@ -92,11 +92,12 @@ platform_repos:
   vrixel-tools/template-library: { kind: template, role: library }
   vrixel-tools/template-agent: { kind: template, role: agent }
   vrixel-tools/template-mcp-server: { kind: template, role: mcp-server }
+  vrixel-tools/template-event-worker: { kind: template, role: event-worker }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in
-# vrixel-tools: Java 21 + Spring Boot (service), React + TypeScript (web), Java library, and
-# Python for agentic work: a LangGraph workflow agent and an MCP server.
+# vrixel-tools: Java 21 + Spring Boot (service and event worker), React + TypeScript (web), Java
+# library, and Python for agentic work: a LangGraph workflow agent and an MCP server.
 roles:
   provider:
     template: vrixel-tools/template-service
@@ -106,6 +107,13 @@ roles:
     template: vrixel-tools/template-web
     required_checks: [unit, contract, CodeQL]
     openchoreo: { component_type: deployment/web-app, workflow: docker }
+  # Keeps a data store from the product's events (VX-16): Kafka in, Postgres or an index out.
+  event-worker:
+    template: vrixel-tools/template-event-worker
+    required_checks: [unit, CodeQL]          # unit runs the integration tests (Postgres and Kafka in containers)
+    # No public endpoint, only health and metrics. If your OpenChoreo has no worker type, define one
+    # (a Deployment with no Endpoint) or use deployment/service.
+    openchoreo: { component_type: deployment/worker, workflow: docker }
   mcp-server:
     template: vrixel-tools/template-mcp-server
     required_checks: [unit, CodeQL]

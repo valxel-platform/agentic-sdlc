@@ -115,7 +115,15 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "flag": state.get("flag", ""),
         # What the approved design says gets audited (VX-15); the build must publish those records.
         "audit": _audit_actions(services, arts),
+        # The events the approved design names (VX-16): providers publish them, workers apply them.
+        "events": _design_events(services, arts),
     }
+
+
+def _design_events(services, arts: dict) -> list[dict]:
+    from ..agents.parse import parse_events
+
+    return parse_events(services.artifacts.load(arts["HLD"])) if "HLD" in arts else []
 
 
 def _audit_actions(services, arts: dict) -> list[dict]:
@@ -231,6 +239,38 @@ def audit_findings(ctx: dict, results: dict) -> list[str]:
     return [f"No task publishes the audit records the HLD names: {', '.join(missing)} (VX-15)"] if missing else []
 
 
+# Kafka first (VX-16): providers publish what changed, event workers keep the stores.
+EVENT_ROLES = ("provider", "event-worker")
+
+
+def events_instruction(ctx: dict, task: dict) -> str:
+    role = task.get("role")
+    if role not in EVENT_ROLES:
+        return ""
+    named = "; ".join(e["type"] for e in ctx.get("events") or [])
+    if role == "provider":
+        return (" Change records only by publishing one event per change with the repo's Events (Kafka first), and"
+                " answer 202 once Kafka has it; never write a database in the request (VX-16)."
+                + (f" The design's events: {named}." if named else "")
+                + " List the event types after 'Events:' in the patch summary.")
+    return (" Apply events with one EventHandler per type: an upsert keyed by the record's id that only moves"
+            " forward (keep the Kafka position), a Flyway migration for any table, InvalidEventException for"
+            " an event that can't be applied; never call services or publish from a handler (VX-16)."
+            + (f" The design's events: {named}." if named else "")
+            + " List the event types after 'Events:' in the patch summary.")
+
+
+def events_findings(ctx: dict, results: dict) -> list[str]:
+    """Deterministic: every event the design names is published or applied somewhere in the build."""
+    wanted = [e["type"] for e in ctx.get("events") or []]
+    built = [r for r in results.values() if r.get("role") in EVENT_ROLES and r.get("tests_passed")]
+    if not wanted or not built:
+        return []
+    said = " ".join(r.get("summary") or "" for r in built)
+    missing = [t for t in wanted if t not in said]
+    return [f"No task publishes or applies the events the HLD names: {', '.join(missing)} (VX-16)"] if missing else []
+
+
 def flag_findings(ctx: dict, results: dict) -> list[str]:
     """Deterministic: a feature with a flag must use it in at least one repo users reach."""
     flag = ctx.get("flag")
@@ -263,7 +303,7 @@ def build_build_subgraph(services):
             services, role="coder", phase="build", ctx=ctx, skills=spec.skills,
             tail=(f"Implement {task['id']} in {task['repo']} on branch feature/{ctx['feature_id']}. "
                   f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run tests; return the patch summary."
-                  + flag_instruction(ctx, task) + audit_instruction(ctx, task)),
+                  + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)),
             stub_text=templates.code_task(ctx, task, passed=not fail),
         )
         result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
@@ -296,6 +336,9 @@ def build_build_subgraph(services):
                          " (no field values), that the request fails when the record can't be published, and that"
                          " new calls keep the trace context (VX-8, VX-15)."
                          if ctx.get("audit") and r.get("role") in AUDITED_ROLES else "")
+                      + (" Check that the change writes no database in a request and publishes one event per change"
+                         " to Kafka, or, in an event worker, that each handler applies an event once and only moves"
+                         " forward (VX-16)." if r.get("role") in EVENT_ROLES else "")
                       + f" Reply with JSON score and notes.\n\n{r['summary']}"),
                 stub_text=json.dumps({"score": 0.9, "notes": []}), max_tokens=1024,
             )
@@ -312,6 +355,7 @@ def build_build_subgraph(services):
                      for tid, rv in reviews.items() if rv["score"] < s["threshold"]]
         findings += flag_findings(s["ctx"], results)
         findings += audit_findings(s["ctx"], results)
+        findings += events_findings(s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]
         lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}"
                   for tid, rv in sorted(reviews.items())]

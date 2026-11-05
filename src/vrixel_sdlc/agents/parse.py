@@ -44,6 +44,15 @@ def parse_audit(hld: str) -> list[dict]:
     return [{"action": a, "record": r.split("(", 1)[0].strip()} for a, r in _AUDIT.findall(section(hld, "Audit"))]
 
 
+_EVENT = re.compile(r"^- (vrixel\.[a-z0-9_-]+\.[a-z0-9_-]+\.v\d+)\s*:\s*(.+?)\s*$", re.M)
+
+
+def parse_events(hld: str) -> list[dict]:
+    """'## Events' bullets: '- vrixel.consent.recorded.v1: published by emr-intake-api, applied by
+    emr-consent-worker' -> event type and description (VX-16)."""
+    return [{"type": t, "about": a} for t, a in _EVENT.findall(section(hld, "Events"))]
+
+
 def parse_trace(plan: str) -> list[tuple[str, str, str]]:
     return _TRACE.findall(section(plan, "Traceability"))
 
