@@ -4,7 +4,10 @@ automatically, and print the timeline, gates and token usage.
 `vrixel repos check|apply`: compare every managed repo with the standards in config/repos.yaml
 and report (check) or fix (apply) what differs. Uses the GitHub App (VRIXEL_GITHUB_APP_ID,
 VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE) with administration rights, and reads governance from GitHub
-(VRIXEL_GOVERNANCE_SOURCE=github) or the local examples."""
+(VRIXEL_GOVERNANCE_SOURCE=github) or the local examples.
+
+`vrixel acceptance review`: list acceptance tests whose coverage another test of the same
+capability already has, from a product's catalog.json, so they can be merged or removed."""
 
 from __future__ import annotations
 
@@ -57,6 +60,32 @@ def _repos(args: argparse.Namespace, github=None) -> int:
     return 0 if all(r.ok for r in reports) else 1
 
 
+def _acceptance(args: argparse.Namespace, github=None) -> int:
+    from pathlib import Path
+
+    from . import acceptance
+
+    if args.catalog:
+        text = Path(args.catalog).read_text()
+    else:
+        settings = load_settings(mode="stub", database_url="")
+        services = build_services(settings)
+        product = services.governance.snapshot(args.product).product
+        repo = acceptance.acceptance_repo([{"name": r.name, "role": r.role} for r in product.repos])
+        if not repo:
+            raise SystemExit(f"{args.product} has no acceptance repo (role: acceptance in its product.yaml)")
+        text = (github or _admin_github(settings)).get_file(repo=repo, path="catalog.json", ref="")
+    catalog = acceptance.load_catalog(text)
+    pairs = acceptance.overlaps_in(catalog)
+    if args.json:
+        print(json.dumps({"tests": len(catalog), "overlaps": pairs}, indent=2))
+    else:
+        print(f"{len(catalog)} acceptance tests, {len(pairs)} covered by another test")
+        for p in pairs:
+            print(f"  {p['test']}\n    is within {p['within']}\n    covers {', '.join(p['covers'])}")
+    return 1 if pairs else 0
+
+
 def _admin_github(settings):
     import os
     from pathlib import Path
@@ -88,9 +117,17 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     r.add_argument("action", choices=["check", "apply"])
     r.add_argument("--repo", action="append", default=[], metavar="ORG/REPO", help="Only these repos")
     r.add_argument("--json", action="store_true", help="Print the reports as JSON")
+    a = sub.add_parser("acceptance", help="Review a product's acceptance tests for overlap")
+    a.add_argument("action", choices=["review"])
+    src = a.add_mutually_exclusive_group(required=True)
+    src.add_argument("--product", help="Product id; reads catalog.json from its acceptance repo (GitHub App)")
+    src.add_argument("--catalog", help="A local catalog.json")
+    a.add_argument("--json", action="store_true")
     args = p.parse_args(argv)
     if args.cmd == "repos":
         return _repos(args, github)
+    if args.cmd == "acceptance":
+        return _acceptance(args, github)
     return _demo(args)
 
 

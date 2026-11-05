@@ -527,6 +527,7 @@ def make_merge_train(services):
         passed = ", ".join(sorted({g["gate"].upper() for g in state.get("gate_decisions", [])
                                    if g["decision"] in ("approve", "handback")})) or "gates"
         failed_runs = {r for r, v in runs.items() if v.get("state") == "failure"}
+        roles = {t["repo"]: t.get("role") for t in state.get("tasks") or []}
         for repo in cs.get("merge_order", []):  # dependency order: libraries, providers, consumers
             sha = ""
             for key, pr in sorted(state.get("pull_requests", {}).items()):
@@ -542,6 +543,10 @@ def make_merge_train(services):
                     merged[key] = pr
                 sha = pr.get("merge_sha") or sha
             lane = lanes.get(repo)
+            if roles.get(repo) == "acceptance":
+                # Not deployed: the pipeline runs these tests against each environment (env waits).
+                cs["acceptance"] = {"repo": repo, "sha": sha}
+                continue
             if lane is not None and lane.kind == "shared":
                 # No runtime of its own: publish a release candidate that consumers build against.
                 if repo not in published:
@@ -762,6 +767,7 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
             return Command(goto=ok)
         runs = (state.get("change_set") or {}).get("runs") or {}
         qtargets = [{**t, "sha": runs.get(t["repo"], {}).get("sha", "")} for t in targets]
+        qtargets += acceptance_targets(services, state, stage, targets)
         res = interrupt(external(state, stage, targets, quality_packet(services, state, stage, qtargets)))
         report_to_github(services, state, stage, res)
         if res["status"] == "security":
@@ -773,6 +779,24 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
         return _people_said(state, stage, res, ok=ok, retry=retry, extra=_quality_update(res))
 
     return env_wait, (ok, retry, f"{stage}_wait", END)
+
+
+def acceptance_targets(services, state: FeatureState, stage: str, deployed: list[dict]) -> list[dict]:
+    """The product acceptance run for this stage, when the change set has one: the acceptance
+    repo's merged commit, the criteria to prove, which tests to select and where each component
+    runs (filled in from the deployments when the run starts)."""
+    from .. import acceptance
+    from ..agents.parse import parse_acs
+
+    acc = (state.get("change_set") or {}).get("acceptance")
+    if not acc or not acc.get("sha") or stage not in ("dev", "staging"):
+        return []
+    repos = [{"name": t["repo"], "role": t.get("role")} for t in state.get("tasks") or []]
+    arts = state.get("artifacts") or {}
+    acs = list(parse_acs(services.artifacts.load(arts["PRD"]))) if "PRD" in arts else []
+    return [{"kind": "acceptance", "repo": acc["repo"], "sha": acc["sha"], "feature_id": state["feature_id"],
+             "acs": acs, "flag": state.get("flag", ""), "components": sorted({d["repo"] for d in deployed}),
+             **acceptance.selection(state["feature_id"], repos, stage)}]
 
 
 def finalize(state: FeatureState) -> dict:

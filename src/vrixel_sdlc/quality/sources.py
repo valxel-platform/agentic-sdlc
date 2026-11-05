@@ -168,6 +168,61 @@ class OpenChoreoWorkflowTasks:
         return out
 
 
+class AcceptanceRuns:
+    """The product acceptance run for a feature and stage: the check run
+    `acceptance / <feature> / <stage>` on the acceptance repo's commit. Its summary lists each
+    criterion ("AC-3: passed") and the duration; a criterion the change set needs that has no
+    passing test fails the suite. Running over the product's budget is reported, not blocking."""
+
+    def __init__(self, services) -> None:
+        self.services = services
+
+    def collect(self, suite, spec, targets, stage):
+        from ..acceptance import check_name, parse_report
+
+        out = []
+        for t in targets:
+            name = check_name(t["feature_id"], stage)
+            res = self.services.github.checks(repo=t["repo"], sha=t["sha"])
+            mine = [c for c in res.get("checks", []) if c.get("name", "").lower() == name.lower()]
+            if not mine:
+                out.append(SuiteResult(suite=suite, kind="test", stage=stage, state="pending", repo=t["repo"],
+                                       message=f"waiting for {name}"))
+                continue
+            c = mine[-1]
+            if c["state"] == "pending":
+                out.append(SuiteResult(suite=suite, kind="test", stage=stage, state="pending", repo=t["repo"], url=c.get("url", "")))
+                continue
+            out.append(acceptance_result(suite, stage, t, c.get("summary", ""), c["state"], c.get("url", ""), spec))
+        return out
+
+
+def acceptance_result(suite: str, stage: str, target: dict, summary: str, state: str, url: str, spec: dict) -> SuiteResult:
+    from ..acceptance import parse_report
+
+    report = parse_report(summary)
+    counts = _summary(summary)
+    acs = report["acs"]
+    wanted = list(target.get("acs") or [])
+    failing = [ac for ac in wanted if acs.get(ac) == "failed"]
+    missing = [ac for ac in wanted if ac not in acs or acs[ac] == "skipped"]
+    problems = ([f"failing: {', '.join(failing)}"] if failing else []) + \
+               ([f"no passing test: {', '.join(missing)}"] if missing else [])
+    if state == "failure" and not problems:
+        problems.append("the run failed")
+    budget = spec.get("budget_s")
+    over = bool(budget and report["duration_s"] and report["duration_s"] > float(budget))
+    details = {"criteria": {ac: acs.get(ac, "missing") for ac in wanted} or acs,
+               "duration_s": report["duration_s"], "budget_s": budget, "over_budget": over,
+               "tags": list(target.get("tags") or []), "projects": list(target.get("projects") or [])}
+    msg = "; ".join(problems)
+    if over:
+        msg = "; ".join(filter(None, [msg, f"took {report['duration_s']:.0f}s, over the {float(budget):.0f}s budget"]))
+    return SuiteResult(suite=suite, kind="test", stage=stage, state="failed" if problems else "passed",
+                       repo=target["repo"], url=url, message=msg, details=details,
+                       **{k: counts.get(k) for k in ("passed", "failed", "skipped")})
+
+
 class StubQuality:
     """Offline: every suite passes with plausible numbers, unless a test injects results through
     `results[(suite, repo)]` (a SuiteResult or a callable returning one)."""
@@ -183,6 +238,11 @@ class StubQuality:
                 hit = hit(suite, repo)
             if hit is not None:
                 out.append(hit)
+            elif spec.get("applies_to") == "acceptance":
+                t = next(t for t in targets if t["repo"] == repo)
+                lines = "\n".join(f"- {ac}: passed" for ac in t.get("acs") or [])
+                out.append(acceptance_result(suite, stage, t, f"{len(t.get('acs') or [])} passed, 0 failed\n{lines}\n"
+                                             "Duration: 42s", "success", "", spec))
             elif spec["kind"] == "test":
                 out.append(SuiteResult(suite=suite, kind="test", stage=stage, state="passed", repo=repo,
                                        passed=24, failed=0, skipped=0,

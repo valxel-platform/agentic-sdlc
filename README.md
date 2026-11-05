@@ -217,7 +217,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 
 | Area | Setting |
 | --- | --- |
-| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`, `-event-worker`, `-mcp-server`, `-agent`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
+| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`, `-event-worker`, `-mcp-server`, `-agent`, `-acceptance`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
 | Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
 | Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
@@ -289,7 +289,7 @@ like any other repo and the provision step creates them on the golden path:
 | `mcp-server` | `vrixel-tools/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
 | `agent` | `vrixel-tools/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
 
-Roles merge and deploy in dependency order: library, provider, event-worker, mcp-server, agent, consumer.
+Roles merge and deploy in dependency order: library, provider, event-worker, mcp-server, agent, consumer, acceptance (merged, never deployed).
 The `evals` quality suite reads the agent's `evals / report` status on every PR (recorded model
 responses); after a deploy to dev the agent's post-deploy job runs the same evals against the
 real model and reports `integration / report`. Platform articles VX-12 to VX-14 make these
@@ -667,6 +667,38 @@ quality:
 In stub delivery mode every suite passes with sample numbers; tests inject results through
 `services.quality.sources["stub"].results`.
 
+## Acceptance tests across repos
+
+Each repo tests itself (unit, contract, its own post-deploy suites). A feature that changes two or
+more runtime repos is also tested **end to end, across repos**, from the product's acceptance repo
+(role `acceptance`, one per product, from `vrixel-tools/template-acceptance`: Playwright Test in
+TypeScript). Add it to the product's `repos:` to turn this on.
+
+- **Backend and frontend.** The `api` project tests through the components' APIs and events (no
+  browser): command, then read the result back once the event workers have applied it; events a
+  service must publish; synthetic events from other teams; dead letters and duplicates. The `ui`
+  project adds browser journeys when the change set has a web app. Never through databases.
+- **Tags and coverage.** Each test is declared with `spec()`: the feature criteria it proves
+  (tags `@EMR-FEAT-12`, `@EMR-FEAT-12/AC-3`; an extended test keeps earlier features' tags), its
+  capability (`@cap-consent`), and what it covers: routes with an optional status
+  (`emr-intake-api PUT /api/v1/consents/{id} 202`), events, pages. Component tags
+  (`@comp-emr-intake-api`) follow from the covers. The fixtures fail a test that reaches what it
+  doesn't declare, so `catalog.json` (every test, checked in CI) stays true.
+- **Plans extend before adding.** The planner sees the catalog. The plan's `## Acceptance tests`
+  section says per criterion `extend`, `replace` or `add`; adding a test whose coverage an existing
+  test of the same kind (API or browser) already has is rejected unless the line says `because:`;
+  extending or replacing a test that doesn't exist is rejected. `vrixel acceptance review --product EMR` lists tests already covered by
+  another, for merging; the repo's nightly full run does the same and reports slow tests.
+- **Runs after the whole change set is deployed.** In dev, then staging, the pipeline asks the
+  acceptance repo (`repository_dispatch: vrixel-acceptance`) to run the merged tests with every
+  component's URL, the feature's flag on for test users, and a selection: the feature's tests,
+  every test that reaches a changed component, plus `@critical` journeys in staging. The full
+  regression runs nightly and before release trains, not per feature.
+- **Every criterion needs a passing test.** The run posts `acceptance / <feature> / <stage>` with a
+  line per criterion; the `acceptance` and `acceptance-staging` suites (config/quality.yaml) fail
+  the stage for any criterion that failed or has no test, and G6 shows each criterion's result.
+  `budget_s` (default 600s in dev, 900s in staging) reports runs that are too slow.
+
 ## Diagrams and work tracking
 
 Each product chooses its tools in `<product>-governance/product.yaml`. The tools org runs the connections
@@ -802,7 +834,8 @@ src/vrixel_sdlc/
   engine.py        start, inbox, decide, view; resolves CI and OpenChoreo waits
   waits.py         checks CI, builds and deployments for waiting features
   provisioning.py  new repos: standards, proposal checks, provisioner
-  repo_roles.py    repo roles (library, provider, event-worker, mcp-server, agent, consumer) and merge order
+  repo_roles.py    repo roles (library, provider, event-worker, mcp-server, agent, consumer, acceptance) and merge order
+  acceptance.py    product acceptance tests: plan checks, overlap, test selection, run reports
   quality/         test and security suites: policy, sources, gate
   knowledge/       design knowledge: architecture record, contracts, design check, write-back
   worksync.py      keeps the work tracker in step with each feature
