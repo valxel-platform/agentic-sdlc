@@ -216,6 +216,13 @@ def plan(ctx: dict, defective: bool) -> str:
     repos = parse_affected_repos(ctx["parent_texts"].get("HLD", "")) or ctx["repos"]
     slug = _slug(ctx["title"])
     risky = "auth" in (ctx.get("description", "") + ctx["title"]).lower()
+    from .. import acceptance
+
+    acc = acceptance.acceptance_repo(repos)
+    if acc and not acceptance.needed(repos, ctx.get("acceptance_min_repos", 2)):
+        repos = [r for r in repos if r.get("role") != "acceptance"]  # one repo: its own tests suffice
+        acc = None
+    builders = [r for r in repos if r.get("role") != "acceptance"] or repos
     tasks = []
     for i, repo in enumerate(repos, start=1):
         files = {
@@ -226,10 +233,15 @@ def plan(ctx: dict, defective: bool) -> str:
             "agent": [f"src/agent/prompts/{slug}.md", f"evals/cases/{slug}.jsonl"],
             "event-worker": [f"src/main/java/com/vrixel/worker/{slug.replace('-', '')}/Handler.java",
                              f"src/main/resources/db/migration/V2__{slug.replace('-', '_')}.sql"],
+            "acceptance": [f"tests/{slug}.spec.ts", "catalog.json"],
         }.get(repo["role"], [f"src/{slug}.py"])
         if risky and repo["role"] == "provider":
             files.append("src/auth/policy.py")
-        mine = [ac for j, ac in enumerate(acs) if j % len(repos) == i - 1]
+        if repo.get("role") == "acceptance":
+            mine = list(acs)  # the feature end to end: every criterion
+        else:
+            k = builders.index(repo)
+            mine = [ac for j, ac in enumerate(acs) if j % len(builders) == k]
         tasks.append({"id": f"TASK-{i}", "repo": repo["name"], "role": repo["role"], "acs": mine, "files": files})
     trace = []
     for j, ac in enumerate(acs, start=1):
@@ -242,7 +254,28 @@ def plan(ctx: dict, defective: bool) -> str:
         "", "## Tasks", "```json", json.dumps({"tasks": tasks}, indent=2), "```",
         "", "## Traceability", *trace,
     ]
+    if acc:
+        lines += ["", "## Acceptance tests", *_acceptance_lines(ctx, repos, acs, slug)]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _acceptance_lines(ctx: dict, repos: list[dict], acs: list[str], slug: str) -> list[str]:
+    """Stub judgement: extend the catalog's test when it already covers this feature's routes,
+    else add one test per criterion that says what it covers."""
+    from .. import acceptance
+
+    provider = next((r["name"] for r in repos if r["role"] == "provider"), None)
+    covers = [f"{acceptance.component(provider)} PUT /api/v1/{slug}/{{id}}"] if provider else \
+             [f"{acceptance.component(r['name'])} page /{slug}" for r in repos if r["role"] == "consumer"][:1]
+    existing = acceptance.overlapping(covers, "", ctx.get("acceptance_catalog") or [])
+    out = []
+    for ac in acs:
+        if existing:
+            t = existing[0]
+            out.append(f'- {ac}: extend {t["file"]} "{t["title"]}"')
+        else:
+            out.append(f"- {ac}: add {slug}/{ac.lower()}.spec.ts covers: {', '.join(covers) or slug}")
+    return out
 
 
 def code_task(ctx: dict, task: dict, passed: bool) -> str:
@@ -258,6 +291,8 @@ def code_task(ctx: dict, task: dict, passed: bool) -> str:
            + ("(published to Kafka first; no database write)" if task.get("role") == "provider"
               else "(applied once, in order)")]
           if ctx.get("events") and task.get("role") in ("provider", "event-worker") else []),
+        *([f"Acceptance: {', '.join(task['acs'])} (tagged @{ctx['feature_id']}, covers declared)"]
+          if task.get("role") == "acceptance" else []),
         f"Tests: {'passed' if passed else 'failed: test_' + _slug(task['id'])}",
     ]) + "\n"
 

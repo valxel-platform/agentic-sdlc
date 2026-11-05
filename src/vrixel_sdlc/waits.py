@@ -34,7 +34,27 @@ class WaitChecker:
         (integration in dev, e2e in staging, smoke in production) against it. Once per wait;
         a repeat after a restart is harmless (the workflow cancels duplicates)."""
         q = packet.get("quality") or {}
-        shas = {t["repo"]: t.get("sha", "") for t in q.get("targets") or []}
+        shas = {t["repo"]: t.get("sha", "") for t in q.get("targets") or [] if t.get("kind") != "acceptance"}
+        urls = {r["repo"].split("/", 1)[-1]: r.get("url", "") for r in results}
+        for t in q.get("targets") or []:
+            if t.get("kind") != "acceptance":
+                continue
+            # The product's acceptance run: every component's URL in this environment, the
+            # selected tests, and the feature's flag on for the test users.
+            from .acceptance import check_name
+
+            key = (packet.get("feature_id"), packet["wait"], packet.get("since"), t["repo"])
+            if key in self._dispatched:
+                continue
+            self._dispatched.add(key)
+            try:
+                self.services.github.dispatch(repo=t["repo"], event_type="vrixel-acceptance", payload={
+                    "stage": packet["wait"], "sha": t["sha"], "feature_id": t["feature_id"],
+                    "check": check_name(t["feature_id"], packet["wait"]), "grep": t["grep"],
+                    "projects": ",".join(t["projects"]), "flag": t.get("flag", ""),
+                    "env": urls, "criteria": ",".join(t.get("acs") or [])})
+            except Exception:
+                self._dispatched.discard(key)
         for r in results:
             key = (packet.get("feature_id"), packet["wait"], packet.get("since"), r["repo"])
             if key in self._dispatched or not shas.get(r["repo"]):

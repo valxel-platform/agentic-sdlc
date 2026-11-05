@@ -62,7 +62,7 @@ class SuiteResult:
     suite: str
     kind: str  # test | security
     stage: str
-    state: str  # passed | failed | pending | missing
+    state: str  # passed | failed | pending | missing | not_needed
     repo: str = ""
     passed: int | None = None
     failed: int | None = None
@@ -71,6 +71,7 @@ class SuiteResult:
     url: str = ""
     message: str = ""
     findings: list[Finding] = field(default_factory=list)
+    details: dict = field(default_factory=dict)  # e.g. acceptance results per criterion
 
 
 class QualitySource(Protocol):
@@ -101,7 +102,7 @@ def load_quality(path: Path) -> QualityConfig:
                          waiver_max_days=int((raw.get("waivers") or {}).get("max_days", 90)))
 
 
-_KEYS = {"kind", "stage", "source", "match", "required", "block_on", "min_coverage"}
+_KEYS = {"kind", "stage", "source", "match", "required", "block_on", "min_coverage", "min_repos", "budget_s"}
 
 
 def _stricter(a: dict, b: dict) -> dict:
@@ -207,6 +208,8 @@ def evaluate(stage: str, policy: dict[str, dict], results: list[SuiteResult], wa
         if not mine:
             mine = [SuiteResult(suite=name, kind=spec["kind"], stage=stage, state="missing")]
         for r in mine:
+            if r.state == "not_needed":  # e.g. no acceptance run for a single-repo change
+                continue
             row = asdict(r)
             reasons = []
             if r.state == "pending":
@@ -267,8 +270,16 @@ class Quality:
             source = self.sources.get(spec["source"]) or self.sources.get("stub")
             if source is None:
                 continue
+            # Acceptance suites read the product's acceptance repo; every other suite reads the
+            # components. A change set with no acceptance run doesn't need one.
+            on_acceptance = spec.get("applies_to") == "acceptance"
+            mine = [t for t in targets if (t.get("kind") == "acceptance") == on_acceptance]
+            if not mine:
+                if on_acceptance:
+                    results.append(SuiteResult(suite=name, kind=spec["kind"], stage=stage, state="not_needed"))
+                continue
             try:
-                results += source.collect(name, spec, targets, stage)
+                results += source.collect(name, spec, mine, stage)
             except Exception as exc:  # a flaky API is not a red suite: keep waiting
                 results.append(SuiteResult(suite=name, kind=spec["kind"], stage=stage, state="pending",
                                            message=f"{type(exc).__name__}: {exc}"))

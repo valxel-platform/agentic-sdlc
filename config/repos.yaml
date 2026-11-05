@@ -93,6 +93,7 @@ platform_repos:
   vrixel-tools/template-agent: { kind: template, role: agent }
   vrixel-tools/template-mcp-server: { kind: template, role: mcp-server }
   vrixel-tools/template-event-worker: { kind: template, role: event-worker }
+  vrixel-tools/template-acceptance: { kind: template, role: acceptance }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in
@@ -122,6 +123,13 @@ roles:
     template: vrixel-tools/template-agent
     required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR
     openchoreo: { component_type: deployment/service, workflow: docker }  # needs Postgres and the LLM gateway
+  # The product's end-to-end tests across repos (Playwright Test, TypeScript): API and event
+  # tests for every feature, browser tests when a web app changes. One per product; not deployed:
+  # the pipeline runs it against each environment after the change set is deployed.
+  acceptance:
+    template: vrixel-tools/template-acceptance
+    required_checks: [unit, CodeQL]          # unit: the fixtures' own tests and the catalog check
+    openchoreo: null
   library:
     template: vrixel-tools/template-library
     required_checks: [unit, CodeQL]

@@ -14,6 +14,7 @@ sources:
   github-dependency-review: vrixel_sdlc.quality.sources:GitHubDependencyReview  # vulnerable dependencies a PR adds
   github-secret-scanning: vrixel_sdlc.quality.sources:GitHubSecretScanning      # open secret alerts in the repo
   openchoreo-workflow: vrixel_sdlc.quality.sources:OpenChoreoWorkflowTasks      # steps inside the OpenChoreo build
+  acceptance-runs: vrixel_sdlc.quality.sources:AcceptanceRuns                   # the product acceptance repo's run per feature
 
 # The recommended profile: a common industry baseline (OWASP SAMM / NIST SSDF practices, the
 # test pyramid). Tools in `match` are the defaults we suggest, not requirements.
@@ -50,6 +51,26 @@ suites:
     source: github-checks
     match: { checks: ["e2e*", "playwright*", "cypress*"] }
     required: true
+  # Product acceptance tests (vrixel_sdlc.acceptance): the feature end to end across the repos it
+  # changes, run from the product's acceptance repo once the whole change set is deployed. For
+  # change sets touching min_repos runtime repos or more, in products that have an acceptance repo.
+  # Every acceptance criterion needs a passing test. budget_s: a run that takes longer is reported.
+  acceptance:
+    kind: test
+    stage: dev
+    source: acceptance-runs
+    applies_to: acceptance
+    required: true
+    min_repos: 2
+    budget_s: 600
+  acceptance-staging:
+    kind: test
+    stage: staging
+    source: acceptance-runs
+    applies_to: acceptance        # the feature's tests again, plus the product's critical journeys
+    required: true
+    min_repos: 2
+    budget_s: 900
   smoke:
     kind: test
     stage: production

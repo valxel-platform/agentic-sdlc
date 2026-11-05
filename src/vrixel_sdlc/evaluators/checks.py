@@ -78,6 +78,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
         out.append("HLD has no contracts section (VX-4)")
     out += _audit(text, repos, ctx)
     out += _events(text, repos)
+    out += _acceptance(repos, ctx)
     out += _diagram(text, repos)
     if ctx.get("knowledge"):
         # Against the existing design: cited decisions are current, overrides are explicit, and
@@ -89,6 +90,19 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 
 
 RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server")
+
+
+def _acceptance(repos: list[dict], ctx: dict) -> list[str]:
+    """A change across repos is tested end to end in the product's acceptance repo, when it has one."""
+    from .. import acceptance
+
+    acc = acceptance.acceptance_repo(ctx.get("repos") or [])
+    if not acc or not acceptance.needed(repos, ctx.get("acceptance_min_repos", 2)):
+        return []
+    if any(r["name"] == acc for r in repos):
+        return []
+    return [f"The change set spans {len(acceptance.runtime_repos(repos))} runtime repos; list {acc} (acceptance) "
+            "in Affected repos so the feature is tested end to end"]
 
 
 def _events(text: str, repos: list[dict]) -> list[str]:
@@ -141,6 +155,9 @@ def _plan(text: str, ctx: dict) -> list[str]:
     for t in tasks:
         if affected and t.get("repo") not in affected:
             out.append(f"{t.get('id')} targets {t.get('repo')}, which is not in the HLD's affected repos")
+    from .. import acceptance
+
+    out += acceptance.check_plan(text, {**ctx, "plan_tasks": tasks})
     return out
 
 

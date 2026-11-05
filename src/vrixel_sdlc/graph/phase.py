@@ -117,7 +117,22 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "audit": _audit_actions(services, arts),
         # The events the approved design names (VX-16): providers publish them, workers apply them.
         "events": _design_events(services, arts),
+        # Product acceptance tests: what exists (so plans extend rather than duplicate) and when needed.
+        "acceptance_catalog": _acceptance_catalog(services, product) if phase in ("plan", "build") else [],
+        "acceptance_min_repos": int(((product.quality or {}).get("acceptance") or {}).get("min_repos", 2)),
     }
+
+
+def _acceptance_catalog(services, product) -> list[dict]:
+    from .. import acceptance
+
+    repo = acceptance.acceptance_repo([{"name": r.name, "role": r.role} for r in product.repos])
+    if not repo:
+        return []
+    try:
+        return acceptance.load_catalog(services.github.get_file(repo=repo, path="catalog.json", ref=""))
+    except Exception:  # an unreadable catalog means no reuse hints, never a stuck plan
+        return []
 
 
 def _design_events(services, arts: dict) -> list[dict]:
@@ -239,6 +254,18 @@ def audit_findings(ctx: dict, results: dict) -> list[str]:
     return [f"No task publishes the audit records the HLD names: {', '.join(missing)} (VX-15)"] if missing else []
 
 
+def acceptance_instruction(ctx: dict, task: dict) -> str:
+    if task.get("role") != "acceptance":
+        return ""
+    return (" Write the feature's acceptance tests as the plan's Acceptance tests section says: extend or replace"
+            " the named tests, add only what it lists. Use the repo's fixtures (api, events, eventually) and declare"
+            f" each test with spec(): proves {{\"{ctx['feature_id']}\": [criteria]}} (keep earlier features' criteria"
+            " on extended tests), its capability, and covers for every route, event and page it reaches (the"
+            " fixtures fail a test that reaches more). Browser tests only when a web app changes (*.ui.spec.ts)."
+            " Test through the components' APIs, events and pages, never their databases, with synthetic data"
+            " only. Run npm run catalog. List the criteria after 'Acceptance:' in the patch summary.")
+
+
 # Kafka first (VX-16): providers publish what changed, event workers keep the stores.
 EVENT_ROLES = ("provider", "event-worker")
 
@@ -303,7 +330,8 @@ def build_build_subgraph(services):
             services, role="coder", phase="build", ctx=ctx, skills=spec.skills,
             tail=(f"Implement {task['id']} in {task['repo']} on branch feature/{ctx['feature_id']}. "
                   f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run tests; return the patch summary."
-                  + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)),
+                  + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
+                  + acceptance_instruction(ctx, task)),
             stub_text=templates.code_task(ctx, task, passed=not fail),
         )
         result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
@@ -339,6 +367,9 @@ def build_build_subgraph(services):
                       + (" Check that the change writes no database in a request and publishes one event per change"
                          " to Kafka, or, in an event worker, that each handler applies an event once and only moves"
                          " forward (VX-16)." if r.get("role") in EVENT_ROLES else "")
+                      + (" Check that the acceptance tests follow the plan (extend before adding), carry the feature,"
+                         " criterion, capability and component tags, declare what they cover, and use synthetic"
+                         " data only." if r.get("role") == "acceptance" else "")
                       + f" Reply with JSON score and notes.\n\n{r['summary']}"),
                 stub_text=json.dumps({"score": 0.9, "notes": []}), max_tokens=1024,
             )
