@@ -21,7 +21,7 @@ from ..agents.parse import parse_affected_repos, parse_new_repos, parse_tasks
 from ..integrations.openchoreo import PIPELINE
 from ..state import GATES, PHASES, FeatureState, GateDecision
 from ..waits import LABELS, TIMEOUT_S
-from .phase import capability_id, design_knowledge, event, make_phase_node, now, touched_lanes
+from .phase import capability_id, design_knowledge, event, gates_status, make_phase_node, now, touched_lanes
 
 GATE_DECISIONS = ("approve", "revise", "takeover", "abort")
 HANDBACK_DECISIONS = ("handback", "abort")
@@ -232,6 +232,8 @@ def make_gate(gate: str, services):
                 "events": [event(gate, "revise", d["feedback"], approver=d["approver"])],
             })
         if d["decision"] == "abort":
+            gates_status(services, (state.get("pull_requests") or {}).values(), "failure",
+                         f"{state['feature_id']} aborted at {gate.upper()} by {d['approver']}")
             if state.get("design"):  # an approved design is no longer in flight
                 services.catalog.register({**_design_entry(state, state["design"]), "status": "abandoned"})
             return Command(goto=END, update={
@@ -522,6 +524,8 @@ def make_merge_train(services):
         g5 = [g for g in state.get("gate_decisions", []) if g["gate"] == "g5" and g["decision"] in ("approve", "handback")]
         actor = g5[-1]["approver"] if (risk != "low" and g5) else "agent:merge-train"
         merged, published, runs = {}, list(cs.get("published") or []), dict(cs.get("runs") or {})
+        passed = ", ".join(sorted({g["gate"].upper() for g in state.get("gate_decisions", [])
+                                   if g["decision"] in ("approve", "handback")})) or "gates"
         failed_runs = {r for r, v in runs.items() if v.get("state") == "failure"}
         for repo in cs.get("merge_order", []):  # dependency order: libraries, providers, consumers
             sha = ""
@@ -529,7 +533,11 @@ def make_merge_train(services):
                 if pr["repo"] != repo:
                     continue
                 if pr.get("state") != "merged":  # idempotent: a retry skips what is merged
-                    res = services.github.merge(repo=repo, number=pr["number"], actor=actor)
+                    # Every gate this change needs is approved: say so on the commit the gates saw,
+                    # and merge exactly that commit.
+                    gates_status(services, [pr], "success", f"{state['feature_id']}: {passed} approved")
+                    res = services.github.merge(repo=repo, number=pr["number"], actor=actor,
+                                                sha=pr.get("head_sha") or "")
                     pr = {**pr, "state": res["state"], "merged_by": actor, "merge_sha": res.get("merge_sha")}
                     merged[key] = pr
                 sha = pr.get("merge_sha") or sha

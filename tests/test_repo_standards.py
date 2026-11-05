@@ -82,7 +82,7 @@ def test_apply_brings_a_hand_made_repo_on_standard(svc):
     branch = state["rulesets"]["vrixel-default-branch"]
     rules = {r["type"]: r.get("parameters") for r in branch["rules"]}
     assert rules["pull_request"]["required_approving_review_count"] == 0  # pull requests only; checks decide
-    assert [c["context"] for c in rules["required_status_checks"]["required_status_checks"]] == ["unit", "contract", "CodeQL"]
+    assert [c["context"] for c in rules["required_status_checks"]["required_status_checks"]] == ["unit", "contract", "CodeQL", "vrixel/gates"]
     assert {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"} in branch["bypass_actors"]
     assert gh.org_properties["vrixel-emr"] == ["vrixel_data_class", "vrixel_managed", "vrixel_product"]
     assert rs.reconcile(gh, t, apply=True).applied == []  # nothing left to do: safe to repeat
@@ -310,3 +310,27 @@ def test_codeowners_at_the_root_counts_and_public_repos_take_vulnerability_repor
     existing(gh, "vrixel-emr/emr-web", visibility="private")
     rep = rs.reconcile(gh, target(svc, "vrixel-emr/emr-web"), apply=False)
     assert [d.fix for d in rep.drift if d.item == "private_vulnerability_reporting"] == ["unavailable"]
+
+
+def test_lane_repos_require_the_gates_status_from_the_platform_app_only(svc, monkeypatch):
+    monkeypatch.setenv("VRIXEL_GITHUB_APP_ID", "4242")
+    ts = {t.repo: t for t in rs.targets(svc)}
+    lane = ts["vrixel-emr/emr-intake-api"].plan["ruleset"]
+    assert lane["gates_check"] == "vrixel/gates"
+    rules = {r["type"]: r.get("parameters") for r in ruleset_body(lane)["rules"]}
+    assert {"context": "vrixel/gates", "integration_id": 4242} in rules["required_status_checks"]["required_status_checks"]
+    # The pipeline doesn't deliver to governance, templates or the tool, so nothing would post it there.
+    for repo in ("vrixel-emr/emr-governance", "vrixel-tools/template-service", "vrixel-tools/agentic-sdlc"):
+        assert not ts[repo].plan["ruleset"]["gates_check"]
+
+    # A ruleset whose gates check anyone could set is drift.
+    gh = StubGitHub()
+    repo = "vrixel-emr/emr-intake-api"
+    existing(gh, repo)
+    t = ts[repo]
+    rs.reconcile(gh, t, apply=True)
+    rules = gh.repos[repo]["state"]["rulesets"]["vrixel-default-branch"]["rules"]
+    checks = next(r for r in rules if r["type"] == "required_status_checks")["parameters"]["required_status_checks"]
+    next(c for c in checks if c["context"] == "vrixel/gates").pop("integration_id")
+    rep = rs.reconcile(gh, t, apply=False)
+    assert ("ruleset", "vrixel-default-branch") in {(d.area, d.item) for d in rep.drift}

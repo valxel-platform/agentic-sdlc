@@ -53,6 +53,11 @@ defaults:
     require_last_push_approval: false
     require_conversation_resolution: false
     linear_history: true
+    # On repos the pipeline delivers to (lane repos), a pull request also needs this status, which
+    # the tool posts once every gate the change needs is approved (G1, G2, G3 or G4, and G5 for
+    # high-risk and regulated changes). It is pinned to the platform's GitHub App, so nobody else
+    # can set it: a pull request that didn't come through the pipeline needs an admin to merge it.
+    gates_check: vrixel/gates
     block_force_push: true
     block_deletion: true
     up_to_date_before_merge: false         # true makes every merge wait for a rebase; auto-merge handles it

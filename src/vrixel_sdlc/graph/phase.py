@@ -29,6 +29,23 @@ from ..state import FeatureState, PhaseState
 
 
 
+
+GATES_CONTEXT = "vrixel/gates"
+
+
+def gates_status(services, prs, state: str, description: str) -> None:
+    """Tell GitHub where each pull request stands in the pipeline's gates (status vrixel/gates,
+    required on lane repos). Best effort: GitHub's view never blocks or breaks the pipeline."""
+    for pr in prs:
+        if not pr.get("head_sha") or pr.get("state") == "merged":
+            continue
+        try:
+            services.github.set_status(repo=pr["repo"], sha=pr["head_sha"], context=GATES_CONTEXT,
+                                       state=state, description=description, url=pr.get("url", ""))
+        except Exception:
+            pass
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -269,6 +286,7 @@ def build_build_subgraph(services):
                 body=r["summary"], files=r["files"],
                 labels=[f"change-set:CS-{ctx['feature_id']}", f"product:{ctx['product_id']}"],
             )
+            gates_status(services, [pr], "pending", f"{ctx['feature_id']}: waiting for CI and the pipeline's gates")
             res = call_agent(
                 services, role="reviewer", phase="build", ctx=ctx, skills=spec.critic_skills,
                 tail=(f"Review {pr['url']} against the plan and constitution."

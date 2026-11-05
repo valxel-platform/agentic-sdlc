@@ -536,9 +536,9 @@ join ─ provision ─ plan ─ build ─ ci_wait ─[G5]─ merge_train ─ bui
 
 | Step | GitHub | OpenChoreo |
 | --- | --- | --- |
-| Build | A change note per task (`.vrixel/changes/<feature>/<task>.md`) on `feature/<id>`; one PR per repo, found again by branch on retries | |
-| ci_wait | Waits until every check run and status on each PR head is green | |
-| merge_train | Merges in dependency order (libraries, providers, consumers); branch protection still applies | Triggers a WorkflowRun on each merge commit; shared-lane repos publish packages instead |
+| Build | A change note per task (`.vrixel/changes/<feature>/<task>.md`) on `feature/<id>`; one PR per repo, found again by branch on retries; posts `vrixel/gates` pending on each PR | |
+| ci_wait | Waits until every check run and status on each PR head is green (except the tool's own `vrixel/` and `openchoreo/` statuses) | |
+| merge_train | Posts `vrixel/gates` success (naming the gates approved), then merges exactly the commit the gates saw, in dependency order (libraries, providers, consumers); branch protection still applies. An abort posts `vrixel/gates` failure | Triggers a WorkflowRun on each merge commit; shared-lane repos publish packages instead |
 | build_wait | Posts `openchoreo/build` on the merge commit | Waits for the WorkflowRuns |
 | deploy and wait | Posts `openchoreo/dev`, `openchoreo/staging`, `openchoreo/production` | Binds the latest release to the first environment, then promotes the same release; waits until each ReleaseBinding is ready |
 
