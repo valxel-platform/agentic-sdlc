@@ -162,7 +162,12 @@ def architecture(ctx: dict, defective: bool) -> str:
         lines += ["", "## Audit",
                   f"- {record}.read: {record} (who opened which {record}, through which service)",
                   f"- {record}.change: {record} (who changed it, on whose behalf, approved by whom)"]
-    lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15"]
+    if any(r["role"] == "event-worker" for r in repos):
+        record = _slug(ctx["title"]).split("-", 1)[0] or "record"
+        workers = ", ".join(r["name"].split("/", 1)[-1] for r in repos if r["role"] == "event-worker")
+        lines += ["", "## Events",
+                  f"- vrixel.{record}.changed.v1: published by {provider.split('/', 1)[-1]}, applied by {workers}"]
+    lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15", "- VX-16"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
 
 
@@ -201,6 +206,8 @@ def _flowchart(ctx: dict, repos: list[dict]) -> str:
             out.append(f'  {_node_id(r["name"])} -->|"models"| llm_gateway["LLM gateway"]')
         elif r["role"] == "mcp-server":
             out += [f'  {_node_id(r["name"])} -->|"versioned API"| {_node_id(p["name"])}' for p in providers]
+        elif r["role"] == "event-worker":
+            out += [f'  {_node_id(p["name"])} -->|"events (Kafka)"| {_node_id(r["name"])}' for p in providers]
     return "\n".join(out)
 
 
@@ -217,6 +224,8 @@ def plan(ctx: dict, defective: bool) -> str:
             "library": [f"contracts/{slug}.yaml"],
             "mcp-server": [f"src/mcp_server/tools/{slug}.py", f"tests/test_{slug}_tools.py"],
             "agent": [f"src/agent/prompts/{slug}.md", f"evals/cases/{slug}.jsonl"],
+            "event-worker": [f"src/main/java/com/vrixel/worker/{slug.replace('-', '')}/Handler.java",
+                             f"src/main/resources/db/migration/V2__{slug.replace('-', '_')}.sql"],
         }.get(repo["role"], [f"src/{slug}.py"])
         if risky and repo["role"] == "provider":
             files.append("src/auth/policy.py")
@@ -245,6 +254,10 @@ def code_task(ctx: dict, task: dict, passed: bool) -> str:
           if ctx.get("flag") and task.get("role") in ("provider", "consumer", "agent", "mcp-server") else []),
         *([f"Audit: {', '.join(a['action'] for a in ctx['audit'])} (ids only; fails closed)"]
           if ctx.get("audit") and task.get("role") in ("provider", "agent", "mcp-server") else []),
+        *([f"Events: {', '.join(e['type'] for e in ctx['events'])} "
+           + ("(published to Kafka first; no database write)" if task.get("role") == "provider"
+              else "(applied once, in order)")]
+          if ctx.get("events") and task.get("role") in ("provider", "event-worker") else []),
         f"Tests: {'passed' if passed else 'failed: test_' + _slug(task['id'])}",
     ]) + "\n"
 

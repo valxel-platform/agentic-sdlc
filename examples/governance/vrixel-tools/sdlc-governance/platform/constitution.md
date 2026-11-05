@@ -1,6 +1,6 @@
 ---
 name: platform
-version: 1.3.0
+version: 1.4.0
 ---
 # Vrixel platform constitution
 
@@ -28,3 +28,7 @@ Agentic features in products (repos with the `agent` and `mcp-server` roles):
 Audit:
 
 - **VX-15** Every change to product records, every read of PHI or payment records, and every person's decision on an agent's proposal is published as an audit record to the product's audit topic: who (and on whose behalf), the action, the record ids and the outcome, never field values. In PHI and payments products a request whose audit record can't be published fails, and the design names its audited actions. Audit records are kept append-only and tamper-evident, with a write-once backup, for at least six years. (Policy, Test)
+
+Data and events:
+
+- **VX-16** A request that changes product records publishes one event to the product's Kafka and writes no database; no request writes to both. Event workers apply events to the data stores, once and in order, and every store can be rebuilt by replaying its topics. Services coordinate through events; a central orchestrator needs an ADR. (Policy, Test)

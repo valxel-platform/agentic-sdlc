@@ -217,7 +217,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 
 | Area | Setting |
 | --- | --- |
-| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`, `-mcp-server`, `-agent`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
+| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`, `-event-worker`, `-mcp-server`, `-agent`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
 | Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
 | Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
@@ -246,8 +246,9 @@ repo_standards:
 
 **Setup once per org.**
 1. Publish the templates named in `config/repos.yaml` to `vrixel-tools` and mark each one a
-   template repository: `template-service` (Java 21, Spring Boot), `template-web` (React,
-   TypeScript), `template-library` (Java), `template-mcp-server` and `template-agent` (Python).
+   template repository: `template-service` and `template-event-worker` (Java 21, Spring Boot),
+   `template-web` (React, TypeScript), `template-library` (Java), `template-mcp-server` and
+   `template-agent` (Python).
    Their CI jobs are named for the required checks
    (`unit`, `contract`) and post `unit / report`-style statuses the quality suites read; their
    `post-deploy.yml` runs integration, e2e and smoke suites when the pipeline dispatches
@@ -261,6 +262,23 @@ repo_standards:
 4. The app is a ruleset bypass actor for pull requests only, so the merge train can merge once
    the pipeline's gates pass; people still can't push to the default branch.
 
+## Data and events
+
+Products change state Kafka first (constitution VX-16). A provider checks a command, publishes one
+event and answers 202 once Kafka holds it; it never writes a database in the request. Event workers
+keep the data stores from those events, and any store can be rebuilt by replaying its topics.
+
+| Role | Template | Required checks | What it is |
+| --- | --- | --- | --- |
+| `provider` | `vrixel-tools/template-service` | `unit`, `contract`, `CodeQL` | Versioned API; commands publish CloudEvents with `Events.publish` (idempotent producer, acks=all, keyed by record id); 503 and no change when Kafka doesn't confirm |
+| `event-worker` | `vrixel-tools/template-event-worker` | `unit`, `CodeQL` | Applies events to Postgres (or an index) once and in order: event ids recorded in the same transaction, rows keep their Kafka position, retries then a dead-letter topic; integration tests against real Postgres and Kafka |
+
+An HLD with event workers has an `## Events` section, one line per event type
+(`- vrixel.<entity>.<what happened>.v1: <who publishes it, who applies it>`). Coders are told to
+publish or apply those events, reviewers check VX-16, and the build fails if a named event isn't
+published or applied by any task. Services coordinate through events; a central orchestrator needs
+an ADR.
+
 ## Agentic features in products
 
 Products build their own agentic features with two more repo roles, so an HLD can propose them
@@ -271,7 +289,7 @@ like any other repo and the provision step creates them on the golden path:
 | `mcp-server` | `vrixel-tools/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
 | `agent` | `vrixel-tools/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
 
-Roles merge and deploy in dependency order: library, provider, mcp-server, agent, consumer.
+Roles merge and deploy in dependency order: library, provider, event-worker, mcp-server, agent, consumer.
 The `evals` quality suite reads the agent's `evals / report` status on every PR (recorded model
 responses); after a deploy to dev the agent's post-deploy job runs the same evals against the
 real model and reports `integration / report`. Platform articles VX-12 to VX-14 make these
@@ -784,7 +802,7 @@ src/vrixel_sdlc/
   engine.py        start, inbox, decide, view; resolves CI and OpenChoreo waits
   waits.py         checks CI, builds and deployments for waiting features
   provisioning.py  new repos: standards, proposal checks, provisioner
-  repo_roles.py    repo roles (library, provider, mcp-server, agent, consumer) and merge order
+  repo_roles.py    repo roles (library, provider, event-worker, mcp-server, agent, consumer) and merge order
   quality/         test and security suites: policy, sources, gate
   knowledge/       design knowledge: architecture record, contracts, design check, write-back
   worksync.py      keeps the work tracker in step with each feature
