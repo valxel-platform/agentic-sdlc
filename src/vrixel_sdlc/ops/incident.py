@@ -1,14 +1,19 @@
-"""Incidents: a production problem from first signal to postmortem.
+"""Incidents: a production problem from first signal to postmortem, worked by the tool.
 
-    triage (agent: what's happening, likely cause, proposed actions)
-      -> decide (on-call: approve some or all actions, ask for another look, or close)
-      -> act (flag off, roll back, start a hotfix, start an intent change)
-      -> monitor (until its alerts and issues resolve; still firing after the window -> decide again)
+    triage   (agent: what's happening, likely cause, proposed actions)
+      -> auto      (the tool mitigates by itself when the platform's remediation policy allows it:
+                    turn off a recent feature's flag, roll back a recent release; then starts the fix)
+      -> escalate  (it can't: page on-call urgently through PagerDuty, unless it's a cost finding or
+                    a request to change what was built, which waits for working hours)
+      -> decide    (on-call: approve some or all actions, ask for another look, resolve, merge)
+      -> act       (flag off, roll back, start a hotfix, start an intent change)
+      -> monitor   (until it's quiet: alerts resolved, no new alerts or error reports, errors in the
+                    logs back below the alert rule; still failing -> escalate, or back to on-call)
       -> postmortem (agent, blameless) -> close (on-call approves; a governance PR records it)
 
-Every production action is a person's decision (VX-1, VX-3): agents investigate and propose.
-On-call is paged through PagerDuty when the incident opens (ops/paging.py); their first decision
-acknowledges the page, and reaching the postmortem (or a merge) resolves it.
+The tool's own production actions are the platform's exception to VX-3, limited to undoing a
+recent change (ops/remediation.py). Everything else, and anything after a person has decided, is a
+person's decision. SEV1s also send on-call a low-urgency heads-up as they open (engine._page).
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from langgraph.types import Command, interrupt
 from ..roadmap import governance_pr
 from ..roadmap.graphs import _decide, event, lane_approvers, now, run_agent
 from ..state import last, merge_dict
+from . import remediation
 from .signals import resolves, still_firing
 
 ACTIONS = ("flag_off", "rollback", "hotfix", "intent_change", "monitor")
@@ -56,6 +62,8 @@ class IncidentState(TypedDict, total=False):
     events: Annotated[list[dict], operator.add]
     cost_usd: Annotated[float, operator.add]
     tokens_used: Annotated[int, operator.add]
+    auto_attempts: Annotated[int, operator.add]  # mitigations the tool took by itself
+    escalated: Annotated[bool, last]  # on-call was paged urgently (or told it waits for them)
 
 
 def section(text: str, heading: str) -> str:
@@ -113,7 +121,8 @@ def stub_triage(ctx: dict) -> str:
         s = suspects[0]
         lines.append(f"{s['feature_id']} ({s['title']}) changed {ctx.get('component') or 'this component'} "
                      f"most recently and is the likely cause.")
-        if s.get("flag") and s.get("flag_on"):
+        may = ctx.get("may") or []  # what the tool may do by itself: prefer it, so it can act now
+        if s.get("flag") and s.get("flag_on") and not (may and "flag_off" not in may and ctx.get("component")):
             actions.append(f"- flag_off: {s['feature_id']}")
         elif ctx.get("component"):
             actions.append(f"- rollback: {ctx['component']}")
@@ -162,8 +171,12 @@ def build_incident_graph(services, checkpointer=None):
                     env="production", project=rt.get("openchoreo_project"), namespace=rt.get("namespace"))
             except Exception as exc:
                 observed = {"available": False, "error": f"{type(exc).__name__}: {exc}"}
+        try:
+            may = sorted((services.snapshot(state["product_id"]).remediation or {}).get("autonomous") or {})
+        except Exception:
+            may = []
         return {**state, "signals": signals, "suspects": suspects, "observed": observed,
-                "feedback": state.get("feedback", "")}
+                "feedback": state.get("feedback", ""), "may": may}
 
     def triage(state: IncidentState) -> dict:
         ctx = context(state)
@@ -179,12 +192,15 @@ def build_incident_graph(services, checkpointer=None):
               f"{'on' if x.get('flag_on') else 'off' if x.get('flag') else 'none'}" for x in ctx["suspects"][:10]],
             "Recent logs (may be partial):", *[f"  {line}" for line in (ctx["observed"].get("logs") or [])[-40:]],
             f"Metrics: {str(ctx['observed'].get('metrics') or {})[:1500]}",
-            *([f"On-call asked for another look: {state['feedback']}"] if state.get("feedback") else []),
+            *([f"Look again, because: {state['feedback']}"] if state.get("feedback") else []),
             "Write Markdown: ## Summary, ## Impact, ## Likely cause, ## Proposed actions with one bullet per action:"
             " '- flag_off: <feature id>', '- rollback: <repo>', '- hotfix: <repo>: <what to change>',"
             " '- intent_change: feature|initiative: <the new intent>' (when it works as built but not as users need),"
             " '- monitor: <why no action>'. Prefer turning a recent feature's flag off over rolling back."
-            " For cost signals (spend above a budget or above what G4 approved): propose an intent_change to"
+            + (f" The tool may itself {' and '.join(a.replace('_', ' ') for a in ctx['may'])} for a change released"
+               " recently, at once, without waiting for on-call: when one of those fits, propose it first."
+               if ctx.get("may") else "")
+            + " For cost signals (spend above a budget or above what G4 approved): propose an intent_change to"
             " right-size or cut usage, or monitor when the spend is expected; turn a flag off only when the"
             " spend must stop now, and never roll back for cost alone."
             " Never include patient data or identifiers.",
@@ -195,6 +211,67 @@ def build_incident_graph(services, checkpointer=None):
         return {"triage": res.text, "actions": parse_actions(res.text), "status": "awaiting_decision",
                 "cost_usd": res.cost_usd, "tokens_used": res.tokens,
                 "events": [event("triage", "triaged", f"{len(parse_actions(res.text))} actions proposed")]}
+
+    def policy(state: IncidentState) -> dict:
+        try:
+            return services.snapshot(state["product_id"]).remediation or remediation.for_product({}, None)
+        except Exception:
+            return remediation.for_product({}, None)
+
+    def people_decided(state: IncidentState) -> bool:
+        return any(not str(g.get("approver") or "").startswith("agent:") for g in state.get("gate_decisions") or [])
+
+    def merged(state: IncidentState, into: str = "") -> Command | None:
+        """Merged into another incident while this one was busy: it ends here."""
+        into = into or (getattr(services, "merged_into", None) or (lambda _: ""))(state["incident_id"]) or ""
+        if not into:
+            return None
+        return Command(goto=END, update={"status": "merged", "links": {into: "merged into"},
+                                         "events": [event("incident", "merged", f"into {into}")]})
+
+    def auto(state: IncidentState) -> Command:
+        """Mitigate by itself when the policy allows it; otherwise a person is needed."""
+        if (done := merged(state)) is not None:
+            return done
+        if state.get("escalated") or people_decided(state):
+            return Command(goto="decide")  # a person has it now
+        pol = policy(state)
+        if (state.get("auto_attempts") or 0) >= pol.get("attempts", 0):
+            why = ("the tool's mitigation didn't fix it" if state.get("auto_attempts")
+                   else "this product's remediation policy lets the tool take no action by itself")
+            return Command(goto="escalate", update={"feedback": why})
+        chosen, why = remediation.choose(state.get("actions") or [],
+                                         lambda repo: services.suspects(state["product_id"], repo),
+                                         state.get("component", ""), pol)
+        if not chosen:
+            return Command(goto="escalate", update={"feedback": why})
+        rec = {"gate": "remediation", "lane": state["product_id"], "at": now(), "decision": "approve",
+               "approver": remediation.AGENT, "action_ids": [a["id"] for a in chosen]}
+        return Command(goto="act", update={
+            "actions": chosen, "auto_attempts": 1, "status": "mitigating", "gate_decisions": [rec],
+            "events": [event("auto", "mitigating", ", ".join(f"{a['type']} {a.get('feature_id') or a.get('component') or a.get('repo', '')}".strip()
+                                                             for a in chosen), approver=remediation.AGENT)]})
+
+    def escalate(state: IncidentState) -> Command:
+        """The tool can't fix it: page on-call urgently, unless nothing is down."""
+        signals = services.incident_signals(state["incident_id"])
+        why = state.get("feedback") or "the tool could not fix it"
+        quiet = remediation.no_page_reason(signals, state.get("actions") or [])
+        pager = getattr(services, "pager", None)
+        if quiet or pager is None:
+            ev = event("escalate", "not_paged", quiet or "no pager configured")
+        else:
+            try:
+                data_class = services.snapshot(state["product_id"]).product.data_class
+            except Exception:
+                data_class = "phi"
+            said = pager.trigger({"incident_id": state["incident_id"], "product_id": state["product_id"],
+                                  "title": state["title"], "severity": state["severity"],
+                                  "component": state.get("component", ""), "data_class": data_class,
+                                  "source": (signals[0] if signals else {}).get("source", ""), "why": why},
+                                 urgent=True)
+            ev = event("escalate", "not_paged" if said.startswith("not paged") else "paged", f"{why}: {said}")
+        return Command(goto="decide", update={"escalated": True, "status": "awaiting_decision", "events": [ev]})
 
     def decide(state: IncidentState) -> Command:
         snap = services.snapshot(state["product_id"])
@@ -247,8 +324,9 @@ def build_incident_graph(services, checkpointer=None):
                                            "events": [event("incident", "approved", ", ".join(a["type"] for a in approved),
                                                             approver=d["approver"])]})
 
-    def act(state: IncidentState) -> dict:
+    def act(state: IncidentState) -> Command:
         approver = (state.get("gate_decisions") or [{}])[-1].get("approver", "")
+        by_tool = approver == remediation.AGENT
         snap = services.snapshot(state["product_id"])
         rt = snap.product.runtime or {}
         taken, links, events = [], {}, []
@@ -264,7 +342,8 @@ def build_incident_graph(services, checkpointer=None):
                     comp = a["component"] or state.get("component", "")
                     rec = services.openchoreo.rollback(
                         component=(rt.get("components") or {}).get(comp, comp), env="production", actor=approver,
-                        actor_type="human", project=rt.get("openchoreo_project"), namespace=rt.get("namespace"))
+                        actor_type="policy" if by_tool else "human", project=rt.get("openchoreo_project"),
+                        namespace=rt.get("namespace"))
                     result = f"rolled {comp} back from {rec.get('from')} to {rec.get('to')}"
                 elif a["type"] == "hotfix":
                     fid = services.start_hotfix(state, repo=a["repo"] or state.get("component", ""),
@@ -283,20 +362,41 @@ def build_incident_graph(services, checkpointer=None):
                 msg = f"{type(exc).__name__}: {exc}"
                 taken.append({**a, "ok": False, "result": msg, "by": approver, "at": now()})
                 events.append(event("act", f"{a['type']}_failed", msg, approver=approver))
-        return {"taken": taken, "links": links, "events": events, "status": "monitoring"}
+        update = {"taken": taken, "links": links, "events": events, "status": "monitoring"}
+        mitigations = [x for x in taken if x["type"] in ("flag_off", "rollback")]
+        if by_tool and not all(x["ok"] for x in mitigations):
+            failed = next(x for x in mitigations if not x["ok"])
+            return Command(goto="escalate", update={**update, "status": "awaiting_decision",
+                                                    "feedback": f"the tool's {failed['type'].replace('_', ' ')} failed"})
+        return Command(goto="monitor", update=update)
 
     def monitor(state: IncidentState) -> Command:
-        machine = [s for s in services.incident_signals(state["incident_id"]) if resolves(s)]
-        if not machine:  # a reported problem or a cost finding: nothing to watch recover
+        signals = services.incident_signals(state["incident_id"])
+        mitigated = any(x.get("ok") and x["type"] in ("flag_off", "rollback") for x in state.get("taken") or [])
+        machine = [s for s in signals if s.get("category") != "cost" and s["source"] != "ticket"]
+        if not machine and not mitigated:  # a reported problem or a cost finding: nothing to watch recover
             return Command(goto="postmortem", update={"status": "postmortem"})
+        sev = state["severity"]
         res = interrupt({"type": "external", "wait": "incident_recovery", "feature_id": state["incident_id"],
-                         "product_id": state["product_id"], "label": "Waiting for its alerts and issues to resolve",
-                         "since": now(), "minutes": RECOVERY_MINUTES.get(state["severity"], 240)})
+                         "product_id": state["product_id"], "component": state.get("component", ""),
+                         "label": "Checking that it has recovered", "since": now(),
+                         "minutes": RECOVERY_MINUTES.get(sev, 240),
+                         "quiet": (policy(state).get("quiet_minutes") or remediation.QUIET_MINUTES).get(sev, 30)
+                         if any(not resolves(s) for s in machine) or mitigated else 0})
+        if res.get("status") == "merged":
+            return merged(state, res.get("into", "")) or Command(goto=END)
         if res.get("status") == "success":
             return Command(goto="postmortem", update={"status": "postmortem",
-                                                      "events": [event("monitor", "recovered")]})
-        return Command(goto="decide", update={"status": "awaiting_decision", "feedback": res.get("reason", ""),
-                                              "events": [event("monitor", "still_firing", res.get("reason", ""))]})
+                                                      "events": [event("monitor", "recovered", res.get("reason", ""))]})
+        reason = res.get("reason", "")
+        update = {"status": "awaiting_decision", "feedback": reason,
+                  "events": [event("monitor", "still_firing", reason)]}
+        if state.get("escalated"):
+            return Command(goto="decide", update=update)
+        if not people_decided(state) and (state.get("auto_attempts") or 0) < policy(state).get("attempts", 0):
+            return Command(goto="triage", update=update)  # another look, and another try if allowed
+        return Command(goto="escalate", update={**update, "feedback": f"still failing after the tool's mitigation: {reason}"[:300]
+                                                if state.get("auto_attempts") else reason})
 
     def postmortem(state: IncidentState) -> dict:
         # Mitigated, recovered or resolved by on-call: the page is over.
@@ -338,25 +438,68 @@ def build_incident_graph(services, checkpointer=None):
 
     g = StateGraph(IncidentState)
     g.add_node("triage", triage)
+    g.add_node("auto", auto, destinations=("act", "escalate", "decide", END))
+    g.add_node("escalate", escalate, destinations=("decide",))
     g.add_node("decide", decide, destinations=("triage", "act", "postmortem"))
-    g.add_node("act", act)
-    g.add_node("monitor", monitor, destinations=("postmortem", "decide"))
+    g.add_node("act", act, destinations=("monitor", "escalate"))
+    g.add_node("monitor", monitor, destinations=("postmortem", "decide", "escalate", "triage", END))
     g.add_node("postmortem", postmortem)
     g.add_node("close", close, destinations=("postmortem", END))
     g.add_edge(START, "triage")
-    g.add_edge("triage", "decide")
-    g.add_edge("act", "monitor")
+    g.add_edge("triage", "auto")
     g.add_edge("postmortem", "close")
     return g.compile(checkpointer=checkpointer, name="vrixel_incident")
 
 
-def recovery(signals: list[dict], since: str, minutes: int) -> dict | None:
-    """The monitor wait's result: success once nothing fires; failure if still firing after the window."""
+GRACE = timedelta(minutes=5)  # alert rules look back 5 minutes: what fires just after an action is old news
+ERROR_LINES = 10  # errors in 5 minutes of logs at or above the default exceptions rule: still failing
+
+
+def _clock() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _at(value) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def recovery(signals: list[dict], since: str, minutes: int, quiet_minutes: int = 0, errors=None) -> dict | None:
+    """The monitor wait's result: {"status": "success"} once it has recovered, {"status": "failure",
+    "reason"} once it clearly hasn't, None while it's too early to say.
+
+    Recovered: every alert that reports its own resolution has resolved, and, when the incident has
+    signals that never do (OpenChoreo rules, GlitchTip, error-report alerts) or the tool mitigated
+    it, it has been quiet for `quiet_minutes`: no new alert or error report after the first few
+    minutes, and the component's logs below the exceptions rule (`errors()`, when they can be read).
+    """
+    started = _at(since) or _clock()
+    elapsed = _clock() - started
     firing = still_firing(signals)
-    if not firing:
-        return {"status": "success"}
-    started = datetime.fromisoformat(since)
-    if datetime.now(timezone.utc) - started > timedelta(minutes=minutes):
+    fresh = [s for s in signals if s["status"] == "firing" and not resolves(s) and s.get("category") != "cost"
+             and s["source"] != "ticket" and (_at(s.get("at")) or started) > started + GRACE]
+    quiet_due = quiet_minutes and elapsed >= timedelta(minutes=quiet_minutes)
+    if quiet_minutes and not quiet_due:
+        if elapsed > timedelta(minutes=minutes):
+            pass  # a window shorter than the quiet period: judge now
+        else:
+            return None
+    problems = []
+    if fresh:
+        problems.append("new alerts since the action: " + "; ".join(s["title"][:80] for s in fresh[:3]))
+    if quiet_minutes and not fresh:
+        count = errors() if errors else None
+        if count is not None and count >= ERROR_LINES:
+            problems.append(f"{count} errors in the component's logs in the last 5 minutes")
+    if not firing and not problems:
+        return {"status": "success",
+                "reason": f"quiet for {quiet_minutes} minutes" if quiet_minutes else "its alerts resolved"}
+    if problems and quiet_minutes:
+        return {"status": "failure", "reason": "; ".join(problems)}
+    if elapsed > timedelta(minutes=minutes):
         return {"status": "failure", "reason": f"still firing after {minutes} minutes: "
-                + "; ".join(s["title"] for s in firing[:5])}
+                + "; ".join(s["title"] for s in (firing or fresh)[:5])}
     return None

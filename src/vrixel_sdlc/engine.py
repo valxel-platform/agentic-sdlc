@@ -136,6 +136,8 @@ class FeatureEngine:
         services.start_hotfix = self.start_hotfix
         services.start_intent_change = self.start_intent_change
         services.close_incident = lambda iid: services.signals.close(iid)
+        self.merged: dict[str, str] = {}  # incident -> the one it was merged into
+        services.merged_into = self.merged.get
         services.incidents = self.incident_summaries
         if getattr(services, "pager", None) is None:
             from .ops.paging import from_env
@@ -483,21 +485,39 @@ class FeatureEngine:
         return list(dict.fromkeys(touched))
 
     def _page(self, iid: str, product_id: str, repo: str, sig: dict) -> dict:
-        """Page the product's on-call for a new incident, before triage starts (ops/paging.py)."""
+        """A new incident: tell on-call (low urgency) if its severity calls for a heads-up while the
+        tool works on it (platform/remediation.yaml page.heads_up). Otherwise nobody is paged
+        unless the tool can't fix it (ops/incident.py escalate)."""
         from .roadmap.graphs import event
 
         try:
-            data_class = self.services.snapshot(product_id).product.data_class
+            snap = self.services.snapshot(product_id)
+            data_class, heads_up = snap.product.data_class, (snap.remediation.get("page") or {}).get("heads_up", ["sev1"])
         except Exception:
-            data_class = "phi"  # unknown: say as little as possible
+            data_class, heads_up = "phi", ["sev1"]  # unknown: say as little as possible
+        if sig.get("category") == "cost" or sig["severity"] not in heads_up:
+            return event("page", "not_paged", "the tool is working on it; on-call is paged only if it can't fix it")
         try:
             said = self.services.pager.trigger({
                 "incident_id": iid, "product_id": product_id, "title": sig["title"], "severity": sig["severity"],
                 "component": repo or sig.get("component", ""), "env": sig.get("env", "production"),
-                "source": sig.get("source", ""), "category": sig.get("category", ""), "data_class": data_class})
+                "source": sig.get("source", ""), "data_class": data_class})
         except Exception as exc:
             said = f"not paged: {type(exc).__name__}: {exc}"
         return event("page", "not_paged" if said.startswith("not paged") else "paged", said)
+
+    def error_lines(self, product_id: str, component: str, minutes: int = 5) -> int | None:
+        """Error lines in a production component's recent logs, or None when they can't be read."""
+        try:
+            rt = self.services.snapshot(product_id).product.runtime or {}
+            got = self.services.openchoreo.observe(
+                component=(rt.get("components") or {}).get(component, component), env="production",
+                project=rt.get("openchoreo_project"), namespace=rt.get("namespace"), minutes=minutes)
+        except Exception:
+            return None
+        if not got.get("available", True):
+            return None
+        return sum(1 for line in got.get("logs") or [] if "stack_trace" in line or '"ERROR"' in line)
 
     def alarm_changes(self, signals: list[dict], background: bool = False) -> dict:
         """CloudWatch alarm state changes: every one goes on the alarm board (what G6 reads);
@@ -563,12 +583,21 @@ class FeatureEngine:
         if incident_id == into:
             raise ValueError("An incident can't be merged into itself")
         moved = self.services.signals.move(incident_id, into)
-        item = next((p for p in self.pending(incident_id) if p.get("gate") == "incident"), None)
+        self.merged[incident_id] = into
+        pending = self.pending(incident_id)
+        item = next((p for p in pending if p.get("gate") == "incident"), None)
+        wait = next((p for p in pending if p.get("wait") == "incident_recovery"), None)
         ended = False
         if item:
             self.decide(incident_id, item["interrupt_id"], {"decision": "merge", "into": into, "approver": approver,
                                                             "feedback": reason or f"Merged into {into}"})
             ended = True
+        elif wait and incident_id not in self.running:  # the tool was watching it recover
+            self.services.close_incident(incident_id)
+            self._execute(incident_id, Command(resume={wait["interrupt_id"]: {"status": "merged", "into": into}}))
+            ended = True
+        else:  # busy: it ends at its next step (ops/incident.py merged)
+            self.services.close_incident(incident_id)
         product_id = self._state(incident_id).get("product_id", "")
         self.services.pager.resolve(incident_id, product_id, f"merged into {into}")
         self._root_moved(into)
@@ -848,8 +877,10 @@ class FeatureEngine:
         if packet["wait"] == "incident_recovery":
             from .ops.incident import recovery
 
+            comp, pid = packet.get("component") or "", packet.get("product_id") or ""
             return recovery(self.services.signals.for_incident(packet["feature_id"]), packet["since"],
-                            int(packet.get("minutes") or 240))
+                            int(packet.get("minutes") or 240), quiet_minutes=int(packet.get("quiet") or 0),
+                            errors=(lambda: self.error_lines(pid, comp)) if comp else None)
         if packet["wait"] == "release_train":  # a feature waiting for its train's approval
             s = self._state(packet["release_id"])
             if s.get("status") in ("approved", "shipped"):

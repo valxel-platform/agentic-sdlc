@@ -1,10 +1,11 @@
-"""Paging: every incident pages the product's on-call through PagerDuty as it opens, before triage;
-on-call's first decision acknowledges it; mitigation, resolution or a merge resolves it."""
+"""Paging: a SEV1 tells on-call (low urgency) as it opens; an incident the tool can't fix pages them
+urgently; on-call's first decision acknowledges; mitigation, resolution or a merge resolves."""
 
 import io
 import json
 import shutil
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.error import HTTPError
 
@@ -15,6 +16,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from vrixel_sdlc.api.app import create_app
 from vrixel_sdlc.config import load_settings
 from vrixel_sdlc.engine import FeatureEngine
+from vrixel_sdlc.ops import incident as incident_mod
 from vrixel_sdlc.ops import paging
 from vrixel_sdlc.ops.signals import from_alertmanager, from_sentry
 from vrixel_sdlc.services import build_services
@@ -48,35 +50,69 @@ def gate(eng, iid, name):
     return next(p for p in eng.pending(iid) if p.get("gate") == name)
 
 
+def no_autonomy(root, product="vrixel-emr/emr-governance"):
+    gov = root / product / "product.yaml"
+    gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {autonomous: false}\n", 1))
+
+
 def test_the_page_says_how_bad_and_where_and_nothing_private():
     inc = {"incident_id": "EMR-INC-4", "product_id": "EMR", "title": "Patient 4411: NullPointerException",
            "severity": "sev1", "component": "vrixel-emr/emr-intake-api", "env": "production", "source": "sentry",
-           "data_class": "phi"}
-    body = paging.page_payload(inc, "k", "https://sdlc.vrixel.dev/")
-    assert (body["routing_key"], body["event_action"], body["dedup_key"]) == ("k", "trigger", "EMR-INC-4")
+           "data_class": "phi", "why": "the tool's rollback didn't fix it"}
+    body = paging.page_payload(inc, "k", "https://sdlc.vrixel.dev/", urgent=True)
+    assert (body["routing_key"], body["event_action"], body["dedup_key"]) == ("k", "trigger", "EMR-INC-4:urgent")
     p = body["payload"]
     assert p["severity"] == "critical" and p["component"] == "emr-intake-api" and p["group"] == "EMR"
     assert "4411" not in json.dumps(body) and "NullPointer" not in json.dumps(body)  # PHI: no title
-    assert p["summary"] == "EMR-INC-4 SEV1 on emr-intake-api: open the incident in the SDLC tool"
+    assert p["summary"] == "EMR-INC-4 SEV1 on emr-intake-api needs on-call (the tool's rollback didn't fix it)"
+    assert p["custom_details"]["why on-call"] == "the tool's rollback didn't fix it"
     assert body["links"] == [{"href": "https://sdlc.vrixel.dev/incidents/EMR-INC-4", "text": "EMR-INC-4 in the SDLC tool"}]
-    general = paging.page_payload({**inc, "data_class": "general", "severity": "sev3"}, "k", "u")
-    assert general["payload"]["severity"] == "warning" and "NullPointerException" in general["payload"]["summary"]
-    cost = paging.page_payload({**inc, "data_class": "general", "severity": "sev2", "category": "cost"}, "k", "u")
-    assert cost["payload"]["severity"] == "info" and cost["payload"]["class"] == "cost"  # spend never wakes anyone
-    assert paging.page_payload({**inc, "severity": "sev4"}, "k", "u")["payload"]["severity"] == "info"
+    heads_up = paging.page_payload(inc, "k", "u")
+    assert heads_up["dedup_key"] == "EMR-INC-4" and heads_up["payload"]["severity"] == "info"
+    assert "the SDLC tool is mitigating it (no action needed)" in heads_up["payload"]["summary"]
+    general = paging.page_payload({**inc, "data_class": "general", "severity": "sev3"}, "k", "u", urgent=True)
+    assert general["payload"]["severity"] == "error" and "NullPointerException" in general["payload"]["summary"]
 
 
-def test_an_incident_pages_on_call_as_it_opens(eng):
-    [iid] = eng.ingest(from_alertmanager(alert()))
+def released(eng):
+    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    eng.auto_drive(fid)
+    return fid
+
+
+def test_a_sev1_tells_on_call_as_it_opens_while_the_tool_fixes_it(eng):
+    released(eng)
+    [iid] = eng.ingest(from_alertmanager(alert()))  # critical: SEV1
     [sent] = eng.services.pager.sent
-    assert sent["dedup_key"] == iid and sent["routing_key"] == "emr-key" and sent["payload"]["severity"] == "critical"
+    assert sent["dedup_key"] == iid and sent["routing_key"] == "emr-key" and sent["payload"]["severity"] == "info"
     assert "4411" not in json.dumps(sent)
     v = eng.view(iid)
     assert v["events"][0]["kind"] == "paged" and v["events"][0]["node"] == "page"
-    assert [h["action"] for h in v["paging"]] == ["trigger"]
-    # More signals for the same incident don't page again.
-    eng.ingest(from_alertmanager(alert(fingerprint="fp2")))
+    assert [h["action"] for h in v["paging"]] == ["heads_up"]
+    assert v["taken"][0]["by"] == "agent:remediate"  # the tool is on it
+    eng.ingest(from_alertmanager(alert(fingerprint="fp2")))  # more signals: no second page
     assert len(eng.services.pager.sent) == 1
+
+
+def test_a_sev2_the_tool_fixes_never_pages(eng):
+    released(eng)
+    [iid] = eng.ingest(from_alertmanager(alert(severity="error")))
+    assert eng.services.pager.sent == []
+    v = eng.view(iid)
+    assert v["events"][0]["kind"] == "not_paged" and v["taken"][0]["by"] == "agent:remediate"
+
+
+def test_what_the_tool_cant_fix_pages_urgently(tmp_path, eng):
+    # No recent change to the component: no action the tool may take fits.
+    [iid] = eng.ingest(from_alertmanager(alert(severity="error")))  # SEV2: no heads-up
+    [sent] = eng.services.pager.sent
+    assert sent["dedup_key"] == f"{iid}:urgent" and sent["payload"]["severity"] == "error"
+    assert "needs on-call (no action the tool may take by itself fits" in sent["payload"]["summary"]
+    g = gate(eng, iid, "incident")
+    assert any(e["node"] == "escalate" and e["kind"] == "paged" for e in eng.view(iid)["events"])
+    eng.decide(iid, g["interrupt_id"], {"decision": "resolve", "approver": "oncall-1", "feedback": "noise"})
+    assert [(s["dedup_key"], s["event_action"]) for s in eng.services.pager.sent] == [
+        (f"{iid}:urgent", "trigger"), (f"{iid}:urgent", "acknowledge"), (f"{iid}:urgent", "resolve")]
 
 
 def test_a_product_without_a_pagerduty_service_says_so(eng):
@@ -86,27 +122,37 @@ def test_a_product_without_a_pagerduty_service_says_so(eng):
     assert ev["kind"] == "not_paged" and "POS has no PagerDuty service" in ev["detail"]
 
 
-def test_the_first_decision_acknowledges_and_mitigation_resolves(eng):
+def test_the_first_decision_acknowledges_and_mitigation_resolves(tmp_path, monkeypatch):
+    root = tmp_path / "gov"
+    shutil.copytree(EXAMPLES, root)
+    no_autonomy(root)
+    s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",
+                      governance_root=root)
+    svc = build_services(s)
+    svc.pager = paging.RecordingPager(KEYS, "https://sdlc.vrixel.dev")
+    eng = FeatureEngine(svc, InMemorySaver())
+    released(eng)
     [iid] = eng.ingest(from_alertmanager(alert()))
+    keys = lambda: [(x["dedup_key"], x["event_action"]) for x in svc.pager.sent]  # noqa: E731
+    assert keys() == [(iid, "trigger"), (f"{iid}:urgent", "trigger")]  # heads-up, then the tool may not act
     eng.decide(iid, gate(eng, iid, "incident")["interrupt_id"],
                {"decision": "revise", "approver": "oncall-1", "feedback": "Look at the database"})
     eng.decide(iid, gate(eng, iid, "incident")["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
-    actions = [s["event_action"] for s in eng.services.pager.sent]
-    assert actions == ["trigger", "acknowledge"]  # once, though on-call decided twice
-    eng.ingest(from_alertmanager(alert(status="resolved")))  # recovered: postmortem
+    assert keys()[2:] == [(iid, "acknowledge"), (f"{iid}:urgent", "acknowledge")]  # once, though on-call decided twice
+    eng.ingest(from_alertmanager(alert(status="resolved")))
+    monkeypatch.setattr(incident_mod, "_clock", lambda: datetime.now(timezone.utc) + timedelta(minutes=11))
+    eng.poke_now(iid)
     pm = gate(eng, iid, "postmortem")
-    assert [s["event_action"] for s in eng.services.pager.sent] == ["trigger", "acknowledge", "resolve"]
+    assert keys()[4:] == [(iid, "resolve"), (f"{iid}:urgent", "resolve")]
     eng.decide(iid, pm["interrupt_id"], {"decision": "revise", "approver": "oncall-1", "feedback": "more detail"})
-    assert len(eng.services.pager.sent) == 3  # resolved once
+    assert len(keys()) == 6  # resolved once
 
 
-def test_an_agents_decision_doesnt_acknowledge_and_a_merge_resolves(eng):
-    trace = "4bf92f3577b34da6a3ce929d0e0e4736"
-
+def test_an_agents_merge_resolves_without_acknowledging(eng):
     def issue(n, slug, at):
         return {"action": "triggered", "data": {"event": {
-            "issue_id": n, "title": "ApiError", "level": "error", "project": {"slug": slug}, "lastSeen": at,
-            "environment": "production", "tags": [["vrixel_product", "EMR"], ["trace_id", trace if n == "3" else n * 32]]}}}
+            "issue_id": n, "title": "ApiError", "level": "fatal", "project": {"slug": slug}, "lastSeen": at,
+            "environment": "production", "tags": [["vrixel_product", "EMR"], ["trace_id", n * 32]]}}}
 
     [a] = eng.ingest(from_sentry(issue("1", "emr-web", "2026-11-06T10:00:00Z")))
     [b] = eng.ingest(from_sentry(issue("2", "emr-intake-api", "2026-11-06T16:00:00Z")))
@@ -114,6 +160,7 @@ def test_an_agents_decision_doesnt_acknowledge_and_a_merge_resolves(eng):
     eng.merge_incidents(b, a, approver="agent:correlate", reason="same request")
     sent = [(s["dedup_key"], s["event_action"]) for s in eng.services.pager.sent]
     assert (b, "resolve") in sent and (b, "acknowledge") not in sent and (a, "resolve") not in sent
+    assert eng._state(b)["status"] == "merged"
 
 
 class FakePD:
@@ -139,11 +186,12 @@ def test_pagerduty_is_retried_in_order_and_failures_are_kept():
     pager = paging.PagerDutyPager({"EMR": "k"}, "https://sdlc", opener=pd, delays=(0, 0, 0, 0))
     inc = {"incident_id": "EMR-INC-1", "product_id": "EMR", "title": "t", "severity": "sev2", "data_class": "phi"}
     t0 = time.time()
-    assert pager.trigger(inc).startswith("paging EMR's on-call")
+    assert pager.trigger(inc, urgent=True).startswith("paged EMR's on-call urgently")
     assert time.time() - t0 < 0.5  # never waits on PagerDuty
     pager.resolve("EMR-INC-1", "EMR")
     pager.flush()
     assert [b["event_action"] for b in pd.bodies] == ["trigger"] * 4 + ["resolve"]  # retried, then in order
+    assert {b["dedup_key"] for b in pd.bodies} == {"EMR-INC-1:urgent"}
     h = pager.history("EMR-INC-1")
     assert h[0]["ok"] and "attempt 4" in h[0]["detail"]
     assert not h[1]["ok"] and "HTTP 400" in h[1]["detail"]  # a refused event isn't retried
@@ -182,12 +230,12 @@ def test_a_webhook_pages_and_answers_before_triage_runs(eng, monkeypatch):
     client = TestClient(create_app(eng, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
     r = client.post("/api/signals/alertmanager", content=json.dumps(alert()), headers={"authorization": "Bearer t0k"})
     assert r.status_code == 202 and r.json()["incidents"] == ["EMR-INC-1"]
-    assert eng.services.pager.sent[0]["dedup_key"] == "EMR-INC-1"  # paged; triage still running
+    assert eng.services.pager.sent[0]["dedup_key"] == "EMR-INC-1"  # told on-call; triage still running
     assert "EMR-INC-1" in eng.running
     release.set()
     end = time.time() + 10
     while "EMR-INC-1" in eng.running and time.time() < end:
         time.sleep(0.02)
-    assert gate(eng, "EMR-INC-1", "incident")
+    assert gate(eng, "EMR-INC-1", "incident")  # nothing recent to undo: on-call is needed
     client.post("/api/auth/dev-login", json={"login": "oncall-1", "orgs": ["vrixel-emr"]})
-    assert [h["action"] for h in client.get("/api/features/EMR-INC-1").json()["paging"]] == ["trigger"]
+    assert [h["action"] for h in client.get("/api/features/EMR-INC-1").json()["paging"]] == ["heads_up", "urgent"]

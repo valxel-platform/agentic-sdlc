@@ -39,6 +39,7 @@ class GovernanceSnapshot:
     dependencies: dict[str, "GovernanceSnapshot"] = field(default_factory=dict)
     aws_catalog: dict = field(default_factory=dict)  # the platform's AWS services (VX-19), empty if none
     alert_rules: dict = field(default_factory=dict)  # the platform's default OpenChoreo alert rules, empty if none
+    remediation: dict = field(default_factory=dict)  # what the tool may do in production by itself (ops/remediation.py)
 
     @property
     def version(self) -> str:
@@ -137,9 +138,18 @@ class GovernanceLoader:
                                                          plat["sha"], optional=True) or "")
         except (error_tracking.PolicyError, ValueError) as exc:
             raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
+        from ..ops import remediation as remediation_mod
+
+        try:
+            remediation = remediation_mod.load_policy(s.read(plat["org"], plat["repo"],
+                                                             self.settings.platform_remediation_path,
+                                                             plat["sha"], optional=True) or "")
+        except (remediation_mod.PolicyError, ValueError) as exc:
+            raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
         runtime = product.runtime or {}
         problems = check_aws(runtime.get("aws"), product.data_class, list(runtime.get("pipeline") or []), catalog)
         problems += error_tracking.check(runtime, product.data_class, tracking)
+        problems += remediation_mod.check(runtime)
         if problems:
             raise GovernanceError(f"{entry.governance.full_name}/product.yaml: " + "; ".join(problems))
         snap = GovernanceSnapshot(
@@ -147,6 +157,7 @@ class GovernanceLoader:
             pins={"platform": dict(plat), "product": dict(prod),
                   "dependencies": {d: dict(p) for d, p in deps_pins.items()} if not _as_dependency else {}},
             constitution_text=own_text, dependencies=dependencies, aws_catalog=catalog, alert_rules=alert_rules,
+            remediation=remediation_mod.for_product(remediation, runtime),
         )
         with self._lock:
             self._cache[key] = snap

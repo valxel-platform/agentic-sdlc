@@ -172,6 +172,8 @@ class Settings:
     platform_alert_rules_path: str = ""
     # Where error reports may go; unset, error-tracking.yaml next to the AWS catalog.
     platform_error_tracking_path: str = ""
+    # What the tool may do in production by itself; unset, remediation.yaml next to the AWS catalog.
+    platform_remediation_path: str = ""
 
     def __post_init__(self) -> None:
         folder = self.platform_resources_path.rsplit("/", 1)[0] if "/" in self.platform_resources_path else ""
@@ -179,6 +181,8 @@ class Settings:
             self.platform_alert_rules_path = f"{folder}/alert-rules.yaml" if folder else "alert-rules.yaml"
         if not self.platform_error_tracking_path:
             self.platform_error_tracking_path = f"{folder}/error-tracking.yaml" if folder else "error-tracking.yaml"
+        if not self.platform_remediation_path:
+            self.platform_remediation_path = f"{folder}/remediation.yaml" if folder else "remediation.yaml"
 
     def entry(self, product_id: str) -> RegistryEntry:
         try:
@@ -235,6 +239,7 @@ def load_settings(
         platform_resources_path=plat.get("resources_path", "aws-resources.yaml"),
         platform_alert_rules_path=plat.get("alert_rules_path", ""),
         platform_error_tracking_path=plat.get("error_tracking_path", ""),
+        platform_remediation_path=plat.get("remediation_path", ""),
         limits=Limits(
             min_critic_threshold=float(lim.get("min_critic_threshold", 0.75)),
             max_loops=int(lim.get("max_loops", 5)),

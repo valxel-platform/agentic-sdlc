@@ -6,7 +6,9 @@ import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
 import { ACTION_LABEL, SEVERITY, threadPath, waitingLabel } from "../vocab";
 
-const PAGE_STATE: Record<string, string> = { trigger: "On-call paged", acknowledge: "Page acknowledged", resolve: "Page resolved" };
+const PAGE_STATE: Record<string, string> = {
+  heads_up: "On-call told (low urgency)", urgent: "On-call paged", acknowledge: "Page acknowledged", resolve: "Page resolved",
+};
 const STATUS: Record<string, string> = {
   triaging: "Triage in progress", awaiting_decision: "Waiting for on-call", mitigating: "Acting",
   monitoring: "Watching for recovery", postmortem: "Postmortem", closed: "Closed", merged: "Merged",
@@ -182,7 +184,8 @@ export function IncidentPage() {
       {v.error && <p className="error-note" role="alert">The workflow stopped with an error: {v.error}</p>}
       {pageFailed && (
         <p className="error-note" role="alert">
-          {pageFailed.action === "trigger" ? "On-call wasn't paged" : `PagerDuty didn't take the ${pageFailed.action}`}: {pageFailed.detail.replace(/^not paged: /, "")}
+          {pageFailed.action === "urgent" || pageFailed.action === "heads_up" ? "On-call wasn't paged"
+            : `PagerDuty didn't take the ${pageFailed.action}`}: {pageFailed.detail.replace(/^not paged: /, "")}
         </p>
       )}
       {err && <p className="error-note" role="alert">{err}</p>}
@@ -199,7 +202,8 @@ export function IncidentPage() {
                 <li key={`${t.id}-${n}`}>
                   <div className="work-line"><strong>{ACTION_LABEL[t.type] ?? t.type}</strong>
                     <span className={`chip ${t.ok ? "go" : "stop"}`}>{t.ok ? "Done" : "Failed"}</span></div>
-                  <div className="small muted">{t.result}{t.by ? `, approved by ${t.by}` : ""}</div>
+                  <div className="small muted">{t.result}{t.by === "agent:remediate" ? ", by the tool (remediation policy)"
+                    : t.by ? `, approved by ${t.by}` : ""}</div>
                 </li>
               ))}
             </ul>

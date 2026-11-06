@@ -75,7 +75,7 @@ def test_an_openchoreo_budget_alert_is_a_cost_signal_that_never_waits_to_clear()
     [m] = from_openchoreo(oc_budget(alertType="metric", alertSeverity="critical"))
     assert "category" not in m and m["severity"] == "sev1"
     assert from_openchoreo({}) == []
-    assert still_firing([s]) == [] and recovery([s], "2026-11-05T10:00:00+00:00", 30) == {"status": "success"}
+    assert still_firing([s]) == [] and recovery([s], "2026-11-05T10:00:00+00:00", 30)["status"] == "success"
 
 
 def test_an_aws_budgets_notification_names_its_product_and_environment():
