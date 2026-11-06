@@ -381,6 +381,20 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(400, "Body is not JSON") from exc
         return eng().alarm_changes(from_cloudwatch(event))
 
+    @api.post("/signals/cloudwatch", status_code=202)
+    async def cloudwatch_alarm(request: Request) -> dict:
+        """CloudWatch alarm state changes from each data plane's AlarmRouting (an EventBridge API
+        destination sending Authorization: Bearer VRIXEL_SIGNALS_TOKEN). Production alarms open and
+        resolve incidents; every alarm's state is kept for G6."""
+        from ..ops.signals import from_cloudwatch
+
+        bearer_ok(request)
+        try:
+            event = json.loads(await request.body() or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        return eng().alarm_changes(from_cloudwatch(event))
+
     @api.post("/signals/aws-budgets", status_code=202)
     async def aws_budgets(request: Request) -> JSONResponse:
         """AWS Budgets through an SNS topic with an HTTPS subscription to
