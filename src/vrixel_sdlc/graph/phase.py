@@ -254,6 +254,27 @@ def audit_findings(ctx: dict, results: dict) -> list[str]:
     return [f"No task publishes the audit records the HLD names: {', '.join(missing)} (VX-15)"] if missing else []
 
 
+SECURITY = {
+    "provider": (" Every endpoint declares its permission with @PreAuthorize (deny by default); every handler"
+                 " that touches a record calls AccessPolicy.require; outgoing calls forward the caller's token"
+                 " inside the product and exchange it across trust boundaries (app.outbound). workload.yaml"
+                 " visibility and dependencies match the HLD's Endpoints section (VX-17)."),
+    "event-worker": " No endpoint but health and metrics; Kafka as this worker's own identity (VX-17).",
+    "mcp-server": (" Each tool requires its scope and checks the caller's access to the records it touches;"
+                   " audit on behalf of the person in the token (VX-17)."),
+    "agent": (" Call MCP servers only through token exchange for the person behind the step (audience and"
+              " scope per server); never a fixed token (VX-13, VX-17)."),
+    "consumer": (" The app never holds a token: it calls the API on its own origin through the product's BFF"
+                 " and sends X-XSRF-TOKEN on writes. Its endpoint is project-visible only (VX-17)."),
+    "bff": (" One route per service the HLD lets it call, each with TokenRelay and the session cookie"
+            " removed; the BFF is the only external endpoint (VX-17)."),
+}
+
+
+def security_instruction(ctx: dict, task: dict) -> str:
+    return SECURITY.get(task.get("role") or "", "")
+
+
 def acceptance_instruction(ctx: dict, task: dict) -> str:
     if task.get("role") != "acceptance":
         return ""
@@ -331,7 +352,7 @@ def build_build_subgraph(services):
             tail=(f"Implement {task['id']} in {task['repo']} on branch feature/{ctx['feature_id']}. "
                   f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run tests; return the patch summary."
                   + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
-                  + acceptance_instruction(ctx, task)),
+                  + acceptance_instruction(ctx, task) + security_instruction(ctx, task)),
             stub_text=templates.code_task(ctx, task, passed=not fail),
         )
         result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
@@ -367,6 +388,9 @@ def build_build_subgraph(services):
                       + (" Check that the change writes no database in a request and publishes one event per change"
                          " to Kafka, or, in an event worker, that each handler applies an event once and only moves"
                          " forward (VX-16)." if r.get("role") in EVENT_ROLES else "")
+                      + (" Check VX-17: no endpoint without a permission, record access checked, no token in the"
+                         " browser or in fixed configuration, exposure as the HLD's Endpoints section says."
+                         if r.get("role") in SECURITY else "")
                       + (" Check that the acceptance tests follow the plan (extend before adding), carry the feature,"
                          " criterion, capability and component tags, declare what they cover, and use synthetic"
                          " data only." if r.get("role") == "acceptance" else "")

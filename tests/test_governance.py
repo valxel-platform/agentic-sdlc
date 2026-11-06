@@ -52,7 +52,7 @@ def test_snapshot_reads_platform_and_product_from_their_orgs(services):
     prefixes = {a.split("-")[0] for a in snap.constitution.product_articles()}
     assert prefixes == {"EMR", "SS", "APX"}  # its own articles plus those of the lanes it depends on
     assert set(snap.pins["dependencies"]) == {"SS", "APX"}
-    assert snap.version.startswith("platform@1.4.0#") and "+emr@1.0.0#" in snap.version
+    assert snap.version.startswith("platform@1.5.0#") and "+emr@1.0.0#" in snap.version
     assert "FHIR R4" in snap.product_context  # context.md feeds the L4 prompt layer
     assert all(r.name.startswith("vrixel-emr/") for r in snap.product.repos)
 

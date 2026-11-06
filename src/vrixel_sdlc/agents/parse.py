@@ -44,6 +44,20 @@ def parse_audit(hld: str) -> list[dict]:
     return [{"action": a, "record": r.split("(", 1)[0].strip()} for a, r in _AUDIT.findall(section(hld, "Audit"))]
 
 
+_ENDPOINT = re.compile(r"^- ([\w.-]+/[\w.-]+)\s*:\s*([a-z, ]+?)\s*(?:;\s*calls\s+(.+?))?\s*$", re.M)
+VISIBILITIES = ("none", "project", "namespace", "internal", "external")
+
+
+def parse_endpoints(hld: str) -> list[dict]:
+    """'## Endpoints' bullets: '- vrixel-emr/emr-bff: external; calls emr-intake-api, emr-web' ->
+    who may reach each component (OpenChoreo endpoint visibility) and what it calls (VX-17)."""
+    out = []
+    for repo, vis, calls in _ENDPOINT.findall(section(hld, "Endpoints")):
+        out.append({"repo": repo, "visibility": [v.strip() for v in vis.split(",") if v.strip()],
+                    "calls": [c.strip() for c in (calls or "").split(",") if c.strip()]})
+    return out
+
+
 _EVENT = re.compile(r"^- (vrixel\.[a-z0-9_-]+\.[a-z0-9_-]+\.v\d+)\s*:\s*(.+?)\s*$", re.M)
 
 

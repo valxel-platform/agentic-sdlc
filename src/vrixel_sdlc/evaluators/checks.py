@@ -79,6 +79,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     out += _audit(text, repos, ctx)
     out += _events(text, repos)
     out += _acceptance(repos, ctx)
+    out += _endpoints(text, repos, ctx)
     out += _diagram(text, repos)
     if ctx.get("knowledge"):
         # Against the existing design: cited decisions are current, overrides are explicit, and
@@ -90,6 +91,41 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 
 
 RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server")
+
+
+EXPOSED_ROLES = RUNTIME_ROLES + ("bff",)
+
+
+def _endpoints(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """VX-17: the design says who may reach each component and what it calls. Only the BFF faces
+    the internet; anything else external needs an ADR that says so."""
+    from ..agents.parse import VISIBILITIES, parse_endpoints, section
+
+    runtime = [r for r in repos if r["role"] in EXPOSED_ROLES]
+    if not runtime:
+        return []
+    declared = {e["repo"]: e for e in parse_endpoints(text)}
+    if not declared:
+        return ["HLD has no Endpoints section: one line per component, '- <org>/<repo>: <project|namespace|"
+                "internal|external|none>[; calls <component>, ...]' (VX-17)"]
+    out = [f"{r['name']} has no line in Endpoints (VX-17)" for r in runtime if r["name"] not in declared]
+    roles = {r["name"]: r["role"] for r in repos}
+    known = {n.split("/", 1)[-1] for n in roles} | {r["name"].split("/", 1)[-1] for r in ctx.get("repos") or []}
+    external_adr = "external" in section(text, "ADRs").lower()
+    for repo, e in declared.items():
+        bad = [v for v in e["visibility"] if v not in VISIBILITIES]
+        if bad:
+            out.append(f"{repo}: unknown visibility {', '.join(bad)} (use {', '.join(VISIBILITIES)})")
+        if "external" in e["visibility"] and roles.get(repo) != "bff":
+            if roles.get(repo) == "consumer":
+                out.append(f"{repo} is a web app: it reaches the internet through the product's BFF, not directly (VX-17)")
+            elif not external_adr:
+                out.append(f"{repo} is external but isn't the BFF: add an ADR approving the exposure (a partner or "
+                           "mobile API through the gateway), or make it project (VX-17)")
+        unknown = [c for c in e["calls"] if c not in known]
+        if unknown:
+            out.append(f"{repo} calls {', '.join(unknown)}, which isn't in this design or the product")
+    return out
 
 
 def _acceptance(repos: list[dict], ctx: dict) -> list[str]:

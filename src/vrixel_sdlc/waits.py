@@ -55,6 +55,10 @@ class WaitChecker:
                     "env": urls, "criteria": ",".join(t.get("acs") or [])})
             except Exception:
                 self._dispatched.discard(key)
+        # A web app is reached only through the product's BFF (VX-17): its own post-deploy tests run
+        # against the BFF's public URL when the change set deploys one.
+        roles = {t["repo"]: t.get("role", "") for t in q.get("targets") or []}
+        public = next((r.get("url", "") for r in results if roles.get(r["repo"]) == "bff"), "")
         for r in results:
             key = (packet.get("feature_id"), packet["wait"], packet.get("since"), r["repo"])
             if key in self._dispatched or not shas.get(r["repo"]):
@@ -62,7 +66,8 @@ class WaitChecker:
             self._dispatched.add(key)
             try:
                 self.services.github.dispatch(repo=r["repo"], event_type="vrixel-deployed", payload={
-                    "stage": packet["wait"], "sha": shas[r["repo"]], "base_url": r.get("url", ""),
+                    "stage": packet["wait"], "sha": shas[r["repo"]],
+                    "base_url": public if roles.get(r["repo"]) == "consumer" and public else r.get("url", ""),
                     "feature_id": packet.get("feature_id", "")})
             except Exception:
                 self._dispatched.discard(key)  # try again on the next check

@@ -217,7 +217,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 
 | Area | Setting |
 | --- | --- |
-| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-library`, `-event-worker`, `-mcp-server`, `-agent`, `-acceptance`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
+| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-bff`, `-library`, `-event-worker`, `-mcp-server`, `-agent`, `-acceptance`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
 | Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
 | Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
@@ -289,7 +289,7 @@ like any other repo and the provision step creates them on the golden path:
 | `mcp-server` | `vrixel-tools/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
 | `agent` | `vrixel-tools/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
 
-Roles merge and deploy in dependency order: library, provider, event-worker, mcp-server, agent, consumer, acceptance (merged, never deployed).
+Roles merge and deploy in dependency order: library, provider, event-worker, mcp-server, agent, consumer, bff, acceptance (merged, never deployed).
 The `evals` quality suite reads the agent's `evals / report` status on every PR (recorded model
 responses); after a deploy to dev the agent's post-deploy job runs the same evals against the
 real model and reports `integration / report`. Platform articles VX-12 to VX-14 make these
@@ -667,6 +667,28 @@ quality:
 In stub delivery mode every suite passes with sample numbers; tests inject results through
 `services.quality.sources["stub"].results`.
 
+## Security model (VX-17)
+
+Every request carries two checked identities: the calling workload, proven by the mesh (Istio
+ambient mTLS), and the person or service it acts for, as a token from the product's Keycloak realm
+issued for the product. `vrixel-tools/platform-security` generates each product's realm and mesh
+policies from one spec.
+
+| Component | Template | What it enforces |
+| --- | --- | --- |
+| BFF (`bff`) | `template-bff` (Spring Cloud Gateway) | The only internet-facing component for a web app: OIDC sign-in with PKCE, tokens kept in the Redis session, `__Host-SESSION` cookie, `/api/**` relayed with the person's token, CSRF and Origin checks |
+| Web app (`consumer`) | `template-web` | No tokens in the browser; same origin through the BFF; project-visible only; security headers on every page |
+| Service (`provider`) | `template-service` | Issuer, keys, expiry and the product audience; `@PreAuthorize` on every endpoint (the build fails otherwise); record-level `AccessPolicy`; forward inside the product, token exchange across trust boundaries |
+| Agent (`agent`) | `template-agent` | Token exchange per MCP server for the person behind each step (the approver for approved changes); no fixed tokens; people's tokens never stored |
+| MCP server (`mcp-server`) | `template-mcp-server` | Audience and a scope per tool; audit on behalf of the person |
+
+Designs declare exposure in an `## Endpoints` section, one line per component:
+`- <org>/<repo>: <project|namespace|internal|external|none>[; calls <component>, ...]`. Only the BFF
+may be `external` (anything else needs an ADR that says so), a web app never is, and every call
+must name a component of the design or the product. G4 approves it; the components' `workload.yaml`
+and the product's mesh policies follow it. Coders and reviewers get their role's rules. A web app's
+post-deploy tests run against the BFF's public URL.
+
 ## Acceptance tests across repos
 
 Each repo tests itself (unit, contract, its own post-deploy suites). A feature that changes two or
@@ -834,7 +856,7 @@ src/vrixel_sdlc/
   engine.py        start, inbox, decide, view; resolves CI and OpenChoreo waits
   waits.py         checks CI, builds and deployments for waiting features
   provisioning.py  new repos: standards, proposal checks, provisioner
-  repo_roles.py    repo roles (library, provider, event-worker, mcp-server, agent, consumer, acceptance) and merge order
+  repo_roles.py    repo roles (library, provider, event-worker, mcp-server, agent, consumer, bff, acceptance) and merge order
   acceptance.py    product acceptance tests: plan checks, overlap, test selection, run reports
   quality/         test and security suites: policy, sources, gate
   knowledge/       design knowledge: architecture record, contracts, design check, write-back

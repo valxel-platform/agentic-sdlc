@@ -162,12 +162,13 @@ def architecture(ctx: dict, defective: bool) -> str:
         lines += ["", "## Audit",
                   f"- {record}.read: {record} (who opened which {record}, through which service)",
                   f"- {record}.change: {record} (who changed it, on whose behalf, approved by whom)"]
+    lines += ["", "## Endpoints", *_endpoint_lines(repos)]
     if any(r["role"] == "event-worker" for r in repos):
         record = _slug(ctx["title"]).split("-", 1)[0] or "record"
         workers = ", ".join(r["name"].split("/", 1)[-1] for r in repos if r["role"] == "event-worker")
         lines += ["", "## Events",
                   f"- vrixel.{record}.changed.v1: published by {provider.split('/', 1)[-1]}, applied by {workers}"]
-    lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15", "- VX-16"]
+    lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15", "- VX-16", "- VX-17"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
 
 
@@ -257,6 +258,28 @@ def plan(ctx: dict, defective: bool) -> str:
     if acc:
         lines += ["", "## Acceptance tests", *_acceptance_lines(ctx, repos, acs, slug)]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _endpoint_lines(repos: list[dict]) -> list[str]:
+    """Stub judgement (VX-17): only the BFF is external; each component calls what its role uses."""
+    short = {r["name"]: r["name"].split("/", 1)[-1] for r in repos}
+    by_role: dict[str, list[str]] = {}
+    for r in repos:
+        by_role.setdefault(r["role"], []).append(short[r["name"]])
+    calls = {
+        "bff": by_role.get("provider", []) + by_role.get("consumer", []) + by_role.get("agent", []),
+        "agent": by_role.get("mcp-server", []),
+        "mcp-server": by_role.get("provider", []),
+        "consumer": [],
+    }
+    out = []
+    for r in repos:
+        if r["role"] in ("library", "acceptance"):
+            continue
+        vis = {"bff": "external", "event-worker": "none"}.get(r["role"], "project")
+        targets = calls.get(r["role"], [])
+        out.append(f"- {r['name']}: {vis}" + (f"; calls {', '.join(targets)}" if targets else ""))
+    return out
 
 
 def _acceptance_lines(ctx: dict, repos: list[dict], acs: list[str], slug: str) -> list[str]:
