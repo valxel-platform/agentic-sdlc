@@ -129,8 +129,17 @@ class GovernanceLoader:
                                             plat["sha"], optional=True) or "")
         except (AlertRulesError, ValueError) as exc:
             raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
+        from ..ops import error_tracking
+
+        try:
+            tracking = error_tracking.load_policy(s.read(plat["org"], plat["repo"],
+                                                         self.settings.platform_error_tracking_path,
+                                                         plat["sha"], optional=True) or "")
+        except (error_tracking.PolicyError, ValueError) as exc:
+            raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
         runtime = product.runtime or {}
         problems = check_aws(runtime.get("aws"), product.data_class, list(runtime.get("pipeline") or []), catalog)
+        problems += error_tracking.check(runtime, product.data_class, tracking)
         if problems:
             raise GovernanceError(f"{entry.governance.full_name}/product.yaml: " + "; ".join(problems))
         snap = GovernanceSnapshot(

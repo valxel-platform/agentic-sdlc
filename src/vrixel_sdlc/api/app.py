@@ -397,19 +397,32 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         # Production alerts open incidents; the rest are kept for G6, like CloudWatch alarms.
         return eng().alarm_changes(from_openchoreo(payload))
 
-    @api.post("/signals/cloudwatch", status_code=202)
-    async def cloudwatch_alarm(request: Request) -> dict:
-        """CloudWatch alarm state changes from each data plane's AlarmRouting (an EventBridge API
-        destination sending Authorization: Bearer VRIXEL_SIGNALS_TOKEN). Production alarms open and
-        resolve incidents; every alarm's state is kept for G6."""
-        from ..ops.signals import from_cloudwatch
+    @api.post("/signals/glitchtip/{product_id}", status_code=202)
+    async def glitchtip_alert(product_id: str, request: Request) -> dict:
+        """A product's GlitchTip alert webhook recipient, with the product's token in the URL
+        (`vrixel glitchtip-token <product>`). Production issues open or join incidents; the rest
+        are kept for G6. The issue's trace id is read back when the product has an API token."""
+        import hmac
 
-        bearer_ok(request)
+        from ..ops import error_tracking as et
+
+        expected = et.token_for(product_id)
+        if not expected or not hmac.compare_digest(request.query_params.get("token", ""), expected):
+            raise HTTPException(401, "Bad token")
         try:
-            event = json.loads(await request.body() or b"{}")
+            snap = eng().services.snapshot(product_id)
+        except Exception as exc:
+            raise HTTPException(404, f"Unknown product {product_id}") from exc
+        choice = (snap.product.runtime or {}).get("error_tracking") or {}
+        if choice.get("provider") != "glitchtip":
+            raise HTTPException(404, f"{product_id} doesn't use GlitchTip")
+        try:
+            payload = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return eng().alarm_changes(from_cloudwatch(event))
+        token = et.api_token(product_id)
+        sigs = [et.enrich(s, str(choice.get("url") or ""), token) for s in et.from_glitchtip(payload, product_id)]
+        return eng().alarm_changes(sigs)
 
     @api.post("/signals/cloudwatch", status_code=202)
     async def cloudwatch_alarm(request: Request) -> dict:

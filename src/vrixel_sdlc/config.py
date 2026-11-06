@@ -170,11 +170,15 @@ class Settings:
     knowledge: Any = None  # vrixel_sdlc.knowledge.KnowledgeConfig
     # The platform's default alert rules; unset, alert-rules.yaml next to the AWS catalog.
     platform_alert_rules_path: str = ""
+    # Where error reports may go; unset, error-tracking.yaml next to the AWS catalog.
+    platform_error_tracking_path: str = ""
 
     def __post_init__(self) -> None:
+        folder = self.platform_resources_path.rsplit("/", 1)[0] if "/" in self.platform_resources_path else ""
         if not self.platform_alert_rules_path:
-            folder = self.platform_resources_path.rsplit("/", 1)[0] if "/" in self.platform_resources_path else ""
             self.platform_alert_rules_path = f"{folder}/alert-rules.yaml" if folder else "alert-rules.yaml"
+        if not self.platform_error_tracking_path:
+            self.platform_error_tracking_path = f"{folder}/error-tracking.yaml" if folder else "error-tracking.yaml"
 
     def entry(self, product_id: str) -> RegistryEntry:
         try:
@@ -230,6 +234,7 @@ def load_settings(
         platform_constitution_path=plat.get("constitution_path", "constitution.md"),
         platform_resources_path=plat.get("resources_path", "aws-resources.yaml"),
         platform_alert_rules_path=plat.get("alert_rules_path", ""),
+        platform_error_tracking_path=plat.get("error_tracking_path", ""),
         limits=Limits(
             min_critic_threshold=float(lim.get("min_critic_threshold", 0.75)),
             max_loops=int(lim.get("max_loops", 5)),

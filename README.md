@@ -721,6 +721,42 @@ wrongly joined signal out (`/split`, "Not the same failure"), which opens its ow
 A Sentry project's slug should be the component's name (or tag events with `component`), and
 events should carry `vrixel_product`, so issues map to the right product and component.
 
+## Error tracking: Sentry or self-hosted GlitchTip
+
+Where a product's error reports may go is the platform's call, in sdlc-governance's
+`platform/error-tracking.yaml`; the first rule that matches decides:
+
+| Rule | When | Allowed |
+| --- | --- | --- |
+| payments | `data_class: payments` | GlitchTip (self-hosted): card data stays in our account (PCI DSS) and payment data in India (RBI) |
+| india | `runtime.aws.region` is ap-south-1 or ap-south-2 | GlitchTip: Sentry's SaaS runs in the US and EU only |
+| phi | `data_class: phi` | GlitchTip, or Sentry with a signed BAA (`baa: true`) |
+| general | anything else | either |
+
+A product chooses in product.yaml, and the governance loader refuses a choice the rules don't allow:
+
+```yaml
+runtime:
+  error_tracking:
+    provider: glitchtip                   # or sentry
+    url: https://errors.apx.vrixel.dev    # GlitchTip's address
+```
+
+GlitchTip takes the same Sentry SDKs the templates already use, so a component changes only its
+`SENTRY_DSN`. platform-resources' `observability/glitchtip` deploys it into the product's
+OpenChoreo project (web, worker, Postgres; no Redis). Its alerts reach the tool through a webhook
+recipient per GlitchTip project:
+
+- `vrixel glitchtip-token APX` prints the path, `/api/signals/glitchtip/APX?token=…`. The token is
+  derived from `VRIXEL_SIGNALS_TOKEN` and opens that product's endpoint only (a webhook can't send
+  headers, so it is in the URL).
+- With an API token per product (`VRIXEL_GLITCHTIP_TOKENS='{"APX": "…"}'`, scope `event:read`)
+  the tool reads each alerted issue's latest event for its `trace_id`, so a GlitchTip issue joins
+  the same incident as the failures it caused elsewhere. The request goes only to the product's
+  configured `url`.
+
+Name each GlitchTip project after its component, as with Sentry.
+
 ## Component alert rules: logs and exceptions
 
 Components log JSON to stdout (the templates' structured logging), with an exception's stack under

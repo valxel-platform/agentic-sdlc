@@ -108,9 +108,21 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         if aws is not None and not isinstance(aws, dict):
             problems.append("runtime.aws must be a mapping: {region, accounts: {<environment>: <account id>}}")
             aws = None
+        tracking = runtime.get("error_tracking")
+        if tracking is not None and not isinstance(tracking, dict):
+            problems.append("runtime.error_tracking must be a mapping: {provider, url, baa}")
+            tracking = None
         runtime = {"openchoreo_project": str(runtime["openchoreo_project"]), "pipeline": pipeline,
+                   # Where the product's error reports go (checked against platform/error-tracking.yaml).
+                   "error_tracking": ({"provider": str(tracking.get("provider") or ""),
+                                       "url": str(tracking.get("url") or ""),
+                                       "baa": tracking.get("baa") is True} if tracking else None),
                    "namespace": str(runtime["namespace"]) if runtime.get("namespace") else None,
                    "components": components,
+                   # Who calls whom beyond the contracts (ops/correlate.py): {caller: [callee, ...]}.
+                   "calls": {str(k): [str(c) for c in (v or [])]
+                             for k, v in (runtime.get("calls") or {}).items()}
+                   if isinstance(runtime.get("calls"), dict) else {},
                    # The product's AWS accounts, one per environment (VX-19); checked against the
                    # platform catalog's regions when the snapshot is loaded.
                    "aws": ({"region": str(aws.get("region") or ""),

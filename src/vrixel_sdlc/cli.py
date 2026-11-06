@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import tempfile
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -123,7 +124,18 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     src.add_argument("--product", help="Product id; reads catalog.json from its acceptance repo (GitHub App)")
     src.add_argument("--catalog", help="A local catalog.json")
     a.add_argument("--json", action="store_true")
+    g = sub.add_parser("glitchtip-token", help="The token for a product's GlitchTip webhook URL")
+    g.add_argument("product")
     args = p.parse_args(argv)
+    if args.cmd == "glitchtip-token":
+        from .ops.error_tracking import token_for
+
+        token = token_for(args.product)
+        if not token:
+            print("Set VRIXEL_SIGNALS_TOKEN first (the tool's signals token).", file=sys.stderr)
+            return 2
+        print(f"/api/signals/glitchtip/{args.product}?token={token}")
+        return 0
     if args.cmd == "repos":
         return _repos(args, github)
     if args.cmd == "acceptance":
