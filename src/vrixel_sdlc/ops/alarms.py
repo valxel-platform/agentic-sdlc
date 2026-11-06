@@ -9,6 +9,15 @@ from __future__ import annotations
 
 import json
 import threading
+from datetime import datetime, timezone
+
+
+def _age_minutes(at: str, now: datetime) -> float:
+    try:
+        t = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    return (now - (t if t.tzinfo else t.replace(tzinfo=timezone.utc))).total_seconds() / 60
 
 
 class InMemoryAlarmBoard:
@@ -63,11 +72,14 @@ class PostgresAlarmBoard:
         return sorted((dict(r["data"]) for r in rows), key=lambda s: s.get("since", ""))
 
 
-def for_feature(board, state: dict, *, before: str = "production") -> list[dict]:
-    """Alarms firing outside `before` on the feature's own resources, or on resources its
-    components use: what G6 approvers should see before production."""
+def for_feature(board, state: dict, *, before: str = "production", now: datetime | None = None,
+                fresh_minutes: int = 60) -> list[dict]:
+    """Alarms firing outside `before` on the feature's own resources, on resources its components
+    use, or on its components themselves: what G6 approvers should see before production. Alerts
+    that never send a resolution (OpenChoreo's) count only while recent."""
     if board is None:
         return []
+    now = now or datetime.now(timezone.utc)
     fid = state.get("feature_id", "")
     mine = {r["name"] for r in state.get("resources") or [] if r.get("type") != "workload-identity"}
     comps = {d.get("component") for d in (state.get("deployments") or {}).values() if d.get("component")}
@@ -78,7 +90,10 @@ def for_feature(board, state: dict, *, before: str = "production") -> list[dict]
         users = set(filter(None, (lab.get("consumers") or "").split(",")))
         if s.get("env") == before:
             continue
-        if lab.get("feature_id") == fid or lab.get("resource") in mine or users & comps:
+        if s.get("resolves") is False and _age_minutes(s.get("at", ""), now) > fresh_minutes:
+            continue
+        if (lab.get("feature_id") == fid or lab.get("resource") in mine or users & comps
+                or (s.get("source") == "openchoreo" and s.get("component") in comps)):
             out.append({"env": s["env"], "resource": lab.get("resource", ""), "alarm": lab.get("alarm", ""),
                         "severity": s["severity"], "says": s.get("detail", ""), "since": s.get("since", ""),
                         "url": s.get("url", ""), "title": s["title"]})
