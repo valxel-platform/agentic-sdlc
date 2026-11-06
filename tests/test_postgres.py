@@ -160,3 +160,23 @@ def test_alarm_states_persist():
         board.record({**sig, "status": "resolved", "at": "2026-11-06T12:00:00Z"})
         board.record({**sig, "at": "2026-11-06T11:30:00Z"})  # late
         assert board.firing(pid) == []
+
+
+def test_incident_signals_move_between_incidents():
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from vrixel_sdlc.ops.signals import PostgresSignalStore
+
+    pid = f"P{uuid.uuid4().hex[:6]}"
+    sig = {"fingerprint": "f1", "component": "web", "title": "t", "status": "firing"}
+    with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        store = PostgresSignalStore(pool)
+        store.add(f"{pid}-INC-1", pid, sig)
+        store.add(f"{pid}-INC-2", pid, {**sig, "fingerprint": "f2"})
+        store.add(f"{pid}-INC-2", pid, {**sig, "fingerprint": "f3"})
+        assert store.open_incidents(pid) == [f"{pid}-INC-1", f"{pid}-INC-2"]
+        assert store.move(f"{pid}-INC-2", f"{pid}-INC-1", "f2") == 1
+        assert store.move(f"{pid}-INC-2", f"{pid}-INC-1") == 1
+        assert [s["fingerprint"] for s in store.for_incident(f"{pid}-INC-1")] == ["f1", "f2", "f3"]
+        assert store.open_incidents(pid) == [f"{pid}-INC-1"]

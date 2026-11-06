@@ -186,14 +186,17 @@ export interface IncidentAction {
   ok?: boolean; result?: string; by?: string; at?: string;
 }
 export interface Signal {
-  source: "prometheus" | "sentry" | "ticket"; status: "firing" | "resolved"; severity: string; title: string;
+  source: string; status: "firing" | "resolved"; severity: string; title: string;
   detail: string; fingerprint: string; url: string; at: string; component: string;
+  // Why it joined this incident (same trace, call graph or release), when it came from elsewhere.
+  labels?: Record<string, string>;
 }
 export interface Suspect { feature_id: string; title: string; released_at: string; flag: string; flag_on: boolean | null }
 export interface IncidentView extends Omit<ThreadBase, "kind"> {
   kind: "incident"; severity: string; component: string; opened_at: string; triage: string;
   actions: IncidentAction[]; taken: IncidentAction[]; links: Record<string, string>; postmortem: string;
   signals: Signal[]; firing: number; suspects: Suspect[];
+  root?: { component: string; why: string };
 }
 export interface IncidentRow {
   feature_id: string; product_id: string; title: string; severity: string; status: string; component: string;
@@ -305,6 +308,10 @@ export const api = {
   initiative: (id: string) => request<InitiativeView>("GET", `/features/${encodeURIComponent(id)}`),
   release: (id: string) => request<ReleaseView>("GET", `/features/${encodeURIComponent(id)}`),
   incident: (id: string) => request<IncidentView>("GET", `/features/${encodeURIComponent(id)}`),
+  mergeIncident: (id: string, into: string, reason: string) =>
+    request<{ merged: string; into: string }>("POST", `/incidents/${encodeURIComponent(id)}/merge`, { into, reason }),
+  splitSignal: (id: string, fingerprint: string) =>
+    request<{ new_incident: string | null }>("POST", `/incidents/${encodeURIComponent(id)}/split`, { fingerprint }),
   incidents: () => request<IncidentRow[]>("GET", "/incidents"),
   reportProblem: (body: { product_id: string; title: string; description: string; severity: string; component?: string }) =>
     request<{ feature_id: string }>("POST", "/incidents", body),

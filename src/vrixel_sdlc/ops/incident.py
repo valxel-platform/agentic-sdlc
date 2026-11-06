@@ -25,7 +25,7 @@ from ..state import last, merge_dict
 from .signals import resolves, still_firing
 
 ACTIONS = ("flag_off", "rollback", "hotfix", "intent_change", "monitor")
-DECISIONS = ("approve", "revise", "resolve")
+DECISIONS = ("approve", "revise", "resolve", "merge")
 CLOSE_DECISIONS = ("approve", "revise")
 RECOVERY_MINUTES = {"sev1": 30, "sev2": 60, "sev3": 240, "sev4": 1440}
 _ACTION = re.compile(r"^-\s*(flag_off|rollback|hotfix|intent_change|monitor)\s*:\s*(.*)$", re.M)
@@ -141,6 +141,14 @@ def stub_postmortem(ctx: dict) -> str:
 def build_incident_graph(services, checkpointer=None):
     def context(state: IncidentState) -> dict:
         signals = services.incident_signals(state["incident_id"])
+        # The furthest-downstream failing component is the root cause candidate (ops/correlate.py).
+        from .correlate import root
+
+        try:
+            component, why = root(services.snapshot(state["product_id"]), signals, state.get("component", ""))
+        except Exception:
+            component, why = state.get("component", ""), ""
+        state = {**state, "component": component or state.get("component", ""), "root_why": why}
         suspects = services.suspects(state["product_id"], state.get("component", ""))
         observed = {}
         if state.get("component"):
@@ -161,6 +169,9 @@ def build_incident_graph(services, checkpointer=None):
             f"Triage incident {state['incident_id']} in {state['product_id']} (severity {state['severity']}).",
             "Signals:", *[f"- [{s['source']} {s['status']} {s['severity']}] {s['title']}: {s.get('detail', '')[:300]}"
                           for s in ctx["signals"][-20:]],
+            *([f"Root cause candidate: {ctx['component']} ({ctx['root_why']})."] if ctx.get("root_why") else []),
+            *[f"Joined because {s['labels']['joined_by']}: {s['title']}"
+              for s in ctx["signals"] if (s.get("labels") or {}).get("joined_by")][-5:],
             "Recent changes to the component (most recent first):",
             *[f"- {x['feature_id']} {x['title']}: released {x.get('released_at', '')}, flag "
               f"{'on' if x.get('flag_on') else 'off' if x.get('flag') else 'none'}" for x in ctx["suspects"][:10]],
@@ -186,11 +197,19 @@ def build_incident_graph(services, checkpointer=None):
     def decide(state: IncidentState) -> Command:
         snap = services.snapshot(state["product_id"])
         signals = services.incident_signals(state["incident_id"])
+        from .correlate import root
+
+        try:
+            root_component, root_why = root(snap, signals, state.get("component", ""))
+        except Exception:
+            root_component, root_why = state.get("component", ""), ""
         packet = {
             "type": "gate", "gate": "incident", "phase": "incident", "kind": "incident", "lane": state["product_id"],
             "feature_id": state["incident_id"], "product_id": state["product_id"], "title": state["title"],
             "severity": state["severity"], "preview": state["triage"][:4000], "actions": state.get("actions") or [],
             "signals": signals[-20:], "firing": len(still_firing(signals)),
+            # Where the failure starts, among the components that showed it (ops/correlate.py).
+            "root": {"component": root_component, "why": root_why},
             "suspects": services.suspects(state["product_id"], state.get("component", ""))[:5],
             "approvers": oncall_approvers(snap.product), "allowed": list(DECISIONS),
         }
@@ -200,6 +219,17 @@ def build_incident_graph(services, checkpointer=None):
             return Command(goto="triage", update={"gate_decisions": [rec], "feedback": d.get("feedback", ""),
                                                   "status": "triaging", "events": [event("incident", "revise", d.get("feedback", ""),
                                                                                          approver=d["approver"])]})
+        if d["decision"] == "merge":
+            into = str(d.get("into") or "")
+            if not into or into == state["incident_id"]:
+                from ..graph import InvalidDecision
+
+                raise InvalidDecision("Merging needs the incident to merge into")
+            services.close_incident(state["incident_id"])
+            return Command(goto=END, update={"gate_decisions": [rec], "status": "merged",
+                                             "links": {into: "merged into"},
+                                             "events": [event("incident", "merged", f"into {into}: {d.get('feedback', '')}",
+                                                              approver=d["approver"])]})
         if d["decision"] == "resolve":
             return Command(goto="postmortem", update={"gate_decisions": [rec], "status": "postmortem",
                                                       "events": [event("incident", "resolved", d.get("feedback", ""),

@@ -352,6 +352,36 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(400, "Body is not JSON") from exc
         return ingest(from_ticket(payload))
 
+    def oncall(user: User, product_id: str) -> None:
+        """Only the product's on-call (who decide incidents) may merge or split them."""
+        from ..ops.incident import oncall_approvers
+
+        member_of(user, product_id)
+        if not can_decide(user, {"approvers": oncall_approvers(eng().services.snapshot(product_id).product)}):
+            raise HTTPException(403, "Only the product's on-call can merge or split incidents")
+
+    @api.post("/incidents/{incident_id}/merge")
+    def merge_incident(incident_id: str, body: dict, user: User = Depends(current_user)) -> dict:
+        """On-call: this incident is the same failure as another; its signals move there."""
+        into = str(body.get("into") or "")
+        product = eng()._state(incident_id).get("product_id", "") if incident_id else ""
+        if not product or eng()._state(into).get("product_id") != product:
+            raise HTTPException(400, "Merge into an open incident of the same product")
+        oncall(user, product)
+        return eng().merge_incidents(incident_id, into, approver=user.login, reason=str(body.get("reason") or ""))
+
+    @api.post("/incidents/{incident_id}/split")
+    def split_incident(incident_id: str, body: dict, user: User = Depends(current_user)) -> dict:
+        """On-call: a signal was joined to this incident wrongly; it opens its own."""
+        product = eng()._state(incident_id).get("product_id", "")
+        if not product:
+            raise HTTPException(404, f"Unknown incident {incident_id}")
+        oncall(user, product)
+        try:
+            return eng().split_signal(incident_id, str(body.get("fingerprint") or ""), approver=user.login)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
     @api.post("/signals/openchoreo", status_code=202)
     async def openchoreo_alert(request: Request) -> dict:
         """An OpenChoreo notification channel (type webhook, no payloadTemplate, header

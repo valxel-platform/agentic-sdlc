@@ -432,23 +432,40 @@ class FeatureEngine:
         or open a new incident for a firing one. Returns the incidents touched."""
         from .ops.signals import resolve_product
 
+        from .ops import correlate
+
         touched: list[str] = []
         for sig in signals:
             product_id, repo = resolve_product(self.services, sig)
             if not product_id:
                 continue  # a signal for no product we know: nothing to do
             sig = {**sig, "product_id": product_id, "component": repo or sig.get("component", "")}
+            sig = self._with_traces(sig)
+            joined, others = "", []
             with self._create_lock:
                 # A cost finding joins only the incident for the same finding, never a component's outage.
                 match = "" if sig.get("category") == "cost" else repo
                 iid = self.services.signals.open_incident_for(product_id, sig["fingerprint"], match)
                 created = False
+                if sig["status"] == "firing" and sig.get("category") != "cost" and not sig.get("no_correlate"):
+                    # The same failure seen from another component (ops/correlate.py). A signal that
+                    # names the same request as other open incidents ties them into one.
+                    matches = correlate.related(self, product_id, sig)
+                    if iid is None and matches:
+                        iid, joined = matches[0]
+                        sig = {**sig, "labels": {**(sig.get("labels") or {}), "joined_by": joined}}
+                    others = [m for m, why in matches if m != iid and why.startswith("trace")]
                 if iid is None and sig["status"] == "firing":
                     iid = self._new_id_locked(product_id, "incident", sig["title"])
                     created = True
                 if iid is None:
                     continue  # a resolution for an incident already closed
                 self.services.signals.add(iid, product_id, sig)
+            for other in others:  # this signal ties them together: one incident
+                self.merge_incidents(other, iid, approver="agent:correlate",
+                                     reason=f"{sig['title']} ties it to {iid} ({joined})")
+            if joined:
+                self._root_moved(iid)
             if created:
                 inp = {"incident_id": iid, "product_id": product_id, "title": sig["title"], "severity": sig["severity"],
                        "component": repo, "opened_at": sig["at"], "status": "triaging"}
@@ -475,6 +492,79 @@ class FeatureEngine:
             if sig["env"] == "production":
                 production.append(sig)
         return {"recorded": kept, "incidents": self.ingest(production) if production else []}
+
+    # --- correlation: one incident per failure ------------------------------------------------
+    def _with_traces(self, sig: dict) -> dict:
+        """An OpenChoreo log alert names no request: read the trace ids of the component's recent
+        error logs, so it can be matched to the apps' and other services' reports (best effort)."""
+        from .ops.correlate import traces_in_logs
+
+        labels = sig.get("labels") or {}
+        if sig.get("source") != "openchoreo" or labels.get("alertType") != "log" or labels.get("trace_ids"):
+            return sig
+        try:
+            snap = self.services.snapshot(sig["product_id"])
+            rt = snap.product.runtime or {}
+            got = self.services.openchoreo.observe(
+                component=(rt.get("components") or {}).get(sig["component"], sig["component"]), env=sig.get("env", "production"),
+                project=rt.get("openchoreo_project"), namespace=rt.get("namespace"), minutes=10)
+        except Exception:
+            return sig
+        ids = traces_in_logs(got.get("logs") or [])
+        return {**sig, "labels": {**labels, "trace_ids": ",".join(ids)}} if ids else sig
+
+    def _root_moved(self, incident_id: str) -> None:
+        """A joined signal may show the failure starts further downstream: if the incident is
+        waiting for on-call, triage again around the new root cause candidate."""
+        from .ops.correlate import root
+
+        s = self._state(incident_id)
+        if not s or s.get("status") != "awaiting_decision":
+            return
+        cand, why = root(self.services.snapshot(s["product_id"]), self.services.signals.for_incident(incident_id),
+                         s.get("component", ""))
+        if not cand or cand == s.get("component"):
+            return
+        item = next((p for p in self.pending(incident_id) if p.get("gate") == "incident"), None)
+        if item:
+            try:
+                self.decide(incident_id, item["interrupt_id"], {
+                    "decision": "revise", "approver": "agent:correlate",
+                    "feedback": f"A related signal joined; the root cause candidate is now {cand}: {why}"})
+            except RuntimeError:
+                pass  # running: its next triage reads the signals anyway
+
+    def merge_incidents(self, incident_id: str, into: str, *, approver: str, reason: str = "") -> dict:
+        """Move one incident's signals into another and end it as merged. On-call can do this; the
+        tool does it when a new signal ties two open incidents together."""
+        if incident_id == into:
+            raise ValueError("An incident can't be merged into itself")
+        moved = self.services.signals.move(incident_id, into)
+        item = next((p for p in self.pending(incident_id) if p.get("gate") == "incident"), None)
+        ended = False
+        if item:
+            self.decide(incident_id, item["interrupt_id"], {"decision": "merge", "into": into, "approver": approver,
+                                                            "feedback": reason or f"Merged into {into}"})
+            ended = True
+        self._root_moved(into)
+        self.bus.publish({"type": "feature.updated", "feature_id": into})
+        return {"merged": incident_id, "into": into, "signals": moved, "ended": ended}
+
+    def split_signal(self, incident_id: str, fingerprint: str, *, approver: str) -> dict:
+        """Take a signal that was joined wrongly out of an incident: it opens its own."""
+        sigs = [s for s in self.services.signals.for_incident(incident_id) if s["fingerprint"] == fingerprint]
+        if not sigs:
+            raise KeyError(f"{incident_id} has no signal {fingerprint}")
+        latest = dict(sigs[-1])
+        latest.pop("incident_id", None)
+        placeholder = f"{incident_id}:split:{fingerprint}"
+        self.services.signals.move(incident_id, placeholder, fingerprint)
+        self.services.signals.close(placeholder)
+        labels = {k: v for k, v in (latest.get("labels") or {}).items() if k != "joined_by"}
+        new = self.ingest([{**latest, "status": "firing", "no_correlate": True,
+                            "labels": {**labels, "split_from": incident_id, "split_by": approver}}])
+        self.bus.publish({"type": "feature.updated", "feature_id": incident_id})
+        return {"incident_id": incident_id, "signal": fingerprint, "new_incident": new[0] if new else None}
 
     # --- cost: released features against what G4 approved -----------------------------------
     def review_costs(self, at=None) -> list[dict]:
@@ -830,6 +920,10 @@ class FeatureEngine:
         if item["type"] == "external":
             raise RuntimeError(f"{feature_id} is waiting on {item.get('label', 'an external system')}, not a person")
         d = normalize(decision, tuple(item["allowed"]))  # validate before resuming
+        if d["decision"] == "merge" and (not d.get("into") or d["into"] == feature_id):
+            from .graph import InvalidDecision
+
+            raise InvalidDecision("Merging needs another incident to merge into")
         if d["decision"] == "accept_risk" and not d["feedback"].strip():
             from .graph import InvalidDecision
 
