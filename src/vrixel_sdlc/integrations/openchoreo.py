@@ -72,6 +72,11 @@ class OpenChoreo(Protocol):
 ROLLBACK_ACTORS = ("human", "policy")
 
 
+# Who may roll production back: a person, or the tool under the platform's remediation policy
+# (ops/remediation.py: only a recent release, and the release restored was already approved).
+ROLLBACK_ACTORS = ("human", "policy")
+
+
 def check_promotion(env: str, actor_type: str, pipeline: tuple[str, ...]) -> None:
     if env not in pipeline:
         raise ValueError(f"Unknown environment {env!r}; the pipeline is {list(pipeline)}")
