@@ -741,6 +741,29 @@ SEV3 otherwise. OpenChoreo budget alert rules and AWS Budgets (named
 
 Not counted yet: in-product agents' model spend outside this tool's gateway, and SaaS bills
 (Sentry, store fees).
+**Building a feature.** Every agent call is metered in the usage ledger (tokens, cache hits, cost by
+phase and model) against the feature's budget, and each gate records the people's active minutes.
+
+**Running it.** G4 approves a feature's AWS services with their planning cost per environment; that
+becomes the feature's cost plan. After release the tool reviews the feature (by default 7 and 30 days
+after, `VRIXEL_COST_REVIEW_DAYS`):
+
+| What | Source | Compared with |
+| --- | --- | --- |
+| The feature's AWS resources, per environment | AWS Cost Explorer: tag `vrixel:feature` in the environment's account (`VRIXEL_AWS_COST_EXPLORER=1`, the `aws` extra, `ce:GetCostAndUsage`) | The G4 plan, as a monthly run-rate |
+| Its components' compute in production | OpenChoreo FinOps (`finops-opencost` module) through the Observer cost API (`VRIXEL_OPENCHOREO_OBSERVER_URL`) | The same components the week before release |
+
+Spend more than `VRIXEL_COST_TOLERANCE` (default 20%) and $5/month above the comparison becomes a
+cost signal in the incident flow: SEV2 for production AWS at twice the plan or more, SEV3 otherwise.
+Budgets are the second line: OpenChoreo budget alert rules per component, and AWS Budgets per
+product account named `vrixel-<product id>-<environment>`, arrive as cost signals the same way.
+
+`vrixel:feature` and `vrixel:product` must be activated as cost allocation tags in the payer
+account; Cost Explorer data lags by about a day. Each review is stored, and served at
+`GET /api/features/{id}/cost` (build cost, plan, reviews) and `GET /api/costs/{product}` (each
+feature's build cost and run-rate, with totals). The feature page shows the plan against the latest
+review. Not covered yet: CI minutes, build and test environment costs before release, cluster
+compute and shared platform costs allocated to products.
 
 ## AWS services (VX-19)
 
