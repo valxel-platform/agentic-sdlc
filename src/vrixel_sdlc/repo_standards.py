@@ -218,7 +218,12 @@ def compare(t: Target, state: dict | None) -> list[Drift]:
             continue
         needs = {"code_scanning_default_setup": "code_scanning", "secret_scanning": "secret_scanning",
                  "push_protection": "secret_scanning"}.get(k)
-        if k == "private_vulnerability_reporting" and state["visibility"] != "public":
+        if k == "dependency_graph":
+            # No API turns it on: dependency review and submission fail until someone does.
+            out.append(Drift("security", k, True, False, "manual",
+                             "Settings > Advanced Security > Dependency graph: Enable (or enable it for all "
+                             "repositories in the organization's settings)"))
+        elif k == "private_vulnerability_reporting" and state["visibility"] != "public":
             out.append(Drift("security", k, True, False, "unavailable", "a public repo"))
         elif needs and not avail.get(needs):
             out.append(Drift("security", k, True, False, "unavailable",

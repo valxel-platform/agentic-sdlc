@@ -257,7 +257,8 @@ class StubGitHub:
                 "rulesets", "security", "available", "topics", "properties", "teams", "files", "visibility",
                 "archived", "description")},
             "visibility": st.get("visibility", "private"), "archived": st.get("archived", False),
-            "security": {k: bool(sec.get(k)) for k in (
+            # GitHub turns the dependency graph on for new repos unless the org says otherwise.
+            "security": {k: bool(sec.get(k, k == "dependency_graph")) for k in (
                 "dependency_graph", "dependabot_alerts", "dependabot_security_updates", "secret_scanning",
                 "push_protection", "code_scanning_default_setup", "private_vulnerability_reporting")},
             "available": {"rulesets": True, **dict(st.get("available") or {"code_scanning": True, "secret_scanning": True})},
@@ -532,6 +533,8 @@ class GitHubRest:
         ghas_code = public or bool(status("code_security", "advanced_security"))
         ghas_secrets = public or bool(status("secret_protection", "advanced_security"))
         alerts = self._call("GET", repo, "/vulnerability-alerts", ok404=True) is not None
+        # The dependency graph has no setting in the API; its SBOM exists only while it's on.
+        graph = self._call("GET", repo, "/dependency-graph/sbom", ok404=True) is not None
         # Read from its own endpoint: security_and_analysis is empty for private repos on GitHub Free.
         fixes = bool((self._call("GET", repo, "/automated-security-fixes", ok404=True) or {}).get("enabled"))
         try:
@@ -573,7 +576,7 @@ class GitHubRest:
                 "is_template")},
             "visibility": info.get("visibility") or ("private" if info.get("private") else "public"),
             "archived": bool(info.get("archived")),
-            "security": {"dependabot_alerts": alerts, "dependency_graph": alerts,
+            "security": {"dependabot_alerts": alerts, "dependency_graph": graph,
                          "dependabot_security_updates": fixes,
                          "private_vulnerability_reporting": pvr,
                          "secret_scanning": bool(status("secret_scanning")),

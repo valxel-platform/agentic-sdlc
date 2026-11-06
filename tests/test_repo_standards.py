@@ -334,3 +334,16 @@ def test_lane_repos_require_the_gates_status_from_the_platform_app_only(svc, mon
     next(c for c in checks if c["context"] == "vrixel/gates").pop("integration_id")
     rep = rs.reconcile(gh, t, apply=False)
     assert ("ruleset", "vrixel-default-branch") in {(d.area, d.item) for d in rep.drift}
+
+
+def test_a_dependency_graph_that_is_off_is_reported_for_a_person(svc):
+    """No API turns it on, and dependency review fails without it: tell someone exactly where."""
+    ts = {t.repo: t for t in rs.targets(svc)}
+    gh = StubGitHub()
+    repo = "vrixel-emr/emr-intake-api"
+    existing(gh, repo)
+    rs.reconcile(gh, ts[repo], apply=True)
+    gh.repos[repo].setdefault("state", {}).setdefault("security", {})["dependency_graph"] = False
+    rep = rs.reconcile(gh, ts[repo], apply=True)
+    d = next(d for d in rep.drift if d.item == "dependency_graph")
+    assert d.fix == "manual" and "Settings > Advanced Security > Dependency graph" in d.needs
