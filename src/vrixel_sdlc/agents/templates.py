@@ -209,6 +209,9 @@ def _flowchart(ctx: dict, repos: list[dict]) -> str:
             out += [f'  {_node_id(r["name"])} -->|"versioned API"| {_node_id(p["name"])}' for p in providers]
         elif r["role"] == "event-worker":
             out += [f'  {_node_id(p["name"])} -->|"events (Kafka)"| {_node_id(r["name"])}' for p in providers]
+        elif r["role"] == "mobile":
+            out += [f'  {_node_id(r["name"])} -->|"/mobile/api (bearer)"| {_node_id(b["name"])}'
+                    for b in repos if b["role"] == "bff"]
     return "\n".join(out)
 
 
@@ -271,12 +274,13 @@ def _endpoint_lines(repos: list[dict]) -> list[str]:
         "agent": by_role.get("mcp-server", []),
         "mcp-server": by_role.get("provider", []),
         "consumer": [],
+        "mobile": by_role.get("bff", []),
     }
     out = []
     for r in repos:
         if r["role"] in ("library", "acceptance"):
             continue
-        vis = {"bff": "external", "event-worker": "none"}.get(r["role"], "project")
+        vis = {"bff": "external", "event-worker": "none", "mobile": "none"}.get(r["role"], "project")
         targets = calls.get(r["role"], [])
         out.append(f"- {r['name']}: {vis}" + (f"; calls {', '.join(targets)}" if targets else ""))
     return out

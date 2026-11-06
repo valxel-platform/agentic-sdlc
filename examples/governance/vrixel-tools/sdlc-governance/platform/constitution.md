@@ -1,6 +1,6 @@
 ---
 name: platform
-version: 1.5.0
+version: 1.6.0
 ---
 # Vrixel platform constitution
 
@@ -36,3 +36,7 @@ Data and events:
 Identity and exposure:
 
 - **VX-17** Every request carries two checked identities: the calling workload (mutual TLS from the mesh) and the person or service it acts for (a token from the product's identity provider, issued for the product). Every endpoint declares the permission it needs and anything undeclared is denied; record access is checked per record. Browsers never hold tokens: they reach a product only through its BFF, the product's only internet-facing component unless an ADR approves another. Tokens are exchanged for the target at trust boundaries and by agents for each tool server; no fixed credentials. (Policy, Test)
+
+Apps on people's devices:
+
+- **VX-18** A mobile app is a public client: it signs people in through the system browser with PKCE, keeps tokens only in the device's secure storage, and reaches its product only through the product's BFF. Every change it makes carries an idempotency key and waits on the device until the product accepts it. Store releases go out in stages and widen only while the release stays healthy. Every app version still supported keeps working: the API stays compatible with the oldest one, which the BFF enforces as the minimum version. On a device, PHI is encrypted at rest, behind the device's lock, kept out of screenshots, notifications and logs, and wiped at sign-out. (Policy, Test)

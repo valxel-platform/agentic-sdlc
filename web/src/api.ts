@@ -94,7 +94,7 @@ export interface Feature extends FeatureSummary {
   events: FeatureEvent[];
   diagrams: Diagram[];
   delivery: Record<string, WaitResult>;
-  deployments: Record<string, { repo: string; component: string; env: string; release?: string; pipeline?: string[] }>;
+  deployments: Record<string, { repo: string; component: string; env: string; release?: string; pipeline?: string[]; kind?: string }>;
   quality: Record<string, { stage: string; status: string; suites: QualitySuite[]; at: string }>;
   waivers: Waiver[];
   new_repos: RepoPlan[];

@@ -95,6 +95,7 @@ platform_repos:
   vrixel-tools/template-event-worker: { kind: template, role: event-worker }
   vrixel-tools/template-acceptance: { kind: template, role: acceptance }
   vrixel-tools/template-bff: { kind: template, role: bff }
+  vrixel-tools/template-mobile: { kind: template, role: mobile }
   vrixel-tools/platform-security: { kind: tool, product: platform, required_checks: [test] }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
@@ -132,6 +133,16 @@ roles:
     template: vrixel-tools/template-bff
     required_checks: [unit, CodeQL]          # unit runs the sign-in flow against a fake realm and Redis
     openchoreo: { component_type: deployment/service, workflow: docker }
+  # An iOS and Android app (React Native, Expo; offline-first). Not deployed: each stage asks the
+  # repo's release workflow to build it (test builds and Maestro in dev and staging, TestFlight and
+  # Play's internal track in staging, the stores in production), then the Play rollout widens
+  # step by step, each step after min_hours and a crash-free check (vrixel_sdlc.store). It calls
+  # the product's API through the BFF's /mobile route.
+  mobile:
+    template: vrixel-tools/template-mobile
+    required_checks: [unit, contract, CodeQL]
+    openchoreo: null
+    rollout: { steps: [0.1, 0.5, 1.0], min_hours: 24, step_timeout_hours: 96, recheck_hours: 6 }
   # The product's end-to-end tests across repos (Playwright Test, TypeScript): API and event
   # tests for every feature, browser tests when a web app changes. One per product; not deployed:
   # the pipeline runs it against each environment after the change set is deployed.

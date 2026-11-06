@@ -739,7 +739,7 @@ RAIL = [("discovery", "phase"), ("g1", "gate"), ("spec", "phase"), ("g2", "gate"
 
 
 WAIT_STATION = {"ci": "build", "build": "build", "dev": "build", "staging": "release", "production": "operate",
-                "release_train": "g6"}
+                "rollout": "operate", "release_train": "g6"}
 EXPEDITED = ("discovery", "g1", "spec", "g2", "design", "g3", "architecture", "g4")
 
 

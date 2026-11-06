@@ -3,7 +3,7 @@
 discovery -> G1 -> spec -> G2 -> (design -> G3 | architecture -> G4) -> join -> plan -> build
   -> ci_wait -> [G5 if high-risk] -> merge_train -> build_wait -> deploy_dev -> dev_wait
   -> deploy_staging -> staging_wait -> release -> G6 (promotes production) -> production_wait
-  -> operate -> finalize
+  -> rollout (store apps only) -> operate -> finalize
 
 Gates and escalations are `interrupt()` nodes; a durable checkpointer keeps each thread
 waiting for as long as a human needs. Any phase escalates after its loop cap or budget.
@@ -20,7 +20,8 @@ from ..agents import GATE_APPROVE_TARGET, GATE_PHASE, NEXT_AFTER_PHASE, PHASE_SP
 from ..agents.parse import parse_affected_repos, parse_new_repos, parse_tasks
 from ..integrations.openchoreo import PIPELINE
 from ..state import GATES, PHASES, FeatureState, GateDecision
-from ..waits import LABELS, TIMEOUT_S
+from .. import store
+from ..waits import LABELS, STORE_TIMEOUT_S, TIMEOUT_S
 from .phase import capability_id, design_knowledge, event, gates_status, make_phase_node, now, touched_lanes
 
 GATE_DECISIONS = ("approve", "revise", "takeover", "abort")
@@ -276,6 +277,12 @@ def make_gate(gate: str, services):
             # thread; the stub records it here.
             lanes_by_repo = snap.lane_of_repo()
             for repo in release.get("components", []):
+                prior = (state.get("deployments") or {}).get(repo) or {}
+                if prior.get("kind") == "store":
+                    # A store app: the approver's decision submits it to the stores (Play at 1%).
+                    update.setdefault("deployments", {})[repo] = release_store_app(
+                        services, state, repo, prior["sha"], "production", actor=d["approver"])
+                    continue
                 t = oc_target(lanes_by_repo.get(repo, snap.product), repo)
                 env = env_for("production", t["pipeline"])
                 rec = services.openchoreo.promote(component=t["component"], env=env, actor=d["approver"],
@@ -547,6 +554,10 @@ def make_merge_train(services):
                 # Not deployed: the pipeline runs these tests against each environment (env waits).
                 cs["acceptance"] = {"repo": repo, "sha": sha}
                 continue
+            if roles.get(repo) in store.STORE_ROLES:
+                # Released through the stores by its own workflow at each stage (vrixel_sdlc.store).
+                cs.setdefault("store", {})[repo] = {"repo": repo, "sha": sha}
+                continue
             if lane is not None and lane.kind == "shared":
                 # No runtime of its own: publish a release candidate that consumers build against.
                 if repo not in published:
@@ -747,6 +758,12 @@ def make_deploy(stage: str, services, nxt: str):
             except Exception as exc:
                 failures.append({"repo": repo, "component": t["component"], "state": "failure",
                                  "message": f"{type(exc).__name__}: {exc}"})
+        for repo, app in ((state.get("change_set") or {}).get("store") or {}).items():
+            try:
+                deps[repo] = release_store_app(services, state, repo, app["sha"], stage, actor=f"agent:{stage}")
+            except Exception as exc:
+                failures.append({"repo": repo, "component": repo, "state": "failure",
+                                 "message": f"{type(exc).__name__}: {exc}"})
         if failures:
             res = {"status": "failure", "wait": stage, "results": failures, "at": now(),
                    "reason": f"Couldn't deploy to {stage}: " + "; ".join(f["message"] for f in failures)}
@@ -760,17 +777,23 @@ def make_deploy(stage: str, services, nxt: str):
 def make_env_wait(services, stage: str, ok: str, retry: str):
     def env_wait(state: FeatureState) -> Command:
         targets = [{"repo": d["repo"], "component": d["component"], "project": d.get("project"),
-                    "namespace": d.get("namespace"), "env": d["env"]}
+                    "namespace": d.get("namespace"), "env": d["env"],
+                    **({"kind": "store", "sha": d.get("sha", "")} if d.get("kind") == "store" else {})}
                    for d in (state.get("deployments") or {}).values()
                    if d.get("env") == env_for(stage, tuple(d.get("pipeline") or PIPELINE))]
         if not targets:
             return Command(goto=ok)
         runs = (state.get("change_set") or {}).get("runs") or {}
         roles = {t["repo"]: t.get("role") for t in state.get("tasks") or []}
-        qtargets = [{**t, "sha": runs.get(t["repo"], {}).get("sha", ""), "role": roles.get(t["repo"], "")}
-                    for t in targets]
-        qtargets += acceptance_targets(services, state, stage, targets)
-        res = interrupt(external(state, stage, targets, quality_packet(services, state, stage, qtargets)))
+        qtargets = [{**t, "sha": t.get("sha") or runs.get(t["repo"], {}).get("sha", ""), "role": roles.get(t["repo"], "")}
+                    for t in targets
+                    # In production a store app is only submitted: its health is the rollout's to judge.
+                    if not (t.get("kind") == "store" and stage == "production")]
+        qtargets += acceptance_targets(services, state, stage, [t for t in targets if t.get("kind") != "store"])
+        packet = external(state, stage, targets, quality_packet(services, state, stage, qtargets))
+        if any(t.get("kind") == "store" for t in targets):
+            packet["timeout_s"] = max(packet["timeout_s"], STORE_TIMEOUT_S[stage])
+        res = interrupt(packet)
         report_to_github(services, state, stage, res)
         if res["status"] == "security":
             return security_review(services, state, stage, res, ok=ok, retry=f"{stage}_wait")
@@ -781,6 +804,60 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
         return _people_said(state, stage, res, ok=ok, retry=retry, extra=_quality_update(res))
 
     return env_wait, (ok, retry, f"{stage}_wait", END)
+
+
+def release_store_app(services, state: FeatureState, repo: str, sha: str, stage: str, *, actor: str) -> dict:
+    """Ask a store app's repo to release this commit for the stage (vrixel_sdlc.store)."""
+    services.github.dispatch(repo=repo, event_type="vrixel-release", payload={
+        "stage": stage, "sha": sha, "feature_id": state["feature_id"], "actor": actor})
+    return {"repo": repo, "kind": "store", "component": repo, "sha": sha, "env": stage,
+            "pipeline": list(store.STAGES), "release": store.release_context(stage), "released_by": actor}
+
+
+def make_rollout(services):
+    """Widen store apps' production rollout step by step, each after a wait and a health check.
+    A failed check halts the rollout and goes to the release managers."""
+
+    def rollout(state: FeatureState) -> Command:
+        apps = sorted((d for d in (state.get("deployments") or {}).values()
+                       if d.get("kind") == "store" and d.get("env") == "production"), key=lambda d: d["repo"])
+        if not apps:
+            return Command(goto="operate")
+        snap = services.feature_snapshot(state)
+        policy = store.rollout_policy(snap.product.repo_standards)
+        ro = dict(state.get("rollout") or {})
+        step, attempt = int(ro.get("step", 0)), int(ro.get("attempt", 0))
+        if step >= len(policy["steps"]):
+            return Command(goto="operate")
+        fraction = policy["steps"][step]
+        since = ro.get("at") or next((e.get("at") for e in reversed(state.get("events") or [])
+                                      if e.get("node") == "production_wait"), None)
+        targets = [{"repo": a["repo"], "sha": a["sha"], "fraction": fraction, "context": store.rollout_context(fraction, attempt),
+                    "not_before": store.not_before(since, policy["min_hours"]) if not attempt else "",
+                    "recheck_hours": policy["recheck_hours"], "feature_id": state["feature_id"]} for a in apps]
+        packet = external(state, "rollout", targets)
+        packet["timeout_s"] = int((float(policy["min_hours"]) + float(policy["step_timeout_hours"])) * 3600)
+        res = interrupt(packet)
+        history = list(ro.get("history") or [])
+        if res["status"] == "success":
+            history.append({"fraction": fraction, "at": res.get("at", now()), "attempt": attempt})
+            done = step + 1 >= len(policy["steps"])
+            return Command(goto="operate" if done else "rollout", update={
+                "rollout": {"step": step + 1, "attempt": 0, "at": res.get("at", now()), "history": history},
+                "events": [event("rollout", "widened", f"{', '.join(a['repo'] for a in apps)} at {store.percent(fraction)}")]})
+        # Unhealthy (or stuck): stop the Play rollout where it is, then let people decide.
+        for a in apps:
+            try:
+                services.github.dispatch(repo=a["repo"], event_type="vrixel-rollout", payload={
+                    "sha": a["sha"], "halt": True, "feature_id": state["feature_id"]})
+            except Exception:
+                pass
+        return _people_said(state, "rollout", res, ok="operate", retry="rollout", extra={
+            "rollout": {"step": step, "attempt": attempt + 1, "at": ro.get("at") or since, "history": history,
+                        "halted": True},
+            "events": [event("rollout", "halted", res.get("reason", ""))]})
+
+    return rollout, ("rollout", "operate", END)
 
 
 def acceptance_targets(services, state: FeatureState, stage: str, deployed: list[dict]) -> list[dict]:
@@ -831,8 +908,10 @@ def build_pipeline(services, checkpointer=None):
         g.add_node(f"deploy_{stage}", node, destinations=dest)
         node, dest = make_env_wait(services, stage, ok=after, retry=f"deploy_{stage}")
         g.add_node(f"{stage}_wait", node, destinations=dest)
-    node, dest = make_env_wait(services, "production", ok="operate", retry="g6")
+    node, dest = make_env_wait(services, "production", ok="rollout", retry="g6")
     g.add_node("production_wait", node, destinations=dest)
+    node, dest = make_rollout(services)
+    g.add_node("rollout", node, destinations=dest)
     g.add_node("finalize", finalize)
 
     g.add_node("hotfix_brief", make_hotfix_brief(services))

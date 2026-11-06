@@ -9,15 +9,20 @@ and when a GitHub webhook says something changed.
   dev        component, env, project, ...        the ReleaseBinding in that env is ready
   staging    (same)
   production (same)
+  (store apps, role mobile: repo, sha, kind=store; done when the repo posts "release / <stage>")
+  rollout    repo, sha, fraction, not_before, context: the repo posted <context> (vrixel_sdlc.store)
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 LABELS = {"ci": "CI checks", "build": "OpenChoreo builds", "dev": "Deploy to dev",
-          "staging": "Deploy to staging", "production": "Deploy to production"}
-TIMEOUT_S = {"ci": 3 * 3600, "build": 3600, "dev": 1800, "staging": 1800, "production": 1800}
+          "staging": "Deploy to staging", "production": "Deploy to production", "rollout": "Staged rollout"}
+# Store builds and Maestro runs take longer than a deployment; a rollout step waits on a day of vitals.
+TIMEOUT_S = {"ci": 3 * 3600, "build": 3600, "dev": 1800, "staging": 1800, "production": 1800,
+             "rollout": 96 * 3600}
+STORE_TIMEOUT_S = {"dev": 3 * 3600, "staging": 4 * 3600, "production": 4 * 3600}
 
 
 def now() -> str:
@@ -28,6 +33,7 @@ class WaitChecker:
     def __init__(self, services) -> None:
         self.services = services
         self._dispatched: set[tuple] = set()
+        self._rollout_asked: dict[tuple, datetime] = {}
 
     def _start_post_deploy(self, packet: dict, results: list[dict]) -> None:
         """Once a stage's deployment is ready, ask each repo to run its post-deploy suite
@@ -60,6 +66,8 @@ class WaitChecker:
         roles = {t["repo"]: t.get("role", "") for t in q.get("targets") or []}
         public = next((r.get("url", "") for r in results if roles.get(r["repo"]) == "bff"), "")
         for r in results:
+            if r.get("kind") == "store":
+                continue  # store apps test themselves in their release workflow
             key = (packet.get("feature_id"), packet["wait"], packet.get("since"), r["repo"])
             if key in self._dispatched or not shas.get(r["repo"]):
                 continue
@@ -72,7 +80,41 @@ class WaitChecker:
             except Exception:
                 self._dispatched.discard(key)  # try again on the next check
 
+    def _status(self, t: dict, context: str) -> dict | None:
+        res = self.services.github.checks(repo=t["repo"], sha=t["sha"])
+        return next((c for c in res.get("checks", []) if c.get("name") == context), None)
+
+    def _rollout(self, t: dict) -> dict:
+        """A rollout step: not before its time; then ask the repo to check health and widen, again
+        every few hours while it has too little data to judge."""
+        from .store import DEFAULT_ROLLOUT
+
+        when = datetime.fromisoformat(t["not_before"]) if t.get("not_before") else None
+        if when and datetime.now(timezone.utc) < when:
+            return {"state": "pending", "message": f"next step after {when.isoformat(timespec='minutes')}"}
+        status = self._status(t, t["context"])
+        if status and status["state"] in ("success", "failure"):
+            return {"state": status["state"], "message": status.get("summary", ""), "url": status.get("url", "")}
+        key = (t["repo"], t["sha"], t["context"])
+        last = self._rollout_asked.get(key)
+        recheck = timedelta(hours=float(t.get("recheck_hours") or DEFAULT_ROLLOUT["recheck_hours"]))
+        if last is None or datetime.now(timezone.utc) - last > recheck:
+            self.services.github.dispatch(repo=t["repo"], event_type="vrixel-rollout", payload={
+                "sha": t["sha"], "fraction": str(t["fraction"]), "context": t["context"],
+                "feature_id": t.get("feature_id", "")})
+            self._rollout_asked[key] = datetime.now(timezone.utc)
+        return {"state": "pending", "message": (status or {}).get("summary", "") or "checking the release's health"}
+
     def _one(self, wait: str, t: dict) -> dict:
+        if wait == "rollout":
+            return self._rollout(t)
+        if t.get("kind") == "store":
+            from .store import release_context
+
+            status = self._status(t, release_context(wait))
+            state = (status or {}).get("state", "pending")
+            return {"state": state, "url": (status or {}).get("url", ""),
+                    "message": (status or {}).get("summary", "") if state == "failure" else ""}
         if wait == "ci":
             res = self.services.github.checks(repo=t["repo"], sha=t["sha"])
             failing = [c["name"] for c in res.get("checks", []) if c["state"] == "failure"]

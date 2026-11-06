@@ -681,13 +681,40 @@ policies from one spec.
 | Service (`provider`) | `template-service` | Issuer, keys, expiry and the product audience; `@PreAuthorize` on every endpoint (the build fails otherwise); record-level `AccessPolicy`; forward inside the product, token exchange across trust boundaries |
 | Agent (`agent`) | `template-agent` | Token exchange per MCP server for the person behind each step (the approver for approved changes); no fixed tokens; people's tokens never stored |
 | MCP server (`mcp-server`) | `template-mcp-server` | Audience and a scope per tool; audit on behalf of the person |
+| Mobile app (`mobile`) | `template-mobile` (React Native, Expo) | A public client (PKCE in the system browser), tokens in the Keychain or Keystore, calls only through the BFF's `/mobile/api` route (bearer token, audience and minimum version checked there); PHI builds encrypt local data and block screenshots (VX-18) |
 
 Designs declare exposure in an `## Endpoints` section, one line per component:
 `- <org>/<repo>: <project|namespace|internal|external|none>[; calls <component>, ...]`. Only the BFF
 may be `external` (anything else needs an ADR that says so), a web app never is, and every call
-must name a component of the design or the product. G4 approves it; the components' `workload.yaml`
+must name a component of the design or the product. A mobile app is `none` and calls only the
+product's BFF. G4 approves it; the components' `workload.yaml`
 and the product's mesh policies follow it. Coders and reviewers get their role's rules. A web app's
 post-deploy tests run against the BFF's public URL.
+
+## Store apps (VX-18)
+
+A mobile app (role `mobile`) is released, not deployed: people install a build and keep it for
+months, and every build goes through the stores. The pipeline is the same up to the merge; then,
+instead of OpenChoreo, each stage asks the app's repo to release the merge commit
+(`vrixel-release`, `release.yml` from `template-mobile`) and waits for the status it posts:
+
+| Stage | The app's repo | Waits for |
+| --- | --- | --- |
+| dev | a test build against dev on an emulator, Maestro flows | `release / dev`, `integration / report` |
+| staging | the same against staging, then TestFlight and Play's internal track for testers | `release / staging`, `e2e / report` |
+| production (G6) | store builds submitted; Play starts at 1% of users | `release / production` |
+| rollout | each step after `min_hours`: Play vitals' crash-free users, then widen | `rollout / <n>%` |
+
+After G6 the `rollout` node widens the Play rollout through `steps` (default 10%, 50%, 100%), each
+at least `min_hours` (24) after the last, because vitals arrive daily. A failed health check halts
+the Play rollout and goes to the release managers (retry the check, carry on, or stop); pause the
+App Store's phased release by hand. Set the policy per product in
+`repo_standards.roles.mobile.rollout`. Features ship dark in the build and turn on with their flag
+as for any other component, so a store release needs no second release for G6's flag.
+
+Old versions are the other half: the BFF answers 426 to versions below `BFF_MOBILE_MIN_VERSION`,
+and an API change the app needs is expanded before the app uses it and contracted only after the
+minimum passes every version that used the old shape.
 
 ## Acceptance tests across repos
 
