@@ -349,6 +349,21 @@ def build_release_graph(services, checkpointer=None):
                     events.append(event("release", "flag_failed", f"Couldn't turn on {key}: {exc}", feature=fid))
             held = [f for f in state.get("features") or [] if f not in (state.get("flags") or {})
                     and f not in (state.get("dropped") or [])]
+            on = [(fid, key) for fid, key in (state.get("flags") or {}).items() if key not in failed]
+            if on and getattr(services, "changes", None) is not None:
+                from ..ops.changes import new as new_change
+
+                try:
+                    stored = services.changes.record(new_change(
+                        key=f"{state['release_id']}:launch", product_id=state["product_id"], kind="release",
+                        type="standard", action="flag_on", summary=f"{state['release_id']} launch: {', '.join(f for f, _ in on)}",
+                        targets=[{"kind": "flag", "name": k, "on": True, "feature_id": f} for f, k in on],
+                        release_id=state["release_id"], approved_by=[a for a in approvers.split(", ") if a],
+                        approvals=[{"gate": "release", "lane": r.get("lane", ""), "approver": r.get("approver", ""),
+                                    "at": r.get("at", "")} for r in records]))
+                    events.append(event("release", "change_recorded", f"{stored['id']}: launch"))
+                except Exception as exc:
+                    events.append(event("release", "change_not_recorded", f"{type(exc).__name__}: {exc}"))
             status = "shipped"
             note = " Flags are on: the features are live."
             if held:

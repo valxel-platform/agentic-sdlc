@@ -103,6 +103,28 @@ def _admin_github(settings):
     return GitHubRest(tokens, api=settings.github_api)
 
 
+def _verify_changes(log=None) -> int:
+    """Exit 0 when every record chains to the one before it, 1 when the log was altered."""
+    from .ops.changes import PostgresChangeLog, verify
+
+    if log is None:
+        url = os.environ.get("DATABASE_URL")
+        if not url:
+            print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
+            return 2
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+
+        pool = ConnectionPool(url, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
+        log = PostgresChangeLog(pool)
+    out = verify(log.all())
+    if out["ok"]:
+        print(f"Change log intact: {out['records']} records.")
+        return 0
+    print(f"Change log altered: the chain breaks at {out['broken_at']} ({out['records']} records).", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None, *, github=None) -> int:
     p = argparse.ArgumentParser(prog="vrixel")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -126,7 +148,11 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     a.add_argument("--json", action="store_true")
     g = sub.add_parser("glitchtip-token", help="The token for a product's GlitchTip webhook URL")
     g.add_argument("product")
+    c = sub.add_parser("changes", help="Check the production change log's hash chain (DATABASE_URL)")
+    c.add_argument("action", choices=["verify"])
     args = p.parse_args(argv)
+    if args.cmd == "changes":
+        return _verify_changes()
     if args.cmd == "glitchtip-token":
         from .ops.error_tracking import token_for
 

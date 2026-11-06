@@ -180,3 +180,42 @@ def test_incident_signals_move_between_incidents():
         assert store.move(f"{pid}-INC-2", f"{pid}-INC-1") == 1
         assert [s["fingerprint"] for s in store.for_incident(f"{pid}-INC-1")] == ["f1", "f2", "f3"]
         assert store.open_incidents(pid) == [f"{pid}-INC-1"]
+
+
+def test_the_change_log_chains_in_postgres_and_shows_tampering():
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from vrixel_sdlc.ops import changes
+    from vrixel_sdlc.ops.inventory import PostgresSnapshots
+
+    with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        with pool.connection() as conn:
+            conn.execute("DROP TABLE IF EXISTS vrixel_changes")
+            conn.execute("DROP TABLE IF EXISTS vrixel_change_incidents")
+            conn.execute("DROP TABLE IF EXISTS vrixel_inventory_snapshots")
+        log = changes.PostgresChangeLog(pool)
+
+        def rec(key, product="EMR"):
+            return changes.new(key=key, product_id=product, kind="release", type="standard", action="deploy",
+                               summary=key, targets=[{"kind": "component", "name": "api"}],
+                               approvals=[{"gate": "g6", "approver": "rm", "at": "2026-11-06T10:00:00+00:00"}])
+
+        a, b = log.record(rec("a")), log.record(rec("b", "AG"))
+        assert (a["id"], b["id"]) == ("CHG-1", "CHG-2") and b["prev_hash"] == a["hash"]
+        assert log.record(rec("a"))["id"] == "CHG-1"
+        assert [r["id"] for r in log.list("AG")] == ["CHG-2"]
+        assert changes.verify(changes.PostgresChangeLog(pool).all())["ok"]  # a restart reads the same chain
+        log.link("CHG-1", "EMR-INC-1", "undone by CHG-3")
+        log.link("CHG-1", "EMR-INC-1", "again")
+        assert [(x["change_id"], x["incident_id"], x["product_id"]) for x in log.links("EMR")] == [
+            ("CHG-1", "EMR-INC-1", "EMR")]
+        with pool.connection() as conn:
+            conn.execute("UPDATE vrixel_changes SET data = jsonb_set(data, '{summary}', '\"edited\"') WHERE id = 'CHG-1'")
+        assert changes.verify(log.all()) == {"ok": False, "records": 2, "broken_at": "CHG-1"}
+
+        snaps = PostgresSnapshots(pool)
+        snaps.put({"product_id": "AG", "day": "2026-11-05", "per_env": {}, "unmanaged": 0})
+        snaps.put({"product_id": "AG", "day": "2026-11-06", "per_env": {}, "unmanaged": 1})
+        snaps.put({"product_id": "AG", "day": "2026-11-06", "per_env": {}, "unmanaged": 2})
+        assert [(h["day"], h["unmanaged"]) for h in snaps.history("AG")] == [("2026-11-05", 0), ("2026-11-06", 2)]

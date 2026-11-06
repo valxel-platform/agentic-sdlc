@@ -151,6 +151,12 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..ops.alarms import PostgresAlarmBoard
 
         services.alarms = PostgresAlarmBoard(pool)
+        from ..ops.changes import PostgresChangeLog
+
+        services.changes = PostgresChangeLog(pool)
+        from ..ops.inventory import PostgresSnapshots
+
+        services.inventory_snapshots = PostgresSnapshots(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
@@ -622,6 +628,112 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         name = f"{product_id}-{month or 'this-month'}-focus.csv"
         return Response(eng().focus_export(product_id, month), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    # --- change management: every production change, and looking back ---
+    def check_day(value: str | None, name: str) -> None:
+        import re
+
+        if value and not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])(-[0-3]\d)?", value):
+            raise HTTPException(400, f"{name} is YYYY-MM or YYYY-MM-DD")
+
+    def change_rows(user: User, product_id: str | None, since: str | None, until: str | None) -> list[dict]:
+        check_day(since, "since")
+        check_day(until, "until")
+        if product_id:
+            member_of(user, product_id)
+        mine = set(lanes_for(user))
+        log = eng().services.changes
+        rows = [r for r in log.list(product_id or None, since, until) if r["product_id"] in mine]
+        caused: dict[str, list[str]] = {}
+        for x in log.links(product_id or None):
+            caused.setdefault(x["change_id"], []).append(x["incident_id"])
+        return [{**r, "caused_incidents": caused.get(r["id"], [])} for r in rows]
+
+    @api.get("/changes")
+    def list_changes(user: User = Depends(current_user), product_id: str | None = None, since: str | None = None,
+                     until: str | None = None) -> list[dict]:
+        """Production changes, newest first: who asked, who approved, the evidence, what they caused."""
+        return list(reversed(change_rows(user, product_id, since, until)))
+
+    @api.get("/changes/export.csv")
+    def export_changes(user: User = Depends(current_user), product_id: str | None = None, since: str | None = None,
+                       until: str | None = None):
+        """The change log for auditors: one row per change, with its hash and the one before it."""
+        import csv
+        import io
+
+        from fastapi.responses import Response
+
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["id", "at", "product", "environment", "kind", "type", "action", "summary", "targets", "feature",
+                    "release", "incident", "requested_by", "approved_by", "approvals", "pull_requests", "outcome",
+                    "caused_incidents", "prev_hash", "hash"])
+        for r in change_rows(user, product_id, since, until):
+            w.writerow([r["id"], r["at"], r["product_id"], r["env"], r["kind"], r["type"], r["action"], r["summary"],
+                        "; ".join(f"{x.get('kind')}:{x.get('name')}" for x in r["targets"]), r["feature_id"],
+                        r["release_id"], r["incident_id"], r["requested_by"], "; ".join(r["approved_by"]),
+                        "; ".join(f"{a['gate']}:{a['approver']}" for a in r["approvals"]),
+                        "; ".join((r.get("evidence") or {}).get("pull_requests") or []), r["outcome"],
+                        "; ".join(r["caused_incidents"]), r["prev_hash"], r["hash"]])
+        name = f"changes-{product_id or 'all'}.csv"
+        return Response(buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @api.get("/changes/verify")
+    def verify_changes(user: User = Depends(current_user)) -> dict:
+        """Whether the change log is intact: every record's hash chains to the one before it."""
+        from ..ops.changes import verify
+
+        return verify(eng().services.changes.all())
+
+    @api.get("/reports/lookback")
+    def lookback(product_id: str, months: int = 6, user: User = Depends(current_user)) -> dict:
+        """Incidents and changes per month: how they ended, time to recover, change failure rate."""
+        member_of(user, product_id)
+        if not 1 <= months <= 24:
+            raise HTTPException(400, "months is 1 to 24")
+        return eng().lookback(product_id, months)
+
+    # --- resource inventory ---
+    @api.get("/inventory/{product_id}")
+    def inventory(product_id: str, user: User = Depends(current_user)) -> dict:
+        """What the product runs in each environment, with the identifiers to find it directly."""
+        member_of(user, product_id)
+        try:
+            return eng().inventory(product_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @api.get("/inventory/{product_id}/history")
+    def inventory_history(product_id: str, days: int = 90, user: User = Depends(current_user)) -> list[dict]:
+        member_of(user, product_id)
+        return eng().services.inventory_snapshots.history(product_id, max(1, min(days, 400)))
+
+    @api.get("/inventory/{product_id}/export.csv")
+    def inventory_csv(product_id: str, user: User = Depends(current_user)):
+        import csv
+        import io
+
+        from fastapi.responses import Response
+
+        member_of(user, product_id)
+        inv = eng().inventory(product_id)
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["environment", "kind", "name", "type", "state", "release", "size", "feature", "openchoreo",
+                    "binding", "aws_account", "aws_region", "arn", "outputs", "secrets", "cost_30d_usd",
+                    "planned_monthly_usd", "kubectl"])
+        for r in inv["items"]:
+            ids = r.get("ids") or {}
+            w.writerow([r["env"], r["kind"], r["name"], r.get("type", ""), r["state"], r.get("release", ""),
+                        r.get("size", ""), r.get("feature_id", ""), ids.get("openchoreo", ""), ids.get("binding", ""),
+                        ids.get("aws_account", ""), ids.get("aws_region", ""), ids.get("arn", ""),
+                        "; ".join(f"{o['name']}={o['value']}" for o in r.get("outputs") or []),
+                        "; ".join(f"{s['output']}: secret {s['name']}/{s['key']}" for s in r.get("secrets") or []),
+                        r.get("cost_30d_usd", ""), r.get("planned_monthly_usd", "") or "", ids.get("kubectl", "")])
+        return Response(buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="inventory-{product_id}.csv"'})
 
     def check_month(month: str | None) -> None:
         import re

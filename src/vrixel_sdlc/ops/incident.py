@@ -324,6 +324,39 @@ def build_incident_graph(services, checkpointer=None):
                                            "events": [event("incident", "approved", ", ".join(a["type"] for a in approved),
                                                             approver=d["approver"])]})
 
+    def log_change(state: IncidentState, a: dict, result: str, approver: str, by_tool: bool, outcome: str,
+                   n: int) -> list[dict]:
+        """An incident's flag off or rollback in the change log (ops/changes.py), linked to the
+        release it undid: that release caused the incident."""
+        log = getattr(services, "changes", None)
+        if log is None:
+            return []
+        from . import changes
+
+        comp = a.get("component") or state.get("component", "")
+        target = ({"kind": "flag", "name": services.flag_of(a["feature_id"]) or "", "on": False,
+                   "feature_id": a["feature_id"]} if a["type"] == "flag_off" else {"kind": "component", "name": comp})
+        try:
+            stored = log.record(changes.new(
+                key=f"{state['incident_id']}:{a['id']}:{n}", product_id=state["product_id"],
+                kind="flag" if a["type"] == "flag_off" else "rollback",
+                type="automatic" if by_tool else "emergency", action=a["type"],
+                summary=f"{state['incident_id']}: {result}", targets=[target], incident_id=state["incident_id"],
+                feature_id=a.get("feature_id", ""), requested_by=remediation.AGENT if by_tool else approver,
+                approved_by=["platform/remediation.yaml"] if by_tool else [approver],
+                evidence={"triage": section(state.get("triage", ""), "Likely cause")[:500]},
+                outcome=outcome, detail="" if outcome == "done" else result))
+            out = [event("act", "change_recorded", f"{stored['id']}: {stored['summary']}")]
+            if outcome == "done":
+                cause = changes.cause_of(log, state["product_id"], feature_id=a.get("feature_id", "") if a["type"] == "flag_off" else "",
+                                         component="" if a["type"] == "flag_off" else comp)
+                if cause:
+                    log.link(cause["id"], state["incident_id"], f"undone by {stored['id']} ({a['type'].replace('_', ' ')})")
+                    out.append(event("act", "cause", f"{cause['id']} ({cause['summary']}) caused it"))
+            return out
+        except Exception as exc:
+            return [event("act", "change_not_recorded", f"{type(exc).__name__}: {exc}")]
+
     def act(state: IncidentState) -> Command:
         approver = (state.get("gate_decisions") or [{}])[-1].get("approver", "")
         by_tool = approver == remediation.AGENT
@@ -358,10 +391,14 @@ def build_incident_graph(services, checkpointer=None):
                     result = a.get("text") or "monitoring"
                 taken.append({**a, "ok": True, "result": result, "by": approver, "at": now()})
                 events.append(event("act", a["type"], result, approver=approver))
+                if a["type"] in ("flag_off", "rollback"):
+                    events += log_change(state, a, result, approver, by_tool, "done", len(state.get("taken") or []))
             except Exception as exc:
                 msg = f"{type(exc).__name__}: {exc}"
                 taken.append({**a, "ok": False, "result": msg, "by": approver, "at": now()})
                 events.append(event("act", f"{a['type']}_failed", msg, approver=approver))
+                if a["type"] in ("flag_off", "rollback"):
+                    events += log_change(state, a, msg, approver, by_tool, "failed", len(state.get("taken") or []))
         update = {"taken": taken, "links": links, "events": events, "status": "monitoring"}
         mitigations = [x for x in taken if x["type"] in ("flag_off", "rollback")]
         if by_tool and not all(x["ok"] for x in mitigations):

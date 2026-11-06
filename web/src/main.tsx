@@ -13,6 +13,8 @@ import { RoadmapPage } from "./pages/Roadmap";
 import { InitiativePage, ReleasePage } from "./pages/Thread";
 import { IncidentPage, IncidentsPage } from "./pages/Incidents";
 import { CostsPage } from "./pages/Costs";
+import { ChangesPage } from "./pages/Changes";
+import { InventoryPage } from "./pages/Inventory";
 
 function Mark() {
   return (
@@ -39,6 +41,8 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <NavLink to="/roadmap">Roadmap</NavLink>
           <NavLink to="/board">Features</NavLink>
           <NavLink to="/incidents">Incidents</NavLink>
+          <NavLink to="/changes">Changes</NavLink>
+          <NavLink to="/inventory">Inventory</NavLink>
           <NavLink to="/costs">Costs</NavLink>
           <NavLink to="/intake">New intent</NavLink>
         </nav>
@@ -62,6 +66,8 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <Route path="/releases/:id" element={<ReleasePage />} />
           <Route path="/incidents" element={<IncidentsPage me={me} />} />
           <Route path="/costs" element={<CostsPage me={me} />} />
+          <Route path="/changes" element={<ChangesPage me={me} />} />
+          <Route path="/inventory" element={<InventoryPage me={me} />} />
           <Route path="/incidents/:id" element={<IncidentPage />} />
           <Route path="/intake" element={<Intake me={me} />} />
           <Route path="/intake/:sid" element={<Intake me={me} />} />

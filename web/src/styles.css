@@ -343,3 +343,14 @@ table.quality tfoot td { padding: 8px; }
 .cost-totals { margin-bottom: 20px; max-width: 420px; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; align-items: start; }
 .grid-2 table.quality, .panel > table.quality { margin: 8px 0 0; }
+
+/* Changes and Inventory */
+.mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.textlink { background: none; border: 0; padding: 0; font: inherit; color: var(--act); cursor: pointer; text-align: left; text-decoration: underline; text-underline-offset: 2px; }
+.textlink:hover { color: var(--act-hover); }
+.detail-row > td { background: var(--rule-soft); }
+.detail-row .kv { padding: 8px 4px; }
+.row-strong th, .row-strong td { font-weight: 600; }
+.btn.small { padding: 1px 8px; font-size: var(--fs-0); margin-left: 6px; vertical-align: baseline; }
+.table-scroll { overflow-x: auto; }
+.table-scroll > table.quality { min-width: 560px; }

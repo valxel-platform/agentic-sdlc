@@ -861,6 +861,63 @@ sides:
 G4 shows the alarms each AWS service comes with. Alarms are named with the data plane's prefix, so
 EventBridge sends only Vrixel's; other alarms in the account are ignored.
 
+## Change management: every production change, and looking back
+
+Every way the tool changes production writes one record to the change log (`ops/changes.py`),
+when it happens:
+
+| Change | Type | Approved by |
+| --- | --- | --- |
+| A feature released at G6 (its components, AWS resources, store apps, flag) | standard | G1 to G6's approvers, each recorded with the time |
+| A launch turning its features' flags on | standard | the release gate's approvers |
+| A hotfix released at G6 | emergency | on-call, at G5 and G6 |
+| On-call turning a flag off or rolling back in an incident | emergency | on-call |
+| The tool turning a flag off or rolling back by itself | automatic | `platform/remediation.yaml`; reviewed afterwards in the incident's postmortem |
+
+A record names who asked, who approved, what changed (components and their releases, resources,
+flags), the feature, release or incident behind it, the evidence (pull requests, the quality
+suites each stage ran, security findings accepted with an expiry, or for an incident the cause
+triage found), and whether it worked. Records are append-only and hash-chained: each carries the
+hash of the one before it, so an edited or deleted record breaks the chain. `vrixel changes verify`
+(with `DATABASE_URL`) and the Changes page check it. In Postgres, grant the tool's role only
+INSERT and SELECT on `vrixel_changes`, so nothing it runs can rewrite history; the chain shows it if
+anything else does. Keep the database's backups for as long as your strictest regime needs the
+records (HIPAA documentation: six years).
+
+When an incident's flag off or rollback undoes a release, that release is linked to the incident
+as its cause. That's what change failure rate counts.
+
+**The Changes page** (and `GET /api/changes`, `/api/changes/export.csv` for auditors) lists every
+change with its approvals and evidence. **Looking back** (`GET /api/reports/lookback`) shows, per
+month: incidents by severity and component, how many the tool fixed by itself and how many needed
+on-call, the median and worst time to recover, changes by type and failed ones, releases and the
+share that caused an incident (change failure rate), and the releases behind the most incidents.
+
+Changes made outside the tool (kubectl, the AWS console) aren't in the log. Direct production
+access should be break-glass: time-limited, approved and logged.
+
+## Resource inventory: what runs where
+
+The Inventory page (`GET /api/inventory/<product>`, and `/export.csv`) reads each product's
+environments live (`ops/inventory.py`); nothing is kept by hand:
+
+- **Components**: each one's OpenChoreo release binding per environment, the release running and its
+  state, and a `kubectl` label selector that finds its workloads on the data plane
+  (`openchoreo.dev/project`, `/component` and `/environment` label every workload).
+- **Resources** (AWS services, and other OpenChoreo Resources such as GlitchTip's database): the
+  binding per environment, its size and release, the AWS account and region, and its outputs.
+  Plain outputs (table names, ARNs, endpoints) are shown; a secret output shows only which Secret
+  holds it, never the value.
+- **Store apps**: the version last released.
+- The feature that created each one, the last 30 days of compute cost (components), the planned
+  monthly cost from the platform catalog (AWS), and production against the environments before it.
+
+With `VRIXEL_AWS_INVENTORY_ROLE` set (a role of that name in each environment's account, allowed
+`tag:GetResources`), the tool also lists everything tagged `vrixel:product=<product>` there. That
+fills in ARNs, and anything tagged for the product that OpenChoreo doesn't know is shown as
+unmanaged, for someone to adopt or remove. Once a day the tool keeps each product's counts per
+environment (`GET /api/inventory/<product>/history`) to show the trend.
+
 ## Cost: what features and products cost
 
 One cost ledger holds every dollar a product spends, once, in [FinOps FOCUS](https://focus.finops.org/)
