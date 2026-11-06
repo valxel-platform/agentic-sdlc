@@ -281,7 +281,10 @@ def summary(hld: str, catalog: dict, pipeline: list[str], aws: dict | None) -> d
             totals[env] += monthly[env]
         rows.append({"name": e["name"], "type": e["type"], "service": t["service"], "stateful": bool(t.get("stateful")),
                      "access": {c: sorted(a) for c, a in sorted(e["access"].items())},
-                     "parameters": dict(e["params"]), "sizes": sizes, "monthly_usd": monthly})
+                     "parameters": dict(e["params"]), "sizes": sizes, "monthly_usd": monthly,
+                     # The standard alarms it comes with: in production they open incidents.
+                     "alarms": [{"name": n, "severity": a["severity"], "says": a["says"]}
+                                for n, a in (t.get("alarms") or {}).items()]})
     return {"resources": rows, "monthly_usd": {k: round(v, 2) for k, v in totals.items()},
             "region": (aws or {}).get("region", ""), "accounts": dict((aws or {}).get("accounts") or {}),
             "note": "Planning figures from the platform catalog, not quotes."}
@@ -311,7 +314,7 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
                     "owner": owner, "stateful": bool(t.get("stateful")),
                     "parameters": {**params, "consumers": consumers,
                                    "tags": {"vrixel:product": product_id, "vrixel:feature": feature_id,
-                                            "vrixel:data-class": data_class}},
+                                            "vrixel:resource": e["name"], "vrixel:data-class": data_class}},
                     "sizes": {env: e["sizes"][env] for env in e["sizes"]},
                     "outputs": dict(t.get("outputs") or {})})
     ids = []
@@ -354,7 +357,10 @@ def instruction(ctx: dict, task: dict) -> str:
     return (f" This component uses {names} (VX-19). Add to workload.yaml:\n{snippet}\n"
             " Read each name from its environment variable, reach the service behind a port in the code, and use"
             " the AWS SDK's default credentials (the pod's identity): never keys or fixed names. Test against "
-            + ", ".join(e for e in emulators if e) + ". Use only the access listed.")
+            + ", ".join(e for e in emulators if e) + ". Use only the access listed. Trace every AWS call with"
+            " OpenTelemetry's AWS SDK instrumentation on the client (Java: opentelemetry-aws-sdk-2.2's"
+            " AwsSdkTelemetry interceptor, as the event worker template's StoreConfig does; Python:"
+            " opentelemetry-instrumentation-botocore), so the calls show in OpenChoreo's traces.")
 
 
 def catalog_guide(catalog: dict, data_class: str) -> str:

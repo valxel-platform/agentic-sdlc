@@ -6,6 +6,7 @@ export interface AwsResource {
   name: string; type: string; service: string; stateful: boolean;
   access: Record<string, string[]>; parameters: Record<string, unknown>;
   sizes: Record<string, string>; monthly_usd: Record<string, number>;
+  alarms?: { name: string; severity: string; says: string }[];
 }
 export interface AwsResources {
   resources: AwsResource[]; monthly_usd: Record<string, number>;
@@ -24,6 +25,9 @@ export interface PendingItem {
   quality?: { suites: QualitySuite[]; waivers: Waiver[] } | null;
   new_repos?: RepoPlan[];
   aws_resources?: AwsResources | null;
+  // At G6: CloudWatch alarms firing before production on what the feature touches.
+  alarms_firing?: { env: string; resource: string; alarm: string; severity: string; says: string;
+                    since: string; url: string; title: string }[];
   design_review?: DesignReview | null;
   related_features?: SimilarItem[];
   kind?: "feature" | "initiative" | "release";

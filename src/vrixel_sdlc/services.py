@@ -60,6 +60,7 @@ class Services:
     costs: object = None  # vrixel_sdlc.ops.cost.CostSource: what released features really cost
     cost_reviews: object = None  # vrixel_sdlc.ops.cost reviews store
     cost_ledger: object = None  # vrixel_sdlc.finops.ledger.CostLedger
+    alarms: object = None  # vrixel_sdlc.ops.alarms board: every CloudWatch alarm's current state
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
