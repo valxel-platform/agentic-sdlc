@@ -467,6 +467,8 @@ Agents never act on production by themselves (VX-1, VX-3); every action is a per
 | Prometheus (Alertmanager webhook; SLO burn-rate and error alerts) | `POST /api/signals/alertmanager` | `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
 | Sentry (internal integration: issues created or regressed, alert rules) | `POST /api/signals/sentry` | `Sentry-Hook-Signature`, HMAC with `VRIXEL_SENTRY_CLIENT_SECRET` |
 | Support tickets (any tool that can post JSON) | `POST /api/signals/ticket` | `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
+| OpenChoreo alert rules (log, metric and FinOps budget rules; webhook channel without `payloadTemplate`) | `POST /api/signals/openchoreo` | channel header `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
+| AWS Budgets (through an SNS topic) | `POST /api/signals/aws-budgets` | HTTPS subscription `https://vrixel:$VRIXEL_SIGNALS_TOKEN@<host>/api/signals/aws-budgets`; topic listed in `VRIXEL_AWS_BUDGET_TOPICS` |
 | People in the web app | "Report a problem" on the Incidents page | signed-in member of the product's org |
 
 Each signal is tied to a product (a `vrixel_product` label or tag, else its `component` matched to
@@ -493,6 +495,10 @@ firing one opens a new incident. Signals are stored in the platform database.
    SEV2 1 hour, SEV3 4 hours, SEV4 1 day) sends it back to on-call. Reported problems skip this.
 5. *Postmortem* (agent, blameless) and *close*: on-call approves it, and a governance pull request
    records it in `incidents/`.
+
+Cost signals (see [Cost](#cost-what-features-and-products-cost)) take the same path. They never
+join a component's outage, triage proposes right-sizing (an intent change) or accepting the spend,
+and they skip *Monitor*: a budget alert or a cost review never "resolves".
 
 Incidents appear in Decisions and on the Incidents page, get a tracker item (a Bug, set
 `incident_type` to change it) with a comment per action, and agents designing new work see recent
@@ -690,6 +696,32 @@ must name a component of the design or the product. A mobile app is `none` and c
 product's BFF. G4 approves it; the components' `workload.yaml`
 and the product's mesh policies follow it. Coders and reviewers get their role's rules. A web app's
 post-deploy tests run against the BFF's public URL.
+
+## Cost: what features and products cost
+
+**Building a feature.** Every agent call is metered in the usage ledger (tokens, cache hits, cost by
+phase and model) against the feature's budget, and each gate records the people's active minutes.
+
+**Running it.** G4 approves a feature's AWS services with their planning cost per environment; that
+becomes the feature's cost plan. After release the tool reviews the feature (by default 7 and 30 days
+after, `VRIXEL_COST_REVIEW_DAYS`):
+
+| What | Source | Compared with |
+| --- | --- | --- |
+| The feature's AWS resources, per environment | AWS Cost Explorer: tag `vrixel:feature` in the environment's account (`VRIXEL_AWS_COST_EXPLORER=1`, the `aws` extra, `ce:GetCostAndUsage`) | The G4 plan, as a monthly run-rate |
+| Its components' compute in production | OpenChoreo FinOps (`finops-opencost` module) through the Observer cost API (`VRIXEL_OPENCHOREO_OBSERVER_URL`) | The same components the week before release |
+
+Spend more than `VRIXEL_COST_TOLERANCE` (default 20%) and $5/month above the comparison becomes a
+cost signal in the incident flow: SEV2 for production AWS at twice the plan or more, SEV3 otherwise.
+Budgets are the second line: OpenChoreo budget alert rules per component, and AWS Budgets per
+product account named `vrixel-<product id>-<environment>`, arrive as cost signals the same way.
+
+`vrixel:feature` and `vrixel:product` must be activated as cost allocation tags in the payer
+account; Cost Explorer data lags by about a day. Each review is stored, and served at
+`GET /api/features/{id}/cost` (build cost, plan, reviews) and `GET /api/costs/{product}` (each
+feature's build cost and run-rate, with totals). The feature page shows the plan against the latest
+review. Not covered yet: CI minutes, build and test environment costs before release, cluster
+compute and shared platform costs allocated to products.
 
 ## AWS services (VX-19)
 

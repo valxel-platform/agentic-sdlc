@@ -256,6 +256,10 @@ def make_gate(gate: str, services):
             services.catalog.register({**_design_entry(state, design), "status": "in_design"})
             update["design"] = design
             update["resources"] = aws_plan(services, state, snap, ref)
+            # The approved cost is what the feature is held to after release (ops.cost).
+            from ..ops.cost import plan_from_g4
+
+            update["cost_plan"] = plan_from_g4(aws_summary(services, state, snap, ref), state, approvers)
             # The feature's flag exists before any code does, so the coder builds behind it.
             update["flag"], note = assign_flag(services, state, approvers)
             update["events"].append(note)

@@ -22,7 +22,7 @@ from langgraph.types import Command, interrupt
 from ..roadmap import governance_pr
 from ..roadmap.graphs import _decide, event, lane_approvers, now, run_agent
 from ..state import last, merge_dict
-from .signals import still_firing
+from .signals import resolves, still_firing
 
 ACTIONS = ("flag_off", "rollback", "hotfix", "intent_change", "monitor")
 DECISIONS = ("approve", "revise", "resolve")
@@ -97,7 +97,14 @@ def stub_triage(ctx: dict) -> str:
              f"Severity {ctx['severity']}" + (f" on {ctx['component']}" if ctx.get("component") else "") + ".",
              "", "## Likely cause"]
     actions = []
-    if tickets_only and wants:
+    cost = [s for s in sigs if s.get("category") == "cost"]
+    if cost and len(cost) == len(sigs):
+        lines.append(f"Spend is above what was planned: {cost[-1].get('detail') or cost[-1]['title']}")
+        feature = next((s["labels"].get("feature_id") for s in cost if (s.get("labels") or {}).get("feature_id")), "")
+        actions.append(f"- intent_change: feature: bring {feature or 'the spend'} back within its approved cost "
+                       f"(right-size or cut usage): {cost[-1].get('detail', '')}")
+        actions.append("- monitor: if the spend is expected, accept it and record the new figure")
+    elif tickets_only and wants:
         lines.append("The product works as built, but not as users need: the intent should change.")
         actions.append(f"- intent_change: feature: {first['title']}")
     elif suspects:
@@ -164,6 +171,9 @@ def build_incident_graph(services, checkpointer=None):
             " '- flag_off: <feature id>', '- rollback: <repo>', '- hotfix: <repo>: <what to change>',"
             " '- intent_change: feature|initiative: <the new intent>' (when it works as built but not as users need),"
             " '- monitor: <why no action>'. Prefer turning a recent feature's flag off over rolling back."
+            " For cost signals (spend above a budget or above what G4 approved): propose an intent_change to"
+            " right-size or cut usage, or monitor when the spend is expected; turn a flag off only when the"
+            " spend must stop now, and never roll back for cost alone."
             " Never include patient data or identifiers.",
         ])
         res = run_agent(services, role="ops", product_id=state["product_id"], thread_id=state["incident_id"],
@@ -239,8 +249,8 @@ def build_incident_graph(services, checkpointer=None):
         return {"taken": taken, "links": links, "events": events, "status": "monitoring"}
 
     def monitor(state: IncidentState) -> Command:
-        machine = [s for s in services.incident_signals(state["incident_id"]) if s["source"] != "ticket"]
-        if not machine:  # a reported problem: nothing to watch recover
+        machine = [s for s in services.incident_signals(state["incident_id"]) if resolves(s)]
+        if not machine:  # a reported problem or a cost finding: nothing to watch recover
             return Command(goto="postmortem", update={"status": "postmortem"})
         res = interrupt({"type": "external", "wait": "incident_recovery", "feature_id": state["incident_id"],
                          "product_id": state["product_id"], "label": "Waiting for its alerts and issues to resolve",

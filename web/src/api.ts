@@ -102,6 +102,9 @@ export interface Feature extends FeatureSummary {
   scores: Record<string, number>;
   loop_count: Record<string, number>;
   human_active_minutes: number;
+  // AWS cost G4 approved, and what the latest review after release found (null: no AWS services).
+  run_cost?: { approved_monthly_usd: Record<string, number>; projected_monthly_usd: Record<string, number> | null;
+               reviewed_at: string | null; findings: string[]; incidents: string[] } | null;
   usage: { calls: number; cache_hit_rate: number; est_cost_usd: number; cost_by_phase: Record<string, number> };
   events: FeatureEvent[];
   diagrams: Diagram[];
