@@ -93,7 +93,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server")
 
 
-EXPOSED_ROLES = RUNTIME_ROLES + ("bff",)
+EXPOSED_ROLES = RUNTIME_ROLES + ("bff", "mobile")
 
 
 def _endpoints(text: str, repos: list[dict], ctx: dict) -> list[str]:
@@ -111,6 +111,7 @@ def _endpoints(text: str, repos: list[dict], ctx: dict) -> list[str]:
     out = [f"{r['name']} has no line in Endpoints (VX-17)" for r in runtime if r["name"] not in declared]
     roles = {r["name"]: r["role"] for r in repos}
     known = {n.split("/", 1)[-1] for n in roles} | {r["name"].split("/", 1)[-1] for r in ctx.get("repos") or []}
+    bffs = {r["name"].split("/", 1)[-1] for r in [*repos, *(ctx.get("repos") or [])] if r.get("role") == "bff"}
     external_adr = "external" in section(text, "ADRs").lower()
     for repo, e in declared.items():
         bad = [v for v in e["visibility"] if v not in VISIBILITIES]
@@ -122,6 +123,18 @@ def _endpoints(text: str, repos: list[dict], ctx: dict) -> list[str]:
             elif not external_adr:
                 out.append(f"{repo} is external but isn't the BFF: add an ADR approving the exposure (a partner or "
                            "mobile API through the gateway), or make it project (VX-17)")
+        if roles.get(repo) == "mobile":
+            # A store app runs on phones, not in the platform: nothing reaches it, and it reaches
+            # the product only through the BFF's mobile route (VX-18).
+            if e["visibility"] != ["none"]:
+                out.append(f"{repo} is a mobile app: its visibility is none (it runs on phones) (VX-18)")
+            if not bffs:
+                out.append(f"{repo} is a mobile app but the product has no BFF: add one (template-bff) for "
+                           "its /mobile/api route (VX-18)")
+            direct = [c for c in e["calls"] if c in known and c not in bffs]
+            if direct:
+                out.append(f"{repo} calls {', '.join(direct)} directly: a mobile app calls only the product's "
+                           "BFF, which passes its token on (VX-18)")
         unknown = [c for c in e["calls"] if c not in known]
         if unknown:
             out.append(f"{repo} calls {', '.join(unknown)}, which isn't in this design or the product")

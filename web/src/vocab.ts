@@ -6,6 +6,7 @@ export const PHASES: Record<string, string> = {
 
 const FAILED: Record<string, string> = {
   build: "OpenChoreo build", dev: "Dev deploy", staging: "Staging deploy", production: "Production deploy",
+  rollout: "Store rollout health check",
 };
 
 export const WAITS: Record<string, string> = {
@@ -13,6 +14,7 @@ export const WAITS: Record<string, string> = {
   incident_recovery: "Waiting for alerts to resolve",
   ci: "Waiting for CI", build: "Building in OpenChoreo", dev: "Deploying to dev",
   staging: "Deploying to staging", production: "Deploying to production",
+  rollout: "Rolling out in the stores",
 };
 
 export const GATES: Record<string, { name: string; question: string; approve: string }> = {

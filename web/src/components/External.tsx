@@ -84,6 +84,7 @@ export function WorkItems({ featureId, work, canSync, onSynced }: {
 
 const STAGES: [string, string][] = [
   ["ci", "CI checks"], ["build", "OpenChoreo build"], ["dev", "Dev"], ["staging", "Staging"], ["production", "Production"],
+  ["rollout", "Store rollout"],
 ];
 const RESULT: Record<string, [string, string]> = {
   success: ["Passed", "go"], failure: ["Failed", "stop"], pending: ["In progress", "run"],
@@ -139,7 +140,7 @@ export function Delivery({ f }: { f: Feature }) {
           {deployed.map((d) => (
             <div key={d.repo} style={{ display: "contents" }}>
               <dt>{short(d.repo)}</dt>
-              <dd>{d.env}{d.release ? `, release ${d.release}` : ""}</dd>
+              <dd>{d.kind === "store" ? `${d.env}, through the stores` : `${d.env}${d.release ? `, release ${d.release}` : ""}`}</dd>
             </div>
           ))}
         </dl>

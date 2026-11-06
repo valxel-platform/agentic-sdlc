@@ -144,6 +144,9 @@ class StubGitHub:
         self.repos: dict[str, dict] = {}  # provisioned repos and the settings applied to them
         self.fail_steps: set[str] = set()  # tests: provisioning calls that should fail
         self.dispatches: list[dict] = []
+        # Store apps' release workflows (vrixel_sdlc.store): the stub answers a dispatch with the
+        # statuses the workflow would post; set to "pending" or "failure" to test waiting and failing.
+        self.release_result = "success"
         self._seq = itertools.count(100)
         self._lock = threading.Lock()
 
@@ -179,8 +182,14 @@ class StubGitHub:
 
     def checks(self, *, repo, sha) -> dict:
         state = self.ci.get((repo, sha), self.ci_default)
-        return {"state": state, "checks": [{"name": "ci", "state": state,
-                                            "url": f"https://github.com/{repo}/commit/{sha}/checks"}]}
+        out = [{"name": "ci", "state": state, "url": f"https://github.com/{repo}/commit/{sha}/checks"}]
+        latest: dict[str, dict] = {}
+        for st in self.statuses:  # commit statuses too, as on GitHub (the latest per context)
+            if st["repo"] == repo and st["sha"] == sha and not st["context"].startswith(("openchoreo/", "vrixel/")):
+                latest[st["context"]] = {"name": st["context"], "state": st["state"], "url": st.get("url", ""),
+                                         "summary": st.get("description", "")}
+        out += latest.values()
+        return {"state": state, "checks": out}
 
     def set_status(self, *, repo, sha, context, state, description, url="") -> None:
         with self._lock:
@@ -199,6 +208,16 @@ class StubGitHub:
     def dispatch(self, *, repo, event_type, payload) -> None:
         with self._lock:
             self.dispatches.append({"repo": repo, "event_type": event_type, "payload": dict(payload)})
+        sha, result = payload.get("sha", ""), self.release_result
+        if event_type == "vrixel-release" and result != "pending":
+            stage = payload.get("stage", "")
+            suite = {"dev": "integration / report", "staging": "e2e / report"}.get(stage)
+            if suite:
+                self.set_status(repo=repo, sha=sha, context=suite, state=result, description="3 passed, 0 failed")
+            self.set_status(repo=repo, sha=sha, context=f"release / {stage}", state=result, description="stub release")
+        if event_type == "vrixel-rollout" and payload.get("context") and result != "pending":
+            self.set_status(repo=repo, sha=sha, context=payload["context"], state=result,
+                            description="crash-free 99.8% of 1200 users (floor 99.00%)")
 
     def _repo(self, repo: str, call: str) -> dict:
         if call in self.fail_steps:

@@ -219,7 +219,7 @@ def build_phase_subgraph(phase: str, services):
 
 
 # Repos whose code runs where users reach it: their changes go behind the feature's flag.
-FLAGGED_ROLES = ("provider", "consumer", "agent", "mcp-server")
+FLAGGED_ROLES = ("provider", "consumer", "agent", "mcp-server", "mobile")
 
 
 def flag_instruction(ctx: dict, task: dict) -> str:
@@ -267,7 +267,14 @@ SECURITY = {
     "consumer": (" The app never holds a token: it calls the API on its own origin through the product's BFF"
                  " and sends X-XSRF-TOKEN on writes. Its endpoint is project-visible only (VX-17)."),
     "bff": (" One route per service the HLD lets it call, each with TokenRelay and the session cookie"
-            " removed; the BFF is the only external endpoint (VX-17)."),
+            " removed; the BFF is the only external endpoint (VX-17). With a mobile app in the product,"
+            " the /mobile/api route checks bearer tokens for the product's audience (BFF_MOBILE_AUDIENCE) and"
+            " the minimum app version (VX-18)."),
+    "mobile": (" A public client: sign-in only through Session (PKCE, tokens in the Keychain or Keystore),"
+               " calls only through the BFF's /mobile/api route, and every change through the outbox with its"
+               " idempotency key so it survives no signal. Store builds stay installed for months: use only API"
+               " shapes the provider already serves, and never PHI in logs, notifications or crash reports"
+               " (VX-17, VX-18)."),
 }
 
 
