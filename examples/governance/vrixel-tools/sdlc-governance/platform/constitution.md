@@ -1,6 +1,6 @@
 ---
 name: platform
-version: 1.4.0
+version: 1.5.0
 ---
 # Vrixel platform constitution
 
@@ -32,3 +32,7 @@ Audit:
 Data and events:
 
 - **VX-16** A request that changes product records publishes one event to the product's Kafka and writes no database; no request writes to both. Event workers apply events to the data stores, once and in order, and every store can be rebuilt by replaying its topics. Services coordinate through events; a central orchestrator needs an ADR. (Policy, Test)
+
+Identity and exposure:
+
+- **VX-17** Every request carries two checked identities: the calling workload (mutual TLS from the mesh) and the person or service it acts for (a token from the product's identity provider, issued for the product). Every endpoint declares the permission it needs and anything undeclared is denied; record access is checked per record. Browsers never hold tokens: they reach a product only through its BFF, the product's only internet-facing component unless an ADR approves another. Tokens are exchanged for the target at trust boundaries and by agents for each tool server; no fixed credentials. (Policy, Test)

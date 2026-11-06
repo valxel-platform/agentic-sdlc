@@ -766,7 +766,9 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
         if not targets:
             return Command(goto=ok)
         runs = (state.get("change_set") or {}).get("runs") or {}
-        qtargets = [{**t, "sha": runs.get(t["repo"], {}).get("sha", "")} for t in targets]
+        roles = {t["repo"]: t.get("role") for t in state.get("tasks") or []}
+        qtargets = [{**t, "sha": runs.get(t["repo"], {}).get("sha", ""), "role": roles.get(t["repo"], "")}
+                    for t in targets]
         qtargets += acceptance_targets(services, state, stage, targets)
         res = interrupt(external(state, stage, targets, quality_packet(services, state, stage, qtargets)))
         report_to_github(services, state, stage, res)

@@ -94,6 +94,8 @@ platform_repos:
   vrixel-tools/template-mcp-server: { kind: template, role: mcp-server }
   vrixel-tools/template-event-worker: { kind: template, role: event-worker }
   vrixel-tools/template-acceptance: { kind: template, role: acceptance }
+  vrixel-tools/template-bff: { kind: template, role: bff }
+  vrixel-tools/platform-security: { kind: tool, product: platform, required_checks: [test] }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in
@@ -123,6 +125,13 @@ roles:
     template: vrixel-tools/template-agent
     required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR
     openchoreo: { component_type: deployment/service, workflow: docker }  # needs Postgres and the LLM gateway
+  # The product's backend-for-frontend (Spring Cloud Gateway): browser sign-in with the product's
+  # Keycloak realm, tokens kept server-side, the web app and its API on one origin. Its only
+  # external endpoint for the web app (VX-17).
+  bff:
+    template: vrixel-tools/template-bff
+    required_checks: [unit, CodeQL]          # unit runs the sign-in flow against a fake realm and Redis
+    openchoreo: { component_type: deployment/service, workflow: docker }
   # The product's end-to-end tests across repos (Playwright Test, TypeScript): API and event
   # tests for every feature, browser tests when a web app changes. One per product; not deployed:
   # the pipeline runs it against each environment after the change set is deployed.
