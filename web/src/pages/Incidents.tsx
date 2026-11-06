@@ -8,7 +8,7 @@ import { ACTION_LABEL, SEVERITY, threadPath, waitingLabel } from "../vocab";
 
 const STATUS: Record<string, string> = {
   triaging: "Triage in progress", awaiting_decision: "Waiting for on-call", mitigating: "Acting",
-  monitoring: "Watching for recovery", postmortem: "Postmortem", closed: "Closed",
+  monitoring: "Watching for recovery", postmortem: "Postmortem", closed: "Closed", merged: "Merged",
 };
 
 function Sev({ s }: { s: string }) {
@@ -109,6 +109,31 @@ export function IncidentsPage({ me }: { me: Me }) {
   );
 }
 
+/** On-call: this incident is the same failure as another one. */
+function MergeForm({ id, onDone }: { id: string; onDone: () => void }) {
+  const [into, setInto] = useState("");
+  const [err, setErr] = useState("");
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setErr("");
+    try {
+      await api.mergeIncident(id, into.trim(), "Same failure");
+      onDone();
+    } catch (x) {
+      setErr((x as Error).message);
+    }
+  }
+  return (
+    <form className="pad small" onSubmit={(e) => void submit(e)}>
+      <label className="field">Same failure as incident
+        <input value={into} onChange={(e) => setInto(e.target.value)} placeholder="e.g. EMR-INC-4" pattern="[A-Z0-9]+-INC-[0-9]+" required />
+      </label>
+      <button className="btn secondary small-btn" type="submit">Merge into it</button>
+      {err && <p className="error-note" role="alert">{err}</p>}
+    </form>
+  );
+}
+
 export function IncidentPage() {
   const { id = "" } = useParams();
   const [v, setV] = useState<IncidentView | null>(null);
@@ -119,6 +144,16 @@ export function IncidentPage() {
   }, [id]);
   useEffect(load, [load]);
   useLive(load, (e) => e.feature_id === id || e.type === "feature.updated");
+  const navigate = useNavigate();
+  async function split(fingerprint: string) {
+    try {
+      const r = await api.splitSignal(id, fingerprint);
+      if (r.new_incident) navigate(threadPath(r.new_incident));
+      else load();
+    } catch (x) {
+      setErr((x as Error).message);
+    }
+  }
   if (err && !v) return <p className="error-note" role="alert">{err}</p>;
   if (!v) return <p className="faint">Loading…</p>;
   const mine = v.pending.find((p) => p.can_decide);
@@ -133,12 +168,14 @@ export function IncidentPage() {
         <div className="meta">
           <Sev s={v.severity} />
           <span>{STATUS[v.status] ?? v.status}</span>
-          {v.component && <span>{v.component}</span>}
+          {v.root?.component ? <span title={v.root.why || undefined}>Starts in {v.root.component}</span>
+            : v.component && <span>{v.component}</span>}
           {v.firing > 0 && <span>{v.firing} still firing</span>}
           {v.record_pr?.url && <span>Postmortem in <a href={v.record_pr.url} target="_blank" rel="noreferrer">this pull request</a></span>}
         </div>
       </div>
       {v.error && <p className="error-note" role="alert">The workflow stopped with an error: {v.error}</p>}
+      {err && <p className="error-note" role="alert">{err}</p>}
       {mine ? <div style={{ marginBottom: 20 }}><DecisionPanel item={{ ...mine, feature_id: v.feature_id, title: v.title }} featureId={v.feature_id} onDone={load} /></div>
         : people.length > 0 ? <p className="note" style={{ marginBottom: 20 }}>{waitingLabel(people[0])}: {people[0].approvers.join(", ")}.</p>
         : ext ? <p className="note" style={{ marginBottom: 20 }}>{ext.label}.</p> : null}
@@ -171,10 +208,17 @@ export function IncidentPage() {
               <li key={`${s.fingerprint}-${n}`}>
                 <div className="work-line"><span className={`chip ${s.status === "firing" ? "stop" : "go"}`}>{s.status}</span>
                   {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a> : <span>{s.title}</span>}</div>
-                <div className="small muted">{s.source}, {new Date(s.at).toLocaleString()}</div>
+                <div className="small muted">{s.source}{s.component ? ` on ${s.component}` : ""}, {new Date(s.at).toLocaleString()}</div>
+                {s.labels?.joined_by && (
+                  <div className="small">
+                    Joined: {s.labels.joined_by}{" "}
+                    <button className="btn secondary small-btn" onClick={() => void split(s.fingerprint)}>Not the same failure</button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
+          {!["merged", "closed"].includes(v.status) && <MergeForm id={v.feature_id} onDone={load} />}
         </section>
         {!mine && (
           <section className="panel" aria-labelledby="h-report">

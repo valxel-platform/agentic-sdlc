@@ -698,6 +698,29 @@ product's BFF. G4 approves it; the components' `workload.yaml`
 and the product's mesh policies follow it. Coders and reviewers get their role's rules. A web app's
 post-deploy tests run against the BFF's public URL.
 
+## One incident per failure
+
+A failure people see in the app and the error behind it arrive as separate signals from different
+components: a Sentry issue from the web app, a Sentry issue or OpenChoreo alert from a service.
+Before opening an incident, the tool looks for an open incident of the same product the signal
+belongs to (`ops/correlate.py`), strongest evidence first:
+
+| Evidence | How |
+| --- | --- |
+| Same request | The signal names a trace another one in the incident names too. The services return a W3C `traceresponse` header; the web and mobile apps tag their error reports with the failed call's trace id; services tag theirs with the request's; for an OpenChoreo log alert the tool reads the trace ids of the component's recent error logs |
+| Calls | Within 30 minutes, one component calls the other, directly or through others: the product's consumer repos call its provider repos (the contracts say who calls whom), plus `runtime.calls` in product.yaml |
+| Same release | Within 30 minutes, the same feature went out to both in the two hours before |
+
+A signal that joins says why (`joined_by`). A signal naming the same request as other open
+incidents merges them into one. The root cause candidate is the furthest-downstream component
+among the incident's signals (the others are where it showed): triage and the rollback or flag
+decision start there, and when a joining signal moves it, triage runs again. On-call can merge two
+incidents (`POST /api/incidents/{id}/merge`, or "Merge into it" on the incident page) and take a
+wrongly joined signal out (`/split`, "Not the same failure"), which opens its own incident.
+
+A Sentry project's slug should be the component's name (or tag events with `component`), and
+events should carry `vrixel_product`, so issues map to the right product and component.
+
 ## Component alert rules: logs and exceptions
 
 Components log JSON to stdout (the templates' structured logging), with an exception's stack under

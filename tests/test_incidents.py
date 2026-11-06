@@ -39,8 +39,9 @@ def make(tmp_path, gov_root):
     return FeatureEngine(svc, InMemorySaver()), svc
 
 
-def alert(status="firing", fingerprint="fp1", component="emr-intake-api", severity="critical", name="HighErrorRate"):
-    return {"alerts": [{"status": status, "fingerprint": fingerprint, "startsAt": "2026-11-03T21:00:00Z",
+def alert(status="firing", fingerprint="fp1", component="emr-intake-api", severity="critical", name="HighErrorRate",
+          at="2026-11-03T21:00:00Z"):
+    return {"alerts": [{"status": status, "fingerprint": fingerprint, "startsAt": at,
                         "labels": {"alertname": name, "severity": severity, "component": component},
                         "annotations": {"summary": f"{name} on {component}"}}]}
 
@@ -132,10 +133,12 @@ def test_signals_join_their_open_incident(tmp_path, gov_root):
     [a] = eng.ingest(from_alertmanager(alert()))
     assert eng.ingest(from_alertmanager(alert())) == [a]  # same alert
     assert eng.ingest(from_alertmanager(alert(fingerprint="fp2", name="HighLatency"))) == [a]  # same component
-    [b] = eng.ingest(from_alertmanager(alert(fingerprint="fp3", component="emr-web")))
-    assert b != a
+    # The web app calls the API (consumer and provider): failing together, it's one incident.
+    assert eng.ingest(from_alertmanager(alert(fingerprint="fp3", component="emr-web"))) == [a]
+    joined = svc.signals.for_incident(a)[-1]
+    assert joined["labels"]["joined_by"].startswith("calls: emr-web calls emr-intake-api")
     assert eng.ingest(from_alertmanager(alert(component="unknown-svc"))) == []
-    assert len(svc.signals.for_incident(a)) == 3
+    assert len(svc.signals.for_incident(a)) == 4
 
 
 def test_recovery_leads_to_a_postmortem_recorded_in_git(tmp_path, gov_root):
@@ -183,7 +186,9 @@ def test_on_call_can_pick_actions_ask_again_or_close(tmp_path, gov_root):
     assert [t["type"] for t in v["taken"]] == ["flag_off"] and not v["links"]  # no hotfix started
     assert svc.flags.get("EMR", eng.view(fid)["release"]["flag"]) is False
 
-    [other] = eng.ingest(from_alertmanager(alert(fingerprint="z", component="emr-web")))
+    # Hours later, the web app failing on its own is another incident.
+    [other] = eng.ingest(from_alertmanager(alert(fingerprint="z", component="emr-web", at="2026-11-04T02:00:00Z")))
+    assert other != iid
     eng.decide(other, gate(eng, other, "incident")["interrupt_id"],
                {"decision": "resolve", "approver": "oncall-1", "feedback": "False alarm: synthetic check"})
     assert gate(eng, other, "postmortem")

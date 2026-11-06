@@ -33,8 +33,14 @@ def thread_view(engine, thread_id: str) -> dict:
     if kind == "incident":
         from ..ops.signals import still_firing
 
+        from ..ops.correlate import root
+
         signals = engine.services.signals.for_incident(thread_id)
-        return out | {"severity": s.get("severity"), "component": s.get("component", ""),
+        try:
+            root_component, root_why = root(engine.services.snapshot(s["product_id"]), signals, s.get("component", ""))
+        except Exception:
+            root_component, root_why = s.get("component", ""), ""
+        return out | {"root": {"component": root_component, "why": root_why},"severity": s.get("severity"), "component": s.get("component", ""),
                       "opened_at": s.get("opened_at", ""), "triage": s.get("triage", ""),
                       "actions": s.get("actions", []), "taken": s.get("taken", []), "links": s.get("links", {}),
                       "postmortem": s.get("postmortem", ""), "signals": signals, "firing": len(still_firing(signals)),

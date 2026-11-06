@@ -242,6 +242,9 @@ class SignalStore(Protocol):
     def for_incident(self, incident_id: str) -> list[dict]: ...
     def open_incident_for(self, product_id: str, fingerprint: str, component: str) -> str | None: ...
     def close(self, incident_id: str) -> None: ...
+    # Correlation (ops/correlate.py): open incidents, and moving signals between them.
+    def open_incidents(self, product_id: str) -> list[str]: ...
+    def move(self, from_incident: str, to_incident: str, fingerprint: str | None = None) -> int: ...
 
 
 class InMemorySignalStore:
@@ -270,6 +273,20 @@ class InMemorySignalStore:
     def close(self, incident_id) -> None:
         with self._lock:
             self.closed.add(incident_id)
+
+    def open_incidents(self, product_id) -> list[str]:
+        with self._lock:
+            return list(dict.fromkeys(r["incident_id"] for r in self.rows
+                                      if r["product_id"] == product_id and r["incident_id"] not in self.closed))
+
+    def move(self, from_incident, to_incident, fingerprint=None) -> int:
+        with self._lock:
+            n = 0
+            for r in self.rows:
+                if r["incident_id"] == from_incident and (fingerprint is None or r["fingerprint"] == fingerprint):
+                    r["incident_id"] = to_incident
+                    n += 1
+            return n
 
 
 class PostgresSignalStore:
@@ -312,6 +329,19 @@ class PostgresSignalStore:
     def close(self, incident_id) -> None:
         with self.pool.connection() as conn:
             conn.execute("UPDATE vrixel_signals SET closed = true WHERE incident_id = %s", (incident_id,))
+
+    def open_incidents(self, product_id) -> list[str]:
+        with self.pool.connection() as conn:
+            rows = conn.execute("SELECT incident_id, min(id) AS first FROM vrixel_signals WHERE product_id = %s "
+                                "AND NOT closed GROUP BY incident_id ORDER BY first", (product_id,)).fetchall()
+        return [r["incident_id"] for r in rows]
+
+    def move(self, from_incident, to_incident, fingerprint=None) -> int:
+        with self.pool.connection() as conn:
+            cur = conn.execute(
+                "UPDATE vrixel_signals SET incident_id = %s WHERE incident_id = %s AND (%s::text IS NULL OR fingerprint = %s)",
+                (to_incident, from_incident, fingerprint, fingerprint))
+            return cur.rowcount
 
 
 def still_firing(signals: list[dict]) -> list[dict]:
