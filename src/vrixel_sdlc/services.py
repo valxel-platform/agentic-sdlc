@@ -57,6 +57,8 @@ class Services:
     start_intent_change: object = None  # starts a feature or initiative from an incident, set by the engine
     close_incident: object = None  # set by the engine
     incidents: object = None  # product_id -> recent incidents, set by the engine
+    costs: object = None  # vrixel_sdlc.ops.cost.CostSource: what released features really cost
+    cost_reviews: object = None  # vrixel_sdlc.ops.cost reviews store
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime

@@ -94,6 +94,7 @@ class FeatureState(TypedDict, total=False):
     new_repos: Annotated[list[dict], last]  # repos created for this feature, with what was applied
     deployments: Annotated[dict[str, dict], merge_dict]  # component -> {"env", "release", "repo", ...}
     resources: Annotated[list[dict], last]  # AWS resources G4 approved, as OpenChoreo Resources (VX-19)
+    cost_plan: Annotated[dict, last]  # what G4 approved it to cost: AWS per environment (vrixel_sdlc.ops.cost)
     rollout: Annotated[dict, last]  # store apps' staged rollout: {"step", "at", "attempt", "history"}
     delivery: Annotated[dict[str, dict], merge_dict]  # wait (ci, build, dev, ...) -> latest result
     quality: Annotated[dict[str, dict], merge_dict]  # stage (pr, build, dev, ...) -> suites evaluated

@@ -133,7 +133,22 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
               <dt>Model calls</dt><dd>{f.usage.calls}</dd>
               <dt>Cache hit rate</dt><dd>{Math.round(f.usage.cache_hit_rate * 100)}%</dd>
               <dt>Human time</dt><dd>{f.human_active_minutes.toFixed(1)} min across {f.gate_decisions.length} decisions</dd>
+              {f.run_cost && <>
+                <dt>AWS approved</dt>
+                <dd>{money(f.run_cost.approved_monthly_usd.production ?? 0)}/month in production</dd>
+                <dt>AWS running at</dt>
+                <dd>{f.run_cost.projected_monthly_usd
+                  ? <>{money(f.run_cost.projected_monthly_usd.production ?? 0)}/month
+                      <span className="small muted"> (reviewed {new Date(f.run_cost.reviewed_at ?? "").toLocaleDateString()})</span></>
+                  : <span className="muted">Reviewed 7 and 30 days after release</span>}</dd>
+              </>}
             </dl>
+            {f.run_cost && f.run_cost.findings.length > 0 && (
+              <div className="small" role="status" style={{ padding: "0 16px 16px" }}>
+                {f.run_cost.findings.map((t) => <p key={t}>{t}</p>)}
+                {f.run_cost.incidents.map((i) => <Link key={i} to={threadPath(i)}>{i}</Link>)}
+              </div>
+            )}
           </section>
         </div>
 

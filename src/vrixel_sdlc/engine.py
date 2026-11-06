@@ -103,6 +103,17 @@ class FeatureEngine:
                        "incident": build_incident_graph(services, checkpointer=checkpointer)}
         if getattr(services, "signals", None) is None:
             services.signals = InMemorySignalStore()
+        from .ops import cost
+
+        if getattr(services, "costs", None) is None:
+            services.costs = cost.default_sources(services.settings)
+        if getattr(services, "cost_reviews", None) is None:
+            services.cost_reviews = cost.InMemoryCostReviews()
+        # Days after release when each feature's cost is reviewed against its plan.
+        self.cost_review_days = tuple(float(d) for d in (os.environ.get("VRIXEL_COST_REVIEW_DAYS") or "7,30").split(",")
+                                      if d.strip())
+        self.cost_tolerance = float(os.environ.get("VRIXEL_COST_TOLERANCE") or 0.2)
+        self._cost_checked = 0.0
         self.index = index or InMemoryIndex()
         self._create_lock = threading.Lock()
         services.features = self.feature_summaries  # what the product has built, for agents and G4
@@ -233,9 +244,17 @@ class FeatureEngine:
             return
 
         def loop():
+            import time
+
             while not self._stop.wait(interval_s):
                 for fid in self.waiting_on_external():
                     self.poke(fid)
+                if time.time() - self._cost_checked > 3600:  # cost data moves daily; hourly is plenty
+                    self._cost_checked = time.time()
+                    try:
+                        self.review_costs()
+                    except Exception:
+                        pass
 
         self._watcher = threading.Thread(target=loop, name="vrixel-watcher", daemon=True)
         self._watcher.start()
@@ -411,7 +430,9 @@ class FeatureEngine:
                 continue  # a signal for no product we know: nothing to do
             sig = {**sig, "product_id": product_id, "component": repo or sig.get("component", "")}
             with self._create_lock:
-                iid = self.services.signals.open_incident_for(product_id, sig["fingerprint"], repo)
+                # A cost finding joins only the incident for the same finding, never a component's outage.
+                match = "" if sig.get("category") == "cost" else repo
+                iid = self.services.signals.open_incident_for(product_id, sig["fingerprint"], match)
                 created = False
                 if iid is None and sig["status"] == "firing":
                     iid = self._new_id_locked(product_id, "incident", sig["title"])
@@ -428,6 +449,129 @@ class FeatureEngine:
                 self.poke_now(iid)  # a resolution may end its recovery wait
             touched.append(iid)
         return list(dict.fromkeys(touched))
+
+    # --- cost: released features against what G4 approved -----------------------------------
+    def review_costs(self, at=None) -> list[dict]:
+        """Review each released feature that has reached a review day without a review for it:
+        AWS spend against its G4 plan, production compute the week after release against the week
+        before. Findings go into the incident flow as cost signals. Returns the reviews made."""
+        from .ops import cost
+
+        at = at or cost.now()
+        made = []
+        for row in self.index.all():
+            if row.get("kind", "feature") != "feature":
+                continue
+            try:
+                s = self._state(row["feature_id"])
+                released = cost.released_at(s) if s.get("status") == "done" else None
+                if not released or not s.get("cost_plan"):
+                    continue
+                elapsed = (at - released).total_seconds() / 86400
+                due = [d for d in self.cost_review_days if elapsed >= d]
+                done = {r.get("review_day") for r in self.services.cost_reviews.for_feature(row["feature_id"])}
+                todo = [d for d in due if d not in done]
+                if not todo:
+                    continue
+                rv = self.review_cost(s, at=at, released=released)
+                rv["review_day"] = max(todo)  # catching up on several days makes one review
+                for d in todo[:-1]:
+                    self.services.cost_reviews.add({**rv, "review_day": d, "skipped": True})
+                self.services.cost_reviews.add(rv)
+                made.append(rv)
+            except Exception as exc:
+                self.errors[f"cost:{row['feature_id']}"] = f"{type(exc).__name__}: {exc}"
+        return made
+
+    def review_cost(self, s: dict, *, at, released) -> dict:
+        from datetime import timedelta
+
+        from .ops import cost
+
+        src = self.services.costs
+        plan = s["cost_plan"]
+        window = min(7.0, max(1.0, (at - released).total_seconds() / 86400))
+        start = at - timedelta(days=window)
+        aws_actual = {}
+        for env, account in sorted((plan.get("accounts") or {}).items()):
+            if env in (plan.get("aws_monthly_usd") or {}):
+                aws_actual[env] = src.aws_costs(product_id=s["product_id"], feature_id=s["feature_id"],
+                                                account=account, start=start, end=at)
+        before, after, repo_of = {}, {}, {}
+        groups: dict[tuple, list[str]] = {}
+        for repo, dep in sorted((s.get("deployments") or {}).items()):
+            if dep.get("kind") in ("resource", "store") or not dep.get("component"):
+                continue
+            if dep.get("env") != (list(dep.get("pipeline") or ["production"]))[-1]:
+                continue  # production only
+            repo_of[dep["component"]] = repo
+            groups.setdefault((dep.get("namespace") or "default", dep.get("project") or "", dep["env"]), []).append(dep["component"])
+        for (ns, project, env), comps in groups.items():
+            after |= src.component_costs(namespace=ns, project=project, env=env, components=comps,
+                                         start=max(start, released), end=at)
+            before |= src.component_costs(namespace=ns, project=project, env=env, components=comps,
+                                          start=released - timedelta(days=window), end=released)
+        rv = cost.review(plan, feature_id=s["feature_id"], product_id=s["product_id"], released=released, at=at,
+                         aws_actual=aws_actual, window_days=window, compute_before=before, compute_after=after,
+                         tolerance=self.cost_tolerance)
+        sigs = cost.signals(rv, title=s.get("title", ""), repo_of=lambda c: repo_of.get(c, c))
+        rv["incidents"] = self.ingest(sigs) if sigs else []
+        return rv
+
+    def _run_cost(self, feature_id: str, s: dict) -> dict | None:
+        """For the feature page: production's approved monthly AWS cost and the latest review."""
+        plan = s.get("cost_plan") or {}
+        if not plan.get("resources"):
+            return None
+        reviews = [r for r in self.services.cost_reviews.for_feature(feature_id) if not r.get("skipped")]
+        last = reviews[-1] if reviews else None
+        return {"approved_monthly_usd": plan.get("aws_monthly_usd") or {},
+                "projected_monthly_usd": ({e: v["projected_monthly_usd"] for e, v in last["aws"].items()} if last else None),
+                "reviewed_at": last["at"] if last else None,
+                "findings": [f["text"] for f in last["findings"]] if last else [],
+                "incidents": last.get("incidents", []) if last else []}
+
+    def feature_cost(self, feature_id: str) -> dict:
+        """What a feature cost to build (agent inference, by phase), what G4 approved it to cost to
+        run, and every review of what it really costs since release."""
+        from .gateway.ledger import summarize
+
+        s = self._state(feature_id)
+        if not s:
+            raise KeyError(feature_id)
+        reviews = [r for r in self.services.cost_reviews.for_feature(feature_id) if not r.get("skipped")]
+        latest = reviews[-1] if reviews else None
+        return {"feature_id": feature_id, "product_id": s.get("product_id"), "title": s.get("title", ""),
+                "build": {"llm_usd": round(float(s.get("cost_usd", 0.0)), 4),
+                          "llm": summarize(self.services.ledger.records(feature_id)),
+                          "human_minutes": round(sum(g.get("active_minutes", 0.0)
+                                                     for g in s.get("gate_decisions") or []), 1)},
+                "plan": s.get("cost_plan") or None,
+                "run": ({"aws_monthly_usd": {e: v["projected_monthly_usd"] for e, v in latest["aws"].items()},
+                         "compute": latest["compute"], "reviewed_at": latest["at"], "findings": latest["findings"]}
+                        if latest else None),
+                "reviews": reviews}
+
+    def product_cost(self, product_id: str) -> dict:
+        """Every feature's build cost and its latest run-rate, with the product's totals."""
+        rows = []
+        for f in self.feature_summaries(product_id):
+            c = self.feature_cost(f["feature_id"])
+            run = c["run"] or {}
+            rows.append({"feature_id": f["feature_id"], "title": f["title"], "status": f["status"],
+                         "build_llm_usd": c["build"]["llm_usd"],
+                         "approved_monthly_usd": ((c["plan"] or {}).get("aws_monthly_usd") or {}),
+                         "projected_monthly_usd": run.get("aws_monthly_usd") or {},
+                         "findings": len(run.get("findings") or [])})
+        envs = sorted({e for r in rows for e in (r["approved_monthly_usd"] | r["projected_monthly_usd"])})
+        return {"product_id": product_id, "features": rows,
+                "totals": {"build_llm_usd": round(sum(r["build_llm_usd"] for r in rows), 4),
+                           "approved_monthly_usd": {e: round(sum(r["approved_monthly_usd"].get(e, 0.0) for r in rows), 2)
+                                                    for e in envs},
+                           "projected_monthly_usd": {e: round(sum(r["projected_monthly_usd"].get(e, 0.0) for r in rows), 2)
+                                                     for e in envs}},
+                "note": "Run cost covers the AWS services features created; cluster compute and shared platform "
+                        "costs are not allocated yet."}
 
     def incident_summaries(self, product_id: str, limit: int = 20) -> list[dict]:
         out = []
@@ -658,6 +802,7 @@ class FeatureEngine:
             "tokens_used": s.get("tokens_used", 0),
             "human_active_minutes": human,
             "usage": summarize(records),
+            "run_cost": self._run_cost(feature_id, s),
             "events": s.get("events", []),
             "diagrams": s.get("diagrams", []),
             "delivery": s.get("delivery", {}),

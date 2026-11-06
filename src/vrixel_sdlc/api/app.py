@@ -141,6 +141,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
 
         services = build_services(settings, ledger=PostgresLedger(pool), catalog=PostgresCatalog(pool))
         services.signals = PostgresSignalStore(pool)
+        from ..ops.cost import PostgresCostReviews
+
+        services.cost_reviews = PostgresCostReviews(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
@@ -343,6 +346,71 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(400, "Body is not JSON") from exc
         return ingest(from_ticket(payload))
 
+    @api.post("/signals/openchoreo", status_code=202)
+    async def openchoreo_alert(request: Request) -> dict:
+        """An OpenChoreo notification channel (type webhook, no payloadTemplate, header
+        Authorization: Bearer VRIXEL_SIGNALS_TOKEN). Budget alerts from the FinOps module arrive
+        as cost signals; log and metric alerts as ordinary ones."""
+        from ..ops.signals import from_openchoreo
+
+        bearer_ok(request)
+        try:
+            payload = json.loads(await request.body() or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        return ingest(from_openchoreo(payload))
+
+    @api.post("/signals/aws-budgets", status_code=202)
+    async def aws_budgets(request: Request) -> JSONResponse:
+        """AWS Budgets through an SNS topic with an HTTPS subscription to
+        https://vrixel:<VRIXEL_SIGNALS_TOKEN>@<host>/api/signals/aws-budgets. Only topics listed in
+        VRIXEL_AWS_BUDGET_TOPICS are accepted; their subscription is confirmed here."""
+        import base64
+        import hmac
+
+        from ..ops.signals import from_aws_budget
+
+        token = os.environ.get("VRIXEL_SIGNALS_TOKEN", "")
+        topics = {t.strip() for t in os.environ.get("VRIXEL_AWS_BUDGET_TOPICS", "").split(",") if t.strip()}
+        if not token or not topics:
+            raise HTTPException(404, "AWS Budgets signals are not configured")
+        auth = request.headers.get("authorization", "")
+        basic = "Basic " + base64.b64encode(f"vrixel:{token}".encode()).decode()
+        if not (hmac.compare_digest(auth, f"Bearer {token}") or hmac.compare_digest(auth, basic)):
+            # SNS sends its credentials only after a challenge.
+            return JSONResponse({"detail": "Bad credentials"}, status_code=401,
+                                headers={"WWW-Authenticate": 'Basic realm="vrixel"'})
+        try:
+            msg = json.loads(await request.body() or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        topic = next((t for t in sorted(topics) if t == msg.get("TopicArn")), None)
+        if topic is None:
+            raise HTTPException(403, "Unknown topic")
+        if msg.get("Type") == "SubscriptionConfirmation":
+            confirm_sns(str(msg.get("Token") or ""), topic)
+            return JSONResponse({"confirmed": topic}, status_code=202)
+        if msg.get("Type") != "Notification":
+            return JSONResponse({"ignored": msg.get("Type")}, status_code=202)
+        reg = list(eng().services.settings.registry)
+        return JSONResponse(ingest(from_aws_budget(str(msg.get("Message") or ""), reg, msg.get("Timestamp", ""))),
+                            status_code=202)
+
+    def confirm_sns(token: str, topic: str) -> None:
+        """Confirm the subscription with SNS in the allowed topic's own region. The URL is built
+        here, from the configured topic, never taken from the request."""
+        import re
+        from urllib.parse import urlencode
+        from urllib.request import urlopen
+
+        parts = topic.split(":")
+        region = parts[3] if len(parts) == 6 and parts[2] == "sns" else ""
+        if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-\d", region) or not re.fullmatch(r"[A-Za-z0-9+/=_-]{16,2048}", token):
+            raise HTTPException(400, "Not a subscription confirmation for an SNS topic")
+        query = urlencode({"Action": "ConfirmSubscription", "TopicArn": topic, "Token": token})
+        with urlopen(f"https://sns.{region}.amazonaws.com/?{query}", timeout=15) as resp:  # noqa: S310
+            resp.read()
+
     @api.post("/webhooks/github", status_code=202)
     async def github_webhook(request: Request) -> dict:
         """CI and pull-request events from the product orgs' GitHub App. Verified with the app's
@@ -451,6 +519,22 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             if product_id not in eng().services.settings.registry:
                 raise HTTPException(404, f"Unknown product {product_id}")
             raise HTTPException(403, f"You aren't a member of {product_id}'s organization")
+
+    @api.get("/costs/{product_id}")
+    def product_costs(product_id: str, user: User = Depends(current_user)) -> dict:
+        """Each feature's build cost and run-rate against its plan, with the product's totals."""
+        member_of(user, product_id)
+        return eng().product_cost(product_id)
+
+    @api.get("/features/{feature_id}/cost")
+    def feature_costs(feature_id: str, user: User = Depends(current_user)) -> dict:
+        """What the feature cost to build, what G4 approved it to cost to run, and what it costs."""
+        try:
+            c = eng().feature_cost(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, f"Unknown feature {feature_id}") from exc
+        member_of(user, c["product_id"])
+        return c
 
     @api.get("/roadmap/{product_id}")
     def roadmap(product_id: str, user: User = Depends(current_user)) -> dict:

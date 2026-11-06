@@ -2,7 +2,11 @@
 into one shape and tied to a product and a component.
 
     {source, status: firing|resolved, product_id, component, env, severity: sev1..sev4,
-     title, detail, fingerprint, url, at, labels}
+     title, detail, fingerprint, url, at, labels, category?: cost, resolves?: false}
+
+Cost signals (OpenChoreo budget alerts, AWS Budgets, the tool's own cost reviews) carry
+category "cost". Signals that never send a resolution (tickets, OpenChoreo notifications, AWS
+Budgets, cost reviews) carry resolves: false, so an incident never waits for them to clear.
 
 Signals are stored outside the incident threads (they keep arriving while an incident waits for a
 person), in the platform database when there is one.
@@ -12,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from datetime import datetime, timezone
 from typing import Protocol
@@ -94,6 +99,74 @@ def from_ticket(payload: dict) -> list[dict]:
     }]
 
 
+def from_openchoreo(payload: dict) -> list[dict]:
+    """An OpenChoreo ObservabilityAlertRule's webhook notification (the raw AlertDetails, sent when
+    the channel has no payloadTemplate). Budget rules (source type budget, from the FinOps module)
+    become cost signals. OpenChoreo notifies when a rule fires and never when it clears."""
+    if not payload.get("alertName"):
+        return []
+    budget = payload.get("alertType") == "budget"
+    sev = _sev(str(payload.get("alertSeverity") or ""), _ALERT_SEV, "sev3")
+    if budget and sev == "sev1":
+        sev = "sev2"  # spend is never an outage
+    value, threshold = payload.get("alertValue"), payload.get("alertThreshold")
+    detail = str(payload.get("alertDescription") or "")
+    if value is not None and threshold is not None:
+        detail = (detail + " " if detail else "") + (
+            f"(cost ${float(value):,.2f} over the ${float(threshold):,.2f} budget)" if budget else
+            f"(value {value}, threshold {threshold})")
+    scope = "/".join(str(payload.get(k) or "") for k in ("namespace", "project", "component", "environment"))
+    sig = {
+        "source": "openchoreo", "status": "firing", "resolves": False,
+        "product_id": "", "component": str(payload.get("component") or ""),
+        "env": str(payload.get("environment") or "production"), "severity": sev,
+        "title": str(payload.get("alertName")), "detail": detail[:4000],
+        "fingerprint": f"openchoreo:{scope}:{payload.get('alertName')}", "url": "",
+        "at": str(payload.get("alertTimestamp") or now()),
+        "labels": {k: str(payload.get(k) or "") for k in ("namespace", "project", "environment", "releaseLine",
+                                                          "alertType")},
+    }
+    if budget:
+        sig["category"] = "cost"
+    return [sig]
+
+
+_BUDGET_FIELDS = {"name": r"Budget Name:\s*(.+)", "budgeted": r"Budgeted Amount:\s*\$?([\d,.]+)",
+                  "type": r"Alert Type:\s*(ACTUAL|FORECASTED)", "threshold": r"Alert Threshold:\s*>?\s*\$?([\d,.]+)",
+                  "amount": r"(?:ACTUAL|FORECASTED) Amount:\s*\$?([\d,.]+)", "account": r"AWS Account\s*(\d{12})"}
+
+
+def from_aws_budget(message: str, products, at: str = "") -> list[dict]:
+    """An AWS Budgets notification, as delivered by SNS (the Message of a Notification). Budgets
+    are named vrixel-<product id>-<environment> (for example vrixel-AG-production), which ties the
+    alert to a product and an environment."""
+    got = {k: (m.group(1).strip() if (m := re.search(rx, message or "")) else "") for k, rx in _BUDGET_FIELDS.items()}
+    if not got["name"]:
+        return []
+    money = {k: float(got[k].replace(",", "")) if got[k] else None for k in ("budgeted", "threshold", "amount")}
+    product_id, env = "", ""
+    rest = got["name"][len("vrixel-"):] if got["name"].lower().startswith("vrixel-") else ""
+    for pid in sorted(products, key=len, reverse=True):
+        if rest.lower() == pid.lower() or rest.lower().startswith(pid.lower() + "-"):
+            product_id, env = pid, rest[len(pid) + 1:]
+            break
+    actual = got["type"] != "FORECASTED"
+    over = actual and money["amount"] is not None and money["budgeted"] and money["amount"] >= money["budgeted"]
+    amount = f"${money['amount']:,.2f}" if money["amount"] is not None else "unknown"
+    return [{
+        "source": "aws-budgets", "category": "cost", "resolves": False, "status": "firing",
+        "product_id": product_id, "component": "", "env": env or "production",
+        "severity": "sev2" if over else "sev3" if actual else "sev4",
+        "title": f"AWS budget {got['name']}: {'forecast' if not actual else 'actual'} spend above its alert",
+        "detail": (f"{got['type'] or 'ACTUAL'} {amount} against a budget of "
+                   f"${(money['budgeted'] or 0):,.2f} (alert above ${(money['threshold'] or 0):,.2f})"
+                   + (f" in account {got['account']}" if got["account"] else "")),
+        "fingerprint": f"aws-budgets:{got['name']}:{got['type'] or 'ACTUAL'}:{got['threshold']}",
+        "url": "", "at": at or now(),
+        "labels": {"budget": got["name"], "account": got["account"], "alert_type": got["type"]},
+    }]
+
+
 def resolve_product(services, signal: dict) -> tuple[str, str]:
     """(product_id, repo) for a signal: an explicit product label wins; otherwise the component is
     matched against each product's repos and OpenChoreo component names."""
@@ -111,6 +184,18 @@ def resolve_product(services, signal: dict) -> tuple[str, str]:
             return product_id, names[comp]
         if pid:
             return pid, ""
+    # An OpenChoreo alert names its project: the product (or one of its lanes) running there.
+    project = (signal.get("labels") or {}).get("project", "")
+    if project:
+        for product_id in reg:
+            try:
+                snap = services.snapshot(product_id)
+            except Exception:
+                continue
+            projects = {(snap.product.runtime or {}).get("openchoreo_project")}
+            projects |= {(lane.runtime or {}).get("openchoreo_project") for lane in snap.lane_of_repo().values()}
+            if project in projects:
+                return product_id, ""
     return "", ""
 
 
@@ -192,8 +277,13 @@ class PostgresSignalStore:
 
 
 def still_firing(signals: list[dict]) -> list[dict]:
-    """The latest state of each alert or issue that is still firing (tickets don't resolve themselves)."""
+    """The latest state of each alert or issue that is still firing. Tickets and notifications that
+    never send a resolution (resolves: false) aren't waited on."""
     latest: dict[str, dict] = {}
     for s in signals:
         latest[s["fingerprint"]] = s
-    return [s for s in latest.values() if s["status"] == "firing" and s["source"] != "ticket"]
+    return [s for s in latest.values() if s["status"] == "firing" and resolves(s)]
+
+
+def resolves(signal: dict) -> bool:
+    return signal["source"] != "ticket" and signal.get("resolves", True) is not False
