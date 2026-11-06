@@ -691,6 +691,35 @@ product's BFF. G4 approves it; the components' `workload.yaml`
 and the product's mesh policies follow it. Coders and reviewers get their role's rules. A web app's
 post-deploy tests run against the BFF's public URL.
 
+## AWS services (VX-19)
+
+Features that need a managed service get it from the platform's AWS catalog
+(`platform/aws-resources.yaml` in sdlc-governance): DynamoDB, Kinesis, SQS, S3, SNS, and RDS
+PostgreSQL and ElastiCache Valkey through OpenChoreo's Crossplane provisioner. Each type is an
+OpenChoreo ClusterResourceType backed by a Crossplane Composition in `vrixel-tools/platform-resources`,
+with encryption, private access, backups and tags built in. People approve; agents do the rest:
+
+| Step | Who | What |
+| --- | --- | --- |
+| Design | architect agent | Picks services from the catalog (it sees what each is for, its data classes, and what the product already runs), writes a `## Resources` section and an ADR for each non-default service |
+| Checks | tool | Type in the catalog and approved for the data class; parameters valid; every component's access declared (`reads`, `writes`, `deletes`) and allowed by the type; only platform components hold AWS access; no change that replaces stored data; the product has AWS accounts |
+| G4 | architects | Approve the services, who may use them, and their size and planning cost per environment |
+| Build | coding agents | Add `dependencies.resources` to `workload.yaml` (outputs as environment variables), reach each service behind a port with the SDK's default credentials, test against the emulator |
+| dev, staging | pipeline | Creates each Resource and a workload identity per component (an IAM role through EKS Pod Identity holding only its declared actions), binds them to the environment with its size, waits until they are ready, then deploys the components |
+| G6 | release managers | See the production sizes and cost; approving binds the resources in production on their behalf |
+
+```
+## Resources
+- field-readings: kinesis-stream; retention_hours=168
+  writes: agtech-sensor-api; reads: agtech-field-worker
+- field-state: dynamodb-table; partition_key=field_id; size production=large
+  reads, writes: agtech-field-worker
+```
+
+A product runs AWS from `runtime.aws` in its `product.yaml`: a region allowed for its data class
+and one account per environment. The pipeline never deletes a resource; changing a key or a
+queue's ordering replaces stored data, so the design check refuses it and a person does it.
+
 ## Store apps (VX-18)
 
 A mobile app (role `mobile`) is released, not deployed: people install a build and keep it for

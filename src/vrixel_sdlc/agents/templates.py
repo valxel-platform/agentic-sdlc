@@ -163,6 +163,7 @@ def architecture(ctx: dict, defective: bool) -> str:
                   f"- {record}.read: {record} (who opened which {record}, through which service)",
                   f"- {record}.change: {record} (who changed it, on whose behalf, approved by whom)"]
     lines += ["", "## Endpoints", *_endpoint_lines(repos)]
+    lines += _resource_lines(ctx, repos, provider, lines)
     if any(r["role"] == "event-worker" for r in repos):
         record = _slug(ctx["title"]).split("-", 1)[0] or "record"
         workers = ", ".join(r["name"].split("/", 1)[-1] for r in repos if r["role"] == "event-worker")
@@ -170,6 +171,32 @@ def architecture(ctx: dict, defective: bool) -> str:
                   f"- vrixel.{record}.changed.v1: published by {provider.split('/', 1)[-1]}, applied by {workers}"]
     lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15", "- VX-16", "- VX-17"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _resource_lines(ctx: dict, repos: list[dict], provider: str, lines: list[str]) -> list[str]:
+    """Stub judgement (VX-19): the AWS services the request names, owned by the provider, with an
+    ADR each and a worker reading any stream."""
+    types = (ctx.get("aws_catalog") or {}).get("types") or {}
+    text = f"{ctx.get('title', '')} {ctx.get('description', '')}"
+    wanted = [(k, t) for k, t in (("DynamoDB", "dynamodb-table"), ("Kinesis", "kinesis-stream"), ("SQS", "sqs-queue"),
+                                  ("S3", "s3-bucket")) if re.search(rf"\b{k}\b", text) and t in types]
+    if not wanted:
+        return []
+    record = _slug(ctx["title"]).split("-", 1)[0] or "record"
+    owner = provider.split("/", 1)[-1]
+    workers = [r["name"].split("/", 1)[-1] for r in repos if r["role"] == "event-worker"]
+    out, adrs = ["", "## Resources"], []
+    for i, (label, kind) in enumerate(wanted, start=1):
+        name = f"{re.sub(r'[^a-z0-9]+', '-', record.lower()).strip('-')}-{kind.split('-')[0]}"
+        params = {"dynamodb-table": "; partition_key=id", "kinesis-stream": "; retention_hours=168"}.get(kind, "")
+        out.append(f"- {name}: {kind}{params}")
+        out.append(f"  writes, reads: {owner}" if kind != "kinesis-stream" or not workers else
+                   f"  writes: {owner}; reads: {', '.join(workers)}")
+        adrs.append(f"- ADR-{ctx['feature_id']}-R{i}: Keep {name} in {label} ({kind}): the request needs it and the "
+                    "platform defaults don't serve that access pattern")
+    at = lines.index("## ADRs") + 2 if "## ADRs" in lines else len(lines)
+    lines[at:at] = adrs
+    return out
 
 
 def _minor_bump(version: str) -> str:

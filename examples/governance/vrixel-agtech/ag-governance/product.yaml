@@ -12,6 +12,11 @@ depends_on: [SS, APX]
 runtime:
   openchoreo_project: agtech
   pipeline: [dev, staging, production]
+  # AWS for managed services (VX-19): one account per environment, in a region the platform
+  # allows for the product's data class. OpenChoreo's data plane for each environment runs there.
+  aws:
+    region: us-east-2
+    accounts: { dev: "111111111111", staging: "222222222222", production: "333333333333" }
 # Where agents publish work. Providers and credentials are run by the tools org; the platform
 # limits which providers may receive content from each data class (config/tools.yaml).
 tools:

@@ -21,6 +21,7 @@ platform:
   repo: sdlc-governance
   ref: main
   constitution_path: platform/constitution.md
+  resources_path: platform/aws-resources.yaml   # AWS services products may use (VX-19)
 
 limits:
   min_critic_threshold: 0.75       # products may raise it, not lower it

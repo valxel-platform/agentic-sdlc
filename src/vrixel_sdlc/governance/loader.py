@@ -37,6 +37,7 @@ class GovernanceSnapshot:
     pins: dict  # {"platform": {...}, "product": {...}, "dependencies": {lane: {...}}}
     constitution_text: str = ""  # this lane's own constitution file, as read
     dependencies: dict[str, "GovernanceSnapshot"] = field(default_factory=dict)
+    aws_catalog: dict = field(default_factory=dict)  # the platform's AWS services (VX-19), empty if none
 
     @property
     def version(self) -> str:
@@ -113,11 +114,22 @@ class GovernanceLoader:
         except ConstitutionError as exc:
             raise GovernanceError(f"{entry.governance.full_name}: {exc}") from exc
         context = s.read(prod["org"], prod["repo"], files["context"], prod["sha"], optional=True) or ""
+        from ..resources import CatalogError, check_aws, load_catalog
+
+        try:
+            catalog = load_catalog(s.read(plat["org"], plat["repo"], self.settings.platform_resources_path,
+                                          plat["sha"], optional=True) or "")
+        except (CatalogError, ValueError) as exc:
+            raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
+        runtime = product.runtime or {}
+        problems = check_aws(runtime.get("aws"), product.data_class, list(runtime.get("pipeline") or []), catalog)
+        if problems:
+            raise GovernanceError(f"{entry.governance.full_name}/product.yaml: " + "; ".join(problems))
         snap = GovernanceSnapshot(
             product=product, constitution=constitution, product_context=context,
             pins={"platform": dict(plat), "product": dict(prod),
                   "dependencies": {d: dict(p) for d, p in deps_pins.items()} if not _as_dependency else {}},
-            constitution_text=own_text, dependencies=dependencies,
+            constitution_text=own_text, dependencies=dependencies, aws_catalog=catalog,
         )
         with self._lock:
             self._cache[key] = snap

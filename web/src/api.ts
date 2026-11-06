@@ -1,6 +1,17 @@
 export type StationState = "done" | "skipped" | "waiting" | "current" | "stopped" | "todo";
 export interface Station { key: string; kind: "phase" | "gate"; state: StationState }
 
+/** AWS services a design asks for (VX-19): what G4 approves and G6 binds in production. */
+export interface AwsResource {
+  name: string; type: string; service: string; stateful: boolean;
+  access: Record<string, string[]>; parameters: Record<string, unknown>;
+  sizes: Record<string, string>; monthly_usd: Record<string, number>;
+}
+export interface AwsResources {
+  resources: AwsResource[]; monthly_usd: Record<string, number>;
+  region: string; accounts: Record<string, string>; note: string;
+}
+
 export interface PendingItem {
   interrupt_id: string;
   type: "gate" | "handback" | "escalation" | "external";
@@ -12,6 +23,7 @@ export interface PendingItem {
   blocking?: SecurityFinding[];
   quality?: { suites: QualitySuite[]; waivers: Waiver[] } | null;
   new_repos?: RepoPlan[];
+  aws_resources?: AwsResources | null;
   design_review?: DesignReview | null;
   related_features?: SimilarItem[];
   kind?: "feature" | "initiative" | "release";

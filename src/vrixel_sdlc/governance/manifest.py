@@ -104,9 +104,18 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         for repo in components:
             if repo not in own:
                 problems.append(f"runtime.components maps {repo}, which is not one of this product's repos")
+        aws = runtime.get("aws")
+        if aws is not None and not isinstance(aws, dict):
+            problems.append("runtime.aws must be a mapping: {region, accounts: {<environment>: <account id>}}")
+            aws = None
         runtime = {"openchoreo_project": str(runtime["openchoreo_project"]), "pipeline": pipeline,
                    "namespace": str(runtime["namespace"]) if runtime.get("namespace") else None,
-                   "components": components}
+                   "components": components,
+                   # The product's AWS accounts, one per environment (VX-19); checked against the
+                   # platform catalog's regions when the snapshot is loaded.
+                   "aws": ({"region": str(aws.get("region") or ""),
+                            "accounts": {str(k): str(v) for k, v in (aws.get("accounts") or {}).items()}}
+                           if aws else None)}
 
     registry = registry or {}
     depends_on = [str(d) for d in raw.get("depends_on") or []]
