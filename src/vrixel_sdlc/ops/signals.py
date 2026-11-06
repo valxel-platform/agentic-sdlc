@@ -167,6 +167,44 @@ def from_aws_budget(message: str, products, at: str = "") -> list[dict]:
     }]
 
 
+def from_cloudwatch(event: dict) -> list[dict]:
+    """A CloudWatch alarm state change, as EventBridge delivers it (the data plane's AlarmRouting).
+    Only Vrixel alarms count: their description's first line says whose they are,
+    `vrixel product=.. feature=.. resource=.. env=.. consumers=a,b alarm=.. severity=..`, and the
+    rest is what on-call reads. ALARM fires, OK resolves; INSUFFICIENT_DATA says nothing."""
+    if event.get("detail-type") != "CloudWatch Alarm State Change":
+        return []
+    d = event.get("detail") or {}
+    state = (d.get("state") or {}).get("value", "")
+    if state not in ("ALARM", "OK"):
+        return []
+    desc = str((d.get("configuration") or {}).get("description") or "")
+    first, _, says = desc.partition("\n")
+    if not first.startswith("vrixel "):
+        return []
+    who = dict(kv.split("=", 1) for kv in first.split()[1:] if "=" in kv)
+    who = {k: ("" if v == "-" else v) for k, v in who.items()}
+    consumers = [c for c in who.get("consumers", "").split(",") if c]
+    name, region = str(d.get("alarmName") or ""), str(event.get("region") or "")
+    resource = who.get("resource") or name
+    alarm = who.get("alarm", "")
+    from urllib.parse import quote
+
+    return [{
+        "source": "cloudwatch", "category": "aws", "status": "firing" if state == "ALARM" else "resolved",
+        "product_id": who.get("product", ""), "component": consumers[0] if consumers else "",
+        "env": who.get("env") or "production", "severity": _sev(who.get("severity", ""), {}, "sev3"),
+        "title": f"{resource}: {alarm.replace('-', ' ')}" if alarm else name,
+        "detail": (says.strip() + " " + str((d.get("state") or {}).get("reason") or "")).strip()[:4000],
+        "fingerprint": f"cloudwatch:{event.get('account', '')}:{name}",
+        "url": (f"https://{region}.console.aws.amazon.com/cloudwatch/home?region={region}#alarmsV2:alarm/{quote(name)}"
+                if region else ""),
+        "at": str((d.get("state") or {}).get("timestamp") or event.get("time") or now()),
+        "labels": {"resource": resource, "feature_id": who.get("feature", ""), "alarm": alarm,
+                   "consumers": ",".join(consumers), "account": str(event.get("account", "")), "region": region},
+    }]
+
+
 def resolve_product(services, signal: dict) -> tuple[str, str]:
     """(product_id, repo) for a signal: an explicit product label wins; otherwise the component is
     matched against each product's repos and OpenChoreo component names."""

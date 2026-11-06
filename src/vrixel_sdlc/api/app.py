@@ -147,6 +147,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..finops.ledger import PostgresCostLedger
 
         services.cost_ledger = PostgresCostLedger(pool)
+        from ..ops.alarms import PostgresAlarmBoard
+
+        services.alarms = PostgresAlarmBoard(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
@@ -362,6 +365,20 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
         return ingest(from_openchoreo(payload))
+
+    @api.post("/signals/cloudwatch", status_code=202)
+    async def cloudwatch_alarm(request: Request) -> dict:
+        """CloudWatch alarm state changes from each data plane's AlarmRouting (an EventBridge API
+        destination sending Authorization: Bearer VRIXEL_SIGNALS_TOKEN). Production alarms open and
+        resolve incidents; every alarm's state is kept for G6."""
+        from ..ops.signals import from_cloudwatch
+
+        bearer_ok(request)
+        try:
+            event = json.loads(await request.body() or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        return eng().alarm_changes(from_cloudwatch(event))
 
     @api.post("/signals/aws-budgets", status_code=202)
     async def aws_budgets(request: Request) -> JSONResponse:

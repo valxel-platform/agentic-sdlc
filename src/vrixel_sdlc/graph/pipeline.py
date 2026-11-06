@@ -210,6 +210,8 @@ def make_gate(gate: str, services):
                 "aws_resources": (aws_summary(services, state, snap, ref)
                                   if gate in ("g4", "g6") and lane_id == state["product_id"] else None),
                 "design_review": review,
+                # G6 sees the CloudWatch alarms firing before production on what the feature touches.
+                "alarms_firing": _alarms_firing(services, state) if gate == "g6" else [],
                 # G1 decides whether this intent is new: what the product already has that looks like it.
                 "related_features": list(state.get("related_features") or []) if gate == "g1" else [],
                 # G1 also decides whether the work fits the roadmap: its initiative and what's left of
@@ -544,6 +546,15 @@ def _resource_owner(snap):
         return rt.get("openchoreo_project"), rt.get("namespace")
 
     return target
+
+
+def _alarms_firing(services, state: FeatureState) -> list[dict]:
+    from ..ops.alarms import for_feature
+
+    try:
+        return for_feature(getattr(services, "alarms", None), state)
+    except Exception:
+        return []
 
 
 def _build_cost(services, state: FeatureState) -> dict | None:

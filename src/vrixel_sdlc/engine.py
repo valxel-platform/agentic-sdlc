@@ -109,6 +109,10 @@ class FeatureEngine:
             services.costs = cost.default_sources(services.settings)
         if getattr(services, "cost_reviews", None) is None:
             services.cost_reviews = cost.InMemoryCostReviews()
+        if getattr(services, "alarms", None) is None:
+            from .ops.alarms import InMemoryAlarmBoard
+
+            services.alarms = InMemoryAlarmBoard()
         if getattr(services, "cost_ledger", None) is None:
             from .finops.ledger import InMemoryCostLedger
 
@@ -454,6 +458,23 @@ class FeatureEngine:
                 self.poke_now(iid)  # a resolution may end its recovery wait
             touched.append(iid)
         return list(dict.fromkeys(touched))
+
+    def alarm_changes(self, signals: list[dict]) -> dict:
+        """CloudWatch alarm state changes: every one goes on the alarm board (what G6 reads);
+        production ones also go into the incident flow."""
+        from .ops.signals import resolve_product
+
+        kept, production = 0, []
+        for sig in signals:
+            product_id, _ = resolve_product(self.services, sig)
+            if not product_id:
+                continue
+            sig = {**sig, "product_id": product_id}
+            self.services.alarms.record(sig)
+            kept += 1
+            if sig["env"] == "production":
+                production.append(sig)
+        return {"recorded": kept, "incidents": self.ingest(production) if production else []}
 
     # --- cost: released features against what G4 approved -----------------------------------
     def review_costs(self, at=None) -> list[dict]:

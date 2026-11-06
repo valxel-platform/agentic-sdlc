@@ -140,3 +140,23 @@ def test_cost_records_and_reviews_persist():
         reviews.add({"feature_id": f"{pid}-FEAT-1", "product_id": pid, "at": "2026-11-09T00:00:00+00:00",
                      "review_day": 7, "findings": []})
         assert [x["review_day"] for x in PostgresCostReviews(pool).for_product(pid)] == [7]
+
+
+def test_alarm_states_persist():
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from vrixel_sdlc.ops.alarms import PostgresAlarmBoard
+
+    pid = f"P{uuid.uuid4().hex[:6]}"
+    sig = {"fingerprint": f"cloudwatch:1:{pid}", "product_id": pid, "status": "firing", "env": "staging",
+           "at": "2026-11-06T10:00:00Z", "title": "t", "severity": "sev3"}
+    with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        board = PostgresAlarmBoard(pool)
+        board.record(sig)
+        board.record({**sig, "at": "2026-11-06T11:00:00Z"})
+        [s] = PostgresAlarmBoard(pool).firing(pid)
+        assert s["since"] == "2026-11-06T10:00:00Z"
+        board.record({**sig, "status": "resolved", "at": "2026-11-06T12:00:00Z"})
+        board.record({**sig, "at": "2026-11-06T11:30:00Z"})  # late
+        assert board.firing(pid) == []

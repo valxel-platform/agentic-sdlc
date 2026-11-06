@@ -5,7 +5,7 @@ import Markdown from "react-markdown";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
-import { AwsResourcesTable } from "./AwsResources";
+import { AlarmsFiring, AwsResourcesTable } from "./AwsResources";
 import { DesignReviewPanel, RepoPlans, SimilarList } from "./External";
 
 const DELIVERY_FAILED: Record<string, string> = {
@@ -229,6 +229,14 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       )}
 
       {item.design_review && <DesignReviewPanel review={item.design_review} />}
+
+      {item.alarms_firing && item.alarms_firing.length > 0 && (
+        <div role="status">
+          <h3>Alarms firing before production</h3>
+          <p className="small">On AWS services this feature created or its components use. Approving ships with them firing.</p>
+          <AlarmsFiring alarms={item.alarms_firing} />
+        </div>
+      )}
 
       {item.aws_resources && item.aws_resources.resources.length > 0 && (
         <div>

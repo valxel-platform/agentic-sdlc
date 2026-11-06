@@ -468,6 +468,7 @@ Agents never act on production by themselves (VX-1, VX-3); every action is a per
 | Sentry (internal integration: issues created or regressed, alert rules) | `POST /api/signals/sentry` | `Sentry-Hook-Signature`, HMAC with `VRIXEL_SENTRY_CLIENT_SECRET` |
 | Support tickets (any tool that can post JSON) | `POST /api/signals/ticket` | `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
 | OpenChoreo alert rules (log, metric and FinOps budget rules; webhook channel without `payloadTemplate`) | `POST /api/signals/openchoreo` | channel header `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
+| CloudWatch alarms on AWS resources (each data plane's `AlarmRouting`: an EventBridge API destination) | `POST /api/signals/cloudwatch` | connection header `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
 | AWS Budgets (through an SNS topic) | `POST /api/signals/aws-budgets` | HTTPS subscription `https://vrixel:$VRIXEL_SIGNALS_TOKEN@<host>/api/signals/aws-budgets`; topic listed in `VRIXEL_AWS_BUDGET_TOPICS` |
 | People in the web app | "Report a problem" on the Incidents page | signed-in member of the product's org |
 
@@ -696,6 +697,32 @@ must name a component of the design or the product. A mobile app is `none` and c
 product's BFF. G4 approves it; the components' `workload.yaml`
 and the product's mesh policies follow it. Coders and reviewers get their role's rules. A web app's
 post-deploy tests run against the BFF's public URL.
+
+## AWS services: alarms
+
+OpenChoreo's observability plane watches components: their logs, CPU and memory, HTTP traffic and
+traces, keyed by component and environment. AWS services aren't pods, their CloudWatch metrics carry
+no OpenChoreo labels, and OpenChoreo's alert rules can't use them. So they are watched from two
+sides:
+
+- **From the component.** AWS clients are instrumented with OpenTelemetry's AWS SDK
+  instrumentation (the event worker template's DynamoDB store does; the coder is told to for any
+  AWS client a feature adds), so each call to DynamoDB, SQS, Kinesis, S3 or SNS is a span of the
+  component in OpenChoreo's traces, and failures it logs can drive OpenChoreo log alerts
+  (`/api/signals/openchoreo`).
+- **From the service.** Every resource comes with its catalog type's standard CloudWatch alarms
+  (platform catalog `alarms`, built by the Compositions in `vrixel-tools/platform-resources`).
+  Each data plane's `AlarmRouting` sends their state changes through EventBridge to
+  `/api/signals/cloudwatch`. An alarm's description says whose it is (product, feature, resource,
+  environment, the components that use it, severity).
+
+| Where the alarm is | What happens |
+| --- | --- |
+| Production | ALARM opens or joins an incident for the component that uses the resource; OK resolves it, so the incident's monitoring sees recovery |
+| Any other environment | Kept on the alarm board; G6 shows the approvers every alarm firing before production on the feature's resources or on resources its components use |
+
+G4 shows the alarms each AWS service comes with. Alarms are named with the data plane's prefix, so
+EventBridge sends only Vrixel's; other alarms in the account are ignored.
 
 ## Cost: what features and products cost
 
