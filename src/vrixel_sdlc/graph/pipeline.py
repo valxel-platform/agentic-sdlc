@@ -575,7 +575,9 @@ def bind_resource(services, state: FeatureState, res: dict, stage: str, *, actor
     size = (size_for({"type": spec["type"], "sizes": spec.get("sizes") or {}}, env, snap.aws_catalog)
             if t.get("sizes") else "small")
     rec = services.openchoreo.bind_resource(name=spec["name"], env=env, size=size, actor=actor, actor_type=actor_type,
-                                            project=spec["project"], namespace=spec.get("namespace"), pipeline=pipeline)
+                                            project=spec["project"], namespace=spec.get("namespace"), pipeline=pipeline,
+                                            # Stored data outlives its binding: OpenChoreo keeps it (VX-19).
+                                            retain=bool(spec.get("stateful")))
     return {"repo": f"resource:{spec['name']}", "kind": "resource", "component": spec["name"], "project": spec["project"],
             "namespace": spec.get("namespace"), "pipeline": list(pipeline), "env": env, "size": size,
             "release": rec.get("release") or applied.get("release", ""), "change": applied.get("change", ""),

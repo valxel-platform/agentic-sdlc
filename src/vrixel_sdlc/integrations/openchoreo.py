@@ -51,7 +51,8 @@ class OpenChoreo(Protocol):
     def apply_resource(self, *, name: str, type: str, parameters: dict, project: str,
                        namespace: str | None = None) -> dict: ...  # {"name", "release", "change": created|updated|unchanged}
     def bind_resource(self, *, name: str, env: str, size: str, actor: str, actor_type: str, project: str,
-                      namespace: str | None = None, pipeline: tuple[str, ...] = PIPELINE) -> dict: ...
+                      namespace: str | None = None, pipeline: tuple[str, ...] = PIPELINE,
+                      retain: bool = False) -> dict: ...  # retain: keep the data if the binding goes
     def resource_status(self, *, name: str, env: str, project: str,
                         namespace: str | None = None) -> dict: ...  # {"state": ready|progressing|failed|absent, "message"}
 
@@ -150,14 +151,15 @@ class StubOpenChoreo:
                                     "namespace": namespace, "releases": n}
             return {"name": name, "release": f"{name}-r{n}", "change": "updated" if prior else "created"}
 
-    def bind_resource(self, *, name, env, size, actor, actor_type, project, namespace=None, pipeline=PIPELINE) -> dict:
+    def bind_resource(self, *, name, env, size, actor, actor_type, project, namespace=None, pipeline=PIPELINE,
+                      retain=False) -> dict:
         check_promotion(env, actor_type, pipeline)
         with self._lock:
             r = self.resources.get(name)
             if r is None:
                 raise ValueError(f"{name}: no such resource to bind")
             rec = {"name": name, "env": env, "size": size, "release": f"{name}-r{r['releases']}", "actor": actor,
-                   "actor_type": actor_type}
+                   "actor_type": actor_type, "retain": retain}
             self.resource_bindings.append(rec)
             return dict(rec)
 
@@ -403,64 +405,82 @@ class OpenChoreoMcp:
         return (f"{self.console_url}/catalog/{namespace or self.default_namespace}/component/"
                 f"{self.name(component)}")
 
-    # -- managed services (VX-19)
-    def _rscope(self, name, project, namespace) -> dict:
-        return {_NS: namespace or self.default_namespace, _PROJECT: project,
-                ("resource", "resource_name", "resourceName", "name"): name}
+    # -- managed services (VX-19): OpenChoreo's MCP tools list_resources, get_resource,
+    # create_resource, update_resource and *_resource_release_binding(s). Resources are
+    # namespace-scoped and owned by a project; a binding pins a release to one environment.
+    def _ns(self, namespace) -> dict:
+        return {_NS: namespace or self.default_namespace}
 
     def list_resources(self, *, project, namespace=None) -> list[dict]:
-        res = self._call(("list_resources",), {_NS: namespace or self.default_namespace, _PROJECT: project})
+        res = self._call(("list_resources",), {**self._ns(namespace), _PROJECT: project})
         return [{"name": str(_get(r, "name", "metadata.name") or ""),
                  "type": str(_get(r, "spec.type.name", "type.name", "type") or ""),
                  "parameters": dict(_get(r, "spec.parameters", "parameters") or {})} for r in _list(res)]
 
-    def apply_resource(self, *, name, type, parameters, project, namespace=None) -> dict:
-        scope = self._rscope(name, project, namespace)
+    def _resource(self, name, namespace) -> dict | None:
         try:
-            prior = self._call(("get_resource",), scope)
+            res = self._call(("get_resource",), {**self._ns(namespace), ("name", "resource_name"): name})
         except McpError:
-            prior = None
+            return None
+        return res if isinstance(res, dict) and res else None
+
+    @staticmethod
+    def _latest(res) -> str:
+        return str(_get(res, "status.latestRelease.name", "latestRelease.name") or "") if isinstance(res, dict) else ""
+
+    def apply_resource(self, *, name, type, parameters, project, namespace=None) -> dict:
+        prior = self._resource(name, namespace)
         if prior:
-            was = str(_get(prior, "spec.type.name", "type.name", "type") or "")
+            was = str(_get(prior, "spec.type.name", "type.name") or "")
             if was and was != type:
                 raise ValueError(f"{name} is a {was}; the pipeline never replaces a resource")
             if dict(_get(prior, "spec.parameters", "parameters") or {}) == parameters:
-                return {"name": name, "release": str(_get(prior, "status.latestRelease.name", "latestRelease.name") or ""),
-                        "change": "unchanged"}
-        tool = ("update_resource",) if prior else ("create_resource",)
-        res = self._call(tool, {**scope, ("type", "resource_type", "resourceType"): type,
-                                ("kind", "resource_type_kind"): "ClusterResourceType",
-                                ("parameters", "params", "spec_parameters"): parameters})
-        release = _get(res, "status.latestRelease.name", "latestRelease.name", "release") if isinstance(res, dict) else None
-        return {"name": name, "release": str(release or ""), "change": "updated" if prior else "created"}
+                return {"name": name, "release": self._latest(prior), "change": "unchanged"}
+            res = self._call(("update_resource",), {**self._ns(namespace), ("name",): name,
+                                                    ("parameters",): parameters})
+            return {"name": name, "release": self._latest(res), "change": "updated"}
+        res = self._call(("create_resource",), {
+            **self._ns(namespace), _PROJECT: project, ("name",): name, ("type_name", "type"): type,
+            ("type_kind",): "ClusterResourceType", ("parameters",): parameters})
+        return {"name": name, "release": self._latest(res), "change": "created"}
 
-    def bind_resource(self, *, name, env, size, actor, actor_type, project, namespace=None, pipeline=PIPELINE) -> dict:
+    def _resource_bindings(self, name, namespace) -> list[dict]:
+        return _list(self._call(("list_resource_release_bindings",),
+                                {**self._ns(namespace), ("resource_name", "name"): name}))
+
+    def bind_resource(self, *, name, env, size, actor, actor_type, project, namespace=None, pipeline=PIPELINE,
+                      retain=False) -> dict:
         check_promotion(env, actor_type, pipeline)
-        scope = self._rscope(name, project, namespace)
-        bindings = _list(self._call(("list_resource_release_bindings",), scope))
+        bindings = self._resource_bindings(name, namespace)
         existing = next((b for b in bindings if self._env_of(b) == env), None)
         idx = pipeline.index(env)
         if idx == 0:
-            r = self._call(("get_resource",), scope)
-            release = str(_get(r, "status.latestRelease.name", "latestRelease.name") or "")
+            release = self._latest(self._resource(name, namespace))
         else:
             prev = next((b for b in bindings if self._env_of(b) == pipeline[idx - 1]), None)
-            release = self._release_of(prev) if prev else ""
+            release = str(_get(prev, "spec.resourceRelease", "resourceRelease", "resource_release") or "") if prev else ""
         if not release:
             raise ValueError(f"{name}: no release to bind to {env}")
-        args = {**scope, _ENV: env, _RELEASE: release,
-                ("resource_type_environment_configs", "environment_configs", "config"): {"size": size}}
-        self._call(("update_resource_release_binding",) if existing else ("create_resource_release_binding",), args)
+        common = {**self._ns(namespace), ("resource_release",): release,
+                  ("resource_type_environment_configs",): {"size": size},
+                  ("retain_policy",): "Retain" if retain else "Delete"}
+        if existing:
+            self._call(("update_resource_release_binding",),
+                       {**common, ("name",): str(_get(existing, "name", "metadata.name"))})
+        else:
+            self._call(("create_resource_release_binding",), {
+                **common, ("name",): f"{name}-{env}", ("project_name",): project, ("resource_name",): name,
+                ("environment",): env})
         return {"name": name, "env": env, "size": size, "release": release, "actor": actor, "actor_type": actor_type}
 
     def resource_status(self, *, name, env, project, namespace=None) -> dict:
-        bindings = _list(self._call(("list_resource_release_bindings",), self._rscope(name, project, namespace)))
-        b = next((x for x in bindings if self._env_of(x) == env), None)
+        b = next((x for x in self._resource_bindings(name, namespace) if self._env_of(x) == env), None)
         if b is None:
             return {"state": "absent", "message": ""}
         if _condition(b, "Ready") == "True":
             return {"state": "ready", "message": ""}
-        if _condition(b, "Failed") == "True" or str(_get(b, "status.phase") or "").lower() in ("failed", "error"):
-            return {"state": "failed", "message": str(_get(b, "status.message") or "")}
+        failed = [c for c in _get(b, "status.conditions") or [] if isinstance(c, dict) and c.get("status") == "False"
+                  and "fail" in str(c.get("reason", "")).lower()]
+        if failed:
+            return {"state": "failed", "message": str(failed[0].get("message", ""))}
         return {"state": "progressing", "message": str(_get(b, "status.message") or "")}
-

@@ -177,3 +177,103 @@ def test_a_resource_that_fails_to_come_up_goes_to_people(engine):
                           max_steps=14, decisions={"escalation:delivery": {"decision": "abort", "feedback": "no table"}})
     assert v["status"] == "aborted"
     assert not any(p["env"] == "production" for p in engine.services.openchoreo.promotions)
+
+
+def fake_openchoreo_resources():
+    """OpenChoreo's MCP resource tools, with their published argument names."""
+    from mcp.server import MCPServer  # the server the delivery tests use
+
+    server = MCPServer("openchoreo")
+    st = {"resources": {}, "bindings": {}, "calls": []}
+
+    @server.tool()
+    def list_resources(namespace_name: str, project_name: str) -> dict:
+        return {"items": [r for r in st["resources"].values() if r["spec"]["owner"]["projectName"] == project_name]}
+
+    @server.tool()
+    def get_resource(namespace_name: str, name: str) -> dict:
+        if name not in st["resources"]:
+            raise ValueError("not found")
+        return st["resources"][name]
+
+    @server.tool()
+    def create_resource(namespace_name: str, project_name: str, name: str, type_name: str, type_kind: str = "",
+                        parameters: dict | None = None) -> dict:
+        st["calls"].append(("create", name, type_name, type_kind))
+        st["resources"][name] = {"metadata": {"name": name}, "spec": {"owner": {"projectName": project_name},
+                                 "type": {"name": type_name}, "parameters": parameters or {}},
+                                 "status": {"latestRelease": {"name": f"{name}-r1"}}}
+        return st["resources"][name]
+
+    @server.tool()
+    def update_resource(namespace_name: str, name: str, parameters: dict | None = None) -> dict:
+        st["calls"].append(("update", name))
+        r = st["resources"][name]
+        r["spec"]["parameters"] = parameters or {}
+        n = int(r["status"]["latestRelease"]["name"].rsplit("-r", 1)[1]) + 1
+        r["status"]["latestRelease"]["name"] = f"{name}-r{n}"
+        return r
+
+    @server.tool()
+    def list_resource_release_bindings(namespace_name: str, resource_name: str) -> dict:
+        return {"items": [b for (r, _), b in st["bindings"].items() if r == resource_name]}
+
+    @server.tool()
+    def create_resource_release_binding(namespace_name: str, name: str, project_name: str, resource_name: str,
+                                        environment: str, resource_release: str = "", retain_policy: str = "",
+                                        resource_type_environment_configs: dict | None = None) -> dict:
+        st["calls"].append(("bind", resource_name, environment, resource_release, retain_policy,
+                            (resource_type_environment_configs or {}).get("size")))
+        st["bindings"][(resource_name, environment)] = {
+            "metadata": {"name": name}, "spec": {"environment": environment, "resourceRelease": resource_release},
+            "status": {"conditions": [{"type": "Ready", "status": "False", "reason": "Provisioning"}]}}
+        return st["bindings"][(resource_name, environment)]
+
+    @server.tool()
+    def update_resource_release_binding(namespace_name: str, name: str, resource_release: str = "",
+                                        retain_policy: str = "",
+                                        resource_type_environment_configs: dict | None = None) -> dict:
+        st["calls"].append(("rebind", name, resource_release))
+        b = next(b for b in st["bindings"].values() if b["metadata"]["name"] == name)
+        b["spec"]["resourceRelease"] = resource_release
+        return b
+
+    return server, st
+
+
+def test_the_openchoreo_adapter_creates_binds_and_promotes_resources():
+    from vrixel_sdlc.integrations.mcp_client import McpHttp
+    from vrixel_sdlc.integrations.openchoreo import OpenChoreoMcp
+
+    server, st = fake_openchoreo_resources()
+    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
+    params = {"partition_key": "id", "consumers": []}
+    assert oc.apply_resource(name="field-state", type="dynamodb-table", parameters=params, project="agtech") == {
+        "name": "field-state", "release": "field-state-r1", "change": "created"}
+    assert st["calls"][0] == ("create", "field-state", "dynamodb-table", "ClusterResourceType")
+    assert oc.apply_resource(name="field-state", type="dynamodb-table", parameters=params,
+                             project="agtech")["change"] == "unchanged"
+    with pytest.raises(ValueError, match="never replaces"):
+        oc.apply_resource(name="field-state", type="s3-bucket", parameters={}, project="agtech")
+    assert oc.list_resources(project="agtech") == [{"name": "field-state", "type": "dynamodb-table", "parameters": params}]
+
+    scope = {"name": "field-state", "project": "agtech"}
+    oc.bind_resource(env="dev", size="small", actor="agent:dev", actor_type="agent", retain=True, **scope)
+    assert ("bind", "field-state", "dev", "field-state-r1", "Retain", "small") in st["calls"]
+    assert oc.resource_status(env="dev", **scope)["state"] == "progressing"
+    st["bindings"][("field-state", "dev")]["status"]["conditions"][0]["status"] = "True"
+    assert oc.resource_status(env="dev", **scope) == {"state": "ready", "message": ""}
+    assert oc.resource_status(env="staging", **scope)["state"] == "absent"
+
+    # A changed resource gets a new release; staging gets what dev runs, not the newest.
+    oc.apply_resource(name="field-state", type="dynamodb-table", parameters={**params, "ttl_attribute": "x"},
+                      project="agtech")
+    rec = oc.bind_resource(env="staging", size="small", actor="agent:staging", actor_type="agent", **scope)
+    assert rec["release"] == "field-state-r1"
+    with pytest.raises(PermissionError):
+        oc.bind_resource(env="production", size="medium", actor="agent:x", actor_type="agent", **scope)
+    oc.bind_resource(env="dev", size="small", actor="agent:dev", actor_type="agent", **scope)
+    assert ("rebind", "field-state-dev", "field-state-r2") in st["calls"]
+    st["bindings"][("field-state", "staging")]["status"]["conditions"] = [
+        {"type": "Ready", "status": "False", "reason": "ApplyFailed", "message": "AccessDenied"}]
+    assert oc.resource_status(env="staging", **scope) == {"state": "failed", "message": "AccessDenied"}
