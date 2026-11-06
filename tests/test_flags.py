@@ -262,7 +262,7 @@ def test_a_launch_with_flipt_ships_dark_then_turns_flipt_flags_on(tmp_path, gov_
     assert fake.enabled("production", key) is True and eng.view(a)["release"]["flag_on"] is True
 
 
-def test_on_call_turns_a_flipt_flag_off(tmp_path, gov_root):
+def test_the_tool_turns_a_flipt_flag_off(tmp_path, gov_root):
     with_flipt(gov_root)
     fake = FakeFlipt()
     eng, _ = make(tmp_path, gov_root, flipt=fake, live=True)
@@ -272,7 +272,7 @@ def test_on_call_turns_a_flipt_flag_off(tmp_path, gov_root):
         "status": "firing", "fingerprint": "f", "startsAt": "2026-11-03T21:00:00Z",
         "labels": {"alertname": "Errors", "severity": "critical", "product": "AG"},
         "annotations": {"summary": "errors"}}]}))
-    g = gate(eng, iid, "incident")
-    assert ("flag_off", fid) in [(x["type"], x.get("feature_id")) for x in g["actions"]]
-    eng.decide(iid, g["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
+    # A feature just released, its flag on: the tool turns it off by itself, in production only.
+    assert ("flag_off", fid, "agent:remediate") in [(x["type"], x.get("feature_id"), x["by"])
+                                                     for x in eng.view(iid)["taken"]]
     assert fake.enabled("production", key) is False and fake.enabled("staging", key) is True

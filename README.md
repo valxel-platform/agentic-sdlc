@@ -456,9 +456,13 @@ With stub delivery, products without Flipt get in-memory flags so the demo works
 
 ## Production issues: incidents, hotfixes and intent changes
 
-The tool watches production through the signals a product already emits, opens an incident,
-has agents investigate, and does what on-call approves: mitigate, fix, or change the intent.
-Agents never act on production by themselves (VX-1, VX-3); every action is a person's decision.
+The tool watches production through the signals a product already emits, opens an incident, has
+agents investigate, and works it to the end by itself where it safely can: it undoes the recent
+change behind the failure, checks that the failure stopped, starts the fix and drafts the
+postmortem. On-call is paged only when the tool can't fix it (and told, at low urgency, as a SEV1
+opens). The tool's own production actions are the platform's one exception to VX-3, set in
+sdlc-governance's `platform/remediation.yaml`: turn off a recent feature's flag, roll back a recent
+release. Everything else is a person's decision.
 
 **Signals in.**
 
@@ -479,13 +483,18 @@ firing one opens a new incident. Signals are stored in the platform database. A 
 soon as its signals are recorded and on-call is paged; triage runs after it.
 
 **Paging on-call (PagerDuty).** Each product has a PagerDuty service; the tool sends it events with
-the service's Events API v2 integration key (`ops/paging.py`):
+the service's Events API v2 integration key (`ops/paging.py`). Two kinds of page, each its own
+PagerDuty alert:
 
-| In the tool | In PagerDuty |
+| When | PagerDuty alert |
 | --- | --- |
-| An incident opens | `trigger`, dedup key = the incident id, linking to the incident page |
-| On-call's first decision (approve, another look, resolve) | `acknowledge` |
-| Mitigated and recovered, resolved by on-call, or merged into another | `resolve` |
+| A SEV1 opens (`page.heads_up` in the policy) | heads-up: dedup key = the incident id, severity `info` (low urgency): the tool is on it, nobody need act |
+| The tool can't fix it: no action it may take fits, its action failed, or it's still failing afterwards | urgent: dedup key = `<incident id>:urgent`, severity `critical` for SEV1, else `error` (high urgency) |
+| On-call's first decision in the tool | `acknowledge` |
+| Recovered, resolved by on-call, or merged into another incident | `resolve` |
+
+Cost findings and requests to change what was built (a user report whose triage proposes only an
+intent change) never page: they wait in the tool for working hours.
 
 ```bash
 VRIXEL_PAGERDUTY_ROUTING_KEYS='{"EMR": "<integration key>", "APX": "<integration key>"}'
@@ -493,39 +502,60 @@ VRIXEL_PAGERDUTY_REGION=us          # or eu (events.eu.pagerduty.com)
 VRIXEL_PUBLIC_URL=https://sdlc.vrixel.dev   # pages link back to the incident here
 ```
 
-PagerDuty owns the schedules, notifications and escalation when nobody acknowledges. Set each
-service's urgency to "based on alert severity": SEV1 is sent as `critical` and SEV2 as `error`
-(high urgency: someone is woken up); SEV3 as `warning`, SEV4 and every cost finding as `info` (low
-urgency). A page carries the incident id, severity, component and environment, and the title only
-for products that hold neither PHI nor payment data: alert titles can quote exception messages, and
-PagerDuty is outside those products' data boundary. Sends go out in order on a background thread;
-throttling, server errors and network failures are retried for about two minutes. The incident
-page shows whether on-call was paged, and says so plainly when a product has no PagerDuty service
-or PagerDuty refused the page. Without `VRIXEL_PAGERDUTY_ROUTING_KEYS` (stub mode) nothing is sent.
+PagerDuty owns the schedules, notifications and escalation when nobody acknowledges; set each
+service's urgency to "based on alert severity". A page carries the incident id, severity,
+component, environment and why on-call is needed, and the title only for products that hold
+neither PHI nor payment data: alert titles can quote exception messages, and PagerDuty is outside
+those products' data boundary. Sends go out in order on a background thread; throttling, server
+errors and network failures are retried for about two minutes. The incident page shows what was
+sent, and says so plainly when a product has no PagerDuty service or PagerDuty refused a page.
+Without `VRIXEL_PAGERDUTY_ROUTING_KEYS` (stub mode) nothing is sent.
 
 **The incident.**
 
 1. *Triage* (ops agent): the signals; the released features that changed the component, most recent
-   first, with their flags; recent logs and metrics from OpenChoreo's observability plane. It writes a
-   summary, impact, likely cause and proposed actions.
-2. *On-call decides* (`approvers.oncall`, else G6's approvers): approve some or all actions, ask
-   triage to look again, or close it without action.
-3. *Act*, as approved:
+   first, with their flags; recent logs and metrics from OpenChoreo's observability plane; what the
+   tool may do by itself. It writes a summary, impact, likely cause and proposed actions.
+2. *The tool mitigates* when one of triage's actions is in the remediation policy and fits:
+   - **Turn a feature's flag off**, if the feature reached the failing component in the last 3 days
+     and its flag is on. Preferred: it touches only the new behavior.
+   - **Roll the component back** to its previous release, if a release reached it in the last day.
+
+   It acts as `agent:remediate` (recorded on the incident's actions and events, the tracker item, and
+   the flag service's log), once per incident (`attempts`), and then starts the hotfix triage proposed.
+   A product can narrow this or turn it off:
+
+   ```yaml
+   runtime:
+     remediation:
+       autonomous: [flag_off]     # or false: on-call decides every action
+   ```
+3. *Escalate* when it can't (nothing fits, its action failed, or the failure persists): the urgent
+   page, and on-call decides (`approvers.oncall`, else G6's approvers): approve some or all actions,
+   ask triage to look again, resolve it, or merge it into another incident. After a person decides,
+   the tool takes no action by itself on that incident.
+4. *Act*, by the tool or as approved:
    - **Turn a feature's flag off**: the fastest mitigation for a recent launch.
-   - **Roll back** the component to its previous release in production (a person's action in OpenChoreo).
-   - **Start a hotfix**: an expedited feature that skips discovery to architecture (on-call has already
-     decided it is needed) but keeps planning, build, tests, security scans, G5 and G6, which on-call
-     approves. A short spec and design are written from the incident.
+   - **Roll back** the component to its previous release in production.
+   - **Start a hotfix**: an expedited feature that skips discovery to architecture but keeps planning,
+     build, tests, security scans, G5 and G6, which people approve. A short spec and design are
+     written from the incident.
    - **Change the intent**: when the product works as built but not as users need, a new feature
      (G1) or initiative (G0) starts with the incident as evidence, linked to the original work.
-4. *Monitor*: wait until its alerts and issues resolve. Still firing after the window (SEV1 30 minutes,
-   SEV2 1 hour, SEV3 4 hours, SEV4 1 day) sends it back to on-call. Reported problems skip this.
-5. *Postmortem* (agent, blameless) and *close*: on-call approves it, and a governance pull request
-   records it in `incidents/`.
+5. *Check it recovered*: alerts that report their own resolution must have resolved; and after a
+   mitigation, or for signals that never resolve (OpenChoreo rules, GlitchTip, error-report alerts),
+   it must stay quiet for `quiet_minutes` (SEV1 10, SEV2 15, SEV3 30, SEV4 60): no new alert or error
+   report after the first 5 minutes (the alert rules' look-back), and fewer than 10 errors in the
+   component's last 5 minutes of logs. Not quiet by then, or still firing after the window (SEV1 30
+   minutes, SEV2 1 hour, SEV3 4 hours, SEV4 1 day): escalate, or back to on-call if already paged.
+   Reported problems with no alerts skip this.
+6. *Postmortem* (agent, blameless) and *close*: on-call approves it in working hours (no page), and a
+   governance pull request records it in `incidents/`.
 
 Cost signals (see [Cost](#cost-what-features-and-products-cost)) take the same path. They never
 join a component's outage, triage proposes right-sizing (an intent change) or accepting the spend,
-and they skip *Monitor*: a budget alert or a cost review never "resolves".
+and they skip the recovery check: a budget alert or a cost review never "resolves". The tool takes
+no action on them by itself, and they never page.
 
 Incidents appear in Decisions and on the Incidents page, get a tracker item (a Bug, set
 `incident_type` to change it) with a comment per action, and agents designing new work see recent
@@ -1060,7 +1090,7 @@ consent screen, so each server needs an API key or token issued to a service acc
 | Constitutions | `governance/` | Read from the tools org and each product org, validated, pinned by commit SHA per feature |
 | Risk-tiered merge | `graph/phase.py`, `graph/pipeline.py` | PHI and payments are `regulated`; changes to high-risk paths are `high`; both go through G5 |
 | Multi-repo change set | `graph/pipeline.py` | One branch name across repos; the merge train runs libraries, then providers, then consumers |
-| CI/CD | `integrations/openchoreo.py` | Agents promote to staging only; production promotion at G6 is human (VX-3) |
+| CI/CD | `integrations/openchoreo.py` | Agents promote to staging only; production promotion at G6 is human (VX-3). A production rollback is a person's, or the tool's under the remediation policy |
 | Knowledge write-back | `graph/phase.py` | After Operate, the capability is registered in the catalog |
 | Durability | `api/app.py` | `PostgresSaver` checkpointer; threads survive restarts and wait at gates for days |
 

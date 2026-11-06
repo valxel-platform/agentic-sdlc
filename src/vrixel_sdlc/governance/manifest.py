@@ -112,7 +112,13 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         if tracking is not None and not isinstance(tracking, dict):
             problems.append("runtime.error_tracking must be a mapping: {provider, url, baa}")
             tracking = None
+        own_remediation = runtime.get("remediation")
+        if own_remediation is not None and not isinstance(own_remediation, dict):
+            problems.append("runtime.remediation must be a mapping: {autonomous: true | false | [actions]}")
+            own_remediation = None
         runtime = {"openchoreo_project": str(runtime["openchoreo_project"]), "pipeline": pipeline,
+                   # What the tool may do here by itself, narrowing platform/remediation.yaml.
+                   "remediation": dict(own_remediation) if own_remediation else None,
                    # Where the product's error reports go (checked against platform/error-tracking.yaml).
                    "error_tracking": ({"provider": str(tracking.get("provider") or ""),
                                        "url": str(tracking.get("url") or ""),

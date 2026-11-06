@@ -1,5 +1,5 @@
-"""Production issues: signals in (Prometheus, Sentry, tickets), incidents triaged by agents and
-decided by on-call, mitigations (flag off, rollback), expedited hotfixes, intent changes,
+"""Production issues: signals in (Prometheus, Sentry, tickets), incidents triaged by agents,
+mitigated by the tool where the remediation policy allows and otherwise decided by on-call, mitigations (flag off, rollback), expedited hotfixes, intent changes,
 recovery, postmortems."""
 
 import hashlib
@@ -83,7 +83,7 @@ def test_signals_map_to_a_product_and_component(tmp_path, gov_root):
 # --------------------------------------------------------------------------- incidents
 
 
-def test_an_alert_opens_an_incident_and_on_call_turns_the_new_feature_off_and_starts_a_hotfix(tmp_path, gov_root):
+def test_an_alert_opens_an_incident_and_the_tool_turns_the_new_feature_off_and_starts_a_hotfix(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
     fid = released_feature(eng)
     key = eng.view(fid)["release"]["flag"]
@@ -91,21 +91,44 @@ def test_an_alert_opens_an_incident_and_on_call_turns_the_new_feature_off_and_st
 
     [iid] = eng.ingest(from_alertmanager(alert()))
     assert iid == "EMR-INC-1"
-    g = gate(eng, iid, "incident")
-    assert g["approvers"] == ["vrixel-emr/release-managers"]  # on-call falls back to G6's approvers
-    assert g["severity"] == "sev1" and g["suspects"][0]["feature_id"] == fid
-    assert [a["type"] for a in g["actions"]] == ["flag_off", "hotfix"]
-    assert svc.flags.get("EMR", key) is True  # nothing happens before a person decides
-
-    eng.decide(iid, g["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
     v = eng.view(iid)
+    # The feature released an hour ago is the likely cause: the tool turned its flag off by itself
+    # (platform/remediation.yaml), started the fix, and is watching it recover. Nobody was asked.
     assert svc.flags.get("EMR", key) is False
-    assert [t["ok"] for t in v["taken"]] == [True, True] and v["status"] == "monitoring"
+    assert [(t["type"], t["ok"], t["by"]) for t in v["taken"]] == [("flag_off", True, "agent:remediate"),
+                                                                    ("hotfix", True, "agent:remediate")]
+    assert v["status"] == "monitoring" and not [p for p in eng.pending(iid) if p["type"] == "gate"]
+    assert [p.get("wait") for p in eng.pending(iid)] == ["incident_recovery"]
+    assert any(e["kind"] == "mitigating" and fid in e["detail"] for e in v["events"])
     [hotfix] = [k for k, kind in v["links"].items() if kind == "hotfix"]
     eng._pool.shutdown(wait=True)  # the hotfix runs in the background
     h = eng.view(hotfix)
     assert {s["key"]: s["state"] for s in h["rail"]}["g4"] == "skipped"
     assert eng._state(hotfix)["track"] == "hotfix" and "Hotfix design" in eng.artifact(hotfix, "HLD")["content"]
+
+
+def no_autonomy(gov_root, product="vrixel-emr/emr-governance"):
+    """The product turns the tool's own production actions off: on-call decides everything."""
+    gov = gov_root / product / "product.yaml"
+    gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {autonomous: false}\n", 1))
+
+
+def test_with_autonomy_off_on_call_decides_before_anything_happens(tmp_path, gov_root):
+    no_autonomy(gov_root)
+    eng, svc = make(tmp_path, gov_root)
+    fid = released_feature(eng)
+    key = eng.view(fid)["release"]["flag"]
+    [iid] = eng.ingest(from_alertmanager(alert()))
+    g = gate(eng, iid, "incident")
+    assert g["approvers"] == ["vrixel-emr/release-managers"]  # on-call falls back to G6's approvers
+    assert g["severity"] == "sev1" and g["suspects"][0]["feature_id"] == fid
+    assert [a["type"] for a in g["actions"]] == ["flag_off", "hotfix"]
+    assert svc.flags.get("EMR", key) is True  # nothing happens before a person decides
+    assert any(e["kind"] == "not_paged" and e["node"] == "escalate" for e in eng.view(iid)["events"])
+    eng.decide(iid, g["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
+    v = eng.view(iid)
+    assert svc.flags.get("EMR", key) is False and v["taken"][0]["by"] == "oncall-1"
+    assert [t["ok"] for t in v["taken"]] == [True, True] and v["status"] == "monitoring"
 
 
 def test_a_hotfix_starts_at_planning_and_on_call_approves_merge_and_release(tmp_path, gov_root):
@@ -141,15 +164,25 @@ def test_signals_join_their_open_incident(tmp_path, gov_root):
     assert len(svc.signals.for_incident(a)) == 4
 
 
-def test_recovery_leads_to_a_postmortem_recorded_in_git(tmp_path, gov_root):
+def later(monkeypatch, minutes):
+    """The tool's clock, `minutes` from now."""
+    from datetime import datetime, timedelta, timezone
+
+    monkeypatch.setattr(incident_mod, "_clock", lambda: datetime.now(timezone.utc) + timedelta(minutes=minutes))
+
+
+def test_recovery_leads_to_a_postmortem_recorded_in_git(tmp_path, gov_root, monkeypatch):
     eng, svc = make(tmp_path, gov_root)
     released_feature(eng)
-    [iid] = eng.ingest(from_alertmanager(alert()))
-    eng.decide(iid, gate(eng, iid, "incident")["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
+    [iid] = eng.ingest(from_alertmanager(alert()))  # the tool turns the feature off
     assert [p.get("wait") for p in eng.pending(iid)] == ["incident_recovery"]
     eng.ingest(from_alertmanager(alert(status="resolved")))
+    assert [p.get("wait") for p in eng.pending(iid)] == ["incident_recovery"]  # resolved, but not quiet long enough
+    later(monkeypatch, 11)  # SEV1: quiet for 10 minutes
+    eng.poke_now(iid)
     pm = gate(eng, iid, "postmortem")
     assert "## Timeline" in pm["preview"] and "flag_off" in pm["preview"]
+    assert any(e["kind"] == "recovered" and "quiet for 10 minutes" in e["detail"] for e in eng.view(iid)["events"])
     eng.decide(iid, pm["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
     v = eng.view(iid)
     assert v["status"] == "closed"
@@ -159,10 +192,11 @@ def test_recovery_leads_to_a_postmortem_recorded_in_git(tmp_path, gov_root):
     assert again != iid
     items = list(svc.trackers["openproject"].items.values())
     bug = next(i for i in items if i["kind"] == "incident" and i["marker"] == iid)
-    assert bug["status"] == "done" and any("flag_off by oncall-1" in c for c in bug["comments"])
+    assert bug["status"] == "done" and any("flag_off by agent:remediate" in c for c in bug["comments"])
 
 
 def test_still_firing_after_the_window_goes_back_to_on_call(tmp_path, gov_root, monkeypatch):
+    no_autonomy(gov_root)
     monkeypatch.setitem(incident_mod.RECOVERY_MINUTES, "sev1", -1)
     eng, _ = make(tmp_path, gov_root)
     released_feature(eng)
@@ -174,6 +208,7 @@ def test_still_firing_after_the_window_goes_back_to_on_call(tmp_path, gov_root, 
 
 
 def test_on_call_can_pick_actions_ask_again_or_close(tmp_path, gov_root):
+    no_autonomy(gov_root)
     eng, svc = make(tmp_path, gov_root)
     fid = released_feature(eng)
     [iid] = eng.ingest(from_alertmanager(alert()))

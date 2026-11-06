@@ -61,6 +61,11 @@ class OpenChoreo(Protocol):
                         namespace: str | None = None) -> dict: ...  # {"state": ready|progressing|failed|absent, "message"}
 
 
+# Who may roll production back: a person, or the tool under the platform's remediation policy
+# (ops/remediation.py: only a recent release, and the release restored was already approved).
+ROLLBACK_ACTORS = ("human", "policy")
+
+
 def check_promotion(env: str, actor_type: str, pipeline: tuple[str, ...]) -> None:
     if env not in pipeline:
         raise ValueError(f"Unknown environment {env!r}; the pipeline is {list(pipeline)}")
@@ -142,8 +147,8 @@ class StubOpenChoreo:
         return dict(self.observations.get((component, env)) or {"available": True, "logs": [], "metrics": {}})
 
     def rollback(self, *, component, env, actor, actor_type, project=None, namespace=None) -> dict:
-        if actor_type != "human":
-            raise PermissionError("Only a person can roll back production (VX-3)")
+        if actor_type not in ROLLBACK_ACTORS:
+            raise PermissionError("Only a person, or the tool under the remediation policy, can roll back production (VX-3)")
         with self._lock:
             rec = {"component": component, "env": env, "from": "r2", "to": "r1", "actor": actor}
             self.rollbacks.append(rec)
@@ -414,8 +419,8 @@ class OpenChoreoMcp:
 
     def rollback(self, *, component, env, actor, actor_type, project=None, namespace=None) -> dict:
         """Point the environment's release binding at the release before the current one."""
-        if actor_type != "human":
-            raise PermissionError("Only a person can roll back production (VX-3)")
+        if actor_type not in ROLLBACK_ACTORS:
+            raise PermissionError("Only a person, or the tool under the remediation policy, can roll back production (VX-3)")
         scope = self._scope(component, project, namespace)
         binding = next((b for b in self._bindings(component, project, namespace) if self._env_of(b) == env), None)
         if binding is None:

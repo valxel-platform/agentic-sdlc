@@ -1,0 +1,31 @@
+# What the SDLC tool may do in production by itself to end an incident: the platform's one
+# exception to "every production action is a person's decision" (VX-3).
+#
+# Both actions undo a change rather than make one: the release being restored, or the product
+# without the feature, was already approved. A product can narrow this or turn it off in its
+# product.yaml (runtime.remediation.autonomous: false | [flag_off]); it can't widen it.
+version: 1
+
+autonomous:
+  # Turn off the flag of a feature released to the failing component in the last 3 days.
+  flag_off: { released_within_hours: 72 }
+  # Roll the failing component back to its previous release, when a release reached it in the
+  # last day (an older release isn't a likely cause, and rolling it back undoes more).
+  rollback: { released_within_hours: 24 }
+
+# After mitigating, start the fix triage proposed. It goes through planning, tests and security
+# scans, and people approve it at G5 and G6 as for any hotfix.
+start_hotfix: true
+
+# Autonomous mitigations per incident. If it isn't fixed after this many, a person is paged.
+attempts: 1
+
+# How long an incident must stay quiet after a mitigation to count as recovered: no new alert,
+# no error report, and errors in the component's logs below the default exceptions rule.
+quiet_minutes: { sev1: 10, sev2: 15, sev3: 30, sev4: 60 }
+
+page:
+  # On-call gets an informational page (low urgency) as these open, while the tool works on
+  # them. Any incident the tool can't fix pages them urgently, whatever its severity; cost
+  # findings and requests to change what was built never page.
+  heads_up: [sev1]
