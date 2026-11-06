@@ -61,6 +61,7 @@ class Services:
     cost_reviews: object = None  # vrixel_sdlc.ops.cost reviews store
     cost_ledger: object = None  # vrixel_sdlc.finops.ledger.CostLedger
     alarms: object = None  # vrixel_sdlc.ops.alarms board: every CloudWatch alarm's current state
+    pager: object = None  # vrixel_sdlc.ops.paging.Pager: pages on-call when an incident opens
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime

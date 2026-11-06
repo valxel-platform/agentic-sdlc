@@ -475,7 +475,33 @@ Agents never act on production by themselves (VX-1, VX-3); every action is a per
 Each signal is tied to a product (a `vrixel_product` label or tag, else its `component` matched to
 the product's repos and OpenChoreo components) and a severity (SEV1 to SEV4 from `severity` or the
 Sentry level). A signal joins the open incident for the same alert, issue or component; otherwise a
-firing one opens a new incident. Signals are stored in the platform database.
+firing one opens a new incident. Signals are stored in the platform database. A webhook answers as
+soon as its signals are recorded and on-call is paged; triage runs after it.
+
+**Paging on-call (PagerDuty).** Each product has a PagerDuty service; the tool sends it events with
+the service's Events API v2 integration key (`ops/paging.py`):
+
+| In the tool | In PagerDuty |
+| --- | --- |
+| An incident opens | `trigger`, dedup key = the incident id, linking to the incident page |
+| On-call's first decision (approve, another look, resolve) | `acknowledge` |
+| Mitigated and recovered, resolved by on-call, or merged into another | `resolve` |
+
+```bash
+VRIXEL_PAGERDUTY_ROUTING_KEYS='{"EMR": "<integration key>", "APX": "<integration key>"}'
+VRIXEL_PAGERDUTY_REGION=us          # or eu (events.eu.pagerduty.com)
+VRIXEL_PUBLIC_URL=https://sdlc.vrixel.dev   # pages link back to the incident here
+```
+
+PagerDuty owns the schedules, notifications and escalation when nobody acknowledges. Set each
+service's urgency to "based on alert severity": SEV1 is sent as `critical` and SEV2 as `error`
+(high urgency: someone is woken up); SEV3 as `warning`, SEV4 and every cost finding as `info` (low
+urgency). A page carries the incident id, severity, component and environment, and the title only
+for products that hold neither PHI nor payment data: alert titles can quote exception messages, and
+PagerDuty is outside those products' data boundary. Sends go out in order on a background thread;
+throttling, server errors and network failures are retried for about two minutes. The incident
+page shows whether on-call was paged, and says so plainly when a product has no PagerDuty service
+or PagerDuty refused the page. Without `VRIXEL_PAGERDUTY_ROUTING_KEYS` (stub mode) nothing is sent.
 
 **The incident.**
 

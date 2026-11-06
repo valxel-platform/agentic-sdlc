@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from ..duplicates import DuplicateIntent
 from ..config import load_settings
@@ -303,9 +304,14 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {token}"):
             raise HTTPException(401, "Bad token")
 
-    def ingest(signals: list[dict]) -> dict:
-        touched = eng().ingest(signals)
+    # Webhooks answer within seconds (EventBridge gives up after 5): the signal is recorded and
+    # on-call paged before the response, off the event loop; triage runs in the background.
+    async def ingest(signals: list[dict]) -> dict:
+        touched = await run_in_threadpool(lambda: eng().ingest(signals, background=True))
         return {"signals": len(signals), "incidents": touched}
+
+    async def alarm_changes(signals: list[dict]) -> dict:
+        return await run_in_threadpool(lambda: eng().alarm_changes(signals, background=True))
 
     @api.post("/signals/alertmanager", status_code=202)
     async def alertmanager(request: Request) -> dict:
@@ -317,7 +323,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             payload = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return ingest(from_alertmanager(payload))
+        return await ingest(from_alertmanager(payload))
 
     @api.post("/signals/sentry", status_code=202)
     async def sentry(request: Request) -> dict:
@@ -338,7 +344,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             payload = json.loads(body or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return ingest(from_sentry(payload, request.headers.get("sentry-hook-resource", "")))
+        return await ingest(from_sentry(payload, request.headers.get("sentry-hook-resource", "")))
 
     @api.post("/signals/ticket", status_code=202)
     async def ticket(request: Request) -> dict:
@@ -350,7 +356,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             payload = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return ingest(from_ticket(payload))
+        return await ingest(from_ticket(payload))
 
     def oncall(user: User, product_id: str) -> None:
         """Only the product's on-call (who decide incidents) may merge or split them."""
@@ -395,7 +401,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
         # Production alerts open incidents; the rest are kept for G6, like CloudWatch alarms.
-        return eng().alarm_changes(from_openchoreo(payload))
+        return await alarm_changes(from_openchoreo(payload))
 
     @api.post("/signals/glitchtip/{product_id}", status_code=202)
     async def glitchtip_alert(product_id: str, request: Request) -> dict:
@@ -410,7 +416,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if not expected or not hmac.compare_digest(request.query_params.get("token", ""), expected):
             raise HTTPException(401, "Bad token")
         try:
-            snap = eng().services.snapshot(product_id)
+            snap = await run_in_threadpool(eng().services.snapshot, product_id)
         except Exception as exc:
             raise HTTPException(404, f"Unknown product {product_id}") from exc
         choice = (snap.product.runtime or {}).get("error_tracking") or {}
@@ -421,8 +427,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
         token = et.api_token(product_id)
-        sigs = [et.enrich(s, str(choice.get("url") or ""), token) for s in et.from_glitchtip(payload, product_id)]
-        return eng().alarm_changes(sigs)
+        sigs = await run_in_threadpool(lambda: [et.enrich(s, str(choice.get("url") or ""), token)
+                                                for s in et.from_glitchtip(payload, product_id)])
+        return await alarm_changes(sigs)
 
     @api.post("/signals/cloudwatch", status_code=202)
     async def cloudwatch_alarm(request: Request) -> dict:
@@ -436,7 +443,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             event = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return eng().alarm_changes(from_cloudwatch(event))
+        return await alarm_changes(from_cloudwatch(event))
 
     @api.post("/signals/aws-budgets", status_code=202)
     async def aws_budgets(request: Request) -> JSONResponse:
@@ -466,12 +473,12 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if topic is None:
             raise HTTPException(403, "Unknown topic")
         if msg.get("Type") == "SubscriptionConfirmation":
-            confirm_sns(str(msg.get("Token") or ""), topic)
+            await run_in_threadpool(confirm_sns, str(msg.get("Token") or ""), topic)
             return JSONResponse({"confirmed": topic}, status_code=202)
         if msg.get("Type") != "Notification":
             return JSONResponse({"ignored": msg.get("Type")}, status_code=202)
         reg = list(eng().services.settings.registry)
-        return JSONResponse(ingest(from_aws_budget(str(msg.get("Message") or ""), reg, msg.get("Timestamp", ""))),
+        return JSONResponse(await ingest(from_aws_budget(str(msg.get("Message") or ""), reg, msg.get("Timestamp", ""))),
                             status_code=202)
 
     def confirm_sns(token: str, topic: str) -> None:
@@ -571,7 +578,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         from ..ops.signals import from_ticket
 
         member_of(user, body.product_id)
-        touched = eng().ingest(from_ticket({**body.model_dump(), "reporter": user.login}))
+        touched = eng().ingest(from_ticket({**body.model_dump(), "reporter": user.login}), background=True)
         if not touched:
             raise HTTPException(422, "Couldn't tie this problem to the product")
         return {"feature_id": touched[0]}
