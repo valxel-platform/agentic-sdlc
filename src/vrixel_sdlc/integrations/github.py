@@ -129,6 +129,9 @@ class GitHub(Protocol):
     def set_properties(self, *, repo: str, properties: dict[str, str]) -> None: ...
     def upsert_ruleset(self, *, repo: str, branch: str, spec: dict) -> str: ...
     def dispatch(self, *, repo: str, event_type: str, payload: dict) -> None: ...
+    # For the cost ledger: Actions runs with their jobs (started_at, completed_at, labels).
+    def workflow_runs(self, *, repo: str, branch: str | None = None, head_sha: str | None = None,
+                      event: str | None = None) -> list[dict]: ...
 
 
 class StubGitHub:
@@ -147,6 +150,9 @@ class StubGitHub:
         # Store apps' release workflows (vrixel_sdlc.store): the stub answers a dispatch with the
         # statuses the workflow would post; set to "pending" or "failure" to test waiting and failing.
         self.release_result = "success"
+        # Actions runs for the cost ledger: (repo, branch | sha | event) -> runs. Unset, a PR's branch
+        # has one five-minute Linux run.
+        self.actions: dict[tuple[str, str], list[dict]] = {}
         self._seq = itertools.count(100)
         self._lock = threading.Lock()
 
@@ -204,6 +210,18 @@ class StubGitHub:
 
     def secret_alerts(self, *, repo):
         return list(self.secrets.get(repo, []))
+
+    def workflow_runs(self, *, repo, branch=None, head_sha=None, event=None) -> list[dict]:
+        key = (repo, branch or head_sha or event or "")
+        if key in self.actions:
+            return [dict(r) for r in self.actions[key]]
+        if not branch:
+            return []
+        at = "2026-11-02T15:00:00+00:00"
+        return [{"id": sum(map(ord, f"{repo}{branch}")), "name": "ci", "display_title": branch,
+                 "event": "pull_request", "status": "completed", "created_at": at,
+                 "updated_at": "2026-11-02T15:05:00+00:00",
+                 "jobs": [{"started_at": at, "completed_at": "2026-11-02T15:04:30+00:00", "labels": ["ubuntu-latest"]}]}]
 
     def dispatch(self, *, repo, event_type, payload) -> None:
         with self._lock:
@@ -422,6 +440,23 @@ class GitHubRest:
         else:
             state = "success"  # no CI configured counts as passing; branch protection is the backstop
         return {"state": state, "checks": out}
+
+    def workflow_runs(self, *, repo, branch=None, head_sha=None, event=None) -> list[dict]:
+        """Actions runs (first 100) with their jobs, for the cost ledger."""
+        from urllib.parse import urlencode
+
+        q = urlencode({k: v for k, v in (("branch", branch), ("head_sha", head_sha), ("event", event),
+                                         ("per_page", 100)) if v})
+        runs = (self._call("GET", repo, f"/actions/runs?{q}", ok404=True) or {}).get("workflow_runs") or []
+        out = []
+        for r in runs:
+            jobs = (self._call("GET", repo, f"/actions/runs/{r['id']}/jobs?per_page=100", ok404=True) or {}).get("jobs") or []
+            out.append({"id": r["id"], "name": r.get("name", ""), "display_title": r.get("display_title", ""),
+                        "event": r.get("event", ""), "status": r.get("status", ""), "created_at": r.get("created_at"),
+                        "updated_at": r.get("updated_at"),
+                        "jobs": [{"started_at": j.get("started_at"), "completed_at": j.get("completed_at"),
+                                  "labels": j.get("labels") or []} for j in jobs]})
+        return out
 
     def set_status(self, *, repo, sha, context, state, description, url="") -> None:
         body = {"state": state, "context": context, "description": description[:140]}

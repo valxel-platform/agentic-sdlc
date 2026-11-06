@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, ApiError, type Feature, type FeatureEvent } from "../api";
+import { api, ApiError, type Feature, type FeatureCost, type FeatureEvent } from "../api";
+import { CostTable } from "../components/Costs";
 import { useLive } from "../live";
 import { Rail } from "../components/Rail";
 import { ArtifactBody } from "../components/Artifact";
@@ -22,6 +23,24 @@ const WAIT_EVENTS: Record<string, Record<string, string>> = {
   staging_wait: { passed: "Ready in staging", retry: "Staging deployment retried", resolved: "Staging failure waved through", aborted: "Stopped after a failed staging deployment" },
   production_wait: { passed: "Ready in production", retry: "Production deployment sent back to G6", resolved: "Production failure waved through", aborted: "Stopped after a failed production deployment" },
 };
+
+// Everything the feature has cost to build: agents, CI, builds, environments, AWS, tests, people.
+function BuildCost({ featureId, version }: { featureId: string; version: number }) {
+  const [c, setC] = useState<FeatureCost | null>(null);
+  useEffect(() => { api.featureCost(featureId).then(setC).catch(() => setC(null)); }, [featureId, version]);
+  if (!c) return null;
+  return (
+    <>
+      <h3 className="section-title small">Cost to build</h3>
+      <CostTable rows={c.build.by_category} total={c.build.total_usd} caption="Build cost by category" />
+      {c.run_30d.total_usd > 0 && (
+        <p className="small muted" style={{ padding: "8px 16px 16px" }}>
+          Its own AWS services since release, last 30 days: {money(c.run_30d.total_usd)}
+        </p>
+      )}
+    </>
+  );
+}
 
 function describe(e: FeatureEvent): string {
   const wait = WAIT_EVENTS[e.node]?.[e.kind];
@@ -143,6 +162,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
                   : <span className="muted">Reviewed 7 and 30 days after release</span>}</dd>
               </>}
             </dl>
+            <BuildCost featureId={f.feature_id} version={f.events.length} />
             {f.run_cost && f.run_cost.findings.length > 0 && (
               <div className="small" role="status" style={{ padding: "0 16px 16px" }}>
                 {f.run_cost.findings.map((t) => <p key={t}>{t}</p>)}

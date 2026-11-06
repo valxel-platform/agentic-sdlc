@@ -12,6 +12,7 @@ import { Intake } from "./pages/Intake";
 import { RoadmapPage } from "./pages/Roadmap";
 import { InitiativePage, ReleasePage } from "./pages/Thread";
 import { IncidentPage, IncidentsPage } from "./pages/Incidents";
+import { CostsPage } from "./pages/Costs";
 
 function Mark() {
   return (
@@ -38,6 +39,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <NavLink to="/roadmap">Roadmap</NavLink>
           <NavLink to="/board">Features</NavLink>
           <NavLink to="/incidents">Incidents</NavLink>
+          <NavLink to="/costs">Costs</NavLink>
           <NavLink to="/intake">New intent</NavLink>
         </nav>
         <div className="side-foot">
@@ -59,6 +61,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <Route path="/initiatives/:id" element={<InitiativePage />} />
           <Route path="/releases/:id" element={<ReleasePage />} />
           <Route path="/incidents" element={<IncidentsPage me={me} />} />
+          <Route path="/costs" element={<CostsPage me={me} />} />
           <Route path="/incidents/:id" element={<IncidentPage />} />
           <Route path="/intake" element={<Intake me={me} />} />
           <Route path="/intake/:sid" element={<Intake me={me} />} />

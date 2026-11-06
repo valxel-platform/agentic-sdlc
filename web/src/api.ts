@@ -271,7 +271,25 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return res.status === 204 ? (undefined as T) : res.json();
 }
 
+export interface CostCategory { category: string; label: string; usd: number; basis: string[]; provisional: boolean }
+export interface FeatureCost {
+  feature_id: string; product_id: string; title: string; status: string;
+  build: { total_usd: number; by_category: CostCategory[]; provisional: boolean; llm_budget_usd?: number | null };
+  run_30d: { total_usd: number; by_category: CostCategory[] };
+}
+export interface ProductCost {
+  product_id: string; month: string; provisional: boolean;
+  totals: { run_usd: number; build_usd: number; total_usd: number; build_to_date_usd: number };
+  run: { by_category: CostCategory[]; by_env: Record<string, number> };
+  build: { by_category: CostCategory[] };
+  features: { feature_id: string; title: string; status: string; build_to_date_usd: number; build_month_usd: number;
+              run_month_usd: number; approved_monthly_usd?: number | null }[];
+}
+
 export const api = {
+  featureCost: (id: string) => request<FeatureCost>("GET", `/features/${encodeURIComponent(id)}/cost`),
+  productCost: (productId: string, month?: string) =>
+    request<ProductCost>("GET", `/costs/${encodeURIComponent(productId)}${month ? `?month=${month}` : ""}`),
   authConfig: () => request<{ mode: "github" | "dev"; teams?: string[] }>("GET", "/auth/config"),
   devLogin: (login: string, teams: string[], orgs: string[]) => request<Me>("POST", "/auth/dev-login", { login, teams, orgs }),
   logout: () => request<{ ok: boolean }>("POST", "/auth/logout", {}),

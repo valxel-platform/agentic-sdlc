@@ -59,6 +59,7 @@ class Services:
     incidents: object = None  # product_id -> recent incidents, set by the engine
     costs: object = None  # vrixel_sdlc.ops.cost.CostSource: what released features really cost
     cost_reviews: object = None  # vrixel_sdlc.ops.cost reviews store
+    cost_ledger: object = None  # vrixel_sdlc.finops.ledger.CostLedger
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime

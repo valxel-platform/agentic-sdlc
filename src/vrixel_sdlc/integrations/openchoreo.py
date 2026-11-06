@@ -102,7 +102,8 @@ class StubOpenChoreo:
 
     def run_status(self, *, run_id, component, project=None, namespace=None) -> dict:
         return {"status": self.run_results.get(component, "succeeded"), "message": "",
-                "tasks": list(self.run_tasks.get(component, []))}
+                "tasks": list(self.run_tasks.get(component, [])),
+                "started_at": "2026-11-02T15:10:00+00:00", "finished_at": "2026-11-02T15:16:00+00:00"}
 
     def environment(self, component: str) -> str | None:
         with self._lock:
@@ -289,7 +290,10 @@ class OpenChoreoMcp:
         message = "; ".join(f"{t.get('name')}: {t.get('message', '')}".strip(": ") for t in failed)
         tasks = [{"name": t.get("name", ""), "phase": t.get("phase", ""), "message": t.get("message", "")}
                  for t in _get(res, "status.tasks", "tasks") or [] if isinstance(t, dict)]
-        return {"status": status, "message": message, "tasks": tasks}
+        return {"status": status, "message": message, "tasks": tasks,
+                "started_at": str(_get(res, "status.startedAt", "startedAt", "status.startTime") or ""),
+                "finished_at": str(_get(res, "status.completedAt", "status.finishedAt", "completedAt",
+                                        "status.completionTime") or "")}
 
     # -- deployments
     def _bindings(self, component, project, namespace) -> list[dict]:

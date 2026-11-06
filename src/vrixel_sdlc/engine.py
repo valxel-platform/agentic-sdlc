@@ -109,6 +109,10 @@ class FeatureEngine:
             services.costs = cost.default_sources(services.settings)
         if getattr(services, "cost_reviews", None) is None:
             services.cost_reviews = cost.InMemoryCostReviews()
+        if getattr(services, "cost_ledger", None) is None:
+            from .finops.ledger import InMemoryCostLedger
+
+            services.cost_ledger = InMemoryCostLedger()
         # Days after release when each feature's cost is reviewed against its plan.
         self.cost_review_days = tuple(float(d) for d in (os.environ.get("VRIXEL_COST_REVIEW_DAYS") or "7,30").split(",")
                                       if d.strip())
@@ -251,10 +255,11 @@ class FeatureEngine:
                     self.poke(fid)
                 if time.time() - self._cost_checked > 3600:  # cost data moves daily; hourly is plenty
                     self._cost_checked = time.time()
-                    try:
-                        self.review_costs()
-                    except Exception:
-                        pass
+                    for job in (self.collect_costs, self.review_costs):
+                        try:
+                            job()
+                        except Exception:
+                            pass
 
         self._watcher = threading.Thread(target=loop, name="vrixel-watcher", daemon=True)
         self._watcher.start()
@@ -531,47 +536,105 @@ class FeatureEngine:
                 "findings": [f["text"] for f in last["findings"]] if last else [],
                 "incidents": last.get("incidents", []) if last else []}
 
-    def feature_cost(self, feature_id: str) -> dict:
-        """What a feature cost to build (agent inference, by phase), what G4 approved it to cost to
-        run, and every review of what it really costs since release."""
-        from .gateway.ledger import summarize
+    def collect_costs(self, at=None, product_ids=None) -> int:
+        """Bring the cost ledger up to date (vrixel_sdlc.finops): every product's agent calls, CI,
+        builds, environments, production compute and AWS, then the shared platform's share.
+        Returns the records written."""
+        from .finops import collect as fc
+        from .finops.views import month_bounds
+        from .ops import cost
 
-        s = self._state(feature_id)
+        at = at or cost.now()
+        r = fc.rates()
+        ledger = self.services.cost_ledger
+        since = at.timestamp() - fc.LOOKBACK_DAYS * 86400
+        usage = [u for u in self.services.ledger.records() if fc.utc(u.ts).timestamp() >= since]
+        written, compute = 0, {}
+        reg = self.services.settings.registry
+        for pid in (product_ids or list(reg)):
+            try:
+                written += self._collect_product(pid, at, r, [u for u in usage if u.product_id == pid])
+            except Exception as exc:
+                self.errors[f"cost:{pid}"] = f"{type(exc).__name__}: {exc}"
+                continue
+            _, start, end = month_bounds(None, at)
+            compute[pid] = sum(x.usd for x in ledger.query(product_id=pid, stage="run", start=start, end=end)
+                               if x.category == "compute")
+        if not product_ids:
+            written += ledger.upsert(fc.collect_platform(compute, at.date(), at, r))
+        return written
+
+    def _collect_product(self, pid: str, at, r: dict, usage: list) -> int:
+        from .finops import collect as fc
+        from .ops import cost
+
+        ledger = self.services.cost_ledger
+        recs = fc.collect_llm(usage, kind_of, lambda t: None)
+        snap = self.services.snapshot(pid)
+        windows: dict[tuple, list] = {}
+        releases = {}
+        for row in self._rows(pid, "feature"):
+            fid = row["feature_id"]
+            s = self._state(fid)
+            if not s:
+                continue
+            releases[fid] = cost.released_at(s) if s.get("status") == "done" else None
+            end = fc.ended_at(s, at)
+            if (at - end).days > fc.LOOKBACK_DAYS:
+                continue  # settled long ago
+            recs += fc.collect_ci(self.services.github, s, r)
+            recs += fc.collect_builds(self.services.openchoreo, s, r)
+            recs += fc.collect_people(s, r)
+            for env, (a, b) in fc.env_windows(s, at).items():
+                for dep in (s.get("deployments") or {}).values():
+                    if dep.get("kind") in ("resource", "store") or not dep.get("component"):
+                        continue
+                    windows.setdefault((dep.get("project") or "", env, dep["component"]), []).append((fid, a, b))
+        targets = set()
+        runtimes = [snap.product.runtime or {}] + [lane.runtime or {} for lane in snap.lane_of_repo().values()]
+        for rt in runtimes:
+            if not rt.get("openchoreo_project"):
+                continue
+            pipeline = list(rt.get("pipeline") or ["dev", "staging", "production"])
+            for env in pipeline:
+                targets.add((rt.get("namespace") or "default", rt["openchoreo_project"], env, env == pipeline[-1]))
+        recs += fc.collect_runtime(self.services.costs, pid, sorted(targets), windows, at, r)
+        aws = (snap.product.runtime or {}).get("aws") or {}
+        recs += fc.collect_aws(self.services.costs, pid, dict(aws.get("accounts") or {}), releases, at, r)
+        return ledger.upsert(recs)
+
+    def feature_cost(self, feature_id: str) -> dict:
+        """The feature's cost card: build cost by category, its own resources' run cost, the plan G4
+        approved, and the reviews since release."""
+        from .finops import collect as fc
+        from .finops.views import feature_card
+
+        s = self._state(feature_id) if kind_of(feature_id) == "feature" else {}
         if not s:
             raise KeyError(feature_id)
-        reviews = [r for r in self.services.cost_reviews.for_feature(feature_id) if not r.get("skipped")]
-        latest = reviews[-1] if reviews else None
-        return {"feature_id": feature_id, "product_id": s.get("product_id"), "title": s.get("title", ""),
-                "build": {"llm_usd": round(float(s.get("cost_usd", 0.0)), 4),
-                          "llm": summarize(self.services.ledger.records(feature_id)),
-                          "human_minutes": round(sum(g.get("active_minutes", 0.0)
-                                                     for g in s.get("gate_decisions") or []), 1)},
-                "plan": s.get("cost_plan") or None,
-                "run": ({"aws_monthly_usd": {e: v["projected_monthly_usd"] for e, v in latest["aws"].items()},
-                         "compute": latest["compute"], "reviewed_at": latest["at"], "findings": latest["findings"]}
-                        if latest else None),
-                "reviews": reviews}
+        # Agent spend is always current: it is in the tool's own ledger.
+        self.services.cost_ledger.upsert(fc.collect_llm(self.services.ledger.records(feature_id), kind_of,
+                                                        lambda t: None))
+        return feature_card(self.services.cost_ledger, s,
+                            reviews=self.services.cost_reviews.for_feature(feature_id))
 
-    def product_cost(self, product_id: str) -> dict:
-        """Every feature's build cost and its latest run-rate, with the product's totals."""
-        rows = []
+    def product_cost(self, product_id: str, month: str | None = None) -> dict:
+        """The product's month: run cost by category and environment, build cost by feature."""
+        from .finops.views import product_rollup
+
+        features = []
         for f in self.feature_summaries(product_id):
-            c = self.feature_cost(f["feature_id"])
-            run = c["run"] or {}
-            rows.append({"feature_id": f["feature_id"], "title": f["title"], "status": f["status"],
-                         "build_llm_usd": c["build"]["llm_usd"],
-                         "approved_monthly_usd": ((c["plan"] or {}).get("aws_monthly_usd") or {}),
-                         "projected_monthly_usd": run.get("aws_monthly_usd") or {},
-                         "findings": len(run.get("findings") or [])})
-        envs = sorted({e for r in rows for e in (r["approved_monthly_usd"] | r["projected_monthly_usd"])})
-        return {"product_id": product_id, "features": rows,
-                "totals": {"build_llm_usd": round(sum(r["build_llm_usd"] for r in rows), 4),
-                           "approved_monthly_usd": {e: round(sum(r["approved_monthly_usd"].get(e, 0.0) for r in rows), 2)
-                                                    for e in envs},
-                           "projected_monthly_usd": {e: round(sum(r["projected_monthly_usd"].get(e, 0.0) for r in rows), 2)
-                                                     for e in envs}},
-                "note": "Run cost covers the AWS services features created; cluster compute and shared platform "
-                        "costs are not allocated yet."}
+            plan = self._state(f["feature_id"]).get("cost_plan") or {}
+            features.append({**f, "approved_monthly_usd": plan.get("aws_monthly_usd") or {}})
+        return product_rollup(self.services.cost_ledger, product_id, features, month=month)
+
+    def focus_export(self, product_id: str, month: str | None = None) -> str:
+        from .finops.ledger import focus_csv
+        from .finops.views import month_bounds
+        from .ops.cost import now
+
+        _, start, end = month_bounds(month, now())
+        return focus_csv(self.services.cost_ledger.query(product_id=product_id, start=start, end=end))
 
     def incident_summaries(self, product_id: str, limit: int = 20) -> list[dict]:
         out = []
