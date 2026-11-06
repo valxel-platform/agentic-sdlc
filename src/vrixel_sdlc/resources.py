@@ -248,6 +248,11 @@ def _check_param(p: str, v, spec: dict) -> list[str]:
             return [f"{p} must be between {spec.get('min')} and {spec.get('max')}"]
     if kind == "boolean" and not isinstance(v, bool):
         return [f"{p} must be true or false"]
+    if kind == "list":
+        items = [i for i in str(v).split("+")]
+        if not all(items):
+            return [f"{p}: separate items with +, each non-empty ({spec.get('help', '')})"]
+        return []
     if kind == "string" and not isinstance(v, str):
         return [f"{p} must be text"]
     return []
@@ -300,9 +305,11 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
                 identities.setdefault(comp, {"component": comp})
         owner = next((c for c, a in sorted(e["access"].items()) if "write" in a), sorted(e["access"])[0])
         project, namespace = owner_target(owner)
+        params = {p: (str(v).split("+") if ((t.get("parameters") or {}).get(p) or {}).get("type") == "list" else v)
+                  for p, v in e["params"].items()}
         out.append({"name": e["name"], "type": e["type"], "project": project, "namespace": namespace,
                     "owner": owner, "stateful": bool(t.get("stateful")),
-                    "parameters": {**e["params"], "consumers": consumers,
+                    "parameters": {**params, "consumers": consumers,
                                    "tags": {"vrixel:product": product_id, "vrixel:feature": feature_id,
                                             "vrixel:data-class": data_class}},
                     "sizes": {env: e["sizes"][env] for env in e["sizes"]},

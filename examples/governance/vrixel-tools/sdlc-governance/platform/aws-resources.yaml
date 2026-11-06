@@ -34,7 +34,7 @@ types:
       partition_key: { type: string, required: true }
       sort_key: { type: string }
       ttl_attribute: { type: string }
-      indexes: { type: list, help: "global secondary indexes: name:partition_key[:sort_key]" }
+      indexes: { type: list, help: "global secondary indexes joined by +, each name:partition_key[:sort_key]" }
     access:
       read: [dynamodb:GetItem, dynamodb:BatchGetItem, dynamodb:Query, dynamodb:DescribeTable]
       write: [dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:BatchWriteItem, dynamodb:ConditionCheckItem]

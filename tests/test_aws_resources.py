@@ -28,7 +28,7 @@ def hld(resources_body: str, adrs: str = "- ADR-1: Use DynamoDB for field-state 
     return f"# HLD\n\n## ADRs\n{adrs}\n\n## Resources\n{resources_body}\n\n## Endpoints\n- o/ag-api: project\n"
 
 
-GOOD = """- field-state: dynamodb-table; partition_key=field_id; size production=large
+GOOD = """- field-state: dynamodb-table; partition_key=field_id, indexes=by-farm:farm_id+by-crop:crop_id; size production=large
   reads, writes: ag-api
 - readings: kinesis-stream; retention_hours=168
   writes: ag-api; reads: ag-worker"""
@@ -47,7 +47,7 @@ def test_the_catalog_and_the_products_accounts_are_checked():
 
 def test_a_design_declares_its_services_and_who_uses_them():
     entries = {e["name"]: e for e in resources.parse_resources(hld(GOOD))}
-    assert entries["field-state"]["params"] == {"partition_key": "field_id"}
+    assert entries["field-state"]["params"] == {"partition_key": "field_id", "indexes": "by-farm:farm_id+by-crop:crop_id"}
     assert entries["field-state"]["sizes"] == {"production": "large"}
     assert entries["readings"]["access"] == {"ag-api": {"write"}, "ag-worker": {"read"}}
     assert resources.check(hld(GOOD), REPOS, ctx()) == []
@@ -75,6 +75,7 @@ def test_a_design_declares_its_services_and_who_uses_them():
      "changing its type replaces it"),
     ("- Bad_Name: s3-bucket\n  writes: ag-api", "- ADR-1: S3 for Bad_Name", {}, "lowercase letters"),
     ("- readings kinesis", None, {}, "Can't read resource line"),
+    ("- field-state: dynamodb-table; partition_key=id, indexes=a:b+\n  reads: ag-api", None, {}, "separate items with +"),
 ])
 def test_resource_findings(body, adrs, context, finding):
     text = hld(body, adrs) if adrs else hld(body)
@@ -109,6 +110,8 @@ def test_g4_sees_the_cost_and_the_plan_gives_least_privilege():
     writer = next(c for c in readings["parameters"]["consumers"] if c["component"] == "ag-api")
     assert "kinesis:PutRecord" in writer["actions"] and "kinesis:GetRecords" not in writer["actions"]
     assert readings["owner"] == "ag-api" and readings["parameters"]["tags"]["vrixel:feature"] == "AG-1"
+    state = next(p for p in plan if p["name"] == "field-state")
+    assert state["parameters"]["indexes"] == ["by-farm:farm_id", "by-crop:crop_id"]  # the ResourceType's list
 
 
 def test_coders_get_the_workload_bindings():
