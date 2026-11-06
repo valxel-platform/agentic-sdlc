@@ -187,12 +187,15 @@ def test_budget_webhooks(engine, monkeypatch):
             return b"ok"
 
     monkeypatch.setattr("urllib.request.urlopen", lambda url, timeout=0: visited.append(url) or Resp())
-    confirm = {"Type": "SubscriptionConfirmation", "TopicArn": TOPIC,
-               "SubscribeURL": "https://sns.us-east-2.amazonaws.com/?Action=ConfirmSubscription&Token=abc"}
+    token = "2336412f37fb687f5d51e6e2425c464de" * 2
+    confirm = {"Type": "SubscriptionConfirmation", "TopicArn": TOPIC, "Token": token,
+               "SubscribeURL": "https://evil.example/?Action=ConfirmSubscription"}  # never visited
     assert client.post("/api/signals/aws-budgets", json=confirm, headers=basic).status_code == 202
-    assert visited == [confirm["SubscribeURL"]]
-    evil = {**confirm, "SubscribeURL": "https://evil.example/?x=sns.us-east-2.amazonaws.com"}
-    assert client.post("/api/signals/aws-budgets", json=evil, headers=basic).status_code == 400
+    [url] = visited
+    assert url.startswith("https://sns.us-east-2.amazonaws.com/?Action=ConfirmSubscription&TopicArn=")
+    assert url.endswith(f"&Token={token}")
+    bad = {**confirm, "Token": "a&b=c"}
+    assert client.post("/api/signals/aws-budgets", json=bad, headers=basic).status_code == 400
 
 
 def test_cost_views_are_for_the_products_members(engine):

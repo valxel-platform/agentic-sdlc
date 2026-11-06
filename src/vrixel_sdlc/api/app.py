@@ -384,27 +384,31 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             msg = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        if msg.get("TopicArn") not in topics:
+        topic = next((t for t in sorted(topics) if t == msg.get("TopicArn")), None)
+        if topic is None:
             raise HTTPException(403, "Unknown topic")
         if msg.get("Type") == "SubscriptionConfirmation":
-            confirm_sns(msg.get("SubscribeURL", ""), msg["TopicArn"])
-            return JSONResponse({"confirmed": msg["TopicArn"]}, status_code=202)
+            confirm_sns(str(msg.get("Token") or ""), topic)
+            return JSONResponse({"confirmed": topic}, status_code=202)
         if msg.get("Type") != "Notification":
             return JSONResponse({"ignored": msg.get("Type")}, status_code=202)
         reg = list(eng().services.settings.registry)
         return JSONResponse(ingest(from_aws_budget(str(msg.get("Message") or ""), reg, msg.get("Timestamp", ""))),
                             status_code=202)
 
-    def confirm_sns(url: str, topic: str) -> None:
-        """Visit SNS's SubscribeURL, only on an SNS host in the topic's own region."""
-        from urllib.parse import urlparse
+    def confirm_sns(token: str, topic: str) -> None:
+        """Confirm the subscription with SNS in the allowed topic's own region. The URL is built
+        here, from the configured topic, never taken from the request."""
+        import re
+        from urllib.parse import urlencode
         from urllib.request import urlopen
 
-        region = topic.split(":")[3] if topic.count(":") >= 5 else ""
-        u = urlparse(url)
-        if u.scheme != "https" or not region or u.hostname != f"sns.{region}.amazonaws.com":
-            raise HTTPException(400, "SubscribeURL is not an SNS URL for the topic's region")
-        with urlopen(url, timeout=15) as resp:  # noqa: S310 (host checked above)
+        parts = topic.split(":")
+        region = parts[3] if len(parts) == 6 and parts[2] == "sns" else ""
+        if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-\d", region) or not re.fullmatch(r"[A-Za-z0-9+/=_-]{16,2048}", token):
+            raise HTTPException(400, "Not a subscription confirmation for an SNS topic")
+        query = urlencode({"Action": "ConfirmSubscription", "TopicArn": topic, "Token": token})
+        with urlopen(f"https://sns.{region}.amazonaws.com/?{query}", timeout=15) as resp:  # noqa: S310
             resp.read()
 
     @api.post("/webhooks/github", status_code=202)
