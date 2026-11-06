@@ -197,7 +197,10 @@ export interface IncidentView extends Omit<ThreadBase, "kind"> {
   actions: IncidentAction[]; taken: IncidentAction[]; links: Record<string, string>; postmortem: string;
   signals: Signal[]; firing: number; suspects: Suspect[];
   root?: { component: string; why: string };
+  paging?: PageSend[];
 }
+/** What happened to each PagerDuty send for an incident (ops/paging.py). */
+export interface PageSend { at: string; action: "trigger" | "acknowledge" | "resolve"; ok: boolean; detail: string }
 export interface IncidentRow {
   feature_id: string; product_id: string; title: string; severity: string; status: string; component: string;
   opened_at: string; firing: number; links: Record<string, string>;

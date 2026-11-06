@@ -137,6 +137,10 @@ class FeatureEngine:
         services.start_intent_change = self.start_intent_change
         services.close_incident = lambda iid: services.signals.close(iid)
         services.incidents = self.incident_summaries
+        if getattr(services, "pager", None) is None:
+            from .ops.paging import from_env
+
+            services.pager = from_env(os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         self.bus = bus or EventBus()
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="feature")
         self._locks: dict[str, threading.Lock] = {}
@@ -427,9 +431,10 @@ class FeatureEngine:
         return rid
 
     # --- operations: production signals and incidents --------------------------------------
-    def ingest(self, signals: list[dict]) -> list[str]:
+    def ingest(self, signals: list[dict], background: bool = False) -> list[str]:
         """Attach each signal to the open incident it belongs to (same alert, issue or component),
-        or open a new incident for a firing one. Returns the incidents touched."""
+        or open a new incident for a firing one, paging on-call. Returns the incidents touched.
+        With background, triage runs after this returns (webhooks answer at once)."""
         from .ops.signals import resolve_product
 
         from .ops import correlate
@@ -468,15 +473,33 @@ class FeatureEngine:
                 self._root_moved(iid)
             if created:
                 inp = {"incident_id": iid, "product_id": product_id, "title": sig["title"], "severity": sig["severity"],
-                       "component": repo, "opened_at": sig["at"], "status": "triaging"}
+                       "component": repo, "opened_at": sig["at"], "status": "triaging",
+                       "events": [self._page(iid, product_id, repo, sig)]}
                 self.bus.publish({"type": "feature.created", "feature_id": iid, "product_id": product_id})
-                self._execute(iid, inp)
+                (self._submit if background else self._execute)(iid, inp)
             else:
-                self.poke_now(iid)  # a resolution may end its recovery wait
+                (self.poke if background else self.poke_now)(iid)  # a resolution may end its recovery wait
             touched.append(iid)
         return list(dict.fromkeys(touched))
 
-    def alarm_changes(self, signals: list[dict]) -> dict:
+    def _page(self, iid: str, product_id: str, repo: str, sig: dict) -> dict:
+        """Page the product's on-call for a new incident, before triage starts (ops/paging.py)."""
+        from .roadmap.graphs import event
+
+        try:
+            data_class = self.services.snapshot(product_id).product.data_class
+        except Exception:
+            data_class = "phi"  # unknown: say as little as possible
+        try:
+            said = self.services.pager.trigger({
+                "incident_id": iid, "product_id": product_id, "title": sig["title"], "severity": sig["severity"],
+                "component": repo or sig.get("component", ""), "env": sig.get("env", "production"),
+                "source": sig.get("source", ""), "category": sig.get("category", ""), "data_class": data_class})
+        except Exception as exc:
+            said = f"not paged: {type(exc).__name__}: {exc}"
+        return event("page", "not_paged" if said.startswith("not paged") else "paged", said)
+
+    def alarm_changes(self, signals: list[dict], background: bool = False) -> dict:
         """CloudWatch alarm state changes: every one goes on the alarm board (what G6 reads);
         production ones also go into the incident flow."""
         from .ops.signals import resolve_product
@@ -491,7 +514,7 @@ class FeatureEngine:
             kept += 1
             if sig["env"] == "production":
                 production.append(sig)
-        return {"recorded": kept, "incidents": self.ingest(production) if production else []}
+        return {"recorded": kept, "incidents": self.ingest(production, background=background) if production else []}
 
     # --- correlation: one incident per failure ------------------------------------------------
     def _with_traces(self, sig: dict) -> dict:
@@ -546,6 +569,8 @@ class FeatureEngine:
             self.decide(incident_id, item["interrupt_id"], {"decision": "merge", "into": into, "approver": approver,
                                                             "feedback": reason or f"Merged into {into}"})
             ended = True
+        product_id = self._state(incident_id).get("product_id", "")
+        self.services.pager.resolve(incident_id, product_id, f"merged into {into}")
         self._root_moved(into)
         self.bus.publish({"type": "feature.updated", "feature_id": into})
         return {"merged": incident_id, "into": into, "signals": moved, "ended": ended}
@@ -939,7 +964,10 @@ class FeatureEngine:
         if kind_of(feature_id) != "feature":
             from .roadmap.views import thread_view
 
-            return thread_view(self, feature_id)
+            v = thread_view(self, feature_id)
+            if kind_of(feature_id) == "incident":
+                v["paging"] = self.services.pager.history(feature_id)
+            return v
         snap = self.graph.get_state(self._config(feature_id))
         s = snap.values
         if not s:

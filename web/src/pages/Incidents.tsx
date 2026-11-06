@@ -6,6 +6,7 @@ import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
 import { ACTION_LABEL, SEVERITY, threadPath, waitingLabel } from "../vocab";
 
+const PAGE_STATE: Record<string, string> = { trigger: "On-call paged", acknowledge: "Page acknowledged", resolve: "Page resolved" };
 const STATUS: Record<string, string> = {
   triaging: "Triage in progress", awaiting_decision: "Waiting for on-call", mitigating: "Acting",
   monitoring: "Watching for recovery", postmortem: "Postmortem", closed: "Closed", merged: "Merged",
@@ -159,6 +160,9 @@ export function IncidentPage() {
   const mine = v.pending.find((p) => p.can_decide);
   const people = v.pending.filter((p) => p.type !== "external");
   const ext = v.pending.find((p) => p.type === "external");
+  const paging = v.paging ?? [];
+  const paged = [...paging].reverse().find((p) => p.ok);
+  const pageFailed = paging.length > 0 && !paging[paging.length - 1].ok ? paging[paging.length - 1] : null;
 
   return (
     <>
@@ -171,10 +175,16 @@ export function IncidentPage() {
           {v.root?.component ? <span title={v.root.why || undefined}>Starts in {v.root.component}</span>
             : v.component && <span>{v.component}</span>}
           {v.firing > 0 && <span>{v.firing} still firing</span>}
+          {paged && <span>{PAGE_STATE[paged.action]}</span>}
           {v.record_pr?.url && <span>Postmortem in <a href={v.record_pr.url} target="_blank" rel="noreferrer">this pull request</a></span>}
         </div>
       </div>
       {v.error && <p className="error-note" role="alert">The workflow stopped with an error: {v.error}</p>}
+      {pageFailed && (
+        <p className="error-note" role="alert">
+          {pageFailed.action === "trigger" ? "On-call wasn't paged" : `PagerDuty didn't take the ${pageFailed.action}`}: {pageFailed.detail.replace(/^not paged: /, "")}
+        </p>
+      )}
       {err && <p className="error-note" role="alert">{err}</p>}
       {mine ? <div style={{ marginBottom: 20 }}><DecisionPanel item={{ ...mine, feature_id: v.feature_id, title: v.title }} featureId={v.feature_id} onDone={load} /></div>
         : people.length > 0 ? <p className="note" style={{ marginBottom: 20 }}>{waitingLabel(people[0])}: {people[0].approvers.join(", ")}.</p>

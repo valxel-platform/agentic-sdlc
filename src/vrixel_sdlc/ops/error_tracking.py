@@ -124,7 +124,7 @@ def enrich(signal: dict, base_url: str, token: str, opener=None) -> dict:
     req = Request(f"{base_url.rstrip('/')}/api/0/issues/{issue}/events/latest/",
                   headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
     try:
-        with (opener or build_opener()).open(req, timeout=10) as resp:
+        with (opener or build_opener()).open(req, timeout=3) as resp:  # inside a webhook: keep it short
             event = json.loads(resp.read().decode("utf-8"))
     except Exception:
         return signal

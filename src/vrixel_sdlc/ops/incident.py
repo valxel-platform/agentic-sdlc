@@ -7,6 +7,8 @@
       -> postmortem (agent, blameless) -> close (on-call approves; a governance PR records it)
 
 Every production action is a person's decision (VX-1, VX-3): agents investigate and propose.
+On-call is paged through PagerDuty when the incident opens (ops/paging.py); their first decision
+acknowledges the page, and reaching the postmortem (or a merge) resolves it.
 """
 
 from __future__ import annotations
@@ -215,6 +217,9 @@ def build_incident_graph(services, checkpointer=None):
         }
         d = _decide(interrupt(packet), DECISIONS)
         rec = {"gate": "incident", "lane": state["product_id"], "at": now(), **d}
+        pager = getattr(services, "pager", None)
+        if pager is not None and not str(d.get("approver") or "").startswith("agent:"):
+            pager.acknowledge(state["incident_id"], state["product_id"], d["approver"])  # someone has it
         if d["decision"] == "revise":
             return Command(goto="triage", update={"gate_decisions": [rec], "feedback": d.get("feedback", ""),
                                                   "status": "triaging", "events": [event("incident", "revise", d.get("feedback", ""),
@@ -226,6 +231,8 @@ def build_incident_graph(services, checkpointer=None):
 
                 raise InvalidDecision("Merging needs the incident to merge into")
             services.close_incident(state["incident_id"])
+            if pager is not None:
+                pager.resolve(state["incident_id"], state["product_id"], f"merged into {into}")
             return Command(goto=END, update={"gate_decisions": [rec], "status": "merged",
                                              "links": {into: "merged into"},
                                              "events": [event("incident", "merged", f"into {into}: {d.get('feedback', '')}",
@@ -292,6 +299,10 @@ def build_incident_graph(services, checkpointer=None):
                                               "events": [event("monitor", "still_firing", res.get("reason", ""))]})
 
     def postmortem(state: IncidentState) -> dict:
+        # Mitigated, recovered or resolved by on-call: the page is over.
+        pager = getattr(services, "pager", None)
+        if pager is not None:
+            pager.resolve(state["incident_id"], state["product_id"], "mitigated")
         ctx = {**state, "events": state.get("events") or [], "taken": state.get("taken") or [],
                "links": state.get("links") or {}}
         res = run_agent(services, role="ops", product_id=state["product_id"], thread_id=state["incident_id"],
