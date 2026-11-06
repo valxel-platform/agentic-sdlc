@@ -41,6 +41,10 @@ class OpenChoreo(Protocol):
     def environment(self, component: str) -> str | None: ...  # furthest environment requested so far
     def register_component(self, *, component: str, project: str | None, namespace: str | None,
                            component_type: str, workflow: str | None, repo_url: str, branch: str) -> str: ...
+    # Adds the traits a component lacks (by instanceName); never changes or removes one. Returns
+    # the instance names added.
+    def ensure_traits(self, *, component: str, traits: list[dict], project: str | None = None,
+                      namespace: str | None = None) -> list[str]: ...
     # Operations: what a component is doing in an environment, and putting its previous release back.
     def observe(self, *, component: str, env: str, project: str | None = None, namespace: str | None = None,
                 minutes: int = 60) -> dict: ...  # {"available", "logs": [str], "metrics": {...}}
@@ -81,6 +85,7 @@ class StubOpenChoreo:
         self.resources: dict[str, dict] = {}  # name -> {"type", "parameters", "project", "releases": n}
         self.resource_bindings: list[dict] = []
         self.resource_results: dict[tuple[str, str], str] = {}  # (name, env) -> state
+        self.traits: dict[str, list[dict]] = {}  # component -> traits
         self._seq = itertools.count(1)
         self._lock = threading.Lock()
 
@@ -92,6 +97,15 @@ class StubOpenChoreo:
                                                    "component_type": component_type, "workflow": workflow,
                                                    "repo_url": repo_url, "branch": branch})
         return "created" if new else "exists"
+
+    def ensure_traits(self, *, component, traits, project=None, namespace=None) -> list[str]:
+        from ..ops.alert_rules import missing
+
+        with self._lock:
+            have = self.traits.setdefault(component, [])
+            add = missing(have, traits)
+            have.extend(add)
+        return [t["instanceName"] for t in add]
 
     def run_workflow(self, *, component, ref, kind, project=None, namespace=None) -> dict:
         with self._lock:
@@ -306,6 +320,19 @@ class OpenChoreoMcp:
     @staticmethod
     def _release_of(b: dict) -> str:
         return str(_get(b, "release", "spec.releaseName", "spec.release", "releaseName") or "")
+
+    def ensure_traits(self, *, component, traits, project=None, namespace=None) -> list[str]:
+        """Patch the component's traits list with the ones it lacks, keeping every existing trait."""
+        from ..ops.alert_rules import missing
+
+        scope = self._scope(component, project, namespace)
+        comp = self._call(("get_component",), scope) or {}
+        have = list(_get(comp, "spec.traits", "traits") or [])
+        add = missing(have, traits)
+        if add:
+            self._call(("patch_component",), {_NS: scope[_NS], _COMPONENT: scope[_COMPONENT],
+                                              ("traits",): have + add})
+        return [t["instanceName"] for t in add]
 
     def _latest_release(self, component, project, namespace) -> str:
         comp = self._call(("get_component",), self._scope(component, project, namespace))

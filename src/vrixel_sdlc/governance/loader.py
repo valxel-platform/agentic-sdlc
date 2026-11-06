@@ -38,6 +38,7 @@ class GovernanceSnapshot:
     constitution_text: str = ""  # this lane's own constitution file, as read
     dependencies: dict[str, "GovernanceSnapshot"] = field(default_factory=dict)
     aws_catalog: dict = field(default_factory=dict)  # the platform's AWS services (VX-19), empty if none
+    alert_rules: dict = field(default_factory=dict)  # the platform's default OpenChoreo alert rules, empty if none
 
     @property
     def version(self) -> str:
@@ -121,6 +122,13 @@ class GovernanceLoader:
                                           plat["sha"], optional=True) or "")
         except (CatalogError, ValueError) as exc:
             raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
+        from ..ops.alert_rules import AlertRulesError, load as load_rules
+
+        try:
+            alert_rules = load_rules(s.read(plat["org"], plat["repo"], self.settings.platform_alert_rules_path,
+                                            plat["sha"], optional=True) or "")
+        except (AlertRulesError, ValueError) as exc:
+            raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
         runtime = product.runtime or {}
         problems = check_aws(runtime.get("aws"), product.data_class, list(runtime.get("pipeline") or []), catalog)
         if problems:
@@ -129,7 +137,7 @@ class GovernanceLoader:
             product=product, constitution=constitution, product_context=context,
             pins={"platform": dict(plat), "product": dict(prod),
                   "dependencies": {d: dict(p) for d, p in deps_pins.items()} if not _as_dependency else {}},
-            constitution_text=own_text, dependencies=dependencies, aws_catalog=catalog,
+            constitution_text=own_text, dependencies=dependencies, aws_catalog=catalog, alert_rules=alert_rules,
         )
         with self._lock:
             self._cache[key] = snap

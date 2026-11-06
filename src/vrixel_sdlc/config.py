@@ -168,6 +168,13 @@ class Settings:
     quality: Any = None  # vrixel_sdlc.quality.QualityConfig
     repos: Any = None  # vrixel_sdlc.provisioning.RepoStandards
     knowledge: Any = None  # vrixel_sdlc.knowledge.KnowledgeConfig
+    # The platform's default alert rules; unset, alert-rules.yaml next to the AWS catalog.
+    platform_alert_rules_path: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.platform_alert_rules_path:
+            folder = self.platform_resources_path.rsplit("/", 1)[0] if "/" in self.platform_resources_path else ""
+            self.platform_alert_rules_path = f"{folder}/alert-rules.yaml" if folder else "alert-rules.yaml"
 
     def entry(self, product_id: str) -> RegistryEntry:
         try:
@@ -222,6 +229,7 @@ def load_settings(
         platform=RepoPointer(org=plat["org"], repo=plat["repo"], ref=plat.get("ref", "main")),
         platform_constitution_path=plat.get("constitution_path", "constitution.md"),
         platform_resources_path=plat.get("resources_path", "aws-resources.yaml"),
+        platform_alert_rules_path=plat.get("alert_rules_path", ""),
         limits=Limits(
             min_critic_threshold=float(lim.get("min_critic_threshold", 0.75)),
             max_loops=int(lim.get("max_loops", 5)),

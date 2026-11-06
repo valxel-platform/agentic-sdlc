@@ -698,6 +698,28 @@ product's BFF. G4 approves it; the components' `workload.yaml`
 and the product's mesh policies follow it. Coders and reviewers get their role's rules. A web app's
 post-deploy tests run against the BFF's public URL.
 
+## Component alert rules: logs and exceptions
+
+Components log JSON to stdout (the templates' structured logging), with an exception's stack under
+`error.stack_trace` and the request's `trace.id`. OpenChoreo's logs module collects every container's
+output with Fluent Bit (to OpenSearch, CloudWatch Logs or another backend) and labels it with the
+component, project and environment, so logs, traces and alerts line up per component.
+
+Every component that runs code gets the platform's default alert rules (`platform/alert-rules.yaml`
+in sdlc-governance) as OpenChoreo `observability-alert-rule` traits: exceptions logged (more than 10
+in 5 minutes, and a surge of more than 100) and memory near its limit. The pipeline adds whichever a
+component lacks before each deployment (`ensure_traits`, an event `alert_rules` says which), and
+never changes or removes a trait someone tuned.
+
+OpenChoreo evaluates the rules per environment and notifies the environment's default notification
+channel. Point that channel (a webhook, no `payloadTemplate`, header `Authorization: Bearer
+$VRIXEL_SIGNALS_TOKEN`) at `/api/signals/openchoreo` in every environment:
+
+| Environment | What happens |
+| --- | --- |
+| Production | the alert opens or joins an incident for the component |
+| Any other | kept on the alarm board for an hour (OpenChoreo never says an alert cleared); G6 shows it if it is on a component the feature changes |
+
 ## AWS services: alarms
 
 OpenChoreo's observability plane watches components: their logs, CPU and memory, HTTP traffic and

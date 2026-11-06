@@ -364,7 +364,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             payload = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return ingest(from_openchoreo(payload))
+        # Production alerts open incidents; the rest are kept for G6, like CloudWatch alarms.
+        return eng().alarm_changes(from_openchoreo(payload))
 
     @api.post("/signals/cloudwatch", status_code=202)
     async def cloudwatch_alarm(request: Request) -> dict:

@@ -548,6 +548,22 @@ def _resource_owner(snap):
     return target
 
 
+def _ensure_alert_rules(services, snap, target: dict) -> list[str]:
+    """Give a component the rules it lacks. A failure here never stops a deployment; the next
+    deployment tries again."""
+    from ..ops.alert_rules import traits_for
+
+    traits = traits_for(getattr(snap, "alert_rules", None) or {}, target["component"].rsplit("/", 1)[-1])
+    ensure = getattr(services.openchoreo, "ensure_traits", None)
+    if not traits or not callable(ensure):
+        return []
+    try:
+        return ensure(component=target["component"], traits=traits, project=target["project"],
+                      namespace=target["namespace"])
+    except Exception:
+        return []
+
+
 def _alarms_firing(services, state: FeatureState) -> list[dict]:
     from ..ops.alarms import for_feature
 
@@ -838,8 +854,9 @@ def make_deploy(stage: str, services, nxt: str):
     """Agents deploy to dev and staging only (VX-3); each component in its own product's runtime."""
 
     def deploy(state: FeatureState) -> Command:
-        lanes = services.feature_snapshot(state).lane_of_repo()
-        deps, failures = {}, []
+        snap = services.feature_snapshot(state)
+        lanes = snap.lane_of_repo()
+        deps, failures, notes = {}, [], []
         # Managed services first, so the components that use them find them (VX-19).
         for spec in state.get("resources") or []:
             try:
@@ -853,6 +870,10 @@ def make_deploy(stage: str, services, nxt: str):
             env = env_for(stage, t["pipeline"])
             if env is None:
                 continue
+            # The platform's default alert rules, before the component runs anywhere (alert-rules.yaml).
+            added = _ensure_alert_rules(services, snap, t)
+            if added:
+                notes.append(f"{t['component']}: alert rules {', '.join(added)}")
             try:
                 rec = services.openchoreo.promote(component=t["component"], env=env, actor=f"agent:{stage}",
                                                   actor_type="agent", project=t["project"],
@@ -873,6 +894,7 @@ def make_deploy(stage: str, services, nxt: str):
                    "reason": f"Couldn't deploy to {stage}: " + "; ".join(f["message"] for f in failures)}
             return _people_said(state, stage, res, ok=nxt, retry=f"deploy_{stage}", extra={"deployments": deps})
         events = [event(f"deploy_{stage}", "deployed", ", ".join(sorted(deps)))] if deps else []
+        events += [event(f"deploy_{stage}", "alert_rules", n) for n in notes]
         return Command(goto=f"{stage}_wait", update={"deployments": deps, "events": events})
 
     return deploy, (f"{stage}_wait", nxt, f"deploy_{stage}", END)
