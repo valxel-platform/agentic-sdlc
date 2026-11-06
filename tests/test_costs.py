@@ -140,10 +140,11 @@ def test_g4_records_the_plan_and_a_released_feature_over_it_opens_a_cost_inciden
     assert rv30["review_day"] == 30 and rv30["incidents"] == [iid]
 
     view = engine.feature_cost(fid)
-    assert view["build"]["llm_usd"] == round(s["cost_usd"], 4) and view["plan"]["aws_monthly_usd"]["production"] == 60.0
-    assert view["run"]["aws_monthly_usd"]["production"] == 150.0 and len(view["reviews"]) == 2
-    totals = engine.product_cost("AG")["totals"]
-    assert totals["approved_monthly_usd"]["production"] == 60.0 and totals["projected_monthly_usd"]["production"] == 150.0
+    llm = next(c for c in view["build"]["by_category"] if c["category"] == "llm")
+    assert llm["usd"] == pytest.approx(s["cost_usd"], abs=1e-3) and view["plan"]["aws_monthly_usd"]["production"] == 60.0
+    assert view["latest_review"]["aws"]["production"]["projected_monthly_usd"] == 150.0 and len(view["reviews"]) == 2
+    row = engine.product_cost("AG")["features"][0]
+    assert row["feature_id"] == fid and row["approved_monthly_usd"] == 60.0
 
 
 def test_a_cost_finding_never_joins_a_components_outage(engine):
@@ -205,7 +206,7 @@ def test_cost_views_are_for_the_products_members(engine):
     assert client.get(f"/api/features/{fid}/cost").status_code == 403
     client.post("/api/auth/dev-login", json={"login": "farmer", "orgs": ["vrixel-agtech"]})
     c = client.get(f"/api/features/{fid}/cost").json()
-    assert c["plan"]["aws_monthly_usd"]["production"] == 60.0 and c["run"] is None
+    assert c["plan"]["aws_monthly_usd"]["production"] == 60.0 and c["latest_review"] is None
     p = client.get("/api/costs/AG").json()
     assert p["features"][0]["feature_id"] == fid
     assert client.get("/api/features/AG-FEAT-99/cost").status_code == 404

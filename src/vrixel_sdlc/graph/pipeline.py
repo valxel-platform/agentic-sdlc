@@ -193,6 +193,8 @@ def make_gate(gate: str, services):
                 "score": state.get("scores", {}).get(phase), "loops": state.get("loop_count", {}).get(phase),
                 "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
                 "budget_usd": state.get("token_budget_usd"),
+                # Every gate sees what the feature has cost to build so far, by category (finops).
+                "build_cost": _build_cost(services, state),
                 # On-call decides an incident's hotfix at G5 and G6.
                 "approvers": (list(lane.approvers.get("oncall") or lane.approvers.get(gate, []))
                               if state.get("track") == "hotfix" and gate in ("g5", "g6")
@@ -542,6 +544,15 @@ def _resource_owner(snap):
         return rt.get("openchoreo_project"), rt.get("namespace")
 
     return target
+
+
+def _build_cost(services, state: FeatureState) -> dict | None:
+    from ..finops.views import build_so_far
+
+    try:
+        return build_so_far(getattr(services, "cost_ledger", None), state)
+    except Exception:
+        return None
 
 
 def aws_summary(services, state: FeatureState, snap, ref) -> dict | None:

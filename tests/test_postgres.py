@@ -117,3 +117,26 @@ def test_incidents_and_their_signals_survive_a_restart(settings):
         assert restarted.ingest(from_alertmanager(alert)) == [iid]  # joins the open incident
         assert len(restarted.services.signals.for_incident(iid)) == 2
         assert [p["gate"] for p in restarted.pending(iid)] == ["incident"]
+
+
+def test_cost_records_and_reviews_persist():
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from vrixel_sdlc.finops.ledger import CostRecord, PostgresCostLedger
+    from vrixel_sdlc.ops.cost import PostgresCostReviews
+
+    pid = f"P{uuid.uuid4().hex[:6]}"
+    with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        ledger = PostgresCostLedger(pool)
+        r = dict(product_id=pid, stage="build", category="ci", period_start="2026-11-02T10:00:00+00:00",
+                 period_end="2026-11-02T10:05:00+00:00", feature_id=f"{pid}-FEAT-1")
+        ledger.upsert([CostRecord(key=f"ci:{pid}:1", usd=1.0, **r), CostRecord(key=f"ci:{pid}:2", usd=2.0, **r)])
+        ledger.upsert([CostRecord(key=f"ci:{pid}:1", usd=1.5, **r)])
+        assert sorted(x.usd for x in PostgresCostLedger(pool).query(product_id=pid)) == [1.5, 2.0]
+        assert ledger.query(product_id=pid, start="2026-11-03T00:00:00+00:00") == []
+
+        reviews = PostgresCostReviews(pool)
+        reviews.add({"feature_id": f"{pid}-FEAT-1", "product_id": pid, "at": "2026-11-09T00:00:00+00:00",
+                     "review_day": 7, "findings": []})
+        assert [x["review_day"] for x in PostgresCostReviews(pool).for_product(pid)] == [7]

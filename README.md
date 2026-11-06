@@ -699,6 +699,48 @@ post-deploy tests run against the BFF's public URL.
 
 ## Cost: what features and products cost
 
+One cost ledger holds every dollar a product spends, once, in [FinOps FOCUS](https://focus.finops.org/)
+columns: product, feature (when one feature caused it), stage (**build** until production, **run**
+after), category, environment, and how sure the figure is (*estimate*, *metered* usage at list price,
+*billed* by AWS, or *allocated* from something shared; *provisional* until the source settles). The
+watcher collects hourly from each source; collecting again replaces figures rather than adding to them.
+
+| Category | Source | Stage |
+| --- | --- | --- |
+| Agents (model calls) | the usage ledger, per call and model | build (feature, initiative and release threads) |
+| CI | GitHub Actions: the jobs of each PR's runs and its merge, per runner OS, rounded up per job | build |
+| Acceptance tests | GitHub Actions runs dispatched for the feature (their run name carries the feature id) | build |
+| Builds | OpenChoreo build runs × build-plane minute rate; EAS store builds when a rate is set | build |
+| Dev and staging environments | OpenChoreo FinOps, each component's daily cost, shared among the features deployed there that day by the hours each was there; the rest is the product's | build / run |
+| AWS services | Cost Explorer by `vrixel:product` and `vrixel:feature` tags per environment account: a feature's spend is build until release and run after; untagged is the product's | build / run |
+| Production compute | OpenChoreo FinOps, each production component | run |
+| Incident triage | the usage ledger, incident threads | run |
+| People at gates | active minutes at each gate × hourly rate (off unless set) | build |
+| Shared platform | OpenChoreo, observability and this tool's monthly cost, split by products' production compute (off unless set) | run |
+
+Rates are set in `VRIXEL_COST_RATES` (JSON): `github_minute_usd` per OS (set from your plan),
+`build_minute_usd`, `eas_build_usd`, `people_hour_usd`, `platform_monthly_usd`. Sources:
+`VRIXEL_OPENCHOREO_OBSERVER_URL` (the `finops-opencost` module), and `VRIXEL_AWS_COST_EXPLORER=1` with
+the `aws` extra and `ce:GetCostAndUsage` (activate `vrixel:product` and `vrixel:feature` as cost
+allocation tags in the payer account).
+
+**Where it shows.** Every gate packet carries the feature's build cost so far, by category. The
+feature page has its cost to build and its own AWS since release. The Costs page shows a product's
+month: run cost by category and environment, build cost, and each feature's build cost to date
+against what G4 approved, with a FOCUS CSV download for finance and BI tools
+(`GET /api/costs/{product}?month=YYYY-MM`, `/api/costs/{product}/focus.csv`,
+`GET /api/features/{id}/cost`).
+
+**Held to the plan.** G4 approves a feature's AWS services with planning costs per environment;
+that is its cost plan. 7 and 30 days after release (`VRIXEL_COST_REVIEW_DAYS`) the tool compares
+its AWS spend with the plan as a monthly run-rate, and its production components' compute with the
+week before release. Spend more than `VRIXEL_COST_TOLERANCE` (default 20%) and $5/month over
+becomes a cost signal in the incident flow: SEV2 for production AWS at twice the plan or more,
+SEV3 otherwise. OpenChoreo budget alert rules and AWS Budgets (named
+`vrixel-<product id>-<environment>`) arrive as cost signals the same way.
+
+Not counted yet: in-product agents' model spend outside this tool's gateway, and SaaS bills
+(Sentry, store fees).
 **Building a feature.** Every agent call is metered in the usage ledger (tokens, cache hits, cost by
 phase and model) against the feature's budget, and each gate records the people's active minutes.
 

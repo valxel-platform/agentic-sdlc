@@ -335,3 +335,11 @@ fieldset.field legend { margin-bottom: 4px; }
 .action-list li { padding: 2px 0; }
 h3.pad { padding-top: 4px; }
 .radio input { width: auto; flex: none; margin-top: 3px; }
+
+/* Costs */
+table.quality .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.quality tfoot th { text-align: left; padding: 8px; color: var(--ink-2); font-weight: 600; }
+table.quality tfoot td { padding: 8px; }
+.cost-totals { margin-bottom: 20px; max-width: 420px; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; align-items: start; }
+.grid-2 table.quality, .panel > table.quality { margin: 8px 0 0; }

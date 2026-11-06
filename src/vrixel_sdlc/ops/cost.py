@@ -60,6 +60,19 @@ class CostSource(Protocol):
                         start: datetime, end: datetime) -> dict[str, float]: ...  # component -> USD
     def aws_costs(self, *, product_id: str, feature_id: str, account: str,
                   start: datetime, end: datetime) -> dict[str, float]: ...  # AWS service -> USD
+    # For the cost ledger (vrixel_sdlc.finops): day by day, everything in a project or account.
+    def component_costs_daily(self, *, namespace: str, project: str, env: str, start: datetime,
+                              end: datetime) -> list[dict]: ...  # [{day, component, usd}]
+    def aws_costs_daily(self, *, product_id: str, account: str, start: datetime,
+                        end: datetime) -> list[dict]: ...  # [{day, service, feature_id ('' = untagged), usd}]
+
+
+def _days(start: datetime, end: datetime):
+    d = start.date()
+    while datetime(d.year, d.month, d.day, tzinfo=timezone.utc) < end:
+        day0 = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+        yield d, max(day0, start), min(day0 + timedelta(days=1), end)
+        d += timedelta(days=1)
 
 
 class StubCostSource:
@@ -69,9 +82,14 @@ class StubCostSource:
     def __init__(self) -> None:
         self.component_daily: dict[tuple[str, str], list[tuple[datetime | None, float]]] = {}
         self.aws_daily: dict[tuple[str, str], float] = {}
+        self.component_project: dict[str, str] = {}  # component -> its OpenChoreo project, when set
+        self.aws_product_daily: dict[tuple[str, str], float] = {}  # (product, account): untagged spend
 
-    def set_component(self, env: str, component: str, usd_per_day: float, since: datetime | None = None) -> None:
+    def set_component(self, env: str, component: str, usd_per_day: float, since: datetime | None = None,
+                      project: str = "") -> None:
         self.component_daily.setdefault((env, component), []).append((since, usd_per_day))
+        if project:
+            self.component_project[component] = project
 
     def set_aws(self, feature_id: str, account: str, usd_per_day: float) -> None:
         self.aws_daily[(feature_id, account)] = usd_per_day
@@ -92,6 +110,31 @@ class StubCostSource:
     def aws_costs(self, *, product_id, feature_id, account, start, end) -> dict[str, float]:
         rate = self.aws_daily.get((feature_id, account), 0.0)
         return {"Amazon DynamoDB": round(rate * (end - start).total_seconds() / 86400, 4)} if rate else {}
+
+    def component_costs_daily(self, *, namespace, project, env, start, end) -> list[dict]:
+        comps = sorted({c for e, c in self.component_daily
+                        if e == env and self.component_project.get(c, project) == project})
+        out = []
+        for d, a, b in _days(start, end):
+            for c, usd in self.component_costs(namespace=namespace, project=project, env=env, components=comps,
+                                               start=a, end=b).items():
+                if usd:
+                    out.append({"day": d.isoformat(), "component": c, "usd": usd})
+        return out
+
+    def aws_costs_daily(self, *, product_id, account, start, end) -> list[dict]:
+        out = []
+        for d, a, b in _days(start, end):
+            frac = (b - a).total_seconds() / 86400
+            for (fid, acct), rate in sorted(self.aws_daily.items()):
+                if acct == account and fid.startswith(product_id + "-"):
+                    out.append({"day": d.isoformat(), "service": "Amazon DynamoDB", "feature_id": fid,
+                                "usd": round(rate * frac, 4)})
+            rate = self.aws_product_daily.get((product_id, account), 0.0)
+            if rate:
+                out.append({"day": d.isoformat(), "service": "AWS Key Management Service", "feature_id": "",
+                            "usd": round(rate * frac, 4)})
+        return out
 
 
 class ObserverCostSource:
@@ -121,6 +164,22 @@ class ObserverCostSource:
     def aws_costs(self, **_) -> dict[str, float]:
         return {}
 
+    def component_costs_daily(self, *, namespace, project, env, start, end) -> list[dict]:
+        from urllib.parse import quote, urlencode
+        from urllib.request import Request
+
+        q = urlencode({"project": project, "startTime": _iso(start), "endTime": _iso(end), "granularity": "1d"})
+        req = Request(f"{self.url}/api/v1alpha1/costs/namespaces/{quote(namespace)}/environments/{quote(env)}?{q}",
+                      headers={"Accept": "application/json", **(self.auth() if self.auth else {})})
+        with self.opener.open(req, timeout=60) as resp:
+            items = json.loads(resp.read().decode("utf-8")).get("items") or []
+        return [{"day": str(it.get("startTime", ""))[:10], "component": it.get("component", ""),
+                 "usd": round(float(it.get("cpuCost") or 0) + float(it.get("memoryCost") or 0), 6)}
+                for it in items if it.get("component")]
+
+    def aws_costs_daily(self, **_) -> list[dict]:
+        return []
+
 
 class CostExplorerSource:
     """AWS Cost Explorer: the feature's resources (tag vrixel:feature, activated as a cost
@@ -136,6 +195,31 @@ class CostExplorerSource:
 
     def component_costs(self, **_) -> dict[str, float]:
         return {}
+
+    def component_costs_daily(self, **_) -> list[dict]:
+        return []
+
+    def aws_costs_daily(self, *, product_id, account, start, end) -> list[dict]:
+        """Everything tagged vrixel:product in the account, by day, feature tag and service."""
+        flt = {"And": [{"Tags": {"Key": "vrixel:product", "Values": [product_id], "MatchOptions": ["EQUALS"]}},
+                       {"Dimensions": {"Key": "LINKED_ACCOUNT", "Values": [account]}}]}
+        out, token = [], None
+        while True:
+            kw = {"TimePeriod": {"Start": start.date().isoformat(), "End": end.date().isoformat()},
+                  "Granularity": "DAILY", "Metrics": ["UnblendedCost"], "Filter": flt,
+                  "GroupBy": [{"Type": "TAG", "Key": "vrixel:feature"}, {"Type": "DIMENSION", "Key": "SERVICE"}]}
+            if token:
+                kw["NextPageToken"] = token
+            res = self.ce.get_cost_and_usage(**kw)
+            for day in res.get("ResultsByTime") or []:
+                for g in day.get("Groups") or []:
+                    tag, service = g["Keys"]
+                    out.append({"day": day["TimePeriod"]["Start"], "service": service,
+                                "feature_id": tag.split("$", 1)[1] if "$" in tag else "",
+                                "usd": float(g["Metrics"]["UnblendedCost"]["Amount"])})
+            token = res.get("NextPageToken")
+            if not token:
+                return out
 
     def aws_costs(self, *, product_id, feature_id, account, start, end) -> dict[str, float]:
         flt = {"And": [{"Tags": {"Key": "vrixel:feature", "Values": [feature_id], "MatchOptions": ["EQUALS"]}},
@@ -168,6 +252,12 @@ class CostSources:
 
     def aws_costs(self, **kw) -> dict[str, float]:
         return self.aws.aws_costs(**kw)
+
+    def component_costs_daily(self, **kw) -> list[dict]:
+        return self.compute.component_costs_daily(**kw)
+
+    def aws_costs_daily(self, **kw) -> list[dict]:
+        return self.aws.aws_costs_daily(**kw)
 
 
 def _iso(t: datetime) -> str:

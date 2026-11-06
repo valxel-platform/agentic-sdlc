@@ -144,6 +144,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..ops.cost import PostgresCostReviews
 
         services.cost_reviews = PostgresCostReviews(pool)
+        from ..finops.ledger import PostgresCostLedger
+
+        services.cost_ledger = PostgresCostLedger(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
@@ -521,10 +524,28 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(403, f"You aren't a member of {product_id}'s organization")
 
     @api.get("/costs/{product_id}")
-    def product_costs(product_id: str, user: User = Depends(current_user)) -> dict:
-        """Each feature's build cost and run-rate against its plan, with the product's totals."""
+    def product_costs(product_id: str, month: str | None = None, user: User = Depends(current_user)) -> dict:
+        """The product's month (YYYY-MM, default this one): run cost, build cost, each feature."""
         member_of(user, product_id)
-        return eng().product_cost(product_id)
+        check_month(month)
+        return eng().product_cost(product_id, month)
+
+    @api.get("/costs/{product_id}/focus.csv")
+    def product_focus(product_id: str, month: str | None = None, user: User = Depends(current_user)):
+        """The month's cost records in FinOps FOCUS columns, for finance and BI tools."""
+        from fastapi.responses import Response
+
+        member_of(user, product_id)
+        check_month(month)
+        name = f"{product_id}-{month or 'this-month'}-focus.csv"
+        return Response(eng().focus_export(product_id, month), media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    def check_month(month: str | None) -> None:
+        import re
+
+        if month and not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", month):
+            raise HTTPException(400, "month is YYYY-MM")
 
     @api.get("/features/{feature_id}/cost")
     def feature_costs(feature_id: str, user: User = Depends(current_user)) -> dict:
