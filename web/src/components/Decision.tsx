@@ -5,6 +5,7 @@ import Markdown from "react-markdown";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
+import { AwsResourcesTable } from "./AwsResources";
 import { DesignReviewPanel, RepoPlans, SimilarList } from "./External";
 
 const DELIVERY_FAILED: Record<string, string> = {
@@ -228,6 +229,13 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       )}
 
       {item.design_review && <DesignReviewPanel review={item.design_review} />}
+
+      {item.aws_resources && item.aws_resources.resources.length > 0 && (
+        <div>
+          <h3>{item.gate === "g6" ? "Approving also creates these AWS services in production" : "Approving also approves these AWS services"}</h3>
+          <AwsResourcesTable aws={item.aws_resources} />
+        </div>
+      )}
 
       {item.new_repos && item.new_repos.length > 0 && (
         <div>

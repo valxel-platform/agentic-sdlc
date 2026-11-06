@@ -80,6 +80,9 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     out += _events(text, repos)
     out += _acceptance(repos, ctx)
     out += _endpoints(text, repos, ctx)
+    from ..resources import check as resources_check
+
+    out += resources_check(text, repos, ctx)
     out += _diagram(text, repos)
     if ctx.get("knowledge"):
         # Against the existing design: cited decisions are current, overrides are explicit, and

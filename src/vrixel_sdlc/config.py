@@ -158,6 +158,7 @@ class Settings:
     github_api: str
     platform: RepoPointer
     platform_constitution_path: str
+    platform_resources_path: str
     limits: Limits
     registry: dict[str, RegistryEntry]
     roles: dict[str, RoleConfig]
@@ -220,6 +221,7 @@ def load_settings(
         github_api=os.environ.get("VRIXEL_GITHUB_API") or gov.get("github_api", "https://api.github.com"),
         platform=RepoPointer(org=plat["org"], repo=plat["repo"], ref=plat.get("ref", "main")),
         platform_constitution_path=plat.get("constitution_path", "constitution.md"),
+        platform_resources_path=plat.get("resources_path", "aws-resources.yaml"),
         limits=Limits(
             min_critic_threshold=float(lim.get("min_critic_threshold", 0.75)),
             max_loops=int(lim.get("max_loops", 5)),

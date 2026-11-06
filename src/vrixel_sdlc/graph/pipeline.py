@@ -203,6 +203,10 @@ def make_gate(gate: str, services):
                 "quality": quality_summary(state) if gate in ("g5", "g6") else None,
                 # Approving G4 approves creating these repos, with these settings.
                 "new_repos": repo_plans(services, state) if gate == "g4" and lane_id == state["product_id"] else [],
+                # Approving G4 approves these AWS services, who may use them and their cost (VX-19);
+                # G6 approves binding them in production.
+                "aws_resources": (aws_summary(services, state, snap, ref)
+                                  if gate in ("g4", "g6") and lane_id == state["product_id"] else None),
                 "design_review": review,
                 # G1 decides whether this intent is new: what the product already has that looks like it.
                 "related_features": list(state.get("related_features") or []) if gate == "g1" else [],
@@ -251,6 +255,7 @@ def make_gate(gate: str, services):
             design["adrs"] = _hld_adrs(services.artifacts.load(ref))
             services.catalog.register({**_design_entry(state, design), "status": "in_design"})
             update["design"] = design
+            update["resources"] = aws_plan(services, state, snap, ref)
             # The feature's flag exists before any code does, so the coder builds behind it.
             update["flag"], note = assign_flag(services, state, approvers)
             update["events"].append(note)
@@ -276,8 +281,15 @@ def make_gate(gate: str, services):
             # production the approver promotes in the OpenChoreo portal and a watcher resumes this
             # thread; the stub records it here.
             lanes_by_repo = snap.lane_of_repo()
+            # Managed services first, so the components find them ready (VX-19).
+            for key, dep in sorted((state.get("deployments") or {}).items()):
+                if dep.get("kind") == "resource":
+                    update.setdefault("deployments", {})[key] = bind_resource(
+                        services, state, dep, "production", actor=d["approver"], actor_type="human")
             for repo in release.get("components", []):
                 prior = (state.get("deployments") or {}).get(repo) or {}
+                if prior.get("kind") == "resource":
+                    continue  # bound above
                 if prior.get("kind") == "store":
                     # A store app: the approver's decision submits it to the stores (Play at 1%).
                     update.setdefault("deployments", {})[repo] = release_store_app(
@@ -514,6 +526,62 @@ def oc_target(lane, repo: str) -> dict:
             "namespace": rt.get("namespace"), "pipeline": tuple(rt.get("pipeline") or PIPELINE)}
 
 
+def _resource_owner(snap):
+    """component short name -> (project, namespace): the component's lane runtime, or the product's
+    for shared lanes (they run inside the product)."""
+    lanes = snap.lane_of_repo()
+    product_rt = snap.product.runtime or {}
+
+    def target(component: str):
+        repo = next((r for r in lanes if r.split("/", 1)[-1] == component), None)
+        rt = ((lanes[repo].runtime if repo else None) or product_rt)
+        return rt.get("openchoreo_project"), rt.get("namespace")
+
+    return target
+
+
+def aws_summary(services, state: FeatureState, snap, ref) -> dict | None:
+    """G4 and G6 see the AWS services, each component's access and the cost per environment (VX-19)."""
+    from .. import resources
+
+    if not ref or not snap.aws_catalog:
+        return None
+    rt = snap.product.runtime or {}
+    return resources.summary(services.artifacts.load(ref) if isinstance(ref, dict) else "",
+                             snap.aws_catalog, list(rt.get("pipeline") or PIPELINE), rt.get("aws"))
+
+
+def aws_plan(services, state: FeatureState, snap, ref) -> list[dict]:
+    from .. import resources
+
+    if not ref or not snap.aws_catalog:
+        return []
+    return resources.plan(services.artifacts.load(ref), snap.aws_catalog, _resource_owner(snap),
+                          product_id=state["product_id"], feature_id=state["feature_id"],
+                          data_class=snap.product.data_class)
+
+
+def bind_resource(services, state: FeatureState, res: dict, stage: str, *, actor: str, actor_type: str) -> dict:
+    """Create or update an approved Resource and bind it to the stage's environment with its size."""
+    from ..resources import size_for
+
+    snap = services.feature_snapshot(state)
+    pipeline = tuple((snap.product.runtime or {}).get("pipeline") or PIPELINE)
+    env = env_for(stage, pipeline)
+    spec = res.get("spec") or res
+    applied = services.openchoreo.apply_resource(name=spec["name"], type=spec["type"], parameters=spec["parameters"],
+                                                 project=spec["project"], namespace=spec.get("namespace"))
+    t = (snap.aws_catalog.get("types") or {}).get(spec["type"]) or {}
+    size = (size_for({"type": spec["type"], "sizes": spec.get("sizes") or {}}, env, snap.aws_catalog)
+            if t.get("sizes") else "small")
+    rec = services.openchoreo.bind_resource(name=spec["name"], env=env, size=size, actor=actor, actor_type=actor_type,
+                                            project=spec["project"], namespace=spec.get("namespace"), pipeline=pipeline)
+    return {"repo": f"resource:{spec['name']}", "kind": "resource", "component": spec["name"], "project": spec["project"],
+            "namespace": spec.get("namespace"), "pipeline": list(pipeline), "env": env, "size": size,
+            "release": rec.get("release") or applied.get("release", ""), "change": applied.get("change", ""),
+            "spec": spec, "bound_by": actor}
+
+
 def env_for(stage: str, pipeline: tuple[str, ...]) -> str | None:
     """dev is the first environment, production the last, staging the one in between (if any)."""
     if stage == "dev":
@@ -744,6 +812,14 @@ def make_deploy(stage: str, services, nxt: str):
     def deploy(state: FeatureState) -> Command:
         lanes = services.feature_snapshot(state).lane_of_repo()
         deps, failures = {}, []
+        # Managed services first, so the components that use them find them (VX-19).
+        for spec in state.get("resources") or []:
+            try:
+                deps[f"resource:{spec['name']}"] = bind_resource(services, state, spec, stage,
+                                                                 actor=f"agent:{stage}", actor_type="agent")
+            except Exception as exc:
+                failures.append({"repo": f"resource:{spec['name']}", "component": spec["name"], "state": "failure",
+                                 "message": f"{type(exc).__name__}: {exc}"})
         for repo, run in ((state.get("change_set") or {}).get("runs") or {}).items():
             t = oc_target(lanes.get(repo), repo)
             env = env_for(stage, t["pipeline"])
@@ -778,7 +854,8 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
     def env_wait(state: FeatureState) -> Command:
         targets = [{"repo": d["repo"], "component": d["component"], "project": d.get("project"),
                     "namespace": d.get("namespace"), "env": d["env"],
-                    **({"kind": "store", "sha": d.get("sha", "")} if d.get("kind") == "store" else {})}
+                    **({"kind": "store", "sha": d.get("sha", "")} if d.get("kind") == "store" else {}),
+                    **({"kind": "resource"} if d.get("kind") == "resource" else {})}
                    for d in (state.get("deployments") or {}).values()
                    if d.get("env") == env_for(stage, tuple(d.get("pipeline") or PIPELINE))]
         if not targets:
@@ -788,8 +865,8 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
         qtargets = [{**t, "sha": t.get("sha") or runs.get(t["repo"], {}).get("sha", ""), "role": roles.get(t["repo"], "")}
                     for t in targets
                     # In production a store app is only submitted: its health is the rollout's to judge.
-                    if not (t.get("kind") == "store" and stage == "production")]
-        qtargets += acceptance_targets(services, state, stage, [t for t in targets if t.get("kind") != "store"])
+                    if not (t.get("kind") == "store" and stage == "production") and t.get("kind") != "resource"]
+        qtargets += acceptance_targets(services, state, stage, [t for t in targets if t.get("kind") not in ("store", "resource")])
         packet = external(state, stage, targets, quality_packet(services, state, stage, qtargets))
         if any(t.get("kind") == "store" for t in targets):
             packet["timeout_s"] = max(packet["timeout_s"], STORE_TIMEOUT_S[stage])

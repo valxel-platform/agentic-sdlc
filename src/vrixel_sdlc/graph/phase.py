@@ -120,7 +120,26 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         # Product acceptance tests: what exists (so plans extend rather than duplicate) and when needed.
         "acceptance_catalog": _acceptance_catalog(services, product) if phase in ("plan", "build") else [],
         "acceptance_min_repos": int(((product.quality or {}).get("acceptance") or {}).get("min_repos", 2)),
+        # AWS services (VX-19): what the platform offers, where the product runs them, what exists.
+        "aws_catalog": dict(snap.aws_catalog or {}),
+        "aws": (product.runtime or {}).get("aws"),
+        "pipeline": list((product.runtime or {}).get("pipeline") or []),
+        "aws_existing": _aws_existing(services, snap) if phase == "architecture" else [],
+        # The approved design, for the coder's resource bindings.
+        "hld_text": services.artifacts.load(arts["HLD"]) if phase == "build" and "HLD" in arts else "",
     }
+
+
+def _aws_existing(services, snap) -> list[dict]:
+    """The product's resources OpenChoreo already runs, so a design reuses rather than replaces them."""
+    lister = getattr(services.openchoreo, "list_resources", None)
+    runtime = snap.product.runtime or {}
+    if not callable(lister) or not runtime.get("openchoreo_project") or not snap.aws_catalog:
+        return []
+    try:
+        return list(lister(project=runtime["openchoreo_project"], namespace=runtime.get("namespace")))
+    except Exception:  # an unreadable inventory means no reuse hints, never a stuck design
+        return []
 
 
 def _acceptance_catalog(services, product) -> list[dict]:
@@ -145,6 +164,12 @@ def _audit_actions(services, arts: dict) -> list[dict]:
     from ..agents.parse import parse_audit
 
     return parse_audit(services.artifacts.load(arts["HLD"])) if "HLD" in arts else []
+
+
+def resources_instruction(ctx: dict, task: dict) -> str:
+    from ..resources import instruction
+
+    return instruction(ctx, task)
 
 
 def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str, ...], tail: str,
@@ -193,6 +218,13 @@ def build_phase_subgraph(phase: str, services):
             tail.append(f"Human feedback to address: {ctx['feedback']}")
         if ctx["prior_findings"]:
             tail.append("Evaluator findings to fix:\n" + "\n".join(f"- {f}" for f in ctx["prior_findings"]))
+        if phase == "architecture" and ctx.get("aws_catalog"):
+            from ..resources import catalog_guide
+
+            tail.append(catalog_guide(ctx["aws_catalog"], ctx.get("data_class", "")))
+            if ctx.get("aws_existing"):
+                tail.append("AWS resources the product already has (reuse them; never change their keys): " + ", ".join(
+                    f"{r['name']} ({r.get('type', '')})" for r in ctx["aws_existing"]))
         res = call_agent(services, role=spec.role, phase=phase, ctx=ctx, skills=spec.skills,
                          tail="\n".join(tail), stub_text=template(ctx, defective))
         return {"attempt": attempt, "draft": {"kind": spec.kind, "content": res.text},
@@ -359,7 +391,8 @@ def build_build_subgraph(services):
             tail=(f"Implement {task['id']} in {task['repo']} on branch feature/{ctx['feature_id']}. "
                   f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run tests; return the patch summary."
                   + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
-                  + acceptance_instruction(ctx, task) + security_instruction(ctx, task)),
+                  + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
+                  + resources_instruction(ctx, task)),
             stub_text=templates.code_task(ctx, task, passed=not fail),
         )
         result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
@@ -398,6 +431,9 @@ def build_build_subgraph(services):
                       + (" Check VX-17: no endpoint without a permission, record access checked, no token in the"
                          " browser or in fixed configuration, exposure as the HLD's Endpoints section says."
                          if r.get("role") in SECURITY else "")
+                      + (" Check VX-19: AWS services reached only behind a port, names from the environment variables"
+                         " workload.yaml binds, the SDK's default credentials (no keys), and only the access the HLD's"
+                         " Resources section gives this component." if resources_instruction(ctx, r) else "")
                       + (" Check that the acceptance tests follow the plan (extend before adding), carry the feature,"
                          " criterion, capability and component tags, declare what they cover, and use synthetic"
                          " data only." if r.get("role") == "acceptance" else "")

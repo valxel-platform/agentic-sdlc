@@ -1,6 +1,6 @@
 ---
 name: platform
-version: 1.6.0
+version: 1.7.0
 ---
 # Vrixel platform constitution
 
@@ -40,3 +40,7 @@ Identity and exposure:
 Apps on people's devices:
 
 - **VX-18** A mobile app is a public client: it signs people in through the system browser with PKCE, keeps tokens only in the device's secure storage, and reaches its product only through the product's BFF. Every change it makes carries an idempotency key and waits on the device until the product accepts it. Store releases go out in stages and widen only while the release stays healthy. Every app version still supported keeps working: the API stays compatible with the oldest one, which the BFF enforces as the minimum version. On a device, PHI is encrypted at rest, behind the device's lock, kept out of screenshots, notifications and logs, and wiped at sign-out. (Policy, Test)
+
+Cloud services:
+
+- **VX-19** A feature uses a managed AWS service only from the platform catalog (`aws-resources.yaml`), declared in its design with what it is for, who may read or write it, and why the platform defaults don't serve; G4 approves the services, their access and their cost. Each component reaches only what it declared, through its own identity and never with keys. Resources are created and changed only through OpenChoreo, per environment, in the product's own AWS account and allowed regions; production changes follow G6, and deleting or replacing stored data needs a person. (Policy, Test)

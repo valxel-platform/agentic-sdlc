@@ -66,8 +66,8 @@ class WaitChecker:
         roles = {t["repo"]: t.get("role", "") for t in q.get("targets") or []}
         public = next((r.get("url", "") for r in results if roles.get(r["repo"]) == "bff"), "")
         for r in results:
-            if r.get("kind") == "store":
-                continue  # store apps test themselves in their release workflow
+            if r.get("kind") in ("store", "resource"):
+                continue  # store apps test themselves in their release workflow; resources have no tests
             key = (packet.get("feature_id"), packet["wait"], packet.get("since"), r["repo"])
             if key in self._dispatched or not shas.get(r["repo"]):
                 continue
@@ -108,6 +108,11 @@ class WaitChecker:
     def _one(self, wait: str, t: dict) -> dict:
         if wait == "rollout":
             return self._rollout(t)
+        if t.get("kind") == "resource":
+            r = self.services.openchoreo.resource_status(name=t["component"], env=t["env"], project=t.get("project"),
+                                                         namespace=t.get("namespace"))
+            state = {"ready": "success", "failed": "failure"}.get(r.get("state", ""), "pending")
+            return {"state": state, "message": r.get("message", "") if state == "failure" else ""}
         if t.get("kind") == "store":
             from .store import release_context
 

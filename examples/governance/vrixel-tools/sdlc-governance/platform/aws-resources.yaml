@@ -1,0 +1,180 @@
+# The AWS services products may use, and how (constitution VX-19).
+#
+# The Vrixel SDLC's architect picks from these types when a feature needs a managed service and
+# writes them in the design's Resources section; G4 approves the choice, its access and its cost.
+# Each type is an OpenChoreo ClusterResourceType backed by a Crossplane Composition in
+# vrixel-tools/platform-resources, which builds in the defaults below (encryption, private access,
+# backups, tags). Products may tighten this (product.yaml runtime.aws), never loosen it.
+#
+# Adding a type is a pull request here and a Composition there, approved by the platform owner.
+# Cost figures are rough monthly planning numbers per environment in us-east-1, for the approver
+# to weigh at G4; they are not quotes.
+version: 1
+
+# Regions a product may run in, per data class. PHI and payment data stay in these.
+regions:
+  general: [us-east-1, us-east-2, us-west-2, ap-south-1]
+  payments: [us-east-1, us-east-2, us-west-2]
+  phi: [us-east-1, us-east-2, us-west-2, ap-south-1]   # ap-south-1: India data stays in India
+
+# Platform defaults first: a cloud service needs a reason the defaults can't meet, written as an
+# ADR. Kafka (VX-16) carries events; Postgres keeps records; the event worker builds read models.
+defaults:
+  events: kafka
+  records: postgres-crossplane
+
+types:
+  dynamodb-table:
+    service: "Amazon DynamoDB"
+    use_for: "Records read and written by key at any scale with steady single-digit-millisecond latency; spiky or unpredictable traffic (on-demand); data that expires (TTL)."
+    not_for: "Queries by anything but its keys and indexes, joins, reports or search (Postgres, or an event worker into a search index)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    parameters:
+      partition_key: { type: string, required: true }
+      sort_key: { type: string }
+      ttl_attribute: { type: string }
+      indexes: { type: list, help: "global secondary indexes: name:partition_key[:sort_key]" }
+    access:
+      read: [dynamodb:GetItem, dynamodb:BatchGetItem, dynamodb:Query, dynamodb:DescribeTable]
+      write: [dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:BatchWriteItem, dynamodb:ConditionCheckItem]
+    outputs: { table: TABLE_NAME, arn: TABLE_ARN }
+    sizes:
+      small: { capacity: on-demand, monthly_usd: 5 }
+      medium: { capacity: on-demand, monthly_usd: 60 }
+      large: { capacity: "provisioned, auto scaling", monthly_usd: 600 }
+    built_in: [KMS encryption with the product key, point-in-time recovery, deletion protection, VPC gateway endpoint]
+    emulator: "DynamoDB Local (amazon/dynamodb-local) in Testcontainers"
+
+  kinesis-stream:
+    service: "Amazon Kinesis Data Streams"
+    use_for: "High-volume ordered ingest from many producers (devices, sensors, clickstreams) that several consumers read, with replay inside the retention window."
+    not_for: "Domain events between services (Kafka, VX-16); work queues with per-message retries (sqs-queue)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    parameters:
+      retention_hours: { type: integer, default: 24, min: 24, max: 8760 }
+    access:
+      read: [kinesis:GetRecords, kinesis:GetShardIterator, kinesis:DescribeStream, kinesis:DescribeStreamSummary, kinesis:ListShards, kinesis:SubscribeToShard]
+      write: [kinesis:PutRecord, kinesis:PutRecords, kinesis:DescribeStreamSummary]
+    outputs: { stream: STREAM_NAME, arn: STREAM_ARN }
+    sizes:
+      small: { capacity: 1 shard, monthly_usd: 15 }
+      medium: { capacity: on-demand, monthly_usd: 60 }
+      large: { capacity: on-demand, monthly_usd: 400 }
+    built_in: [KMS encryption with the product key, VPC interface endpoint]
+    emulator: "LocalStack (Kinesis) in Testcontainers"
+
+  sqs-queue:
+    service: "Amazon SQS"
+    use_for: "Work handed to one consumer at a time with retries and a dead-letter queue (jobs, webhooks out, slow integrations); FIFO when order per key matters."
+    not_for: "Events several services read (Kafka); anything that must be replayed later."
+    data_classes: [general, payments, phi]
+    stateful: false
+    parameters:
+      fifo: { type: boolean, default: false }
+      visibility_timeout_s: { type: integer, default: 60, min: 0, max: 43200 }
+      max_receives: { type: integer, default: 5, min: 1, max: 1000, help: "then the message goes to the dead-letter queue" }
+    access:
+      read: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility, sqs:GetQueueAttributes]
+      write: [sqs:SendMessage, sqs:GetQueueAttributes]
+    outputs: { url: QUEUE_URL, arn: QUEUE_ARN }
+    sizes:
+      small: { monthly_usd: 1 }
+      medium: { monthly_usd: 10 }
+      large: { monthly_usd: 100 }
+    built_in: [KMS encryption with the product key, a dead-letter queue with an alarm, VPC interface endpoint]
+    emulator: "LocalStack (SQS) in Testcontainers"
+
+  s3-bucket:
+    service: "Amazon S3"
+    use_for: "Files and documents (uploads, images, exports, clinical documents), large payloads referenced from events, archives."
+    not_for: "Records queried field by field (Postgres or DynamoDB)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    parameters:
+      versioning: { type: boolean, default: true }
+      expire_days: { type: integer, help: "delete objects after this many days; empty keeps them" }
+    access:
+      read: [s3:GetObject, s3:ListBucket]
+      write: [s3:PutObject, s3:AbortMultipartUpload]
+      delete: [s3:DeleteObject]
+    outputs: { bucket: BUCKET_NAME, arn: BUCKET_ARN }
+    sizes:
+      small: { monthly_usd: 2 }
+      medium: { monthly_usd: 25 }
+      large: { monthly_usd: 250 }
+    built_in: [KMS encryption with the product key, public access blocked, TLS only, VPC gateway endpoint, access logs]
+    emulator: "LocalStack (S3) in Testcontainers"
+
+  sns-topic:
+    service: "Amazon SNS"
+    use_for: "Notifications out of the product (SMS, mobile push, email) and fan-out to queues."
+    not_for: "Events between the product's services (Kafka)."
+    data_classes: [general, payments, phi]   # PHI never in the message itself (VX-18)
+    stateful: false
+    parameters:
+      fifo: { type: boolean, default: false }
+    access:
+      write: [sns:Publish]
+    outputs: { arn: TOPIC_ARN }
+    sizes:
+      small: { monthly_usd: 1 }
+      medium: { monthly_usd: 15 }
+      large: { monthly_usd: 150 }
+    built_in: [KMS encryption with the product key, VPC interface endpoint]
+    emulator: "LocalStack (SNS) in Testcontainers"
+
+  postgres-crossplane:
+    service: "Amazon RDS for PostgreSQL (OpenChoreo's provisioner-crossplane)"
+    use_for: "The default for records: relations, transactions, queries, reports."
+    not_for: "Files (s3-bucket); key-only access at very large scale (dynamodb-table)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    parameters:
+      database: { type: string, required: true }
+      version: { type: string, default: "17" }
+    access: {}          # the component gets the database's credentials (outputs), not IAM actions
+    outputs: { host: DB_HOST, port: DB_PORT, database: DB_NAME, username: DB_USER, password: DB_PASSWORD }
+    sizes:
+      small: { capacity: db.t4g.micro, monthly_usd: 15 }
+      medium: { capacity: db.m7g.large, monthly_usd: 140 }
+      large: { capacity: "db.m7g.xlarge, Multi-AZ", monthly_usd: 560 }
+    built_in: [KMS encryption, private subnets only, automated backups, deletion protection]
+    emulator: "postgres in Testcontainers"
+
+  redis-crossplane:
+    service: "Amazon ElastiCache for Valkey (OpenChoreo's provisioner-crossplane)"
+    use_for: "Caches, sessions (the BFF), rate limits."
+    not_for: "The only copy of anything."
+    data_classes: [general, payments, phi]
+    stateful: false
+    parameters: {}
+    access: {}
+    outputs: { host: REDIS_HOST, port: REDIS_PORT, password: REDIS_PASSWORD }
+    sizes:
+      small: { capacity: cache.t4g.micro, monthly_usd: 12 }
+      medium: { capacity: cache.m7g.large, monthly_usd: 120 }
+      large: { capacity: "cache.m7g.large, 2 replicas", monthly_usd: 360 }
+    built_in: [encryption in transit and at rest, private subnets only]
+    emulator: "valkey in Testcontainers"
+
+  # Not chosen in designs: the pipeline creates one per component that reads or writes an AWS
+  # resource. An IAM role trusted only by the component's service account through EKS Pod
+  # Identity; each resource's Composition attaches a policy with just its declared actions.
+  workload-identity:
+    internal: true
+    service: "IAM role with EKS Pod Identity"
+    use_for: "One component's identity in AWS, without keys."
+    data_classes: [general, payments, phi]
+    stateful: false
+    parameters:
+      component: { type: string, required: true }
+    access: {}
+    outputs: { role: AWS_ROLE_ARN }
+    sizes:
+      small: { monthly_usd: 0 }
+    built_in: [a permissions boundary that stops at the product's resources, no keys]
+
+# Sizes per environment unless the design says otherwise. Lanes and dev stay small.
+environment_sizes: { dev: small, staging: small, production: medium }
