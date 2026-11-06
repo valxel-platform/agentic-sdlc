@@ -12,6 +12,10 @@ depends_on: [SS]
 runtime:
   openchoreo_project: apx
   pipeline: [dev, staging, production]
+  # Error reports stay in APX's own accounts (platform/error-tracking.yaml: payments).
+  error_tracking:
+    provider: glitchtip
+    url: https://errors.apx.vrixel.dev
 # Where agents publish work. Providers and credentials are run by the tools org; the platform
 # limits which providers may receive content from each data class (config/tools.yaml).
 tools:

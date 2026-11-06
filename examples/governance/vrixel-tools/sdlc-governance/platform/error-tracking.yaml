@@ -1,0 +1,35 @@
+# Where a product's error reports (Sentry SDKs in every template) may go. Read by the SDLC tool,
+# which refuses a product.yaml whose runtime.error_tracking breaks these rules.
+#
+# Error reports are scrubbed in the templates (types, stacks, paths and trace ids; never messages,
+# queries, headers, bodies or users), but scrubbing is a backstop, not the control: where the law or
+# a standard says data stays in a place or out of a vendor's hands, the reports stay there too.
+version: 1
+
+providers:
+  sentry:
+    hosted: true                 # Sentry's SaaS
+    regions: [us, eu]            # where Sentry stores data
+    baa: "Business plan or higher, signed before any PHI product sends a report"
+  glitchtip:
+    hosted: false                # self-hosted in the product's own AWS account and region,
+                                 # from vrixel-tools/platform-resources (observability/glitchtip)
+
+# The first rule that matches decides. A product without runtime.error_tracking sends nothing.
+rules:
+  - name: payments
+    when: { data_class: payments }
+    require: glitchtip
+    why: "Payment systems stay out of third-party tools: PCI DSS scope, and RBI's rule that payment data is stored only in India."
+  - name: india
+    when: { region: [ap-south-1, ap-south-2] }
+    require: glitchtip
+    why: "Data about people in India stays in India (DPDP; health and payment regulators expect it)."
+  - name: phi
+    when: { data_class: phi }
+    allow: [glitchtip, sentry]
+    sentry_needs: baa            # product.yaml says baa: true once Sentry's BAA is signed
+    why: "HIPAA: a hosted tracker needs a business associate agreement."
+  - name: general
+    when: {}
+    allow: [glitchtip, sentry]
