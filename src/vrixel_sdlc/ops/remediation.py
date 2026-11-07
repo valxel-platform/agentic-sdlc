@@ -133,6 +133,15 @@ def _gradual(raw: dict) -> dict:
             "compare": {"min_requests": int(cmp_["min_requests"]), "z": float(cmp_["z"]),
                         "min_increase": float(cmp_["min_increase"]), "relative": float(cmp_["relative"])}}
 
+def _gradual(raw: dict) -> dict:
+    steps = raw.get("steps") or []
+    if (not isinstance(steps, list) or not steps or any(not isinstance(s, (int, float)) or isinstance(s, bool) for s in steps)
+            or steps != sorted(set(steps)) or steps[-1] != 100 or steps[0] <= 0):
+        raise PolicyError("gradual_release.steps rise from above 0 to 100, e.g. [5, 25, 50, 100]")
+    bake = {"low": 30, "high": 60, "regulated": 120, **(raw.get("bake_minutes") or {})}
+    if set(bake) - set(RISK_TIERS) or not all(isinstance(v, int) and v >= 1 for v in bake.values()):
+        raise PolicyError("gradual_release.bake_minutes are whole minutes per risk tier (low, high, regulated)")
+    return {"steps": [float(s) for s in steps], "bake_minutes": bake}
 
 def for_product(policy: dict, runtime: dict | None, data_class: str = "", data_classes: dict | None = None) -> dict:
     """The platform's policy as it applies to one product: `runtime.remediation.autonomous` false
