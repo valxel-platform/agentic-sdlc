@@ -26,9 +26,9 @@ from vrixel_sdlc.services import build_services
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 
 FLOW = """flowchart LR
-  subgraph AG["AgTech"]
-    mobile["agtech-mobile (consumer)"]
-    api["agtech-field-api (provider)"]
+  subgraph FARM["Farm app"]
+    mobile["farm-mobile (consumer)"]
+    api["farm-field-api (provider)"]
   end
   db[(Field DB)]
   mobile -->|"versioned API"| api
@@ -61,10 +61,10 @@ def edit(path: Path, old: str, new: str) -> None:
 
 def test_flowchart_converts_to_a_drawio_file_and_editor_link():
     fc = parse_flowchart(FLOW)
-    assert fc.groups == {"AG": "AgTech"}
+    assert fc.groups == {"FARM": "Farm app"}
     assert fc.nodes["db"]["shape"] == "database"
     assert fc.edges == [("mobile", "api", "versioned API"), ("api", "db", "writes")]
-    xml = to_drawio(fc, "AG-FEAT-1 v1")
+    xml = to_drawio(fc, "FARM-FEAT-1 v1")
     root = ET.fromstring(xml)
     cells = root.findall(".//mxCell")
     assert sum(1 for c in cells if c.get("vertex")) == 4  # one group, three nodes
@@ -74,20 +74,20 @@ def test_flowchart_converts_to_a_drawio_file_and_editor_link():
 
 def test_architecture_publishes_drawio_into_the_feature_branch(tmp_path, gov_root):
     eng, svc = make_engine(tmp_path, gov_root)
-    v = eng.start(product_id="EMR", title="Consent check on intake", description="Block intake until consent")
+    v = eng.start(product_id="CLN", title="Consent check on intake", description="Block intake until consent")
     v = eng.auto_drive(v["feature_id"])
     (diagram,) = v["diagrams"]
     assert diagram["provider"] == "drawio" and diagram["version"] == 1
-    path = ("vrixel-emr/emr-intake-api", "feature/EMR-FEAT-1", "docs/architecture/EMR-FEAT-1.drawio")
+    path = ("acme-clinic/cln-intake-api", "feature/CLN-FEAT-1", "docs/architecture/CLN-FEAT-1.drawio")
     assert path in svc.github.files
     ET.fromstring(svc.github.files[path])
-    hld = eng.artifact("EMR-FEAT-1", "HLD")["content"]
+    hld = eng.artifact("CLN-FEAT-1", "HLD")["content"]
     assert "## Diagrams" in hld and "app.diagrams.net" in hld
 
 
 def test_diagram_is_withheld_when_the_change_touches_a_restricted_lane(tmp_path, gov_root):
     eng, svc = make_engine(tmp_path, gov_root)
-    v = eng.start(product_id="AG", title="Audit trail for field edits",
+    v = eng.start(product_id="FARM", title="Audit trail for field edits",
                   description="Record who changed a field, with the shared audit framework")
     v = eng.auto_drive(v["feature_id"])
     assert v["diagrams"] == []
@@ -104,7 +104,7 @@ def test_a_failed_diagram_publish_does_not_fail_the_phase(tmp_path, gov_root):
 
     eng, svc = make_engine(tmp_path, gov_root)
     svc.diagrams["lucid"] = Broken()
-    v = eng.start(product_id="AG", title="Offline crop log", description="Record observations offline")
+    v = eng.start(product_id="FARM", title="Offline crop log", description="Record observations offline")
     v = eng.auto_drive(v["feature_id"])
     assert v["status"] == "done" and v["diagrams"] == []
     assert any(e["kind"] == "diagram_failed" for e in v["events"])
@@ -136,15 +136,15 @@ def test_lucid_publisher_imports_mermaid_tags_and_shares_view_only(tmp_path, gov
     server, calls = fake_lucid()
     eng, svc = make_engine(tmp_path, gov_root, diagrams=None)
     svc.diagrams["lucid"] = LucidPublisher(McpHttp("lucid", server))
-    v = eng.start(product_id="AG", title="Offline crop log", description="Record observations offline")
+    v = eng.start(product_id="FARM", title="Offline crop log", description="Record observations offline")
     v = eng.auto_drive(v["feature_id"])
     (d,) = v["diagrams"]
     assert d["url"] == "https://lucid.app/lucidchart/d0c-1/view?invitationId=abc"
     assert d["edit_url"].endswith("/edit") and d["id"] == "d0c-1"
     create = calls[0]
-    assert create[1] == "AG-FEAT-1 Offline crop log: architecture v1" and create[3] == "lucidchart"
+    assert create[1] == "FARM-FEAT-1 Offline crop log: architecture v1" and create[3] == "lucidchart"
     assert parse_flowchart(create[2]).nodes  # the HLD's mermaid, as written
-    assert ("tags", "d0c-1", ["vrixel", "AG-FEAT-1"]) in calls
+    assert ("tags", "d0c-1", ["vrixel", "FARM-FEAT-1"]) in calls
     assert ("share", "d0c-1", "view", True) in calls
 
 
@@ -154,7 +154,7 @@ def test_lucid_publisher_imports_mermaid_tags_and_shares_view_only(tmp_path, gov
 def test_tracker_follows_the_feature_from_intent_to_release(tmp_path, gov_root):
     eng, svc = make_engine(tmp_path, gov_root)
     jira = svc.trackers["jira"]
-    v = eng.start(product_id="AG", title="Offline crop log", description="Record observations offline")
+    v = eng.start(product_id="FARM", title="Offline crop log", description="Record observations offline")
     fid = v["feature_id"]
     assert v["work_tracking"]["items"] == []  # nothing until G1 is approved
 
@@ -179,7 +179,7 @@ def test_tracker_follows_the_feature_from_intent_to_release(tmp_path, gov_root):
 
 def test_stopping_a_feature_cancels_open_items(tmp_path, gov_root):
     eng, svc = make_engine(tmp_path, gov_root)
-    v = eng.start(product_id="EMR", title="Consent check", description="Block intake until consent")
+    v = eng.start(product_id="CLN", title="Consent check", description="Block intake until consent")
     v = eng.auto_drive(v["feature_id"], decisions={"g3": {"decision": "abort", "feedback": "out of scope"}})
     assert v["status"] == "aborted"
     statuses = {i["item"]: i["status"] for i in v["work_tracking"]["items"]}
@@ -191,7 +191,7 @@ def test_stopping_a_feature_cancels_open_items(tmp_path, gov_root):
 def test_tracker_outage_never_blocks_the_pipeline_and_catches_up(tmp_path, gov_root):
     eng, svc = make_engine(tmp_path, gov_root)
     jira = svc.trackers["jira"]
-    v = eng.start(product_id="AG", title="Offline crop log", description="Record observations offline")
+    v = eng.start(product_id="FARM", title="Offline crop log", description="Record observations offline")
     jira.fail_next = 1
     eng.decide(v["feature_id"], v["pending"][0]["interrupt_id"], {"decision": "approve", "approver": "maria"})
     v = eng.view(v["feature_id"])
@@ -204,7 +204,7 @@ def test_tracker_outage_never_blocks_the_pipeline_and_catches_up(tmp_path, gov_r
 
 def test_tasks_in_a_restricted_lane_carry_no_detail(tmp_path, gov_root):
     eng, svc = make_engine(tmp_path, gov_root)
-    v = eng.start(product_id="AG", title="Audit trail for field edits",
+    v = eng.start(product_id="FARM", title="Audit trail for field edits",
                   description="Record who changed a field, with the shared audit framework")
     v = eng.auto_drive(v["feature_id"])
     ss_task = next(x for x in svc.trackers["jira"].items.values() if "Change in SS" in x["summary"])
@@ -216,7 +216,7 @@ def fake_jira():
 
     @server.tool()
     def getAccessibleAtlassianResources() -> list:
-        return [{"id": "cloud-1", "url": "https://vrixel.atlassian.net"}]
+        return [{"id": "cloud-1", "url": "https://acme.atlassian.net"}]
 
     @server.tool()
     def searchJiraIssuesUsingJql(cloudId: str, jql: str, maxResults: int = 50) -> dict:
@@ -257,17 +257,17 @@ def test_jira_over_the_atlassian_mcp_tools(tmp_path, gov_root):
     server, store = fake_jira()
     eng, svc = make_engine(tmp_path, gov_root)
     svc.trackers["jira"] = JiraTracker(McpHttp("atlassian", server))
-    v = eng.start(product_id="AG", title="Offline crop log", description="Record observations offline")
+    v = eng.start(product_id="FARM", title="Offline crop log", description="Record observations offline")
     v = eng.auto_drive(v["feature_id"], approver="maria")
     assert v["work_tracking"]["error"] is None
     issues = store["issues"]
-    epic = issues["AG-1"]
-    assert epic["type"] == "Epic" and epic["summary"] == "[AG-FEAT-1] Offline crop log"
-    assert "vrixel-AG-FEAT-1" in epic["labels"]
+    epic = issues["FARM-1"]
+    assert epic["type"] == "Epic" and epic["summary"] == "[FARM-FEAT-1] Offline crop log"
+    assert "vrixel-FARM-FEAT-1" in epic["labels"]
     stories = [i for i in issues.values() if i["type"] == "Story"]
-    assert len(stories) == 3 and all(s["parent"] == "AG-1" for s in stories)
+    assert len(stories) == 3 and all(s["parent"] == "FARM-1" for s in stories)
     assert all(i["status"] == "Done" for i in issues.values())
-    assert ("AG-1", "G1 Intent approved by maria.") in store["comments"]
+    assert ("FARM-1", "G1 Intent approved by maria.") in store["comments"]
 
     # Lost link store (e.g. a restore): the markers find the existing issues instead of duplicating.
     eng.work.links = type(eng.work.links)()
@@ -320,11 +320,11 @@ def test_openproject_over_its_mcp_tools(tmp_path, gov_root):
     eng, svc = make_engine(tmp_path, gov_root)
     svc.trackers["openproject"] = OpenProjectTracker(McpHttp("openproject", server),
                                                      base_url="https://op.example.com")
-    v = eng.start(product_id="EMR", title="Consent check on intake", description="Block intake until consent")
+    v = eng.start(product_id="CLN", title="Consent check on intake", description="Block intake until consent")
     v = eng.auto_drive(v["feature_id"], approver="li")
     assert v["work_tracking"]["error"] is None
     wps = store["wps"]
-    assert wps[1]["subject"] == "[EMR-FEAT-1] Consent check on intake" and wps[1]["type_id"] == 5
+    assert wps[1]["subject"] == "[CLN-FEAT-1] Consent check on intake" and wps[1]["type_id"] == 5
     stories = [w for w in wps.values() if w["type_id"] == 4]
     assert len(stories) == 3 and all(w["parent_id"] == 1 for w in stories)
     assert all(w["status_id"] == 12 for w in wps.values())  # Closed, matched by name
@@ -338,22 +338,22 @@ def test_openproject_over_its_mcp_tools(tmp_path, gov_root):
 @pytest.mark.parametrize("old,new,message", [
     ("provider: drawio", "provider: lucid", "lucid is not approved for phi data"),
     ("provider: drawio", "provider: visio", "must be one of"),
-    ("    project: emr\n", "", "tools.work_tracking.project is required"),
+    ("    project: cln\n", "", "tools.work_tracking.project is required"),
 ])
 def test_tool_choices_are_validated(tmp_path, gov_root, old, new, message):
-    edit(gov_root / "vrixel-emr" / "emr-governance" / "product.yaml", old, new)
+    edit(gov_root / "acme-clinic" / "cln-governance" / "product.yaml", old, new)
     eng, svc = make_engine(tmp_path, gov_root)
     with pytest.raises(GovernanceError, match=message):
-        svc.snapshot("EMR")
+        svc.snapshot("CLN")
 
 
 def test_products_without_tools_skip_publishing_and_tracking(tmp_path, gov_root):
-    path = gov_root / "vrixel-agtech" / "ag-governance" / "product.yaml"
+    path = gov_root / "acme-farm" / "farm-governance" / "product.yaml"
     text = path.read_text()
     start = text.index("# Where agents publish work")
     path.write_text(text[:start] + text[text.index("budget_usd:"):])
     eng, svc = make_engine(tmp_path, gov_root)
-    v = eng.start(product_id="AG", title="Offline crop log", description="Record observations offline")
+    v = eng.start(product_id="FARM", title="Offline crop log", description="Record observations offline")
     v = eng.auto_drive(v["feature_id"])
     assert v["diagrams"] == [] and v["work_tracking"] is None
     assert "## Diagram\n" in eng.artifact(v["feature_id"], "HLD")["content"]

@@ -21,9 +21,9 @@ RULES = EXAMPLES / "vrixel-tools" / "sdlc-governance" / "platform" / "alert-rule
 
 def test_the_platform_rules_become_traits_per_component():
     doc = load(RULES.read_text())
-    traits = traits_for(doc, "agtech-field-api")
+    traits = traits_for(doc, "farm-field-api")
     assert [t["instanceName"] for t in traits] == [
-        "agtech-field-api-exceptions", "agtech-field-api-exception-surge", "agtech-field-api-memory"]
+        "farm-field-api-exceptions", "farm-field-api-exception-surge", "farm-field-api-memory"]
     t = traits[0]
     assert (t["name"], t["kind"]) == ("observability-alert-rule", "ClusterTrait")
     assert t["parameters"]["source"] == {"type": "log", "query": "stack_trace"}
@@ -33,7 +33,7 @@ def test_the_platform_rules_become_traits_per_component():
     assert traits_for(doc, "web", "deployment/web-application")  # code running in the cluster
     assert traits_for(doc, "x", "proxy/api") == []
     assert traits_for({}, "x") == [] and load("") == {}
-    assert missing([{"instanceName": "agtech-field-api-memory", "parameters": {"tuned": True}}], traits) == traits[:2]
+    assert missing([{"instanceName": "farm-field-api-memory", "parameters": {"tuned": True}}], traits) == traits[:2]
 
 
 @pytest.mark.parametrize("bad", [
@@ -58,10 +58,10 @@ def engine(tmp_path):
 
 def test_components_get_the_rules_before_they_deploy_and_tuned_rules_stay(engine):
     oc = engine.services.openchoreo
-    oc.traits["vrixel-agtech/agtech-field-api"] = [{"name": "observability-alert-rule", "kind": "ClusterTrait",
-                                      "instanceName": "agtech-field-api-exceptions",
+    oc.traits["acme-farm/farm-field-api"] = [{"name": "observability-alert-rule", "kind": "ClusterTrait",
+                                      "instanceName": "farm-field-api-exceptions",
                                       "parameters": {"condition": {"threshold": 50}}}]
-    fid = engine.start(product_id="AG", title="Field log",
+    fid = engine.start(product_id="FARM", title="Field log",
                        description="Keep each field's latest state in DynamoDB")["feature_id"]
     assert engine.auto_drive(fid)["status"] == "done"
     s = engine._state(fid)
@@ -73,16 +73,16 @@ def test_components_get_the_rules_before_they_deploy_and_tuned_rules_stay(engine
         short = c.rsplit("/", 1)[-1]  # OpenChoreo's component name
         assert {f"{short}-exceptions", f"{short}-exception-surge", f"{short}-memory"} <= set(names)
         assert len(names) == len(set(names))  # added once, though the feature deployed three times
-    tuned = next(t for t in oc.traits["vrixel-agtech/agtech-field-api"] if t["instanceName"] == "agtech-field-api-exceptions")
+    tuned = next(t for t in oc.traits["acme-farm/farm-field-api"] if t["instanceName"] == "farm-field-api-exceptions")
     assert tuned["parameters"]["condition"]["threshold"] == 50  # left as someone set it
     notes = [e for e in s["events"] if e["kind"] == "alert_rules"]
     assert notes and all(e["node"] == "deploy_dev" for e in notes)
 
 
-def oc_alert(env, component="agtech-field-api", at=None):
+def oc_alert(env, component="farm-field-api", at=None):
     return {"alertName": f"{component}-exceptions", "alertSeverity": "warning", "alertType": "log",
             "alertDescription": "More than 10 exceptions logged in 5 minutes.", "alertThreshold": 10,
-            "alertValue": 37, "namespace": "default", "project": "agtech", "component": component,
+            "alertValue": 37, "namespace": "default", "project": "farm", "component": component,
             "environment": env, "alertTimestamp": at or datetime.now(timezone.utc).isoformat()}
 
 
@@ -91,10 +91,10 @@ def test_production_alerts_open_incidents_and_staging_ones_show_at_g6(engine):
     assert out == {"recorded": 1, "incidents": []}
     [iid] = engine.alarm_changes(from_openchoreo(oc_alert("production")))["incidents"]
     inc = engine._state(iid)
-    assert inc["severity"] == "sev3" and inc["title"] == "agtech-field-api-exceptions"
+    assert inc["severity"] == "sev3" and inc["title"] == "farm-field-api-exceptions"
 
-    state = {"feature_id": "AG-FEAT-5", "product_id": "AG", "resources": [],
-             "deployments": {"vrixel-agtech/agtech-field-api": {"component": "agtech-field-api"}}}
+    state = {"feature_id": "FARM-FEAT-5", "product_id": "FARM", "resources": [],
+             "deployments": {"acme-farm/farm-field-api": {"component": "farm-field-api"}}}
     [shown] = for_feature(engine.services.alarms, state)
     assert shown["env"] == "staging" and "37" in shown["says"]
     later = datetime.now(timezone.utc) + timedelta(hours=2)
@@ -103,9 +103,9 @@ def test_production_alerts_open_incidents_and_staging_ones_show_at_g6(engine):
 
 def test_the_board_ignores_other_components():
     board = InMemoryAlarmBoard()
-    board.record({**from_openchoreo(oc_alert("staging", component="other"))[0], "product_id": "AG"})
-    state = {"feature_id": "F", "product_id": "AG", "resources": [],
-             "deployments": {"r": {"component": "agtech-field-api"}}}
+    board.record({**from_openchoreo(oc_alert("staging", component="other"))[0], "product_id": "FARM"})
+    state = {"feature_id": "F", "product_id": "FARM", "resources": [],
+             "deployments": {"r": {"component": "farm-field-api"}}}
     assert for_feature(board, state) == []
 
 
@@ -131,9 +131,9 @@ def test_the_openchoreo_adapter_patches_only_the_missing_traits():
 
     oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
     wanted = traits_for(load(RULES.read_text()), "api")
-    assert oc.ensure_traits(component="org/api", traits=wanted, project="agtech") == ["api-exceptions",
+    assert oc.ensure_traits(component="org/api", traits=wanted, project="farm") == ["api-exceptions",
                                                                                      "api-exception-surge"]
     [(ns, comp, traits)] = st["patches"]
     assert (ns, comp) == ("vrixel", "api") and traits[0]["parameters"] == {"tuned": True} and len(traits) == 3
-    assert oc.ensure_traits(component="org/api", traits=wanted, project="agtech") == []
+    assert oc.ensure_traits(component="org/api", traits=wanted, project="farm") == []
     assert len(st["patches"]) == 1

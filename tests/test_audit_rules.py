@@ -7,18 +7,18 @@ from vrixel_sdlc.graph.phase import audit_findings, audit_instruction
 HLD = """# HLD: Consent capture
 
 ## ADRs
-- ADR-EMR-FEAT-1-1: Extend the intake API
+- ADR-CLN-FEAT-1-1: Extend the intake API
 
 ## Affected repos
-- vrixel-emr/emr-intake-api (provider)
+- acme-clinic/cln-intake-api (provider)
 
 ## Contracts
-- vrixel-emr/emr-intake-api: 1.2.0 -> 1.3.0
+- acme-clinic/cln-intake-api: 1.2.0 -> 1.3.0
 
 ## Diagram
 ```mermaid
 flowchart LR
-  api[emr-intake-api]
+  api[cln-intake-api]
 ```
 {audit}"""
 
@@ -30,7 +30,7 @@ AUDIT = """
 
 
 def ctx(data_class: str) -> dict:
-    return {"data_class": data_class, "repos": [{"name": "vrixel-emr/emr-intake-api", "role": "provider"}]}
+    return {"data_class": data_class, "repos": [{"name": "acme-clinic/cln-intake-api", "role": "provider"}]}
 
 
 def test_the_audit_section_is_parsed() -> None:

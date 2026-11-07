@@ -22,7 +22,7 @@ from vrixel_sdlc.web.auth import AuthConfig
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 
 
-def rec(key, product="EMR", **kw):
+def rec(key, product="CLN", **kw):
     return changes.new(key=key, product_id=product, kind=kw.pop("kind", "release"), type=kw.pop("type", "standard"),
                        action=kw.pop("action", "deploy"), summary=kw.pop("summary", key), targets=[], **kw)
 
@@ -39,7 +39,7 @@ def test_the_log_is_append_only_and_tampering_shows():
     del log.rows[0]  # removing a record
     assert changes.verify(log.all())["broken_at"] == "CHG-2"
     with pytest.raises(ValueError):
-        changes.new(key="x", product_id="EMR", kind="deploy", type="standard", action="x", summary="", targets=[])
+        changes.new(key="x", product_id="CLN", kind="deploy", type="standard", action="x", summary="", targets=[])
 
 
 def test_the_cli_says_whether_the_log_is_intact(capsys):
@@ -59,16 +59,16 @@ def eng(tmp_path):
     return FeatureEngine(build_services(s), InMemorySaver())
 
 
-def alert(status="firing", component="emr-intake-api", fp="fp1", at="2026-11-06T21:00:00Z", severity="error"):
+def alert(status="firing", component="cln-intake-api", fp="fp1", at="2026-11-06T21:00:00Z", severity="error"):
     return from_alertmanager({"alerts": [{"status": status, "fingerprint": fp, "startsAt": at,
                                           "labels": {"alertname": "HighErrorRate", "severity": severity,
                                                      "component": component}}]})
 
 
 def test_a_release_records_who_approved_it_and_the_evidence(eng):
-    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    fid = eng.create(product_id="CLN", title="Consent capture at intake")
     eng.auto_drive(fid)
-    rows = eng.services.changes.list("EMR")
+    rows = eng.services.changes.list("CLN")
     [r] = [x for x in rows if x["kind"] == "release"]
     assert (r["kind"], r["type"], r["action"], r["feature_id"]) == ("release", "standard", "deploy", fid)
     flag = next(x for x in r["targets"] if x["kind"] == "flag")
@@ -84,44 +84,44 @@ def test_a_release_records_who_approved_it_and_the_evidence(eng):
 
 
 def test_the_tools_fix_is_automatic_and_names_the_release_behind_the_incident(eng, monkeypatch):
-    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    fid = eng.create(product_id="CLN", title="Consent capture at intake")
     eng.auto_drive(fid)
     [iid] = eng.ingest(alert())
     eng._pool.shutdown(wait=True)  # the hotfix the tool started runs in the background
-    rows = eng.services.changes.list("EMR")
+    rows = eng.services.changes.list("CLN")
     flag = next(r for r in rows if r["action"] == "flag_off")
     assert (flag["type"], flag["action"], flag["incident_id"]) == ("automatic", "flag_off", iid)
     assert flag["approved_by"] == ["platform/remediation.yaml"] and flag["requested_by"] == "agent:remediate"
-    [link] = eng.services.changes.links("EMR")
+    [link] = eng.services.changes.links("CLN")
     assert (link["change_id"], link["incident_id"]) == ("CHG-1", iid) and "undone by" in link["why"]
     assert any(e["kind"] == "cause" and "CHG-1" in e["detail"] for e in eng.view(iid)["events"])
 
     # Recovered: the lookback counts it as fixed by the tool, and the release as a failed change.
     monkeypatch.setattr(incident_mod, "_clock", lambda: datetime.now(timezone.utc) + timedelta(minutes=16))
     eng.ingest(alert(status="resolved"))
-    month = eng.lookback("EMR", 1)["months"][-1]
+    month = eng.lookback("CLN", 1)["months"][-1]
     assert month["incidents"] == 1 and month["fixed_by_tool"] == 1 and month["escalated"] == 0
     assert month["releases"] == 1 and month["releases_causing_incidents"] == 1 and month["change_failure_rate"] == 1.0
     assert month["changes"] == {"standard": 4, "automatic": 1}  # the release, its 3 steps, the flag off
-    assert eng.lookback("EMR", 1)["causes"][0]["incidents"] == [iid]
+    assert eng.lookback("CLN", 1)["causes"][0]["incidents"] == [iid]
 
 
 def test_on_calls_rollback_is_an_emergency_change_and_a_hotfix_release_too(tmp_path):
     root = tmp_path / "gov"
     shutil.copytree(EXAMPLES, root)
-    gov = root / "vrixel-emr" / "emr-governance" / "product.yaml"
+    gov = root / "acme-clinic" / "cln-governance" / "product.yaml"
     gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {autonomous: false}\n", 1))
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",
                       governance_root=root)
     eng = FeatureEngine(build_services(s), InMemorySaver())
-    eng.auto_drive(eng.create(product_id="EMR", title="Consent capture at intake"))
+    eng.auto_drive(eng.create(product_id="CLN", title="Consent capture at intake"))
     [iid] = eng.ingest(alert())
     g = next(p for p in eng.pending(iid) if p.get("gate") == "incident")
     eng.decide(iid, g["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
     hotfix = next(k for k, v in eng.view(iid)["links"].items() if v == "hotfix")
     eng._pool.shutdown(wait=True)
     eng.auto_drive(hotfix)
-    rows = eng.services.changes.list("EMR")
+    rows = eng.services.changes.list("CLN")
     off = next(r for r in rows if r["action"] == "flag_off")
     assert off["type"] == "emergency" and off["approved_by"] == ["oncall-1"]
     fix = next(r for r in rows if r["feature_id"] == hotfix)
@@ -131,8 +131,8 @@ def test_on_calls_rollback_is_an_emergency_change_and_a_hotfix_release_too(tmp_p
 
 def test_the_lookback_by_month():
     def inc(i, opened, **kw):
-        return {"incident_id": f"EMR-INC-{i}", "opened_at": opened, "severity": kw.pop("sev", "sev2"),
-                "component": "vrixel-emr/emr-intake-api", "status": kw.pop("status", "closed"), **kw}
+        return {"incident_id": f"CLN-INC-{i}", "opened_at": opened, "severity": kw.pop("sev", "sev2"),
+                "component": "acme-clinic/cln-intake-api", "status": kw.pop("status", "closed"), **kw}
 
     recovered = [{"kind": "recovered", "at": "2026-10-03T10:30:00+00:00"}]
     incidents = [
@@ -144,12 +144,12 @@ def test_the_lookback_by_month():
         inc(5, "2025-01-01T10:00:00+00:00"),  # outside the window
     ]
     chg = [{"id": "CHG-1", "at": "2026-10-02T09:00:00+00:00", "kind": "release", "action": "deploy", "type": "standard",
-            "outcome": "done", "summary": "EMR-FEAT-1"},
+            "outcome": "done", "summary": "CLN-FEAT-1"},
            {"id": "CHG-2", "at": "2026-10-03T10:05:00+00:00", "kind": "flag", "action": "flag_off", "type": "automatic",
             "outcome": "done", "summary": "off"},
            {"id": "CHG-3", "at": "2026-11-02T09:00:00+00:00", "kind": "release", "action": "deploy", "type": "emergency",
-            "outcome": "failed", "summary": "EMR-FEAT-2"}]
-    links = [{"change_id": "CHG-1", "incident_id": "EMR-INC-1"}]
+            "outcome": "failed", "summary": "CLN-FEAT-2"}]
+    links = [{"change_id": "CHG-1", "incident_id": "CLN-INC-1"}]
     out = lookback.report(incidents, chg, links, ["2026-10", "2026-11"])
     oct_, nov = out["months"]
     assert oct_["incidents"] == 2 and oct_["by_severity"] == {"sev1": 1, "sev2": 1}
@@ -162,18 +162,18 @@ def test_the_lookback_by_month():
 
 
 def test_the_api_shows_members_their_products_changes(eng):
-    eng.auto_drive(eng.create(product_id="EMR", title="Consent capture at intake"))
-    eng.auto_drive(eng.create(product_id="AG", title="Field log"))
+    eng.auto_drive(eng.create(product_id="CLN", title="Consent capture at intake"))
+    eng.auto_drive(eng.create(product_id="FARM", title="Field log"))
     client = TestClient(create_app(eng, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
-    client.post("/api/auth/dev-login", json={"login": "dev", "orgs": ["vrixel-emr"]})
+    client.post("/api/auth/dev-login", json={"login": "dev", "orgs": ["acme-clinic"]})
     rows = client.get("/api/changes").json()
-    assert rows and {r["product_id"] for r in rows} == {"EMR"}  # not AG's
-    assert client.get("/api/changes?product_id=AG").status_code == 403
+    assert rows and {r["product_id"] for r in rows} == {"CLN"}  # not FARM's
+    assert client.get("/api/changes?product_id=FARM").status_code == 403
     assert client.get("/api/changes?since=yesterday").status_code == 400
-    csv = client.get("/api/changes/export.csv?product_id=EMR")
+    csv = client.get("/api/changes/export.csv?product_id=CLN")
     assert csv.status_code == 200 and csv.text.splitlines()[0].startswith("id,at,product")
-    assert "EMR-FEAT-1" in csv.text and "AG-" not in csv.text
+    assert "CLN-FEAT-1" in csv.text and "FARM-" not in csv.text
     assert client.get("/api/changes/verify").json()["ok"] is True
-    lb = client.get("/api/reports/lookback?product_id=EMR&months=3").json()
+    lb = client.get("/api/reports/lookback?product_id=CLN&months=3").json()
     assert len(lb["months"]) == 3 and lb["months"][-1]["releases"] == 1
-    assert client.get("/api/reports/lookback?product_id=EMR&months=99").status_code == 400
+    assert client.get("/api/reports/lookback?product_id=CLN&months=99").status_code == 400

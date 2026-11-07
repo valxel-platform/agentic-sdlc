@@ -97,7 +97,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "related_features": list(state.get("related_features") or []),
         "not_duplicate_reason": state.get("not_duplicate_reason", ""),
         "repo_prefix": product.repo_prefix,
-        # Repos of the lanes this product depends on (shared services, APX): they may join the
+        # Repos of the lanes this product depends on (shared services, PAY): they may join the
         # change set when the architecture needs them.
         "dependency_repos": [{"name": r.name, "role": r.role, "lane": lane_id}
                              for lane_id, s in snap.dependencies.items() for r in s.product.repos],

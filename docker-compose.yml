@@ -42,8 +42,8 @@ services:
       # Production signals: Alertmanager and ticket webhooks (Bearer token), Sentry (client secret).
       VRIXEL_SIGNALS_TOKEN: ${VRIXEL_SIGNALS_TOKEN:-}
       VRIXEL_SENTRY_CLIENT_SECRET: ${VRIXEL_SENTRY_CLIENT_SECRET:-}
-      # One Flipt client token per product with tools.flags, e.g. VRIXEL_FLIPT_TOKEN_EMR.
-      VRIXEL_FLIPT_TOKEN_EMR: ${VRIXEL_FLIPT_TOKEN_EMR:-}
+      # One Flipt client token per product with tools.flags, e.g. VRIXEL_FLIPT_TOKEN_CLN.
+      VRIXEL_FLIPT_TOKEN_CLN: ${VRIXEL_FLIPT_TOKEN_CLN:-}
       VRIXEL_WATCH_INTERVAL_S: ${VRIXEL_WATCH_INTERVAL_S:-30}
       VRIXEL_OPENCHOREO_MCP_URL: ${VRIXEL_OPENCHOREO_MCP_URL:-}
       VRIXEL_OPENCHOREO_TOKEN_URL: ${VRIXEL_OPENCHOREO_TOKEN_URL:-}

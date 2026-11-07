@@ -9,19 +9,19 @@ from vrixel_sdlc.repo_roles import REPO_ORDER
 HLD = """# HLD: Consent capture
 
 ## ADRs
-- ADR-EMR-FEAT-1-1: Extend the intake API
+- ADR-CLN-FEAT-1-1: Extend the intake API
 
 ## Affected repos
-- vrixel-emr/emr-intake-api (provider)
-- vrixel-emr/emr-consent-worker (event-worker)
+- acme-clinic/cln-intake-api (provider)
+- acme-clinic/cln-consent-worker (event-worker)
 
 ## Contracts
-- vrixel-emr/emr-intake-api: 1.2.0 -> 1.3.0
+- acme-clinic/cln-intake-api: 1.2.0 -> 1.3.0
 
 ## Diagram
 ```mermaid
 flowchart LR
-  api[emr-intake-api] --> w[emr-consent-worker]
+  api[cln-intake-api] --> w[cln-consent-worker]
 ```
 
 ## Audit
@@ -30,18 +30,18 @@ flowchart LR
 
 EVENTS = """
 ## Events
-- vrixel.consent.recorded.v1: published by emr-intake-api, applied by emr-consent-worker
-- vrixel.consent.withdrawn.v1: published by emr-intake-api, applied by emr-consent-worker
+- vrixel.consent.recorded.v1: published by cln-intake-api, applied by cln-consent-worker
+- vrixel.consent.withdrawn.v1: published by cln-intake-api, applied by cln-consent-worker
 """
 
 
 def ctx() -> dict:
-    return {"data_class": "phi", "repos": [{"name": "vrixel-emr/emr-intake-api", "role": "provider"},
-                                           {"name": "vrixel-emr/emr-consent-worker", "role": "event-worker"}]}
+    return {"data_class": "phi", "repos": [{"name": "acme-clinic/cln-intake-api", "role": "provider"},
+                                           {"name": "acme-clinic/cln-consent-worker", "role": "event-worker"}]}
 
 
 def test_event_workers_are_a_role_that_merges_after_providers() -> None:
-    assert parse_affected_repos(HLD.format(events=""))[1] == {"name": "vrixel-emr/emr-consent-worker", "role": "event-worker"}
+    assert parse_affected_repos(HLD.format(events=""))[1] == {"name": "acme-clinic/cln-consent-worker", "role": "event-worker"}
     assert REPO_ORDER["provider"] < REPO_ORDER["event-worker"] < REPO_ORDER["consumer"]
 
 
@@ -54,7 +54,7 @@ def test_designs_with_event_workers_must_name_their_events() -> None:
     missing = "no Events section"
     assert any(missing in f for f in run_checks("architecture", HLD.format(events=""), ctx()))
     assert not any(missing in f for f in run_checks("architecture", HLD.format(events=EVENTS), ctx()))
-    no_worker = HLD.format(events="").replace("- vrixel-emr/emr-consent-worker (event-worker)\n", "")
+    no_worker = HLD.format(events="").replace("- acme-clinic/cln-consent-worker (event-worker)\n", "")
     assert not any(missing in f for f in run_checks("architecture", no_worker, ctx()))
 
 

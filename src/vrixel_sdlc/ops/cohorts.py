@@ -5,7 +5,7 @@ errors are a small share of the component's. So the backend templates count, per
 requests that evaluated it and how many of them failed (a 5xx or an unhandled exception), apart
 for users who got it on and users who got it off, and log one line per flag a minute:
 
-    vrixel.flag_cohorts {"flag": "emr.emr-feat-3.kiosk", "on": {"requests": 40, "errors": 0},
+    vrixel.flag_cohorts {"flag": "cln.cln-feat-3.kiosk", "on": {"requests": 40, "errors": 0},
                          "off": {"requests": 760, "errors": 2}}
 
 The tool sums those lines (OpenChoreo's log query, across the product's whole project, so a

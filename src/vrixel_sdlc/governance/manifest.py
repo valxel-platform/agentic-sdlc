@@ -71,9 +71,9 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
     # them and the provision step creates them. It then needs the prefix new repo names start with.
     repo_prefix = str(raw.get("repo_prefix") or "")
     if repo_prefix and not _PREFIX.match(repo_prefix):
-        problems.append(f"repo_prefix {repo_prefix!r} must be lowercase letters and digits ending in '-', e.g. 'emr-'")
+        problems.append(f"repo_prefix {repo_prefix!r} must be lowercase letters and digits ending in '-', e.g. 'cln-'")
     if not repos and not repo_prefix:
-        problems.append("no repos listed: list the product's repos, or set repo_prefix (e.g. 'emr-') so its first "
+        problems.append("no repos listed: list the product's repos, or set repo_prefix (e.g. 'cln-') so its first "
                         "feature can propose them")
 
     approvers = {k: [str(a).lstrip("@") for a in (v or [])] for k, v in (raw.get("approvers") or {}).items()}
@@ -274,7 +274,7 @@ def _flags(spec: dict, entry: RegistryEntry, runtime: dict | None, problems: lis
         return None
     url = str(spec.get("url") or "")
     if not re.match(r"^https?://[^\s/]+", url):
-        problems.append("tools.flags.url must be the product's Flipt server, e.g. https://flipt.emr.example.com")
+        problems.append("tools.flags.url must be the product's Flipt server, e.g. https://flipt.cln.example.com")
         return None
     pipeline = list(runtime.get("pipeline") or [])
     envs = spec.get("environments") or {}

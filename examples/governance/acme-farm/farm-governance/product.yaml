@@ -1,0 +1,54 @@
+# Farm app governance manifest, read by the Vrixel agentic SDLC tool.
+# Changes are pull requests approved by the product owner (see CODEOWNERS).
+# The tool rejects values that loosen platform limits.
+product_id: FARM
+name: Farm app
+constitution: constitution.md
+context: context.md
+# Lanes this product builds on. Their repos may join this product's change sets, their
+# constitutions apply to changes in their repos, and their owners co-approve G4 to G6.
+depends_on: [SS, PAY]
+# Runtime infrastructure stays with the product: shared services run inside it.
+runtime:
+  openchoreo_project: farm
+  pipeline: [dev, staging, production]
+  # AWS for managed services (VX-19): one account per environment, in a region the platform
+  # allows for the product's data class. OpenChoreo's data plane for each environment runs there.
+  aws:
+    region: us-east-2
+    accounts: { dev: "111111111111", staging: "222222222222", production: "333333333333" }
+# Where agents publish work. Providers and credentials are run by the tools org; the platform
+# limits which providers may receive content from each data class (config/tools.yaml).
+tools:
+  diagrams:
+    provider: lucid          # Lucid documents, shared view-only with a link
+  work_tracking:
+    provider: jira
+    project: FARM
+budget_usd: 150
+critic_threshold: 0.8
+max_loops: 3
+repos:
+- name: acme-farm/farm-field-api
+  role: provider
+- name: acme-farm/farm-mobile
+  role: consumer
+# Approvers are GitHub teams (<org>/<team-slug>) or users (<login>). Only they can decide a gate.
+approvers:
+  g1:
+  - acme-farm/product-owners
+  g2:
+  - acme-farm/product-owners
+  g3:
+  - acme-farm/design
+  g4:
+  - acme-farm/architects
+  g5:
+  - acme-farm/tech-leads
+  security:
+  - acme-farm/security
+  g6:
+  - acme-farm/release-managers
+high_risk_paths:
+- src/auth/
+- migrations/

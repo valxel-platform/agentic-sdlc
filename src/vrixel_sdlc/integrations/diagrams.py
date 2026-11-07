@@ -193,7 +193,7 @@ def decode_editor_url(url: str) -> str:
 @dataclass
 class DiagramRequest:
     feature_id: str
-    title: str  # e.g. "AG-FEAT-2 Offline crop log: architecture v1"
+    title: str  # e.g. "FARM-FEAT-2 Offline crop log: architecture v1"
     mermaid: str
     repo: str  # the provider repo whose feature branch receives drawio files
     branch: str

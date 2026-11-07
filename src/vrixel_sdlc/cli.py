@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     p = argparse.ArgumentParser(prog="vrixel")
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo", help="Run one feature end to end with auto-approved gates")
-    d.add_argument("--product", default="EMR", help="EMR, AG, POS, MS or APX")
+    d.add_argument("--product", default="CLN", help="CLN, FARM, SHOP, DNT or PAY")
     d.add_argument("--title", default="Consent check on patient intake")
     d.add_argument("--description", default="Block intake submission until patient consent is recorded")
     d.add_argument("--fault", action="append", default=[], metavar="PHASE=N",

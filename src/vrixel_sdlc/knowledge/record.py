@@ -8,11 +8,11 @@ ADRs use MADR's sections with YAML front matter, so people read them as document
 reads them as data:
 
     ---
-    id: ADR-EMR-0001
+    id: ADR-CLN-0001
     title: FHIR R4 at every system boundary
     status: accepted            # proposed | accepted | superseded | deprecated
     date: 2026-07-01
-    repos: [vrixel-emr/emr-intake-api]
+    repos: [acme-clinic/cln-intake-api]
     supersedes: []
     superseded_by: ""
     feature: ""                 # the feature that made the decision, when the SDLC did

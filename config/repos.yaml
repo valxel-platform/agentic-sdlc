@@ -5,7 +5,7 @@
 
 naming:
   # Repo names start with the product's prefix (the part before the first "-" of its existing
-  # repos, e.g. emr- for vrixel-emr/emr-intake-api) and use lowercase words joined by "-".
+  # repos, e.g. cln- for acme-clinic/cln-intake-api) and use lowercase words joined by "-".
   pattern: "^[a-z][a-z0-9]*(-[a-z0-9]+)+$"
   max_length: 50
 

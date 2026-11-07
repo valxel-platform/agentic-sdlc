@@ -8,55 +8,55 @@ from vrixel_sdlc.graph.phase import security_instruction
 from vrixel_sdlc.repo_roles import REPO_ORDER
 
 REPOS = [
-    {"name": "vrixel-emr/emr-intake-api", "role": "provider"},
-    {"name": "vrixel-emr/emr-web", "role": "consumer"},
-    {"name": "vrixel-emr/emr-bff", "role": "bff"},
+    {"name": "acme-clinic/cln-intake-api", "role": "provider"},
+    {"name": "acme-clinic/cln-web", "role": "consumer"},
+    {"name": "acme-clinic/cln-bff", "role": "bff"},
 ]
 
 
-def hld(endpoints: str, adrs: str = "- ADR-EMR-FEAT-1-1: Extend the intake API") -> str:
+def hld(endpoints: str, adrs: str = "- ADR-CLN-FEAT-1-1: Extend the intake API") -> str:
     return f"# HLD\n\n## ADRs\n{adrs}\n\n## Endpoints\n{endpoints}\n"
 
 
 def test_the_endpoints_section_is_parsed() -> None:
-    e = parse_endpoints(hld("- vrixel-emr/emr-bff: external; calls emr-intake-api, emr-web\n"
-                            "- vrixel-emr/emr-intake-api: project, namespace\n"))
+    e = parse_endpoints(hld("- acme-clinic/cln-bff: external; calls cln-intake-api, cln-web\n"
+                            "- acme-clinic/cln-intake-api: project, namespace\n"))
     assert e == [
-        {"repo": "vrixel-emr/emr-bff", "visibility": ["external"], "calls": ["emr-intake-api", "emr-web"]},
-        {"repo": "vrixel-emr/emr-intake-api", "visibility": ["project", "namespace"], "calls": []},
+        {"repo": "acme-clinic/cln-bff", "visibility": ["external"], "calls": ["cln-intake-api", "cln-web"]},
+        {"repo": "acme-clinic/cln-intake-api", "visibility": ["project", "namespace"], "calls": []},
     ]
 
 
 def test_only_the_bff_faces_the_internet() -> None:
-    ok = hld("- vrixel-emr/emr-bff: external; calls emr-intake-api, emr-web\n"
-             "- vrixel-emr/emr-intake-api: project\n- vrixel-emr/emr-web: project\n")
+    ok = hld("- acme-clinic/cln-bff: external; calls cln-intake-api, cln-web\n"
+             "- acme-clinic/cln-intake-api: project\n- acme-clinic/cln-web: project\n")
     assert _endpoints(ok, REPOS, {"repos": REPOS}) == []
-    web = ok.replace("emr-web: project", "emr-web: external")
+    web = ok.replace("cln-web: project", "cln-web: external")
     assert any("reaches the internet through the product's BFF" in f for f in _endpoints(web, REPOS, {}))
-    api = ok.replace("emr-intake-api: project", "emr-intake-api: external")
+    api = ok.replace("cln-intake-api: project", "cln-intake-api: external")
     assert any("add an ADR approving the exposure" in f for f in _endpoints(api, REPOS, {}))
-    approved = hld(api.split("## Endpoints\n")[1], adrs="- ADR-EMR-FEAT-1-2: Expose the intake API external to partners")
+    approved = hld(api.split("## Endpoints\n")[1], adrs="- ADR-CLN-FEAT-1-2: Expose the intake API external to partners")
     assert not any("ADR" in f for f in _endpoints(approved, REPOS, {}))
 
 
 def test_every_component_is_declared_with_known_calls() -> None:
     assert "no Endpoints section" in _endpoints("# HLD\n", REPOS, {})[0]
-    partial = hld("- vrixel-emr/emr-bff: external; calls emr-billing\n- vrixel-emr/emr-intake-api: public\n")
+    partial = hld("- acme-clinic/cln-bff: external; calls cln-billing\n- acme-clinic/cln-intake-api: public\n")
     findings = _endpoints(partial, REPOS, {"repos": REPOS})
-    assert "vrixel-emr/emr-web has no line in Endpoints (VX-17)" in findings
-    assert any("calls emr-billing" in f for f in findings)
+    assert "acme-clinic/cln-web has no line in Endpoints (VX-17)" in findings
+    assert any("calls cln-billing" in f for f in findings)
     assert any("unknown visibility public" in f for f in findings)
     assert _endpoints("# HLD\n", [{"name": "o/lib", "role": "library"}], {}) == []
 
 
 def test_the_stub_architect_writes_endpoints_that_pass() -> None:
-    repos = REPOS + [{"name": "vrixel-emr/emr-agent", "role": "agent"}, {"name": "vrixel-emr/emr-care-mcp", "role": "mcp-server"},
-                     {"name": "vrixel-emr/emr-worker", "role": "event-worker"}, {"name": "vrixel-emr/emr-lib", "role": "library"}]
+    repos = REPOS + [{"name": "acme-clinic/cln-agent", "role": "agent"}, {"name": "acme-clinic/cln-care-mcp", "role": "mcp-server"},
+                     {"name": "acme-clinic/cln-worker", "role": "event-worker"}, {"name": "acme-clinic/cln-lib", "role": "library"}]
     lines = _endpoint_lines(repos)
-    assert "- vrixel-emr/emr-bff: external; calls emr-intake-api, emr-web, emr-agent" in lines
-    assert "- vrixel-emr/emr-agent: project; calls emr-care-mcp" in lines
-    assert "- vrixel-emr/emr-worker: none" in lines
-    assert not any("emr-lib" in line for line in lines)
+    assert "- acme-clinic/cln-bff: external; calls cln-intake-api, cln-web, cln-agent" in lines
+    assert "- acme-clinic/cln-agent: project; calls cln-care-mcp" in lines
+    assert "- acme-clinic/cln-worker: none" in lines
+    assert not any("cln-lib" in line for line in lines)
     assert _endpoints(hld("\n".join(lines)), repos, {"repos": repos}) == []
 
 
@@ -82,12 +82,12 @@ def test_web_apps_are_tested_through_the_bff() -> None:
         github = GH()
 
     w = WaitChecker(S())
-    packet = {"wait": "staging", "feature_id": "EMR-FEAT-1", "since": "t", "quality": {"targets": [
-        {"repo": "o/emr-web", "sha": "1", "role": "consumer"},
-        {"repo": "o/emr-bff", "sha": "2", "role": "bff"},
-        {"repo": "o/emr-intake-api", "sha": "3", "role": "provider"}]}}
-    w._start_post_deploy(packet, [{"repo": "o/emr-web", "url": "http://emr-web.internal"},
-                                  {"repo": "o/emr-bff", "url": "https://emr.example.com"},
-                                  {"repo": "o/emr-intake-api", "url": "http://api.internal"}])
-    assert dict(sent) == {"o/emr-web": "https://emr.example.com", "o/emr-bff": "https://emr.example.com",
-                          "o/emr-intake-api": "http://api.internal"}
+    packet = {"wait": "staging", "feature_id": "CLN-FEAT-1", "since": "t", "quality": {"targets": [
+        {"repo": "o/cln-web", "sha": "1", "role": "consumer"},
+        {"repo": "o/cln-bff", "sha": "2", "role": "bff"},
+        {"repo": "o/cln-intake-api", "sha": "3", "role": "provider"}]}}
+    w._start_post_deploy(packet, [{"repo": "o/cln-web", "url": "http://cln-web.internal"},
+                                  {"repo": "o/cln-bff", "url": "https://cln.example.com"},
+                                  {"repo": "o/cln-intake-api", "url": "http://api.internal"}])
+    assert dict(sent) == {"o/cln-web": "https://cln.example.com", "o/cln-bff": "https://cln.example.com",
+                          "o/cln-intake-api": "http://api.internal"}

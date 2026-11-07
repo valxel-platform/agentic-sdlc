@@ -36,8 +36,8 @@ def engine_for(tmp_path, gov_root):
 
 
 def add_quality(gov_root, org, block):
-    prefix = {"vrixel-emr": "emr", "vrixel-agtech": "ag", "vrixel-pos": "pos", "vrixel-medspa": "ms",
-              "vrixel-apx": "apx", "vrixel-shared-services": "ss"}[org]
+    prefix = {"acme-clinic": "cln", "acme-farm": "farm", "acme-shop": "shop", "acme-dental": "dnt",
+              "acme-pay": "pay", "acme-shared": "ss"}[org]
     path = gov_root / org / f"{prefix}-governance" / "product.yaml"
     path.write_text(path.read_text() + "\nquality:\n" + block)
 
@@ -80,10 +80,10 @@ def test_products_change_tools_and_tighten_but_never_loosen():
 
 
 def test_governance_rejects_a_looser_quality_block(tmp_path, gov_root):
-    add_quality(gov_root, "vrixel-emr", "  sast:\n    block_on: critical\n")
+    add_quality(gov_root, "acme-clinic", "  sast:\n    block_on: critical\n")
     eng, svc = engine_for(tmp_path, gov_root)
     with pytest.raises(GovernanceError, match="sast.block_on critical is looser"):
-        svc.snapshot("EMR")
+        svc.snapshot("CLN")
 
 
 # --------------------------------------------------------------------------- gate
@@ -191,8 +191,8 @@ def sql_injection(suite, repo):
 
 def test_blocking_finding_goes_to_security_who_can_accept_the_risk(tmp_path, gov_root):
     eng, svc = engine_for(tmp_path, gov_root)
-    svc.quality.sources["stub"].results[("sast", "vrixel-agtech/agtech-field-api")] = sql_injection
-    v = drive_gates(eng, eng.start(product_id="AG", title="Offline crop log", description="x")["feature_id"])
+    svc.quality.sources["stub"].results[("sast", "acme-farm/farm-field-api")] = sql_injection
+    v = drive_gates(eng, eng.start(product_id="FARM", title="Offline crop log", description="x")["feature_id"])
     (esc,) = eng.pending(v["feature_id"])
     assert esc["phase"] == "security" and esc["stage"] == "pr"
     assert esc["blocking"][0]["rule"] == "js/sql-injection" and "HIGH SQL injection" in esc["findings"][0]
@@ -214,8 +214,8 @@ def test_blocking_finding_goes_to_security_who_can_accept_the_risk(tmp_path, gov
 def test_fix_sends_findings_back_to_the_coders(tmp_path, gov_root):
     eng, svc = engine_for(tmp_path, gov_root)
     stub = svc.quality.sources["stub"]
-    stub.results[("sast", "vrixel-agtech/agtech-field-api")] = sql_injection
-    fid = drive_gates(eng, eng.start(product_id="AG", title="Offline crop log", description="x")["feature_id"])["feature_id"]
+    stub.results[("sast", "acme-farm/farm-field-api")] = sql_injection
+    fid = drive_gates(eng, eng.start(product_id="FARM", title="Offline crop log", description="x")["feature_id"])["feature_id"]
     (esc,) = eng.pending(fid)
     stub.results.clear()  # the agents' next attempt fixes it
     eng.decide(fid, esc["interrupt_id"], {"decision": "retry", "approver": "sec"})
@@ -228,25 +228,25 @@ def test_failing_tests_go_back_to_the_build_escalation(tmp_path, gov_root):
     eng, svc = engine_for(tmp_path, gov_root)
     svc.quality.sources["stub"].results[("unit", "*")] = lambda s, repo: SuiteResult(
         suite="unit", kind="test", stage="pr", state="passed", repo=repo, passed=40, failed=0, coverage=55.0)
-    v = drive_gates(eng, eng.start(product_id="AG", title="Offline crop log", description="x")["feature_id"])
+    v = drive_gates(eng, eng.start(product_id="FARM", title="Offline crop log", description="x")["feature_id"])
     (esc,) = eng.pending(v["feature_id"])
     assert esc["phase"] == "build" and "unit coverage 55.0% is below 90%" in esc["reason"]
 
 
 def test_e2e_failure_in_staging_asks_release_managers(tmp_path, gov_root):
     eng, svc = engine_for(tmp_path, gov_root)
-    svc.quality.sources["stub"].results[("e2e", "vrixel-agtech/agtech-mobile")] = SuiteResult(
-        suite="e2e", kind="test", stage="staging", state="failed", repo="vrixel-agtech/agtech-mobile",
+    svc.quality.sources["stub"].results[("e2e", "acme-farm/farm-mobile")] = SuiteResult(
+        suite="e2e", kind="test", stage="staging", state="failed", repo="acme-farm/farm-mobile",
         message="checkout.spec.ts")
-    v = drive_gates(eng, eng.start(product_id="AG", title="Offline crop log", description="x")["feature_id"])
+    v = drive_gates(eng, eng.start(product_id="FARM", title="Offline crop log", description="x")["feature_id"])
     (esc,) = eng.pending(v["feature_id"])
     assert esc["phase"] == "delivery" and esc["wait"] == "staging"
-    assert "e2e tests failed in vrixel-agtech/agtech-mobile: checkout.spec.ts" in esc["reason"]
+    assert "e2e tests failed in acme-farm/farm-mobile: checkout.spec.ts" in esc["reason"]
 
 
 def test_g5_and_g6_see_the_evidence(tmp_path, gov_root):
     eng, svc = engine_for(tmp_path, gov_root)
-    fid = eng.start(product_id="POS", title="Split tender", description="x")["feature_id"]
+    fid = eng.start(product_id="SHOP", title="Split tender", description="x")["feature_id"]
     seen = {}
     while (p := [x for x in eng.pending(fid) if x["type"] == "gate"]):
         if p[0]["gate"] in ("g5", "g6"):

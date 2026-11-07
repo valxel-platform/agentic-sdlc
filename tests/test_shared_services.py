@@ -42,43 +42,43 @@ def edit(path: Path, old: str, new: str) -> None:
 
 def test_shared_lane_is_governed_from_its_own_org_without_a_runtime(services):
     snap = services.snapshot("SS")
-    assert snap.product.kind == "shared" and snap.product.org == "vrixel-shared-services"
+    assert snap.product.kind == "shared" and snap.product.org == "acme-shared"
     assert snap.product.runtime is None
     assert {r.role for r in snap.product.repos} == {"library"}
     assert "SS-6" in snap.constitution.article_ids
 
 
 def test_a_shared_lane_may_not_declare_a_runtime(services, gov_root):
-    edit(gov_root / "vrixel-shared-services/ss-governance/product.yaml", "max_loops: 3\n",
+    edit(gov_root / "acme-shared/ss-governance/product.yaml", "max_loops: 3\n",
          "max_loops: 3\nruntime:\n  openchoreo_project: shared\n")
     with pytest.raises(GovernanceError, match="a shared lane owns no runtime"):
         services.snapshot("SS")
 
 
 def test_a_product_must_own_its_runtime(services, gov_root):
-    edit(gov_root / "vrixel-pos/pos-governance/product.yaml", "  openchoreo_project: pos\n", "")
+    edit(gov_root / "acme-shop/shop-governance/product.yaml", "  openchoreo_project: shop\n", "")
     with pytest.raises(GovernanceError, match="runtime.openchoreo_project is required"):
-        services.snapshot("POS")
+        services.snapshot("SHOP")
 
 
 def test_unknown_or_upward_dependencies_are_rejected(services, gov_root):
-    edit(gov_root / "vrixel-agtech/ag-governance/product.yaml", "depends_on: [SS, APX]", "depends_on: [SS, NOPE]")
+    edit(gov_root / "acme-farm/farm-governance/product.yaml", "depends_on: [SS, PAY]", "depends_on: [SS, NOPE]")
     with pytest.raises(GovernanceError, match="'NOPE' is not a registered lane"):
-        services.snapshot("AG")
-    edit(gov_root / "vrixel-shared-services/ss-governance/product.yaml", "max_loops: 3\n",
-         "max_loops: 3\ndepends_on: [EMR]\n")
-    with pytest.raises(GovernanceError, match="shared lane may not depend on product EMR"):
+        services.snapshot("FARM")
+    edit(gov_root / "acme-shared/ss-governance/product.yaml", "max_loops: 3\n",
+         "max_loops: 3\ndepends_on: [CLN]\n")
+    with pytest.raises(GovernanceError, match="shared lane may not depend on product CLN"):
         services.snapshot("SS")
 
 
 def test_feature_without_shared_changes_needs_only_its_own_approvals(engine):
-    v = engine.auto_drive(engine.start(product_id="AG", title="Yield chart")["feature_id"])
+    v = engine.auto_drive(engine.start(product_id="FARM", title="Yield chart")["feature_id"])
     assert v["status"] == "done" and v["lanes_touched"] == []
-    assert {g["lane"] for g in v["gate_decisions"]} == {"AG"}
+    assert {g["lane"] for g in v["gate_decisions"]} == {"FARM"}
 
 
 def test_product_feature_that_changes_a_shared_framework(engine, services):
-    fid = engine.start(product_id="AG", title="Audit trail for field edits",
+    fid = engine.start(product_id="FARM", title="Audit trail for field edits",
                        description="Record who changed field data using the shared audit framework")["feature_id"]
     v = engine.auto_drive(fid)
     assert v["status"] == "done"
@@ -89,27 +89,27 @@ def test_product_feature_that_changes_a_shared_framework(engine, services):
     lanes_by_gate = {}
     for g in v["gate_decisions"]:
         lanes_by_gate.setdefault(g["gate"], []).append(g["lane"])
-    assert lanes_by_gate["g1"] == ["AG"] and lanes_by_gate["g2"] == ["AG"] and lanes_by_gate["g3"] == ["AG"]
+    assert lanes_by_gate["g1"] == ["FARM"] and lanes_by_gate["g2"] == ["FARM"] and lanes_by_gate["g3"] == ["FARM"]
     for gate in ("g4", "g5", "g6"):
-        assert lanes_by_gate[gate] == ["AG", "SS"], f"{gate} needs both owners"
+        assert lanes_by_gate[gate] == ["FARM", "SS"], f"{gate} needs both owners"
 
     # The shared library merges first and publishes; the product's services deploy in its runtime.
     order = v["change_set"]["merge_order"]
-    assert order[0] == "vrixel-shared-services/ss-audit-framework"
-    assert v["change_set"]["published"] == ["vrixel-shared-services/ss-audit-framework"]
-    assert services.packages.channel("vrixel-shared-services/ss-audit-framework", fid) == "stable"
+    assert order[0] == "acme-shared/ss-audit-framework"
+    assert v["change_set"]["published"] == ["acme-shared/ss-audit-framework"]
+    assert services.packages.channel("acme-shared/ss-audit-framework", fid) == "stable"
     oc = services.openchoreo
-    assert "vrixel-shared-services/ss-audit-framework" not in oc.deployments
-    assert {r["project"] for r in oc.runs if r["kind"] == "main"} == {"agtech"}
+    assert "acme-shared/ss-audit-framework" not in oc.deployments
+    assert {r["project"] for r in oc.runs if r["kind"] == "main"} == {"farm"}
     assert {p["component"] for p in oc.promotions if p["env"] == "production"} == {
-        c for c in order if c.startswith("vrixel-agtech/")}
+        c for c in order if c.startswith("acme-farm/")}
 
     # The shared constitution governs the change: it is part of the pinned version.
     assert "+shared-services@1.0.0#" in v["constitution_version"]
 
 
 def test_g5_shows_each_lane_only_its_own_pull_requests(engine):
-    fid = engine.start(product_id="AG", title="Security headers",
+    fid = engine.start(product_id="FARM", title="Security headers",
                        description="Adopt the shared security library for request signing")["feature_id"]
     seen = {}
     for _ in range(20):
@@ -120,30 +120,30 @@ def test_g5_shows_each_lane_only_its_own_pull_requests(engine):
         if p.get("gate") == "g5":
             seen[p["lane"]] = p["pull_requests"]
         engine.decide(fid, p["interrupt_id"], {"decision": "approve", "approver": f"{p.get('lane')}-owner"})
-    assert set(seen) == {"AG", "SS"}
-    assert all(k.startswith("vrixel-agtech/") for k in seen["AG"])
-    assert seen["SS"] and all(k.startswith("vrixel-shared-services/") for k in seen["SS"])
+    assert set(seen) == {"FARM", "SS"}
+    assert all(k.startswith("acme-farm/") for k in seen["FARM"])
+    assert seen["SS"] and all(k.startswith("acme-shared/") for k in seen["SS"])
 
 
 def test_shared_owner_can_send_the_architecture_back(engine):
-    fid = engine.start(product_id="POS", title="Receipt notification",
+    fid = engine.start(product_id="SHOP", title="Receipt notification",
                        description="Send receipts through the shared communication service")["feature_id"]
     for gate in ("g1", "g2"):
         [p] = [p for p in engine.pending(fid) if p.get("gate") == gate]
         engine.decide(fid, p["interrupt_id"], {"decision": "approve", "approver": "po"})
     [g4_pos] = [p for p in engine.pending(fid) if p.get("gate") == "g4"]
-    assert g4_pos["lane"] == "POS" and g4_pos["lanes"] == ["POS", "SS"]
-    engine.decide(fid, g4_pos["interrupt_id"], {"decision": "approve", "approver": "pos-architect"})
+    assert g4_pos["lane"] == "SHOP" and g4_pos["lanes"] == ["SHOP", "SS"]
+    engine.decide(fid, g4_pos["interrupt_id"], {"decision": "approve", "approver": "shop-architect"})
     [g4_ss] = [p for p in engine.pending(fid) if p.get("gate") == "g4"]
-    assert g4_ss["lane"] == "SS" and g4_ss["approvers"] == ["vrixel-shared-services/architects"]
+    assert g4_ss["lane"] == "SS" and g4_ss["approvers"] == ["acme-shared/architects"]
     v = engine.decide(fid, g4_ss["interrupt_id"], {"decision": "revise", "approver": "ss-architect",
                                                     "feedback": "Use the existing template API"})
     assert any(g["gate"] == "g4" and g["lane"] == "SS" and g["decision"] == "revise" for g in v["gate_decisions"])
-    assert [(p["gate"], p["lane"]) for p in v["pending"]] == [("g3", "POS")]  # G3 and G4 resolve as a pair
+    assert [(p["gate"], p["lane"]) for p in v["pending"]] == [("g3", "SHOP")]  # G3 and G4 resolve as a pair
     [g3] = v["pending"]
-    v = engine.decide(fid, g3["interrupt_id"], {"decision": "approve", "approver": "pos-design-lead"})
+    v = engine.decide(fid, g3["interrupt_id"], {"decision": "approve", "approver": "shop-design-lead"})
     assert v["artifacts"]["HLD"].endswith(".HLD.v2")  # architecture re-ran with the shared owner's feedback
-    assert [(p["gate"], p["lane"]) for p in v["pending"]] == [("g4", "POS")]  # both owners decide again
+    assert [(p["gate"], p["lane"]) for p in v["pending"]] == [("g4", "SHOP")]  # both owners decide again
 
 
 def test_shared_lane_feature_publishes_a_stable_package_and_deploys_nothing(engine, services):
@@ -158,11 +158,11 @@ def test_shared_lane_feature_publishes_a_stable_package_and_deploys_nothing(engi
 
 
 def test_shared_amendment_mid_feature_does_not_change_the_pinned_version(engine, gov_root):
-    first = engine.start(product_id="EMR", title="Consent audit", description="Audit consent changes")
-    con = gov_root / "vrixel-shared-services/ss-governance/constitution.md"
+    first = engine.start(product_id="CLN", title="Consent audit", description="Audit consent changes")
+    con = gov_root / "acme-shared/ss-governance/constitution.md"
     edit(con, "version: 1.0.0", "version: 2.0.0")
     v = engine.auto_drive(first["feature_id"])
     assert "shared-services@1.0.0" in v["constitution_version"]
-    second = engine.start(product_id="EMR", title="Consent audit v2",
+    second = engine.start(product_id="CLN", title="Consent audit v2",
                           not_duplicate_reason="A second round after the shared lane amended its constitution")
     assert "shared-services@2.0.0" in second["constitution_version"]

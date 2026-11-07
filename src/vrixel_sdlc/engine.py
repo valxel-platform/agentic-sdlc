@@ -24,7 +24,7 @@ KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release", "INC": "incid
 
 
 def kind_of(thread_id: str) -> str:
-    """EMR-FEAT-3 -> feature, EMR-INI-1 -> initiative, EMR-REL-2 -> release."""
+    """CLN-FEAT-3 -> feature, CLN-INI-1 -> initiative, CLN-REL-2 -> release."""
     parts = thread_id.split("-")
     return KINDS.get(parts[1], "feature") if len(parts) >= 3 else "feature"
 

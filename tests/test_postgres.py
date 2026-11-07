@@ -34,7 +34,7 @@ def test_threads_survive_a_restart_and_usage_is_persisted(settings):
             conn.execute("DROP TABLE IF EXISTS vrixel_features")
         title = f"Durable feature {uuid.uuid4().hex[:6]}"
         first = _engine(settings, pool)
-        v = first.start(product_id="EMR", title=title)
+        v = first.start(product_id="CLN", title=title)
         fid = v["feature_id"]
         assert [p["gate"] for p in v["pending"]] == ["g1"]
 
@@ -47,7 +47,7 @@ def test_threads_survive_a_restart_and_usage_is_persisted(settings):
         assert v["status"] == "done"
         records = restarted.services.ledger.records(fid)
         assert len(records) == v["usage"]["calls"] > 10
-        assert records[0].prefix_hashes and records[0].product_id == "EMR"
+        assert records[0].prefix_hashes and records[0].product_id == "CLN"
 
 
 def test_released_features_and_the_duplicate_check_survive_a_restart(settings):
@@ -61,15 +61,15 @@ def test_released_features_and_the_duplicate_check_survive_a_restart(settings):
             conn.execute("DROP TABLE IF EXISTS vrixel_features")
             conn.execute("DROP TABLE IF EXISTS vrixel_capabilities")
         first = _engine(settings, pool)
-        fid = first.start(product_id="EMR", title="Medication reconciliation at discharge")["feature_id"]
+        fid = first.start(product_id="CLN", title="Medication reconciliation at discharge")["feature_id"]
         assert first.auto_drive(fid)["status"] == "done"
 
         restarted = _engine(settings, pool)  # same database, fresh process state
-        [cap] = [c for c in restarted.services.catalog.lookup("EMR") if c.get("feature") == fid]
+        [cap] = [c for c in restarted.services.catalog.lookup("CLN") if c.get("feature") == fid]
         assert cap["status"] == "live"
-        assert [f["status"] for f in restarted.feature_summaries("EMR") if f["feature_id"] == fid] == ["released"]
+        assert [f["status"] for f in restarted.feature_summaries("CLN") if f["feature_id"] == fid] == ["released"]
         with pytest.raises(DuplicateIntent, match="already released"):
-            restarted.create(product_id="EMR", title="Medication reconciliation at discharge")
+            restarted.create(product_id="CLN", title="Medication reconciliation at discharge")
 
 
 def test_initiatives_and_releases_share_the_index_and_survive_a_restart(settings):
@@ -82,17 +82,17 @@ def test_initiatives_and_releases_share_the_index_and_survive_a_restart(settings
             # An index created before initiatives existed: no kind column yet.
             conn.execute("""CREATE TABLE vrixel_features (feature_id TEXT PRIMARY KEY, product_id TEXT NOT NULL,
                             title TEXT NOT NULL, seq INT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())""")
-            conn.execute("INSERT INTO vrixel_features VALUES ('EMR-FEAT-1', 'EMR', 'Old feature', 1, now())")
+            conn.execute("INSERT INTO vrixel_features VALUES ('CLN-FEAT-1', 'CLN', 'Old feature', 1, now())")
         first = _engine(settings, pool)
-        iid = first.create_initiative(product_id="EMR", title="Walk-in intake",
+        iid = first.create_initiative(product_id="CLN", title="Walk-in intake",
                                       request="Register walk-in patients; Capture consent at registration")
-        assert iid == "EMR-INI-1"
-        fid = first.create(product_id="EMR", title="Lab results viewer")
-        assert fid == "EMR-FEAT-2"  # numbering per kind; the old row counts as a feature
+        assert iid == "CLN-INI-1"
+        fid = first.create(product_id="CLN", title="Lab results viewer")
+        assert fid == "CLN-FEAT-2"  # numbering per kind; the old row counts as a feature
 
         restarted = _engine(settings, pool)
         assert restarted.view(iid)["status"] == "awaiting_approval"
-        assert [i["kind"] for i in restarted.inbox("EMR") if i["feature_id"] == iid] == ["initiative"]
+        assert [i["kind"] for i in restarted.inbox("CLN") if i["feature_id"] == iid] == ["initiative"]
 
 
 def test_incidents_and_their_signals_survive_a_restart(settings):
@@ -102,7 +102,7 @@ def test_incidents_and_their_signals_survive_a_restart(settings):
     from vrixel_sdlc.ops.signals import PostgresSignalStore, from_alertmanager
 
     alert = {"alerts": [{"status": "firing", "fingerprint": "pg1", "startsAt": "2026-11-03T21:00:00Z",
-                         "labels": {"alertname": "HighErrorRate", "severity": "critical", "component": "emr-intake-api"},
+                         "labels": {"alertname": "HighErrorRate", "severity": "critical", "component": "cln-intake-api"},
                          "annotations": {"summary": "5xx"}}]}
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
         with pool.connection() as conn:
@@ -196,29 +196,29 @@ def test_the_change_log_chains_in_postgres_and_shows_tampering():
             conn.execute("DROP TABLE IF EXISTS vrixel_inventory_snapshots")
         log = changes.PostgresChangeLog(pool)
 
-        def rec(key, product="EMR"):
+        def rec(key, product="CLN"):
             return changes.new(key=key, product_id=product, kind="release", type="standard", action="deploy",
                                summary=key, targets=[{"kind": "component", "name": "api"}],
                                approvals=[{"gate": "g6", "approver": "rm", "at": "2026-11-06T10:00:00+00:00"}])
 
-        a, b = log.record(rec("a")), log.record(rec("b", "AG"))
+        a, b = log.record(rec("a")), log.record(rec("b", "FARM"))
         assert (a["id"], b["id"]) == ("CHG-1", "CHG-2") and b["prev_hash"] == a["hash"]
         assert log.record(rec("a"))["id"] == "CHG-1"
-        assert [r["id"] for r in log.list("AG")] == ["CHG-2"]
+        assert [r["id"] for r in log.list("FARM")] == ["CHG-2"]
         assert changes.verify(changes.PostgresChangeLog(pool).all())["ok"]  # a restart reads the same chain
-        log.link("CHG-1", "EMR-INC-1", "undone by CHG-3")
-        log.link("CHG-1", "EMR-INC-1", "again")
-        assert [(x["change_id"], x["incident_id"], x["product_id"]) for x in log.links("EMR")] == [
-            ("CHG-1", "EMR-INC-1", "EMR")]
+        log.link("CHG-1", "CLN-INC-1", "undone by CHG-3")
+        log.link("CHG-1", "CLN-INC-1", "again")
+        assert [(x["change_id"], x["incident_id"], x["product_id"]) for x in log.links("CLN")] == [
+            ("CHG-1", "CLN-INC-1", "CLN")]
         with pool.connection() as conn:
             conn.execute("UPDATE vrixel_changes SET data = jsonb_set(data, '{summary}', '\"edited\"') WHERE id = 'CHG-1'")
         assert changes.verify(log.all()) == {"ok": False, "records": 2, "broken_at": "CHG-1"}
 
         snaps = PostgresSnapshots(pool)
-        snaps.put({"product_id": "AG", "day": "2026-11-05", "per_env": {}, "unmanaged": 0})
-        snaps.put({"product_id": "AG", "day": "2026-11-06", "per_env": {}, "unmanaged": 1})
-        snaps.put({"product_id": "AG", "day": "2026-11-06", "per_env": {}, "unmanaged": 2})
-        assert [(h["day"], h["unmanaged"]) for h in snaps.history("AG")] == [("2026-11-05", 0), ("2026-11-06", 2)]
+        snaps.put({"product_id": "FARM", "day": "2026-11-05", "per_env": {}, "unmanaged": 0})
+        snaps.put({"product_id": "FARM", "day": "2026-11-06", "per_env": {}, "unmanaged": 1})
+        snaps.put({"product_id": "FARM", "day": "2026-11-06", "per_env": {}, "unmanaged": 2})
+        assert [(h["day"], h["unmanaged"]) for h in snaps.history("FARM")] == [("2026-11-05", 0), ("2026-11-06", 2)]
 
 
 def test_servicenow_receipts_are_kept_in_postgres():

@@ -16,7 +16,7 @@ def layers(**kw):
 
 
 def tags(**kw):
-    base = dict(product_id="AG", feature_id="AG-FEAT-1", phase="build", role="coder",
+    base = dict(product_id="FARM", feature_id="FARM-FEAT-1", phase="build", role="coder",
                 data_class="general", workspace="wrkspc-shared")
     return CallTags(**{**base, **kw})
 
@@ -26,7 +26,7 @@ def test_cache_hits_on_an_identical_prefix_and_misses_across_workspaces(settings
     gw = ModelGateway(settings, ledger, {"stub": StubProvider()})
     first = gw.complete(tags(), layers()).response
     second = gw.complete(tags(), layers(tail="next step")).response
-    other_ws = gw.complete(tags(workspace="wrkspc-emr"), layers()).response
+    other_ws = gw.complete(tags(workspace="wrkspc-clinic"), layers()).response
     assert first.cache_read_input_tokens == 0 and first.cache_creation_input_tokens > 0
     assert second.cache_read_input_tokens == first.cache_creation_input_tokens
     assert second.cache_creation_input_tokens == 0

@@ -141,7 +141,7 @@ _BUDGET_FIELDS = {"name": r"Budget Name:\s*(.+)", "budgeted": r"Budgeted Amount:
 
 def from_aws_budget(message: str, products, at: str = "") -> list[dict]:
     """An AWS Budgets notification, as delivered by SNS (the Message of a Notification). Budgets
-    are named vrixel-<product id>-<environment> (for example vrixel-AG-production), which ties the
+    are named vrixel-<product id>-<environment> (for example vrixel-FARM-production), which ties the
     alert to a product and an environment."""
     got = {k: (m.group(1).strip() if (m := re.search(rx, message or "")) else "") for k, rx in _BUDGET_FIELDS.items()}
     if not got["name"]:

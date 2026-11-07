@@ -26,7 +26,7 @@ open http://localhost:8080/docs        # interactive API
 ```
 
 Compose starts with development sign-in (`VRIXEL_AUTH=dev`): type any GitHub login and tick the
-teams to act as, for example `vrixel-emr/product-owners`. Use GitHub sign-in for anything shared
+teams to act as, for example `acme-clinic/product-owners`. Use GitHub sign-in for anything shared
 (see [Web interface](#web-interface)).
 
 ### Without Docker
@@ -34,7 +34,7 @@ teams to act as, for example `vrixel-emr/product-owners`. Use GitHub sign-in for
 ```bash
 pip install -e ".[dev]"
 pytest                                   # in memory; set VRIXEL_TEST_DATABASE_URL for the Postgres test
-vrixel demo --product EMR --fault spec=1 --revise
+vrixel demo --product CLN --fault spec=1 --revise
 
 (cd web && npm ci && npm run build)      # build the web interface into web/dist
 VRIXEL_AUTH=dev VRIXEL_SESSION_SECRET=$(openssl rand -hex 32) \
@@ -80,7 +80,7 @@ HttpOnly session cookie and discards the GitHub token.
 
 - **Submitting an intent** requires membership of the product's GitHub org.
 - **Deciding a gate** requires matching one of the gate's approvers in that product's
-  `<product>-governance/product.yaml`. An approver is a team (`vrixel-emr/product-owners`) or a login.
+  `<product>-governance/product.yaml`. An approver is a team (`acme-clinic/product-owners`) or a login.
   Cross-lane gates (G4, G5, G6) ask each touched lane in turn, using that lane's approvers.
 - **Resolving an escalation** uses the approvers of the gate that follows the stuck phase.
 
@@ -91,23 +91,28 @@ Postgres, so a restart loses only open intake chats.
 
 ## Organizations and product governance
 
+The products in this repo (Clinic records, Farm app, Shop, Dental, Payments platform and Shared
+services, in the `acme-*` orgs) are fictional. They exist so the tests and the demo exercise every
+data class and lane shape. To run the tool for your own products, put your `registry.yaml` (and
+the rest of `config/`) in a private repo and point `VRIXEL_CONFIG_DIR` at it.
+
 The tool lives in the tools org. It holds no product constitutions or product settings: each
 product owns a governance repo in its own GitHub organization, and the tool reads it. Governance
-repos are named after the product id: `emr-governance`, `ag-governance`, `ss-governance`
+repos are named after the product id: `cln-governance`, `farm-governance`, `ss-governance`
 (`repo:` in `config/registry.yaml`; that name is the default when it's left out).
 
 ```
 vrixel-tools/                          tools org
   agentic-sdlc                         this repo: registry.yaml points at every governance repo
   sdlc-governance                      platform/constitution.md (VX- articles)
-vrixel-emr/                            one org per product; each owns its runtime
-  emr-governance                       product.yaml · constitution.md · context.md · CODEOWNERS
+acme-clinic/                           one org per product; each owns its runtime
+  cln-governance                       product.yaml · constitution.md · context.md · CODEOWNERS
                                        architecture/ (overview.md, decisions/ADR-*.md)
                                        roadmap/ (goals.yaml, initiatives/, releases/)
                                        incidents/ (postmortems)
-  emr-intake-api, emr-web, ...         product code; PRs are opened here
-vrixel-agtech/ · vrixel-pos/ · vrixel-medspa/ · vrixel-apx/   same layout
-vrixel-shared-services/                shared lane: services and libraries every product runs
+  cln-intake-api, cln-web, ...         product code; PRs are opened here
+acme-farm/ · acme-shop/ · acme-dental/ · acme-pay/   same layout
+acme-shared/                           shared lane: services and libraries every product runs
   ss-governance                        same files, but no runtime
   ss-llm-gateway, ss-audit-sink, ...   shipped as packages; each product runs them itself
 ```
@@ -118,11 +123,11 @@ Every org is a **lane** in `config/registry.yaml`, with a `kind`:
 
 - **`product`** lanes own their runtime. `product.yaml` declares `runtime.openchoreo_project`
   and its environment pipeline, and their services deploy there.
-- **`shared`** lanes (`vrixel-shared-services`) own no runtime and ship versioned libraries and
+- **`shared`** lanes (`acme-shared`) own no runtime and ship versioned libraries and
   frameworks. Each consuming product runs them in its own runtime. A shared manifest that
   declares a runtime is rejected.
 
-A product lists the lanes it builds on in `depends_on` (the examples use `[SS, APX]`). A lane
+A product lists the lanes it builds on in `depends_on` (the examples use `[SS, PAY]`). A lane
 may depend on shared lanes; a shared lane may not depend on a product. The tool pins every
 dependency's governance at intake along with the product's own. When a feature changes a
 dependency's code:
@@ -175,7 +180,7 @@ shows each product's governance status.
 SHAs and stores them on the feature thread. Every phase, gate and critic reads governance at
 those SHAs, so a feature runs under one constitution from intake to release. Amendments merged
 while it runs apply to the next feature. `constitution_version` records both commits, for example
-`platform@1.0.0#ba05394+emr@1.0.0#a1b2c3d`.
+`platform@1.0.0#ba05394+cln@1.0.0#a1b2c3d`.
 
 **Access.** Set `VRIXEL_GOVERNANCE_SOURCE=github` and choose one of these:
 - *GitHub App (recommended).* Install one app in the tools org and every product org, with
@@ -200,13 +205,13 @@ OpenChoreo delivery then work on it from its first pull request, with no manual 
 
 ```
 ## ADRs
-- ADR-EMR-FEAT-4-2: Create vrixel-emr/emr-consent-registry-service: consent has its own data and release cadence
+- ADR-CLN-FEAT-4-2: Create acme-clinic/cln-consent-registry-service: consent has its own data and release cadence
 ## New repos
-- vrixel-emr/emr-consent-registry-service (provider): Owns patient consent records [ADR-EMR-FEAT-4-2]
+- acme-clinic/cln-consent-registry-service (provider): Owns patient consent records [ADR-CLN-FEAT-4-2]
 ```
 
 **A new product starts with no repos.** Its `product.yaml` lists `repos: []` and sets
-`repo_prefix: emr-`; the first feature's HLD proposes the repos it needs, each with an ADR, and the
+`repo_prefix: cln-`; the first feature's HLD proposes the repos it needs, each with an ADR, and the
 same approval and provisioning apply. Don't list repos before a design calls for them.
 
 **Checked before G4.** The repo must be in the product's own org, follow the naming rule (the
@@ -239,7 +244,7 @@ feature is rejected.
 
 ```yaml
 repo_standards:
-  templates: { provider: vrixel-emr/template-fhir-service }
+  templates: { provider: acme-clinic/template-fhir-service }
   extra_required_checks: [fhir-conformance]
   required_approvals: 1   # also require a GitHub review (needs a second identity)
 ```
@@ -329,7 +334,7 @@ name it in `config/knowledge.yaml`; the pipeline only sees the pack each source 
 ```
 architecture/
   overview.md                 the current design: context, building blocks, key flows, change log
-  decisions/ADR-EMR-0001.md   one ADR per file: YAML front matter (id, title, status, repos,
+  decisions/ADR-CLN-0001.md   one ADR per file: YAML front matter (id, title, status, repos,
                               supersedes, superseded_by) and Context, Decision, Consequences
 ```
 
@@ -343,7 +348,7 @@ the feature's pin, so it is current; the constitution stays pinned.
   not superseded;
 - override a decision only with a new ADR that says `Supersedes ADR-x`;
 - state each affected API's change from the version actually merged
-  (`vrixel-emr/emr-intake-api: 1.4.0 -> 1.5.0, adds ...`, or `unchanged`); a major bump needs a
+  (`acme-clinic/cln-intake-api: 1.4.0 -> 1.5.0, adds ...`, or `unchanged`); a major bump needs a
   `## Migration` section (expand, migrate consumers, contract; VX-4).
 
 **What G4 shows.** The decisions the design builds on and overrides, each API change, decisions on
@@ -364,7 +369,7 @@ progress, released or stopped) and every live capability:
 
 | Where | What happens |
 | --- | --- |
-| Intake chat | The agent names the match ("This looks like EMR-FEAT-1, in progress at G2") and asks the creator to add to that feature or say how this one differs; submit stays off until they do |
+| Intake chat | The agent names the match ("This looks like CLN-FEAT-1, in progress at G2") and asks the creator to add to that feature or say how this one differs; submit stays off until they do |
 | `POST /api/features` | A likely duplicate is refused (409, with the matches) unless `not_duplicate_reason` is given |
 | G1 | The approver sees the matches and the creator's reason, and decides |
 
@@ -387,9 +392,9 @@ a `parent` and the record has a `scope` field, so a portfolio level can sit abov
 ```
 roadmap/
   goals.yaml                outcomes for a period: id, title, measure, period (parent: later)
-  initiatives/INI-EMR-1.md  one approved initiative: goal, horizon (now/next/later), budget envelope,
+  initiatives/INI-CLN-1.md  one approved initiative: goal, horizon (now/next/later), budget envelope,
                             lanes, release model, success measure, candidate features
-  releases/REL-EMR-1.md     one release: launch group or release train, features, status, notes, evidence
+  releases/REL-CLN-1.md     one release: launch group or release train, features, status, notes, evidence
 ```
 
 The tool runs initiatives and releases as threads alongside features, computes progress and spend
@@ -427,8 +432,8 @@ own runtime, and names it in `product.yaml`:
 tools:
   flags:
     provider: flipt
-    url: https://flipt.emr.example.com
-    namespace: emr                 # optional; default: the product id in lower case
+    url: https://flipt.cln.example.com
+    namespace: cln                 # optional; default: the product id in lower case
     environments:                  # optional; runtime environment -> Flipt environment
       production: production
 ```
@@ -497,7 +502,7 @@ Cost findings and requests to change what was built (a user report whose triage 
 intent change) never page: they wait in the tool for working hours.
 
 ```bash
-VRIXEL_PAGERDUTY_ROUTING_KEYS='{"EMR": "<integration key>", "APX": "<integration key>"}'
+VRIXEL_PAGERDUTY_ROUTING_KEYS='{"CLN": "<integration key>", "PAY": "<integration key>"}'
 VRIXEL_PAGERDUTY_REGION=us          # or eu (events.eu.pagerduty.com)
 VRIXEL_PUBLIC_URL=https://sdlc.vrixel.dev   # pages link back to the incident here
 ```
@@ -604,7 +609,7 @@ repo on them afterwards, including ones created by hand:
 ```bash
 vrixel repos check                    # report drift; exits 1 if any repo needs fixing
 vrixel repos apply                    # change what differs (safe to repeat)
-vrixel repos check --repo vrixel-emr/emr-governance --json
+vrixel repos check --repo acme-clinic/cln-governance --json
 ```
 
 Managed repos are each lane's repos (from its governance manifest), each lane's governance repo
@@ -656,11 +661,11 @@ approver's name, and OpenChoreo's own authorization is the backstop.
 
 ```yaml
 runtime:
-  openchoreo_project: agtech
+  openchoreo_project: farm
   pipeline: [dev, staging, production]   # OpenChoreo environment names, first to last
   namespace: vrixel                      # optional; defaults to config/tools.yaml
   components:                            # optional; defaults to the repo name
-    vrixel-agtech/agtech-mobile: field-app
+    acme-farm/farm-mobile: field-app
 ```
 
 **Going live** (`VRIXEL_DELIVERY=live`):
@@ -733,7 +738,7 @@ blocking severity, or makes a required suite optional for its data class.
 ```yaml
 # <product>-governance/product.yaml
 approvers:
-  security: [vrixel-emr/security]
+  security: [acme-clinic/security]
 quality:
   sast: { match: { tools: [CodeQL, Semgrep] }, block_on: medium }
   unit: { match: { checks: ["vitest*"] }, min_coverage: 95 }
@@ -814,7 +819,7 @@ A product chooses in product.yaml, and the governance loader refuses a choice th
 runtime:
   error_tracking:
     provider: glitchtip                   # or sentry
-    url: https://errors.apx.vrixel.dev    # GlitchTip's address
+    url: https://errors.pay.example.dev    # GlitchTip's address
 ```
 
 GlitchTip takes the same Sentry SDKs the templates already use, so a component changes only its
@@ -822,10 +827,10 @@ GlitchTip takes the same Sentry SDKs the templates already use, so a component c
 OpenChoreo project (web, worker, Postgres; no Redis). Its alerts reach the tool through a webhook
 recipient per GlitchTip project:
 
-- `vrixel glitchtip-token APX` prints the path, `/api/signals/glitchtip/APX?token=…`. The token is
+- `vrixel glitchtip-token PAY` prints the path, `/api/signals/glitchtip/PAY?token=…`. The token is
   derived from `VRIXEL_SIGNALS_TOKEN` and opens that product's endpoint only (a webhook can't send
   headers, so it is in the URL).
-- With an API token per product (`VRIXEL_GLITCHTIP_TOKENS='{"APX": "…"}'`, scope `event:read`)
+- With an API token per product (`VRIXEL_GLITCHTIP_TOKENS='{"PAY": "…"}'`, scope `event:read`)
   the tool reads each alerted issue's latest event for its `trace_id`, so a GlitchTip issue joins
   the same incident as the failures it caused elsewhere. The request goes only to the product's
   configured `url`.
@@ -1120,9 +1125,9 @@ with encryption, private access, backups and tags built in. People approve; agen
 ```
 ## Resources
 - field-readings: kinesis-stream; retention_hours=168
-  writes: agtech-sensor-api; reads: agtech-field-worker
+  writes: farm-sensor-api; reads: farm-field-worker
 - field-state: dynamodb-table; partition_key=field_id; size production=large
-  reads, writes: agtech-field-worker
+  reads, writes: farm-field-worker
 ```
 
 A product runs AWS from `runtime.aws` in its `product.yaml`: a region allowed for its data class
@@ -1166,15 +1171,15 @@ TypeScript). Add it to the product's `repos:` to turn this on.
   service must publish; synthetic events from other teams; dead letters and duplicates. The `ui`
   project adds browser journeys when the change set has a web app. Never through databases.
 - **Tags and coverage.** Each test is declared with `spec()`: the feature criteria it proves
-  (tags `@EMR-FEAT-12`, `@EMR-FEAT-12/AC-3`; an extended test keeps earlier features' tags), its
+  (tags `@CLN-FEAT-12`, `@CLN-FEAT-12/AC-3`; an extended test keeps earlier features' tags), its
   capability (`@cap-consent`), and what it covers: routes with an optional status
-  (`emr-intake-api PUT /api/v1/consents/{id} 202`), events, pages. Component tags
-  (`@comp-emr-intake-api`) follow from the covers. The fixtures fail a test that reaches what it
+  (`cln-intake-api PUT /api/v1/consents/{id} 202`), events, pages. Component tags
+  (`@comp-cln-intake-api`) follow from the covers. The fixtures fail a test that reaches what it
   doesn't declare, so `catalog.json` (every test, checked in CI) stays true.
 - **Plans extend before adding.** The planner sees the catalog. The plan's `## Acceptance tests`
   section says per criterion `extend`, `replace` or `add`; adding a test whose coverage an existing
   test of the same kind (API or browser) already has is rejected unless the line says `because:`;
-  extending or replacing a test that doesn't exist is rejected. `vrixel acceptance review --product EMR` lists tests already covered by
+  extending or replacing a test that doesn't exist is rejected. `vrixel acceptance review --product CLN` lists tests already covered by
   another, for merging; the repo's nightly full run does the same and reports slow tests.
 - **Runs after the whole change set is deployed.** In dev, then staging, the pipeline asks the
   acceptance repo (`repository_dispatch: vrixel-acceptance`) to run the merged tests with every
@@ -1198,7 +1203,7 @@ tools:
     provider: lucid          # lucid | drawio
   work_tracking:
     provider: jira           # jira | openproject
-    project: AG              # Jira project key or OpenProject project identifier
+    project: FARM              # Jira project key or OpenProject project identifier
     # optional: epic_type, story_type, task_type, statuses: {in_progress, done, cancelled}
 ```
 
@@ -1218,7 +1223,7 @@ passes, the diagram is published and linked from the HLD, so G4 reviewers open i
   draw.io editor. draw.io's MCP servers run beside a person's editor and store nothing, so the
   pipeline writes the file itself.
 
-If the change touches a lane whose data class doesn't allow the tool (an AgTech change to the
+If the change touches a lane whose data class doesn't allow the tool (a Farm app change to the
 PHI shared-services lane, say), the diagram stays in the HLD and isn't published. A failed
 publish never fails the phase.
 
@@ -1227,7 +1232,7 @@ OpenProject project with the feature.
 
 | When | In the tracker |
 | --- | --- |
-| G1 approved | Epic `[AG-FEAT-1] title`, linked to the feature page |
+| G1 approved | Epic `[FARM-FEAT-1] title`, linked to the feature page |
 | G2 approved | One story per acceptance criterion, under the epic; epic in progress |
 | Plan passed | One task per planned repo change; tasks in a restricted lane carry no detail |
 | Build and merge | A task is in progress once it has a PR and done when merged; stories done at merge |

@@ -13,7 +13,7 @@ about it, in two ways, each its own alert on the product's PagerDuty service:
 On-call's first decision in the tool acknowledges what was sent; the incident reaching its
 postmortem (or being merged into another) resolves it. Set each service's urgency to "based on
 alert severity". Each product's service is reached with its Events API v2 integration key
-(VRIXEL_PAGERDUTY_ROUTING_KEYS='{"EMR": "<key>", "APX": "<key>"}').
+(VRIXEL_PAGERDUTY_ROUTING_KEYS='{"CLN": "<key>", "PAY": "<key>"}').
 
 A page says which incident, how bad, where and why on-call is needed, and links to the incident
 in the tool. It never carries signal details or logs, and for PHI and payments products not even

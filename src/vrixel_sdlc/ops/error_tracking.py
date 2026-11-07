@@ -7,7 +7,7 @@ otherwise. A product chooses in product.yaml:
     runtime:
       error_tracking:
         provider: glitchtip            # or sentry
-        url: https://errors.apx.vrixel.dev   # GlitchTip's own address (glitchtip only)
+        url: https://errors.pay.example.dev   # GlitchTip's own address (glitchtip only)
         baa: true                      # sentry with PHI: Sentry's BAA is signed
 
 The governance loader refuses a choice the rules don't allow.
@@ -16,7 +16,7 @@ GlitchTip alerts reach the tool through a webhook recipient per project, at
 `/api/signals/glitchtip/<product>?token=<token_for(product)>` (a webhook can't send headers, so
 the token is in the URL, and is the product's own: a leaked URL opens one product's endpoint
 only). An alert names the issue but not the request; with an API token for the product
-(VRIXEL_GLITCHTIP_TOKENS, {"APX": "<token>"}) the tool reads the issue's latest event for its
+(VRIXEL_GLITCHTIP_TOKENS, {"PAY": "<token>"}) the tool reads the issue's latest event for its
 `trace_id`, which ties it to other components' failures (ops/correlate.py).
 """
 
@@ -67,7 +67,7 @@ def check(runtime: dict | None, data_class: str, policy: dict) -> list[str]:
         return [f"runtime.error_tracking.provider must be one of {PROVIDERS}"]
     problems = []
     if provider == "glitchtip" and not re.fullmatch(r"https://[a-z0-9.-]+\.[a-z]{2,}", str(choice.get("url") or "")):
-        problems.append("runtime.error_tracking.url must be GlitchTip's https address, e.g. https://errors.apx.vrixel.dev")
+        problems.append("runtime.error_tracking.url must be GlitchTip's https address, e.g. https://errors.pay.example.dev")
     region = str(((runtime or {}).get("aws") or {}).get("region") or "")
     for rule in policy.get("rules") or []:
         if not _matches(rule.get("when") or {}, data_class, region):

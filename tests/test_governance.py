@@ -44,76 +44,76 @@ def edit(path: Path, old: str, new: str) -> None:
 
 
 def test_snapshot_reads_platform_and_product_from_their_orgs(services):
-    snap = services.snapshot("EMR")
-    assert snap.product.org == "vrixel-emr"
+    snap = services.snapshot("CLN")
+    assert snap.product.org == "acme-clinic"
     assert snap.pins["platform"]["org"] == "vrixel-tools"
-    assert snap.pins["product"]["org"] == "vrixel-emr"
-    assert {"VX-3", "EMR-8"} <= set(snap.constitution.article_ids)
+    assert snap.pins["product"]["org"] == "acme-clinic"
+    assert {"VX-3", "CLN-8"} <= set(snap.constitution.article_ids)
     prefixes = {a.split("-")[0] for a in snap.constitution.product_articles()}
-    assert prefixes == {"EMR", "SS", "APX"}  # its own articles plus those of the lanes it depends on
-    assert set(snap.pins["dependencies"]) == {"SS", "APX"}
-    assert snap.version.startswith("platform@1.7.0#") and "+emr@1.0.0#" in snap.version
+    assert prefixes == {"CLN", "SS", "PAY"}  # its own articles plus those of the lanes it depends on
+    assert set(snap.pins["dependencies"]) == {"SS", "PAY"}
+    assert snap.version.startswith("platform@1.7.0#") and "+cln@1.0.0#" in snap.version
     assert "FHIR R4" in snap.product_context  # context.md feeds the L4 prompt layer
-    assert all(r.name.startswith("vrixel-emr/") for r in snap.product.repos)
+    assert all(r.name.startswith("acme-clinic/") for r in snap.product.repos)
 
 
 @pytest.mark.parametrize("old,new,message", [
     ("critic_threshold: 0.8", "critic_threshold: 0.5", "critic_threshold 0.5 must be between 0.75"),
     ("max_loops: 3", "max_loops: 9", "max_loops 9 must be between 1 and 5"),
     ("budget_usd: 150", "budget_usd: 5000", "budget_usd 5000.0 must be above 0 and at most 500"),
-    ("name: vrixel-emr/emr-web", "name: vrixel-pos/emr-web", "outside the product's organization vrixel-emr"),
-    ("product_id: EMR", "product_id: EMR\ndata_class: general", "data classes are set by the platform"),
-    ("  g5:\n  - vrixel-emr/tech-leads\n", "  g5: []\n", "gate g5 has no approvers"),
-    ("  - vrixel-emr/architects", "  - vrixel-pos/architects", "outside the product's organization vrixel-emr"),
-    ("  - vrixel-emr/architects", "  - not a handle!", "must be a GitHub user"),
-    ("product_id: EMR", "product_id: POS", "the registry expects 'EMR'"),
+    ("name: acme-clinic/cln-web", "name: acme-shop/cln-web", "outside the product's organization acme-clinic"),
+    ("product_id: CLN", "product_id: CLN\ndata_class: general", "data classes are set by the platform"),
+    ("  g5:\n  - acme-clinic/tech-leads\n", "  g5: []\n", "gate g5 has no approvers"),
+    ("  - acme-clinic/architects", "  - acme-shop/architects", "outside the product's organization acme-clinic"),
+    ("  - acme-clinic/architects", "  - not a handle!", "must be a GitHub user"),
+    ("product_id: CLN", "product_id: SHOP", "the registry expects 'CLN'"),
 ])
 def test_manifest_cannot_loosen_platform_limits(local_services, gov_root, old, new, message):
-    edit(gov_root / "vrixel-emr/emr-governance/product.yaml", old, new)
+    edit(gov_root / "acme-clinic/cln-governance/product.yaml", old, new)
     with pytest.raises(GovernanceError, match=message):
-        local_services.snapshot("EMR")
+        local_services.snapshot("CLN")
 
 
 def test_product_constitution_cannot_redefine_platform_articles(local_services, gov_root):
-    con = gov_root / "vrixel-emr/emr-governance/constitution.md"
+    con = gov_root / "acme-clinic/cln-governance/constitution.md"
     con.write_text(con.read_text() + "\n- **VX-3** Agents may promote to production. (Policy)\n")
     with pytest.raises(GovernanceError, match="may not define platform articles: VX-3"):
-        local_services.snapshot("EMR")
+        local_services.snapshot("CLN")
 
 
 def test_missing_governance_repo_blocks_intake(tmp_path, gov_root):
-    shutil.rmtree(gov_root / "vrixel-pos")
+    shutil.rmtree(gov_root / "acme-shop")
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a",
                       governance_source="local", governance_root=gov_root)
     engine = FeatureEngine(build_services(s), InMemorySaver())
-    with pytest.raises(GovernanceError, match="vrixel-pos/pos-governance not found"):
-        engine.start(product_id="POS", title="Tip jar")
+    with pytest.raises(GovernanceError, match="acme-shop/shop-governance not found"):
+        engine.start(product_id="SHOP", title="Tip jar")
     assert engine.index.all() == []  # nothing registered for a product it could not govern
 
 
 def test_a_feature_keeps_its_pinned_constitution_after_an_amendment(local_services, gov_root):
     engine = FeatureEngine(local_services, InMemorySaver())
-    first = engine.start(product_id="EMR", title="Consent check")
+    first = engine.start(product_id="CLN", title="Consent check")
     pinned_version = first["constitution_version"]
 
-    con = gov_root / "vrixel-emr/emr-governance/constitution.md"
+    con = gov_root / "acme-clinic/cln-governance/constitution.md"
     edit(con, "version: 1.0.0", "version: 1.1.0")
-    con.write_text(con.read_text() + "\n- **EMR-9** New consent rule. (Test)\n")
+    con.write_text(con.read_text() + "\n- **CLN-9** New consent rule. (Test)\n")
 
     v = engine.auto_drive(first["feature_id"])
     assert v["status"] == "done"
     assert v["constitution_version"] == pinned_version  # the amendment did not change a running feature
-    snap = local_services.snapshot("EMR", v["governance"])
-    assert "EMR-9" not in snap.constitution.article_ids
+    snap = local_services.snapshot("CLN", v["governance"])
+    assert "CLN-9" not in snap.constitution.article_ids
 
-    second = engine.start(product_id="EMR", title="Allergy list")
-    assert "emr@1.1.0" in second["constitution_version"]  # new features pick up the amendment
+    second = engine.start(product_id="CLN", title="Allergy list")
+    assert "cln@1.1.0" in second["constitution_version"]  # new features pick up the amendment
     assert second["governance"]["product"]["sha"] != first["governance"]["product"]["sha"]
 
 
 def test_raised_budget_is_capped_by_the_platform(local_services):
     engine = FeatureEngine(local_services, InMemorySaver())
-    v = engine.start(product_id="AG", title="Weather alerts", budget_usd=0.000001)
+    v = engine.start(product_id="FARM", title="Weather alerts", budget_usd=0.000001)
     v = approve(engine, v["feature_id"], "g1")
     [esc] = v["pending"]
     v = engine.decide(v["feature_id"], esc["interrupt_id"], {"decision": "retry", "approver": "pm", "budget_usd": 10_000})
@@ -160,30 +160,30 @@ def _repo_files(org_repo: str) -> dict[str, str]:
 
 
 def test_github_source_uses_a_token_per_org_and_pins_by_sha(tmp_path):
-    repos = ["vrixel-tools/sdlc-governance", "vrixel-emr/emr-governance", "vrixel-shared-services/ss-governance",
-             "vrixel-apx/apx-governance"]
+    repos = ["vrixel-tools/sdlc-governance", "acme-clinic/cln-governance", "acme-shared/ss-governance",
+             "acme-pay/pay-governance"]
     fake = FakeGitHub({r: _repo_files(r) for r in repos})
     tokens = EnvTokenProvider({"VRIXEL_GITHUB_TOKEN__VRIXEL_TOOLS": "tok-tools",
-                               "VRIXEL_GITHUB_TOKEN__VRIXEL_EMR": "tok-emr",
-                               "VRIXEL_GITHUB_TOKEN__VRIXEL_SHARED_SERVICES": "tok-ss",
-                               "VRIXEL_GITHUB_TOKEN__VRIXEL_APX": "tok-apx"})
+                               "VRIXEL_GITHUB_TOKEN__ACME_CLINIC": "tok-cln",
+                               "VRIXEL_GITHUB_TOKEN__ACME_SHARED": "tok-ss",
+                               "VRIXEL_GITHUB_TOKEN__ACME_PAY": "tok-pay"})
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="github")
     services = build_services(s, governance_source=GitHubSource(tokens, opener=fake))
 
-    snap = services.snapshot("EMR")
+    snap = services.snapshot("CLN")
     assert snap.pins["product"]["sha"] == "a" * 40
     assert "#aaaaaaa" in snap.version
     auth_by_org = {url.split("/repos/")[1].split("/")[0]: auth for _, url, auth, _ in fake.calls}
-    assert auth_by_org == {"vrixel-tools": "Bearer tok-tools", "vrixel-emr": "Bearer tok-emr",
-                           "vrixel-shared-services": "Bearer tok-ss", "vrixel-apx": "Bearer tok-apx"}
+    assert auth_by_org == {"vrixel-tools": "Bearer tok-tools", "acme-clinic": "Bearer tok-cln",
+                           "acme-shared": "Bearer tok-ss", "acme-pay": "Bearer tok-pay"}
     assert any("?ref=" + "a" * 40 in url for _, url, _, _ in fake.calls)  # reads are pinned to the commit
 
     n = len(fake.calls)
-    services.snapshot("EMR", snap.pins)
+    services.snapshot("CLN", snap.pins)
     assert len(fake.calls) == n  # pinned snapshots are cached; no further API calls
 
-    with pytest.raises(GovernanceError, match="No GitHub token for org vrixel-pos"):
-        services.snapshot("POS")
+    with pytest.raises(GovernanceError, match="No GitHub token for org acme-shop"):
+        services.snapshot("SHOP")
 
 
 def test_github_app_mints_a_read_only_installation_token_per_org():
@@ -196,10 +196,10 @@ def test_github_app_mints_a_read_only_installation_token_per_org():
                             serialization.NoEncryption()).decode()
     fake = FakeGitHub({})
     provider = GitHubAppTokenProvider("12345", pem, opener=fake)
-    assert provider.token("vrixel-emr") == "ghs_inst"
-    assert provider.token("vrixel-emr") == "ghs_inst"
+    assert provider.token("acme-clinic") == "ghs_inst"
+    assert provider.token("acme-clinic") == "ghs_inst"
     methods = [(m, u.split(".com")[1]) for m, u, _, _ in fake.calls]
-    assert methods == [("GET", "/orgs/vrixel-emr/installation"), ("POST", "/app/installations/77/access_tokens")]
+    assert methods == [("GET", "/orgs/acme-clinic/installation"), ("POST", "/app/installations/77/access_tokens")]
     app_jwt = fake.calls[0][2].split(" ", 1)[1]
     claims = jwt.decode(app_jwt, key.public_key(), algorithms=["RS256"])
     assert claims["iss"] == "12345"

@@ -18,7 +18,7 @@ from vrixel_sdlc.services import build_services
 from vrixel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-API, WEB = "vrixel-emr/emr-intake-api", "vrixel-emr/emr-web"
+API, WEB = "acme-clinic/cln-intake-api", "acme-clinic/cln-web"
 TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
 
 
@@ -35,16 +35,16 @@ def web_error(trace=TRACE, issue="9001", at="2026-11-06T18:00:00Z"):
     """A Sentry issue alert from the web app, tagged with the failed call's trace."""
     return {"action": "triggered", "data": {"event": {
         "issue_id": issue, "title": "ApiError: API 503", "level": "error", "culprit": "App.submit",
-        "project": {"slug": "emr-web"}, "lastSeen": at, "environment": "production",
-        "tags": [["vrixel_product", "EMR"], ["trace_id", trace], ["endpoint", "GET /api/v1/greetings"],
+        "project": {"slug": "cln-web"}, "lastSeen": at, "environment": "production",
+        "tags": [["vrixel_product", "CLN"], ["trace_id", trace], ["endpoint", "GET /api/v1/greetings"],
                  ["status", "503"]]}}}
 
 
 def api_error(trace=TRACE, issue="9100", at="2026-11-06T18:01:00Z"):
     return {"action": "triggered", "data": {"event": {
         "issue_id": issue, "title": "DataAccessResourceFailureException", "level": "error",
-        "project": {"slug": "emr-intake-api"}, "lastSeen": at, "environment": "production",
-        "tags": [["vrixel_product", "EMR"], ["trace_id", trace]]}}}
+        "project": {"slug": "cln-intake-api"}, "lastSeen": at, "environment": "production",
+        "tags": [["vrixel_product", "CLN"], ["trace_id", trace]]}}}
 
 
 def test_traces_and_the_call_graph():
@@ -67,7 +67,7 @@ def test_a_web_error_and_the_api_error_behind_it_are_one_incident(eng):
     assert sigs[-1]["labels"]["joined_by"].startswith(f"trace: the same request ({TRACE})")
     # The API is downstream of the web app: it's where the failure starts.
     g = next(p for p in eng.pending(iid) if p.get("gate") == "incident")
-    assert g["root"]["component"] == API and "emr-web" in g["root"]["why"]
+    assert g["root"]["component"] == API and "cln-web" in g["root"]["why"]
     # Triage ran again around the new root (an agent's revise), and the record says why.
     events = eng._state(iid)["events"]
     assert any(e["kind"] == "revise" and "root cause candidate is now" in e.get("detail", "") for e in events)
@@ -79,8 +79,8 @@ def test_an_openchoreo_log_alert_finds_its_traces_in_the_logs(eng):
     oc.observe = lambda **kw: {"available": True, "logs": [
         '{"log.level":"ERROR","trace.id":"%s","error.stack_trace":"java.lang..."}' % TRACE]}
     [iid] = eng.ingest(from_sentry(web_error(at="2026-11-06T09:00:00Z")))
-    alert = {"alertName": "emr-intake-api-exceptions", "alertSeverity": "warning", "alertType": "log",
-             "alertDescription": "More than 10 exceptions", "project": "emr", "component": "emr-intake-api",
+    alert = {"alertName": "cln-intake-api-exceptions", "alertSeverity": "warning", "alertType": "log",
+             "alertDescription": "More than 10 exceptions", "project": "cln", "component": "cln-intake-api",
              "environment": "production", "alertTimestamp": "2026-11-06T15:00:00Z"}  # hours later
     assert eng.alarm_changes(from_openchoreo(alert))["incidents"] == [iid]
     assert eng.services.signals.for_incident(iid)[-1]["labels"]["trace_ids"] == TRACE
@@ -90,7 +90,7 @@ def test_a_signal_tying_two_incidents_merges_them(eng):
     [a] = eng.ingest(from_alertmanager({"alerts": [{"status": "firing", "fingerprint": "w1",
                                                      "startsAt": "2026-11-06T10:00:00Z",
                                                      "labels": {"alertname": "WebErrors", "severity": "warning",
-                                                                "component": "emr-web", "vrixel_product": "EMR"}}]}))
+                                                                "component": "cln-web", "vrixel_product": "CLN"}}]}))
     [b] = eng.ingest(from_sentry(api_error(at="2026-11-06T12:00:00Z")))  # 2 hours later: separate
     assert a != b
     # A web error (joining the web alert's incident) that names the API error's request ties them.
@@ -98,7 +98,7 @@ def test_a_signal_tying_two_incidents_merges_them(eng):
     assert c == a
     assert eng._state(b)["status"] == "merged" and eng._state(b)["links"] == {a: "merged into"}
     assert "sentry:9100" in [s["fingerprint"] for s in eng.services.signals.for_incident(a)]
-    assert b not in eng.services.signals.open_incidents("EMR")
+    assert b not in eng.services.signals.open_incidents("CLN")
 
 
 def test_on_call_merges_and_splits(eng, monkeypatch):
@@ -108,13 +108,13 @@ def test_on_call_merges_and_splits(eng, monkeypatch):
         eng.decide(a, next(p for p in eng.pending(a) if p.get("gate") == "incident")["interrupt_id"],
                    {"decision": "merge", "approver": "oncall-1"})
     client = TestClient(create_app(eng, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
-    client.post("/api/auth/dev-login", json={"login": "dev", "orgs": ["vrixel-emr"]})
+    client.post("/api/auth/dev-login", json={"login": "dev", "orgs": ["acme-clinic"]})
     assert client.post(f"/api/incidents/{a}/merge", json={"into": b}).status_code == 403  # not on-call
-    client.post("/api/auth/dev-login", json={"login": "oncall-1", "orgs": ["vrixel-emr"], "teams": ["vrixel-emr/release-managers"]})
+    client.post("/api/auth/dev-login", json={"login": "oncall-1", "orgs": ["acme-clinic"], "teams": ["acme-clinic/release-managers"]})
     r = client.post(f"/api/incidents/{a}/merge", json={"into": b, "reason": "same outage"})
     assert r.status_code == 200 and r.json()["signals"] == 1 and r.json()["ended"] is True
     assert eng._state(a)["status"] == "merged"
-    assert client.post(f"/api/incidents/{a}/merge", json={"into": "EMR-INC-99"}).status_code == 400
+    assert client.post(f"/api/incidents/{a}/merge", json={"into": "CLN-INC-99"}).status_code == 400
 
     r = client.post(f"/api/incidents/{b}/split", json={"fingerprint": "sentry:1"})
     assert r.status_code == 200

@@ -58,7 +58,7 @@ WEB_DIST = Path(
 
 
 class FeatureIn(BaseModel):
-    product_id: str = Field(examples=["EMR"])
+    product_id: str = Field(examples=["CLN"])
     title: str = Field(min_length=3, max_length=200)
     description: str = ""
     budget_usd: float | None = Field(default=None, gt=0)

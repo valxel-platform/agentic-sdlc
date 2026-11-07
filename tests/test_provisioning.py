@@ -23,7 +23,7 @@ from vrixel_sdlc.integrations.openchoreo import OpenChoreoMcp
 from vrixel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
-NEW = "vrixel-emr/emr-consent-registry-service"
+NEW = "acme-clinic/cln-consent-registry-service"
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def approve_gates(eng, fid, seen=None):
         eng.decide(fid, gates[0]["interrupt_id"], {"decision": "approve", "approver": "lead"})
 
 
-def start_new_service(eng, product="EMR", title="Consent registry"):
+def start_new_service(eng, product="CLN", title="Consent registry"):
     return eng.start(product_id=product, title=title,
                      description="A new service that stores patient consent records")["feature_id"]
 
@@ -72,16 +72,16 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     assert repo["security"]["code_scanning_default_setup"]
     assert repo["teams"] == {"tech-leads": "maintain", "architects": "push", "security": "push",
                              "product-owners": "pull"}
-    assert repo["properties"]["vrixel_data_class"] == "phi" and "emr" in repo["topics"]
+    assert repo["properties"]["vrixel_data_class"] == "phi" and "cln" in repo["topics"]
     assert repo["ruleset"]["branch"] == "main" and not repo["ruleset"]["code_owner_review"]
     codeowners = svc.github.files[(NEW, "main", ".github/CODEOWNERS")]
-    assert "* @vrixel-emr/tech-leads" in codeowners and "/src/phi/ @vrixel-emr/security" in codeowners
+    assert "* @acme-clinic/tech-leads" in codeowners and "/src/phi/ @acme-clinic/security" in codeowners
     assert svc.openchoreo.components[NEW]["component_type"] == "deployment/service"
 
-    manifest = svc.github.files[("vrixel-emr/emr-governance", "vrixel/EMR-FEAT-1-repos", "product.yaml")]
+    manifest = svc.github.files[("acme-clinic/cln-governance", "vrixel/CLN-FEAT-1-repos", "product.yaml")]
     assert {"name": NEW, "role": "provider"} in yaml.safe_load(manifest)["repos"]
     (rec,) = v["new_repos"]
-    assert rec["status"] == "provisioned" and rec["governance_pr"].startswith("https://github.com/vrixel-emr/emr-governance/pull/")
+    assert rec["status"] == "provisioned" and rec["governance_pr"].startswith("https://github.com/acme-clinic/cln-governance/pull/")
 
     # The rest of the pipeline treats it like any repo: tasks, PRs, builds, deployments.
     tasks = eng.graph.get_state({"configurable": {"thread_id": v["feature_id"]}}).values["tasks"]
@@ -93,9 +93,9 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
 def test_general_products_get_the_platform_default_approvals(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
     seen = {}
-    approve_gates(eng, start_new_service(eng, "AG", "Yield forecasting"), seen)
+    approve_gates(eng, start_new_service(eng, "FARM", "Yield forecasting"), seen)
     (plan,) = seen["g4"]["new_repos"]
-    assert plan["repo"] == "vrixel-agtech/agtech-yield-forecasting-service"
+    assert plan["repo"] == "acme-farm/farm-yield-forecasting-service"
     assert plan["ruleset"]["required_approvals"] == 0
 
 
@@ -115,30 +115,30 @@ def test_a_failed_step_goes_to_architects_and_retry_resumes(tmp_path, gov_root):
 
 def test_proposals_are_checked_against_the_standards(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
-    product = svc.snapshot("EMR").product
+    product = svc.snapshot("CLN").product
     from vrixel_sdlc.provisioning import naming_policy
 
     hld = "\n".join([
-        "# HLD: x", "", "## ADRs", "- ADR-1: Extend the API", "- ADR-2: Create vrixel-emr/emr-good-service because",
-        "", "## Affected repos", "- vrixel-emr/emr-intake-api (provider)", "- vrixel-emr/emr-good-service (provider)",
-        "- vrixel-pos/emr-elsewhere (provider)", "- vrixel-emr/Bad_Name (provider)", "- vrixel-emr/emr-no-adr (provider)",
+        "# HLD: x", "", "## ADRs", "- ADR-1: Extend the API", "- ADR-2: Create acme-clinic/cln-good-service because",
+        "", "## Affected repos", "- acme-clinic/cln-intake-api (provider)", "- acme-clinic/cln-good-service (provider)",
+        "- acme-shop/cln-elsewhere (provider)", "- acme-clinic/Bad_Name (provider)", "- acme-clinic/cln-no-adr (provider)",
         "", "## New repos",
-        "- vrixel-emr/emr-good-service (provider): Owns consent [ADR-2]",
-        "- vrixel-pos/emr-elsewhere (provider): Wrong org [ADR-2]",
-        "- vrixel-emr/Bad_Name (provider): Bad name [ADR-2]",
-        "- vrixel-emr/emr-no-adr (provider): No reason given",
-        "- vrixel-emr/emr-intake-api (provider): Already there [ADR-2]",
+        "- acme-clinic/cln-good-service (provider): Owns consent [ADR-2]",
+        "- acme-shop/cln-elsewhere (provider): Wrong org [ADR-2]",
+        "- acme-clinic/Bad_Name (provider): Bad name [ADR-2]",
+        "- acme-clinic/cln-no-adr (provider): No reason given",
+        "- acme-clinic/cln-intake-api (provider): Already there [ADR-2]",
         "", "## Contracts", "- x", "", "## Diagram", "```mermaid",
-        "flowchart LR\n  a[\"emr-intake-api\"]\n  b[\"emr-good-service\"]\n  c[\"emr-elsewhere\"]\n  d[\"Bad_Name\"]\n  e[\"emr-no-adr\"]",
+        "flowchart LR\n  a[\"cln-intake-api\"]\n  b[\"cln-good-service\"]\n  c[\"cln-elsewhere\"]\n  d[\"Bad_Name\"]\n  e[\"cln-no-adr\"]",
         "```"])
     ctx = {"repos": [{"name": r.name, "role": r.role} for r in product.repos], "dependency_repos": [],
            "repo_policy": naming_policy(svc.settings.repos, product)}
     findings = " | ".join(run_checks("architecture", hld, ctx))
-    assert "emr-good-service" not in findings
-    assert "vrixel-pos/emr-elsewhere must be created in vrixel-emr" in findings
+    assert "cln-good-service" not in findings
+    assert "acme-shop/cln-elsewhere must be created in acme-clinic" in findings
     assert "'Bad_Name' must match" in findings
-    assert "emr-no-adr needs an ADR" in findings
-    assert "vrixel-emr/emr-intake-api already exists" in findings
+    assert "cln-no-adr needs an ADR" in findings
+    assert "acme-clinic/cln-intake-api already exists" in findings
 
 
 @pytest.mark.parametrize("block,message", [
@@ -146,22 +146,22 @@ def test_proposals_are_checked_against_the_standards(tmp_path, gov_root):
     ("repo_standards:\n  security:\n    secret_scanning: false\n", "secret_scanning cannot be turned off"),
 ])
 def test_products_cannot_loosen_repo_standards(tmp_path, gov_root, block, message):
-    path = gov_root / "vrixel-emr" / "emr-governance" / "product.yaml"
+    path = gov_root / "acme-clinic" / "cln-governance" / "product.yaml"
     path.write_text(path.read_text() + block)
     eng, svc = make(tmp_path, gov_root)
     with pytest.raises(GovernanceError, match=message):
-        svc.snapshot("EMR")
+        svc.snapshot("CLN")
 
 
 def test_products_choose_their_own_templates_and_extra_checks(tmp_path, gov_root):
-    path = gov_root / "vrixel-emr" / "emr-governance" / "product.yaml"
-    path.write_text(path.read_text() + "repo_standards:\n  templates:\n    provider: vrixel-emr/template-fhir-service\n"
+    path = gov_root / "acme-clinic" / "cln-governance" / "product.yaml"
+    path.write_text(path.read_text() + "repo_standards:\n  templates:\n    provider: acme-clinic/template-fhir-service\n"
                                        "  extra_required_checks: [fhir-conformance]\n  required_approvals: 3\n")
     eng, svc = make(tmp_path, gov_root)
     seen = {}
     approve_gates(eng, start_new_service(eng), seen)
     (plan,) = seen["g4"]["new_repos"]
-    assert plan["template"] == "vrixel-emr/template-fhir-service"
+    assert plan["template"] == "acme-clinic/template-fhir-service"
     assert plan["ruleset"]["required_checks"][-1] == "fhir-conformance" and plan["ruleset"]["required_approvals"] == 3
 
 
@@ -206,35 +206,35 @@ class Tokens:
 def test_github_admin_calls():
     api = FakeAdminApi()
     gh = GitHubRest(Tokens(), opener=api)
-    assert gh.create_repo(repo="o/emr-x-service", template="vrixel-tools/template-service", private=True,
+    assert gh.create_repo(repo="o/cln-x-service", template="vrixel-tools/template-service", private=True,
                           description="d") == "created"
-    assert gh.create_repo(repo="o/emr-x-service", template="vrixel-tools/template-service", private=True,
+    assert gh.create_repo(repo="o/cln-x-service", template="vrixel-tools/template-service", private=True,
                           description="d") == "exists"
-    gh.update_repo(repo="o/emr-x-service", merge={"squash": True}, default_branch="main", description="d")
-    gh.enable_security(repo="o/emr-x-service", secret_scanning=True, push_protection=True)
-    gh.grant_team(org="o", team="tech-leads", repo="o/emr-x-service", permission="maintain")
-    gh.set_topics(repo="o/emr-x-service", topics=["vrixel"])
-    gh.set_properties(repo="o/emr-x-service", properties={"vrixel_managed": "true"})
+    gh.update_repo(repo="o/cln-x-service", merge={"squash": True}, default_branch="main", description="d")
+    gh.enable_security(repo="o/cln-x-service", secret_scanning=True, push_protection=True)
+    gh.grant_team(org="o", team="tech-leads", repo="o/cln-x-service", permission="maintain")
+    gh.set_topics(repo="o/cln-x-service", topics=["vrixel"])
+    gh.set_properties(repo="o/cln-x-service", properties={"vrixel_managed": "true"})
     spec = {"name": "vrixel-default-branch", "required_approvals": 2, "required_checks": ["unit", "CodeQL"],
             "code_scanning_merge_protection": "high", "linear_history": True, "bypass_app_id": "12345"}
-    gh.upsert_ruleset(repo="o/emr-x-service", branch="main", spec=spec)
-    gh.upsert_ruleset(repo="o/emr-x-service", branch="main", spec=spec)
+    gh.upsert_ruleset(repo="o/cln-x-service", branch="main", spec=spec)
+    gh.upsert_ruleset(repo="o/cln-x-service", branch="main", spec=spec)
 
     calls = [(m, p) for m, p, _ in api.calls]
     assert ("POST", "/repos/vrixel-tools/template-service/generate") in calls
-    assert ("PUT", "/repos/o/emr-x-service/vulnerability-alerts") in calls
-    assert ("PATCH", "/repos/o/emr-x-service/code-scanning/default-setup") in calls
-    assert ("PUT", "/orgs/o/teams/tech-leads/repos/o/emr-x-service") in calls
-    assert ("PATCH", "/repos/o/emr-x-service/properties/values") in calls
-    assert calls.count(("POST", "/repos/o/emr-x-service/rulesets")) == 1  # second run updates
-    assert ("PUT", "/repos/o/emr-x-service/rulesets/9") in calls
+    assert ("PUT", "/repos/o/cln-x-service/vulnerability-alerts") in calls
+    assert ("PATCH", "/repos/o/cln-x-service/code-scanning/default-setup") in calls
+    assert ("PUT", "/orgs/o/teams/tech-leads/repos/o/cln-x-service") in calls
+    assert ("PATCH", "/repos/o/cln-x-service/properties/values") in calls
+    assert calls.count(("POST", "/repos/o/cln-x-service/rulesets")) == 1  # second run updates
+    assert ("PUT", "/repos/o/cln-x-service/rulesets/9") in calls
     body = next(b for m, p, b in api.calls if m == "POST" and p.endswith("/rulesets"))
     rules = {r["type"]: r.get("parameters") for r in body["rules"]}
     assert rules["pull_request"]["required_approving_review_count"] == 2
     assert [c["context"] for c in rules["required_status_checks"]["required_status_checks"]] == ["unit", "CodeQL"]
     assert rules["code_scanning"]["code_scanning_tools"][0]["security_alerts_threshold"] == "high_or_higher"
     assert body["bypass_actors"] == [{"actor_id": 12345, "actor_type": "Integration", "bypass_mode": "pull_request"}]
-    sec = next(b for m, p, b in api.calls if m == "PATCH" and p == "/repos/o/emr-x-service" and "security_and_analysis" in b)
+    sec = next(b for m, p, b in api.calls if m == "PATCH" and p == "/repos/o/cln-x-service" and "security_and_analysis" in b)
     assert sec["security_and_analysis"]["secret_scanning_push_protection"] == {"status": "enabled"}
 
 
@@ -255,9 +255,9 @@ def test_openchoreo_component_registration():
         return {"name": component_name}
 
     oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
-    args = dict(component=NEW, project="emr", namespace=None, component_type="deployment/service",
+    args = dict(component=NEW, project="cln", namespace=None, component_type="deployment/service",
                 workflow="docker", repo_url=f"https://github.com/{NEW}", branch="main")
     assert oc.register_component(**args) == "created"
     assert oc.register_component(**args) == "exists"
-    assert calls == [("vrixel", "emr", "emr-consent-registry-service", "deployment/service",
+    assert calls == [("vrixel", "cln", "cln-consent-registry-service", "deployment/service",
                       f"https://github.com/{NEW}", False)]

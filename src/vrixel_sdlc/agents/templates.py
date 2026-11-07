@@ -85,7 +85,7 @@ def design(ctx: dict, defective: bool) -> str:
 
 def _mentions(ctx: dict, repo_name: str) -> bool:
     """Stub impact analysis: a dependency repo joins when the request names what it provides,
-    e.g. 'audit' selects vrixel-shared-services/ss-audit-framework. Live architects decide."""
+    e.g. 'audit' selects acme-shared/ss-audit-framework. Live architects decide."""
     words = [w for w in repo_name.split("/", 1)[-1].split("-")[1:] if len(w) >= 5]
     text = f"{ctx['title']} {ctx.get('description', '')}".lower()
     return any(w in text for w in words)
