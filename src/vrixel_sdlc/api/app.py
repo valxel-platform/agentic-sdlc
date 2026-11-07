@@ -188,7 +188,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if state["pool"] is not None:
             state["pool"].close()
 
-    app = FastAPI(title="Vrixel agentic SDLC", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="Vrixel SDLC", version="0.2.0", lifespan=lifespan)
     api = APIRouter(prefix="/api")
 
     def eng() -> FeatureEngine:

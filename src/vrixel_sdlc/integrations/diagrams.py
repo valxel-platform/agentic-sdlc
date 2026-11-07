@@ -162,7 +162,7 @@ def to_drawio(fc: Flowchart, title: str) -> str:
     model = ('<mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" '
              'arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827"><root>'
              '<mxCell id="0"/><mxCell id="1" parent="0"/>' + "".join(cells) + "</root></mxGraphModel>")
-    return (f'<mxfile host="vrixel-agentic-sdlc"><diagram id="architecture" '
+    return (f'<mxfile host="vrixel-sdlc"><diagram id="architecture" '
             f'name="{escape(title, {chr(34): "&quot;"})}">{model}</diagram></mxfile>\n')
 
 

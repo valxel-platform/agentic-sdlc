@@ -3,12 +3,12 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "vrixel-agentic-sdlc"
+name = "vrixel-sdlc"
 version = "0.1.0"
-description = "Agentic SDLC orchestrated by LangGraph: eight phases, six human gates, LLM-agnostic with Claude by default."
+description = "Vrixel SDLC: an agentic SDLC on LangGraph. Agents take a feature from idea to production; people decide at gates."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = { text = "Apache-2.0" }
 dependencies = [
   "langgraph>=1.2,<2",
   "langgraph-checkpoint-postgres>=3.0,<4",

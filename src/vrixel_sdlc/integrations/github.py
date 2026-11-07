@@ -330,7 +330,7 @@ class GitHubRest:
         data = json.dumps(body).encode() if body is not None else None
         req = Request(f"{self.api}/repos/{repo}{path}", data=data, method=method, headers={
             "Authorization": f"Bearer {self.tokens.token(org)}", "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "vrixel-agentic-sdlc",
+            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "vrixel-sdlc",
             **({"Content-Type": "application/json"} if data else {}),
         })
         try:
@@ -489,7 +489,7 @@ class GitHubRest:
         data = json.dumps(body).encode() if body is not None else None
         req = Request(f"{self.api}{path}", data=data, method=method, headers={
             "Authorization": f"Bearer {self.tokens.token(org)}", "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "vrixel-agentic-sdlc",
+            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "vrixel-sdlc",
             **({"Content-Type": "application/json"} if data else {}),
         })
         try:
@@ -648,7 +648,7 @@ class GitHubRest:
         if missing:
             self._abs("PATCH", org, f"/orgs/{quote(org)}/properties/schema", {"properties": [
                 {"property_name": n, "value_type": "string",
-                 "description": "Set by the Vrixel agentic SDLC repo standards"} for n in missing]})
+                 "description": "Set by the Vrixel SDLC repo standards"} for n in missing]})
 
     def dispatch(self, *, repo, event_type, payload) -> None:
         """repository_dispatch: starts the repo's post-deploy workflow (templates ship one)."""

@@ -103,7 +103,7 @@ class GitHubSource:
             "Authorization": f"Bearer {self.tokens.token(org)}",
             "Accept": accept,
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "vrixel-agentic-sdlc",
+            "User-Agent": "vrixel-sdlc",
         })
         try:
             with self.opener.open(req, timeout=self.timeout) as resp:
@@ -191,7 +191,7 @@ class GitHubAppTokenProvider:
         data = json.dumps(body).encode() if body is not None else None
         req = Request(f"{self.api}{path}", data=data, method=method, headers={
             "Authorization": f"Bearer {bearer}", "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "vrixel-agentic-sdlc",
+            "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "vrixel-sdlc",
         })
         try:
             with self.opener.open(req, timeout=10) as resp:

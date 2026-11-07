@@ -104,7 +104,7 @@ def desired_items(s: dict, *, prd_text: str, feature_url: str, restricted_repos:
 
     epic_status = ended or ("in_progress" if approvals.get("g2") else "todo")
     out.append(Desired("epic", "epic", f"[{fid}] {title}",
-                       f"{s.get('description') or title}\n\nTracked by the Vrixel agentic SDLC: {feature_url}",
+                       f"{s.get('description') or title}\n\nTracked by the Vrixel SDLC: {feature_url}",
                        epic_status))
     if approvals.get("g2"):
         for ac_id, text in parse_acs(prd_text).items():
@@ -232,7 +232,7 @@ class WorkSync:
             if row is None and s["status"] == "approved":
                 d = s.get("draft") or {}
                 desc = (f"{d.get('outcome', '')}\n\nSuccess measure: {d.get('measure', '')}\nHorizon: {d.get('horizon', '')}\n"
-                        f"Budget envelope: {d.get('budget_usd', 0):.0f} USD\n\nTracked by the Vrixel agentic SDLC: "
+                        f"Budget envelope: {d.get('budget_usd', 0):.0f} USD\n\nTracked by the Vrixel SDLC: "
                         f"{self.public_url}/initiatives/{iid}")
                 ext = tracker.find(cfg, iid) or tracker.create(cfg, kind="initiative", summary=f"[{iid}] {s['title']}",
                                                                 description=desc, marker=iid, parent=None)
@@ -257,7 +257,7 @@ class WorkSync:
             have = self.links.get(iid)
             row = have.get("incident")
             if row is None:
-                desc = (f"Severity {s.get('severity')}. {s.get('title')}\n\nTracked by the Vrixel agentic SDLC: "
+                desc = (f"Severity {s.get('severity')}. {s.get('title')}\n\nTracked by the Vrixel SDLC: "
                         f"{self.public_url}/incidents/{iid}")
                 ext = tracker.find(cfg, iid) or tracker.create(cfg, kind="incident", summary=f"[{iid}] {s['title']}",
                                                                 description=desc, marker=iid, parent=None)

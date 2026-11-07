@@ -1,8 +1,8 @@
-# Vrixel agentic SDLC
+# Vrixel SDLC
 
-A LangGraph implementation of the Vrixel agentic SDLC design. Agents built from the Product,
-Design and Engineering plugin skills take a feature from idea to production. Humans decide at
-six gates, and an escalation path takes over a phase when agents are stuck.
+Vrixel SDLC is an agentic software development lifecycle built on LangGraph. Agents built from
+the Product, Design and Engineering plugin skills take a feature from idea to production. Humans
+decide at six gates, and an escalation path takes over a phase when agents are stuck.
 
 This release wires the **whole pipeline end to end with stub agents**: all eight phases, all six
 gates, evaluator loops, escalations, the model gateway, the usage ledger and product
@@ -1345,3 +1345,9 @@ src/vrixel_sdlc/
 web/               React app: decisions, features, intake
 tests/             pipeline, gateway, governance, API, Postgres durability
 ```
+
+## License
+
+Vrixel SDLC is licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).
+Contributions are accepted under the same license. The license gives no rights to the Vrixel name
+or logo.

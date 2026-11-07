@@ -1,4 +1,4 @@
-# Product registry for the Vrixel agentic SDLC tool (lives in the tools org).
+# Product registry for the Vrixel SDLC tool (lives in the tools org).
 #
 # The tool does NOT carry product constitutions or product settings. Each product keeps a
 # governance repo in its own GitHub organization:

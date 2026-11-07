@@ -158,7 +158,7 @@ class GitHubOAuth:
         def get(path: str):
             return self._json(Request(f"{self.api}{path}", headers={
                 "Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "vrixel-agentic-sdlc"}))
+                "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "vrixel-sdlc"}))
 
         me = get("/user")
         orgs = [o["login"] for o in get("/user/orgs?per_page=100")]
