@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vrixel SDLC Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=Public+Sans:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+/* Layout: one wide control-plane diagram as the hero, then the three flows side by side, then the rules and the code map. */
+:root {
+  --bg: #eef2f5;        /* cool drafting paper */
+  --surface: #ffffff;
+  --ink: #142230;
+  --muted: #566778;
+  --line: #c4ced8;
+  --blue: #1c5aa0;      /* the tool's own work */
+  --teal: #0d6f6b;      /* agents and models */
+  --amber: #b87500;     /* people and their decisions */
+  --amber-soft: #fbf1de;
+  --teal-soft: #e2f1ef;
+  --blue-soft: #e4edf8;
+  --display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+  --body: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d141b; --surface: #15202b; --ink: #e2e9f0; --muted: #93a4b5; --line: #2c3c4c;
+    --blue: #74aef0; --teal: #5cc7bf; --amber: #f0b54d;
+    --amber-soft: #2f2617; --teal-soft: #13302e; --blue-soft: #172a40;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d141b; --surface: #15202b; --ink: #e2e9f0; --muted: #93a4b5; --line: #2c3c4c;
+  --blue: #74aef0; --teal: #5cc7bf; --amber: #f0b54d;
+  --amber-soft: #2f2617; --teal-soft: #13302e; --blue-soft: #172a40;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 16px; line-height: 1.6;
+}
+.wrap {
+  max-width: 1240px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 64px;
+  display: grid; gap: 56px;
+}
+header { display: grid; gap: 12px; max-width: 760px; }
+h1 {
+  font-family: var(--display); font-stretch: 78%; font-weight: 800; font-size: clamp(2.2rem, 5vw, 3.6rem);
+  line-height: 1.02; letter-spacing: -0.01em; margin: 0; text-wrap: balance;
+}
+h2 {
+  font-family: var(--display); font-stretch: 85%; font-weight: 700; font-size: 1.6rem; line-height: 1.15;
+  margin: 0; text-wrap: balance;
+}
+h3 { font-family: var(--display); font-stretch: 90%; font-weight: 700; font-size: 1.15rem; margin: 0; }
+p { margin: 0; }
+.lede { font-size: 1.12rem; color: var(--muted); max-width: 66ch; }
+.key { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 0.9rem; color: var(--muted); }
+.key span { display: inline-flex; align-items: center; gap: 8px; }
+.key i { width: 14px; height: 14px; border-radius: 3px; border: 2px solid; display: inline-block; }
+.key .k-amber { border-color: var(--amber); background: var(--amber-soft); }
+.key .k-teal { border-color: var(--teal); background: var(--teal-soft); }
+.key .k-blue { border-color: var(--blue); background: var(--blue-soft); }
+
+/* Diagram */
+figure { margin: 0; display: grid; gap: 12px; }
+.diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.diagram svg { display: block; width: 100%; min-width: 980px; height: auto; }
+figcaption { font-size: 0.9rem; color: var(--muted); max-width: 80ch; }
+svg text { font-family: var(--body); fill: var(--ink); }
+svg .h { font-family: var(--display); font-stretch: 85%; font-weight: 700; font-size: 16px; }
+svg .h-sm { font-family: var(--display); font-stretch: 88%; font-weight: 700; font-size: 14px; }
+svg .t { font-size: 13px; }
+svg .s { font-size: 12px; fill: var(--muted); }
+svg .lbl { font-size: 12px; fill: var(--muted); font-style: italic; }
+svg .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+svg .frame { fill: none; stroke: var(--blue); stroke-width: 1.5; stroke-dasharray: 6 5; }
+svg .frame-t { font-family: var(--display); font-stretch: 85%; font-weight: 800; font-size: 13px; fill: var(--blue); letter-spacing: 0.06em; }
+svg .people { fill: var(--amber-soft); stroke: var(--amber); stroke-width: 1.5; }
+svg .ai { fill: var(--teal-soft); stroke: var(--teal); stroke-width: 1.5; }
+svg .tool { fill: var(--blue-soft); stroke: var(--blue); stroke-width: 1.5; }
+svg .card { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+svg .chip { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+svg .gate { fill: var(--amber); }
+svg .arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#head); }
+svg .join { stroke: var(--muted); stroke-width: 1.6; fill: none; }
+svg .loop { stroke: var(--teal); stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; marker-end: url(#head-teal); }
+svg .head { fill: var(--muted); }
+svg .head-teal { fill: var(--teal); }
+
+/* Flows */
+.flows { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.flow { display: grid; gap: 12px; align-content: start; padding-top: 16px; border-top: 3px solid var(--line); min-width: 0; }
+.flow.f-feature { border-top-color: var(--blue); }
+.flow.f-incident { border-top-color: var(--amber); }
+.flow.f-record { border-top-color: var(--teal); }
+.flow p.sub { color: var(--muted); font-size: 0.95rem; }
+ol, ul { margin: 0; padding-left: 1.3em; display: grid; gap: 8px; font-size: 0.97rem; }
+li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+b.gate { color: var(--amber); font-weight: 600; }
+section { display: grid; gap: 20px; }
+
+/* Rules */
+.rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 40px; }
+.rule { display: grid; gap: 4px; min-width: 0; }
+.rule p { color: var(--muted); font-size: 0.97rem; }
+
+/* Code map */
+.table { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 0.94rem; }
+th, td { text-align: left; padding: 10px 16px; vertical-align: top; border-bottom: 1px solid var(--line); }
+tr:last-child td { border-bottom: 0; }
+th { font-family: var(--display); font-stretch: 90%; font-weight: 700; font-size: 0.9rem; color: var(--muted); }
+td code { font-family: var(--code); font-size: 0.84rem; color: var(--blue); }
+td:first-child { font-weight: 600; white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .flows { grid-template-columns: minmax(0, 1fr); }
+  .rules { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Vrixel SDLC Architecture</h1>
+    <p class="lede">One service that takes a feature from idea to production and keeps it healthy there. Agents do the work, people decide at gates, and every product's own governance repo sets the rules the tool must follow.</p>
+    <div class="key" aria-label="Colour key">
+      <span><i class="k-amber"></i>People and their decisions</span>
+      <span><i class="k-teal"></i>Agents and models</span>
+      <span><i class="k-blue"></i>The tool's own work</span>
+    </div>
+  </header>
+
+  <figure>
+    <div class="diagram">
+      <svg viewBox="0 0 1200 920" role="img" aria-labelledby="dg-title dg-desc">
+        <title id="dg-title">Vrixel agentic SDLC, high-level architecture</title>
+        <desc id="dg-desc">People, production signals and GitHub webhooks enter the tool's API. The engine runs three kinds of LangGraph workflows (roadmap, feature pipeline, incidents), which use agents through a model gateway and a production policy, and act through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, work trackers, AWS and the catalog. Governance repos are read and pinned. Products built from the templates are deployed and send signals back.</desc>
+        <defs>
+          <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+          <marker id="head-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-teal" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+
+        <!-- Left: inputs -->
+        <rect class="people" x="16" y="56" width="220" height="196" rx="8"/>
+        <text class="h" x="32" y="82">People</text>
+        <text class="t" x="32" y="110">Product owners</text>
+        <text class="t" x="32" y="134">Designers and architects</text>
+        <text class="t" x="32" y="158">Release managers</text>
+        <text class="t" x="32" y="182">On-call engineers</text>
+        <text class="s" x="32" y="214">Approve, revise, take over</text>
+        <text class="s" x="32" y="232">or stop, at gates G0 to G6</text>
+
+        <rect class="box" x="16" y="276" width="220" height="232" rx="8"/>
+        <text class="h" x="32" y="302">Production signals</text>
+        <text class="t" x="32" y="330">Prometheus alerts</text>
+        <text class="t" x="32" y="354">Sentry or GlitchTip</text>
+        <text class="t" x="32" y="378">OpenChoreo alert rules</text>
+        <text class="t" x="32" y="402">CloudWatch alarms</text>
+        <text class="t" x="32" y="426">AWS Budgets</text>
+        <text class="t" x="32" y="450">Support tickets</text>
+        <text class="s" x="32" y="486">Tied to a product, given a SEV</text>
+
+        <rect class="box" x="16" y="532" width="220" height="64" rx="8"/>
+        <text class="h" x="32" y="558">GitHub webhooks</text>
+        <text class="s" x="32" y="580">CI results and PR events</text>
+
+        <!-- Center: the tool -->
+        <rect class="frame" x="262" y="24" width="628" height="704" rx="12"/>
+        <text class="frame-t" x="278" y="44">VRIXEL AGENTIC SDLC: ONE SERVICE, ONE POSTGRES</text>
+
+        <rect class="tool" x="276" y="56" width="600" height="84" rx="8"/>
+        <text class="h" x="292" y="80">API and web app</text>
+        <text class="s" x="452" y="80">FastAPI, React, live updates over SSE, GitHub sign-in</text>
+        <rect class="chip" x="292" y="94" width="136" height="32" rx="6"/><text class="t" x="360" y="115" text-anchor="middle">Decisions inbox</text>
+        <rect class="chip" x="436" y="94" width="136" height="32" rx="6"/><text class="t" x="504" y="115" text-anchor="middle">Features</text>
+        <rect class="chip" x="580" y="94" width="136" height="32" rx="6"/><text class="t" x="648" y="115" text-anchor="middle">New intent chat</text>
+        <rect class="chip" x="724" y="94" width="136" height="32" rx="6"/><text class="t" x="792" y="115" text-anchor="middle">Incidents</text>
+
+        <rect class="tool" x="276" y="160" width="600" height="64" rx="8"/>
+        <text class="h" x="292" y="184">Engine</text>
+        <text class="t" x="292" y="208">Starts threads, routes decisions, resolves waits on CI, builds, deploys, flag steps, analysis</text>
+
+        <rect class="tool" x="276" y="244" width="600" height="196" rx="8"/>
+        <text class="h" x="292" y="268">Workflows (LangGraph)</text>
+        <rect class="card" x="292" y="282" width="184" height="128" rx="6"/>
+        <text class="h-sm" x="306" y="304">Roadmap</text>
+        <text class="t" x="306" y="328">Goals, initiatives</text>
+        <text class="t" x="306" y="350">Releases, launch groups</text>
+        <text class="t" x="306" y="372">Gradual launches</text>
+        <path class="gate" d="M306 390 l6 -6 l6 6 l-6 6 z"/><text class="s" x="324" y="394">G0</text>
+
+        <rect class="card" x="484" y="282" width="184" height="128" rx="6"/>
+        <text class="h-sm" x="498" y="304">Feature pipeline</text>
+        <text class="t" x="498" y="328">Discovery to operate</text>
+        <text class="t" x="498" y="350">Merge train, deploys</text>
+        <text class="t" x="498" y="372">Flag rollout by steps</text>
+        <path class="gate" d="M498 390 l6 -6 l6 6 l-6 6 z"/><text class="s" x="516" y="394">G1 to G6</text>
+
+        <rect class="card" x="676" y="282" width="184" height="128" rx="6"/>
+        <text class="h-sm" x="690" y="304">Incidents</text>
+        <text class="t" x="690" y="328">Analyze, triage, act</text>
+        <text class="t" x="690" y="350">Monitor recovery</text>
+        <text class="t" x="690" y="372">Postmortem, hotfix</text>
+        <path class="gate" d="M690 390 l6 -6 l6 6 l-6 6 z"/><text class="s" x="708" y="394">On-call decides</text>
+
+        <text class="s" x="292" y="430">Durable threads in Postgres: they wait at gates, on CI and on deploys for days</text>
+
+        <rect class="ai" x="276" y="460" width="290" height="148" rx="8"/>
+        <text class="h" x="292" y="484">Agents</text>
+        <text class="t" x="292" y="510">14 roles built from plugin skills</text>
+        <text class="t" x="292" y="532">Checks, then a critic in a fresh</text>
+        <text class="t" x="292" y="554">context; 3 failed loops escalate</text>
+        <text class="t" x="292" y="576">Runtimes: Claude Code, generic</text>
+        <text class="s" x="292" y="596">Coder per task, reviewer per PR</text>
+
+        <rect class="tool" x="586" y="460" width="290" height="148" rx="8"/>
+        <text class="h" x="602" y="484">Production policy</text>
+        <text class="t" x="602" y="510">Remediation: when it may act alone</text>
+        <text class="t" x="602" y="532">Cohorts: flag on against off</text>
+        <text class="t" x="602" y="554">Call graph and change correlation</text>
+        <text class="t" x="602" y="576">Change log, inventory, FinOps</text>
+        <text class="s" x="602" y="596">Paging only when it can't fix it</text>
+
+        <rect class="ai" x="276" y="628" width="600" height="86" rx="8"/>
+        <text class="h" x="292" y="652">Model gateway</text>
+        <text class="t" x="292" y="676">Role to model; providers allowed per data class (PHI and payments: BAA only)</text>
+        <text class="t" x="292" y="698">Cache-first prompt layers; one usage ledger row per call; Anthropic or self-hosted</text>
+
+        <!-- Right: systems it works through -->
+        <rect class="box" x="916" y="56" width="268" height="658" rx="8"/>
+        <text class="h" x="932" y="82">Systems it works through</text>
+        <text class="h-sm" x="932" y="114">GitHub</text><text class="s" x="932" y="134">PRs, CI checks, merge train</text>
+        <text class="h-sm" x="932" y="178">OpenChoreo</text><text class="s" x="932" y="198">Builds, environments, logs, RCA</text>
+        <text class="h-sm" x="932" y="242">Flipt</text><text class="s" x="932" y="262">Flags and percentage rollouts</text>
+        <text class="h-sm" x="932" y="306">PagerDuty</text><text class="s" x="932" y="326">Heads-up and urgent pages</text>
+        <text class="h-sm" x="932" y="370">ServiceNow</text><text class="s" x="932" y="390">Change receipts</text>
+        <text class="h-sm" x="932" y="434">Jira or OpenProject</text><text class="s" x="932" y="454">Epics and initiatives kept in step</text>
+        <text class="h-sm" x="932" y="498">Lucid or draw.io</text><text class="s" x="932" y="518">Architecture diagrams for G4</text>
+        <text class="h-sm" x="932" y="562">AWS through Crossplane</text><text class="s" x="932" y="582">Resources, alarms, budgets</text>
+        <text class="h-sm" x="932" y="626">Backstage catalog</text><text class="s" x="932" y="646">Capabilities registered after Operate</text>
+        <text class="s" x="932" y="690">Each behind an interface; stubbed offline</text>
+
+        <!-- Bottom: governance and products -->
+        <rect class="box" x="16" y="752" width="560" height="124" rx="8"/>
+        <text class="h" x="32" y="778">Governance it reads, pinned per feature</text>
+        <text class="h-sm" x="32" y="806">Tools org</text>
+        <text class="s" x="32" y="826">registry.yaml</text>
+        <text class="s" x="32" y="844">models, quality, tools</text>
+        <text class="h-sm" x="208" y="806">sdlc-governance</text>
+        <text class="s" x="208" y="826">Platform constitution</text>
+        <text class="s" x="208" y="844">remediation.yaml</text>
+        <text class="s" x="208" y="862">Alert rules, AWS types</text>
+        <text class="h-sm" x="384" y="806">Product governance</text>
+        <text class="s" x="384" y="826">product.yaml, constitution</text>
+        <text class="s" x="384" y="844">ADRs, roadmap</text>
+        <text class="s" x="384" y="862">Postmortems</text>
+
+        <rect class="box" x="616" y="752" width="568" height="124" rx="8"/>
+        <text class="h" x="632" y="778">Products it builds and runs, from templates</text>
+        <rect class="chip" x="632" y="790" width="128" height="28" rx="6"/><text class="t" x="696" y="809" text-anchor="middle">Service</text>
+        <rect class="chip" x="768" y="790" width="128" height="28" rx="6"/><text class="t" x="832" y="809" text-anchor="middle">Event worker</text>
+        <rect class="chip" x="904" y="790" width="128" height="28" rx="6"/><text class="t" x="968" y="809" text-anchor="middle">Agent</text>
+        <rect class="chip" x="1040" y="790" width="128" height="28" rx="6"/><text class="t" x="1104" y="809" text-anchor="middle">MCP server</text>
+        <rect class="chip" x="632" y="826" width="128" height="28" rx="6"/><text class="t" x="696" y="845" text-anchor="middle">BFF</text>
+        <rect class="chip" x="768" y="826" width="128" height="28" rx="6"/><text class="t" x="832" y="845" text-anchor="middle">Web app</text>
+        <rect class="chip" x="904" y="826" width="128" height="28" rx="6"/><text class="t" x="968" y="845" text-anchor="middle">Mobile app</text>
+        <text class="s" x="1040" y="836">Each in the</text>
+        <text class="s" x="1040" y="852">product's own org</text>
+
+        <!-- Arrows -->
+        <path class="arrow" d="M236 98 H272"/>
+        <path class="join" d="M236 392 H256"/>
+        <path class="arrow" d="M236 564 H256 V124 H272"/>
+        <path class="arrow" d="M576 140 V156"/>
+        <path class="arrow" d="M576 224 V240"/>
+        <path class="arrow" d="M420 440 V456"/>
+        <path class="arrow" d="M730 440 V456"/>
+        <path class="arrow" d="M420 608 V624"/>
+        <path class="arrow" d="M876 342 H912"/>
+        <path class="arrow" d="M876 534 H912"/>
+        <path class="arrow" d="M1050 714 V748"/>
+        <text class="lbl" x="1058" y="736">deploys</text>
+        <path class="arrow" d="M440 752 V732"/>
+        <text class="lbl" x="448" y="744">read</text>
+        <path class="loop" d="M900 876 V888 H6 V420 H12"/>
+        <text class="lbl" x="300" y="912" style="fill: var(--teal)">Running products send signals back: alerts, errors, logs, flag on/off counts</text>
+      </svg>
+    </div>
+    <figcaption>The tool is one Python service with one Postgres database. Everything outside the dashed frame belongs to the products or to third parties, and the tool reaches each through an interface that has an offline stub, so the whole pipeline runs deterministically in tests.</figcaption>
+  </figure>
+
+  <section aria-labelledby="flows-h">
+    <h2 id="flows-h">How work moves through it</h2>
+    <div class="flows">
+      <div class="flow f-feature">
+        <h3>Idea to production</h3>
+        <p class="sub">One feature thread, across every repo it touches.</p>
+        <ol>
+          <li>The intake agent drafts the intent with the person and checks what the product already has.</li>
+          <li>Discovery, then spec, approved at <b class="gate">G1</b> and <b class="gate">G2</b>.</li>
+          <li>Design and architecture run in parallel, approved at <b class="gate">G3</b> and <b class="gate">G4</b>, then join. The architect's diagram is published to Lucid or draw.io for G4 reviewers.</li>
+          <li>New repos are provisioned from templates; the planner splits the work; one coder agent per task, one reviewer per PR.</li>
+          <li>CI must go green. High-risk and regulated changes need <b class="gate">G5</b>. The merge train merges libraries, then providers, then consumers.</li>
+          <li>OpenChoreo builds the merge commits and deploys to dev, then staging.</li>
+          <li>Release managers approve production and a rollout plan at <b class="gate">G6</b>.</li>
+          <li>The flag steps through 5, 25, 50 and 100%, holding on nearby incidents and stopping if users with it on fail more.</li>
+        </ol>
+      </div>
+      <div class="flow f-incident">
+        <h3>Signal to resolution</h3>
+        <p class="sub">The tool does the heavy lifting; on-call is paged only when it can't.</p>
+        <ol>
+          <li>A signal joins an open incident or opens one. A SEV1 sends on-call a low-urgency heads-up.</li>
+          <li>OpenChoreo's root-cause agent investigates, on a provider allowed for the data class, while the tool correlates recent changes.</li>
+          <li>Triage proposes actions. Suspects are recent releases and features still rolling out nearby.</li>
+          <li>When the policy allows and the analysis agrees, the tool turns the flag off or rolls back, and records the change.</li>
+          <li>It watches for recovery. If it can't act, its action fails, or the failure continues, it pages on-call urgently.</li>
+          <li>The fix goes back through the pipeline as a hotfix; the postmortem is drafted into the governance repo.</li>
+        </ol>
+      </div>
+      <div class="flow f-record">
+        <h3>What every step leaves behind</h3>
+        <p class="sub">For audit, and for looking back at what went wrong and what it cost.</p>
+        <ul>
+          <li>Each decision: who approved, at which gate, with how many active minutes.</li>
+          <li>Each production change: who or what made it and why, with a ServiceNow receipt.</li>
+          <li>Each model call: role, model, tokens, cache hits and cost, in the usage ledger.</li>
+          <li>Each feature's cost in production, from FinOps, beside its build cost.</li>
+          <li>The resource inventory: what runs in production against the lower lanes, with cluster identifiers.</li>
+          <li>Traces of every thread, and postmortems and ADRs in Git.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="rules-h">
+    <h2 id="rules-h">Design rules</h2>
+    <div class="rules">
+      <div class="rule"><h3>Agents work, people decide</h3><p>Seven gates (G0 to G6) are interrupts that wait for an approver from the product's own governance repo. Three failed evaluator loops, or a spent budget, hand the phase to a person.</p></div>
+      <div class="rule"><h3>Products own their rules</h3><p>The tool keeps no product settings. It reads each product's governance repo and pins it by commit for the life of a feature. Products can tighten the platform's rules, never loosen them.</p></div>
+      <div class="rule"><h3>Data class picks the model</h3><p>The gateway only routes PHI and payments work to providers covered for it. The same rule decides which provider OpenChoreo's root-cause agent may use.</p></div>
+      <div class="rule"><h3>Production stays human, with two exceptions</h3><p>Promotion to production is a person's decision at G6. The tool may act on its own in only two ways: turn off a recent feature's flag, or roll back a recent release, and only when the policy allows it and the analysis agrees.</p></div>
+      <div class="rule"><h3>Threads survive anything</h3><p>LangGraph checkpoints every step in Postgres. Waits on people, CI and deploys are resumable after a restart, and one replica serves live updates.</p></div>
+      <div class="rule"><h3>Every integration is an interface</h3><p>Stub mode runs offline and deterministically; live mode swaps in Claude Code, the Claude API and the real systems one interface at a time.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="code-h">
+    <h2 id="code-h">Where it lives in the code</h2>
+    <div class="table">
+      <table>
+        <thead><tr><th>Part</th><th>Modules</th><th>Job</th></tr></thead>
+        <tbody>
+          <tr><td>API and web</td><td><code>api/app.py</code>, <code>web/auth.py</code>, <code>events.py</code>, <code>web/</code></td><td>REST API, GitHub sign-in, approver matching, live updates, React screens</td></tr>
+          <tr><td>Engine</td><td><code>engine.py</code>, <code>waits.py</code></td><td>Starts and resumes threads, decision inbox, external waits</td></tr>
+          <tr><td>Feature pipeline</td><td><code>graph/pipeline.py</code>, <code>graph/phase.py</code></td><td>Phases, gates, escalations, build fan-out, merge train, flag rollout</td></tr>
+          <tr><td>Roadmap</td><td><code>roadmap/</code></td><td>Goals, initiatives (G0), releases and launch groups</td></tr>
+          <tr><td>Incidents</td><td><code>ops/incident.py</code>, <code>ops/signals.py</code>, <code>ops/correlate.py</code></td><td>Signal intake, incident graph, call graph, suspects</td></tr>
+          <tr><td>Production policy</td><td><code>ops/remediation.py</code>, <code>ops/rollout.py</code>, <code>ops/cohorts.py</code>, <code>ops/paging.py</code></td><td>When to act alone, gradual rollout, on/off comparison, paging</td></tr>
+          <tr><td>Records</td><td><code>ops/changes.py</code>, <code>ops/inventory.py</code>, <code>ops/lookback.py</code>, <code>finops/</code></td><td>Change log, resource inventory, lookback report, cost</td></tr>
+          <tr><td>Agents</td><td><code>agents/</code>, <code>evaluators/</code>, <code>runtime/</code></td><td>Roster and skills, checks and critic, Claude Code and generic runtimes</td></tr>
+          <tr><td>Model gateway</td><td><code>gateway/</code></td><td>Model routing, data-class allowlist, prompt layers, usage ledger</td></tr>
+          <tr><td>Governance</td><td><code>governance/</code>, <code>constitution.py</code></td><td>Reads, validates and pins the platform and product rules</td></tr>
+          <tr><td>Knowledge</td><td><code>knowledge/</code>, <code>duplicates.py</code>, <code>intake.py</code></td><td>Architecture record, contracts, duplicate requests, guided intake</td></tr>
+          <tr><td>Integrations</td><td><code>integrations/</code>, <code>worksync.py</code>, <code>ops/servicenow.py</code>, <code>provisioning.py</code></td><td>GitHub, OpenChoreo, Flipt, catalog, MCP, Lucid and draw.io diagrams, Jira and OpenProject, ServiceNow, new repos</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+</body>
+</html>

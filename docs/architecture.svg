@@ -1,0 +1,202 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="920" viewBox="0 0 1200 920" role="img" aria-labelledby="dg-title dg-desc">
+        <title id="dg-title">Vrixel agentic SDLC, high-level architecture</title>
+        <desc id="dg-desc">People, production signals and GitHub webhooks enter the tool's API. The engine runs three kinds of LangGraph workflows (roadmap, feature pipeline, incidents), which use agents through a model gateway and a production policy, and act through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, work trackers, AWS and the catalog. Governance repos are read and pinned. Products built from the templates are deployed and send signals back.</desc>
+        <style>
+svg {
+  --bg: #eef2f5;        /* cool drafting paper */
+  --surface: #ffffff;
+  --ink: #142230;
+  --muted: #566778;
+  --line: #c4ced8;
+  --blue: #1c5aa0;      /* the tool's own work */
+  --teal: #0d6f6b;      /* agents and models */
+  --amber: #b87500;     /* people and their decisions */
+  --amber-soft: #fbf1de;
+  --teal-soft: #e2f1ef;
+  --blue-soft: #e4edf8;
+  
+  
+  
+}
+@media (prefers-color-scheme: dark) {
+  svg {
+    --bg: #0d141b; --surface: #15202b; --ink: #e2e9f0; --muted: #93a4b5; --line: #2c3c4c;
+    --blue: #74aef0; --teal: #5cc7bf; --amber: #f0b54d;
+    --amber-soft: #2f2617; --teal-soft: #13302e; --blue-soft: #172a40;
+    color-scheme: dark;
+  }
+}
+
+svg text, text { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; fill: var(--ink); }
+svg .h { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-weight: 700; font-size: 16px; }
+svg .h-sm { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-weight: 700; font-size: 14px; }
+svg .t { font-size: 13px; }
+svg .s { font-size: 12px; fill: var(--muted); }
+svg .lbl { font-size: 12px; fill: var(--muted); font-style: italic; }
+svg .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+svg .frame { fill: none; stroke: var(--blue); stroke-width: 1.5; stroke-dasharray: 6 5; }
+svg .frame-t { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-weight: 800; font-size: 13px; fill: var(--blue); letter-spacing: 0.06em; }
+svg .people { fill: var(--amber-soft); stroke: var(--amber); stroke-width: 1.5; }
+svg .ai { fill: var(--teal-soft); stroke: var(--teal); stroke-width: 1.5; }
+svg .tool { fill: var(--blue-soft); stroke: var(--blue); stroke-width: 1.5; }
+svg .card { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+svg .chip { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+svg .gate { fill: var(--amber); }
+svg .arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; marker-end: url(#head); }
+svg .join { stroke: var(--muted); stroke-width: 1.6; fill: none; }
+svg .loop { stroke: var(--teal); stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; marker-end: url(#head-teal); }
+svg .head { fill: var(--muted); }
+svg .head-teal { fill: var(--teal); }
+svg { background: var(--surface); }
+
+</style>
+        <defs>
+          <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+          <marker id="head-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-teal" d="M0,0 L10,5 L0,10 z"/></marker>
+        </defs>
+
+        <!-- Left: inputs -->
+        <rect class="people" x="16" y="56" width="220" height="196" rx="8"/>
+        <text class="h" x="32" y="82">People</text>
+        <text class="t" x="32" y="110">Product owners</text>
+        <text class="t" x="32" y="134">Designers and architects</text>
+        <text class="t" x="32" y="158">Release managers</text>
+        <text class="t" x="32" y="182">On-call engineers</text>
+        <text class="s" x="32" y="214">Approve, revise, take over</text>
+        <text class="s" x="32" y="232">or stop, at gates G0 to G6</text>
+
+        <rect class="box" x="16" y="276" width="220" height="232" rx="8"/>
+        <text class="h" x="32" y="302">Production signals</text>
+        <text class="t" x="32" y="330">Prometheus alerts</text>
+        <text class="t" x="32" y="354">Sentry or GlitchTip</text>
+        <text class="t" x="32" y="378">OpenChoreo alert rules</text>
+        <text class="t" x="32" y="402">CloudWatch alarms</text>
+        <text class="t" x="32" y="426">AWS Budgets</text>
+        <text class="t" x="32" y="450">Support tickets</text>
+        <text class="s" x="32" y="486">Tied to a product, given a SEV</text>
+
+        <rect class="box" x="16" y="532" width="220" height="64" rx="8"/>
+        <text class="h" x="32" y="558">GitHub webhooks</text>
+        <text class="s" x="32" y="580">CI results and PR events</text>
+
+        <!-- Center: the tool -->
+        <rect class="frame" x="262" y="24" width="628" height="704" rx="12"/>
+        <text class="frame-t" x="278" y="44">AGENTIC SDLC TOOL: ONE SERVICE, ONE POSTGRES</text>
+
+        <rect class="tool" x="276" y="56" width="600" height="84" rx="8"/>
+        <text class="h" x="292" y="80">API and web app</text>
+        <text class="s" x="452" y="80">FastAPI, React, live updates over SSE, GitHub sign-in</text>
+        <rect class="chip" x="292" y="94" width="136" height="32" rx="6"/><text class="t" x="360" y="115" text-anchor="middle">Decisions inbox</text>
+        <rect class="chip" x="436" y="94" width="136" height="32" rx="6"/><text class="t" x="504" y="115" text-anchor="middle">Features</text>
+        <rect class="chip" x="580" y="94" width="136" height="32" rx="6"/><text class="t" x="648" y="115" text-anchor="middle">New intent chat</text>
+        <rect class="chip" x="724" y="94" width="136" height="32" rx="6"/><text class="t" x="792" y="115" text-anchor="middle">Incidents</text>
+
+        <rect class="tool" x="276" y="160" width="600" height="64" rx="8"/>
+        <text class="h" x="292" y="184">Engine</text>
+        <text class="t" x="292" y="208">Starts threads, routes decisions, resolves waits on CI, builds, deploys, flag steps, analysis</text>
+
+        <rect class="tool" x="276" y="244" width="600" height="196" rx="8"/>
+        <text class="h" x="292" y="268">Workflows (LangGraph)</text>
+        <rect class="card" x="292" y="282" width="184" height="128" rx="6"/>
+        <text class="h-sm" x="306" y="304">Roadmap</text>
+        <text class="t" x="306" y="328">Goals, initiatives</text>
+        <text class="t" x="306" y="350">Releases, launch groups</text>
+        <text class="t" x="306" y="372">Gradual launches</text>
+        <path class="gate" d="M306 390 l6 -6 l6 6 l-6 6 z"/><text class="s" x="324" y="394">G0</text>
+
+        <rect class="card" x="484" y="282" width="184" height="128" rx="6"/>
+        <text class="h-sm" x="498" y="304">Feature pipeline</text>
+        <text class="t" x="498" y="328">Discovery to operate</text>
+        <text class="t" x="498" y="350">Merge train, deploys</text>
+        <text class="t" x="498" y="372">Flag rollout by steps</text>
+        <path class="gate" d="M498 390 l6 -6 l6 6 l-6 6 z"/><text class="s" x="516" y="394">G1 to G6</text>
+
+        <rect class="card" x="676" y="282" width="184" height="128" rx="6"/>
+        <text class="h-sm" x="690" y="304">Incidents</text>
+        <text class="t" x="690" y="328">Analyze, triage, act</text>
+        <text class="t" x="690" y="350">Monitor recovery</text>
+        <text class="t" x="690" y="372">Postmortem, hotfix</text>
+        <path class="gate" d="M690 390 l6 -6 l6 6 l-6 6 z"/><text class="s" x="708" y="394">On-call decides</text>
+
+        <text class="s" x="292" y="430">Durable threads in Postgres: they wait at gates, on CI and on deploys for days</text>
+
+        <rect class="ai" x="276" y="460" width="290" height="148" rx="8"/>
+        <text class="h" x="292" y="484">Agents</text>
+        <text class="t" x="292" y="510">14 roles built from plugin skills</text>
+        <text class="t" x="292" y="532">Checks, then a critic in a fresh</text>
+        <text class="t" x="292" y="554">context; 3 failed loops escalate</text>
+        <text class="t" x="292" y="576">Runtimes: Claude Code, generic</text>
+        <text class="s" x="292" y="596">Coder per task, reviewer per PR</text>
+
+        <rect class="tool" x="586" y="460" width="290" height="148" rx="8"/>
+        <text class="h" x="602" y="484">Production policy</text>
+        <text class="t" x="602" y="510">Remediation: when it may act alone</text>
+        <text class="t" x="602" y="532">Cohorts: flag on against off</text>
+        <text class="t" x="602" y="554">Call graph and change correlation</text>
+        <text class="t" x="602" y="576">Change log, inventory, FinOps</text>
+        <text class="s" x="602" y="596">Paging only when it can't fix it</text>
+
+        <rect class="ai" x="276" y="628" width="600" height="86" rx="8"/>
+        <text class="h" x="292" y="652">Model gateway</text>
+        <text class="t" x="292" y="676">Role to model; providers allowed per data class (PHI and payments: BAA only)</text>
+        <text class="t" x="292" y="698">Cache-first prompt layers; one usage ledger row per call; Anthropic or self-hosted</text>
+
+        <!-- Right: systems it works through -->
+        <rect class="box" x="916" y="56" width="268" height="658" rx="8"/>
+        <text class="h" x="932" y="82">Systems it works through</text>
+        <text class="h-sm" x="932" y="114">GitHub</text><text class="s" x="932" y="134">PRs, CI checks, merge train</text>
+        <text class="h-sm" x="932" y="178">OpenChoreo</text><text class="s" x="932" y="198">Builds, environments, logs, RCA</text>
+        <text class="h-sm" x="932" y="242">Flipt</text><text class="s" x="932" y="262">Flags and percentage rollouts</text>
+        <text class="h-sm" x="932" y="306">PagerDuty</text><text class="s" x="932" y="326">Heads-up and urgent pages</text>
+        <text class="h-sm" x="932" y="370">ServiceNow</text><text class="s" x="932" y="390">Change receipts</text>
+        <text class="h-sm" x="932" y="434">Jira or OpenProject</text><text class="s" x="932" y="454">Epics and initiatives kept in step</text>
+        <text class="h-sm" x="932" y="498">Lucid or draw.io</text><text class="s" x="932" y="518">Architecture diagrams for G4</text>
+        <text class="h-sm" x="932" y="562">AWS through Crossplane</text><text class="s" x="932" y="582">Resources, alarms, budgets</text>
+        <text class="h-sm" x="932" y="626">Backstage catalog</text><text class="s" x="932" y="646">Capabilities registered after Operate</text>
+        <text class="s" x="932" y="690">Each behind an interface; stubbed offline</text>
+
+        <!-- Bottom: governance and products -->
+        <rect class="box" x="16" y="752" width="560" height="124" rx="8"/>
+        <text class="h" x="32" y="778">Governance it reads, pinned per feature</text>
+        <text class="h-sm" x="32" y="806">Tools org</text>
+        <text class="s" x="32" y="826">registry.yaml</text>
+        <text class="s" x="32" y="844">models, quality, tools</text>
+        <text class="h-sm" x="208" y="806">sdlc-governance</text>
+        <text class="s" x="208" y="826">Platform constitution</text>
+        <text class="s" x="208" y="844">remediation.yaml</text>
+        <text class="s" x="208" y="862">Alert rules, AWS types</text>
+        <text class="h-sm" x="384" y="806">Product governance</text>
+        <text class="s" x="384" y="826">product.yaml, constitution</text>
+        <text class="s" x="384" y="844">ADRs, roadmap</text>
+        <text class="s" x="384" y="862">Postmortems</text>
+
+        <rect class="box" x="616" y="752" width="568" height="124" rx="8"/>
+        <text class="h" x="632" y="778">Products it builds and runs, from templates</text>
+        <rect class="chip" x="632" y="790" width="128" height="28" rx="6"/><text class="t" x="696" y="809" text-anchor="middle">Service</text>
+        <rect class="chip" x="768" y="790" width="128" height="28" rx="6"/><text class="t" x="832" y="809" text-anchor="middle">Event worker</text>
+        <rect class="chip" x="904" y="790" width="128" height="28" rx="6"/><text class="t" x="968" y="809" text-anchor="middle">Agent</text>
+        <rect class="chip" x="1040" y="790" width="128" height="28" rx="6"/><text class="t" x="1104" y="809" text-anchor="middle">MCP server</text>
+        <rect class="chip" x="632" y="826" width="128" height="28" rx="6"/><text class="t" x="696" y="845" text-anchor="middle">BFF</text>
+        <rect class="chip" x="768" y="826" width="128" height="28" rx="6"/><text class="t" x="832" y="845" text-anchor="middle">Web app</text>
+        <rect class="chip" x="904" y="826" width="128" height="28" rx="6"/><text class="t" x="968" y="845" text-anchor="middle">Mobile app</text>
+        <text class="s" x="1040" y="836">Each in the</text>
+        <text class="s" x="1040" y="852">product's own org</text>
+
+        <!-- Arrows -->
+        <path class="arrow" d="M236 98 H272"/>
+        <path class="join" d="M236 392 H256"/>
+        <path class="arrow" d="M236 564 H256 V124 H272"/>
+        <path class="arrow" d="M576 140 V156"/>
+        <path class="arrow" d="M576 224 V240"/>
+        <path class="arrow" d="M420 440 V456"/>
+        <path class="arrow" d="M730 440 V456"/>
+        <path class="arrow" d="M420 608 V624"/>
+        <path class="arrow" d="M876 342 H912"/>
+        <path class="arrow" d="M876 534 H912"/>
+        <path class="arrow" d="M1050 714 V748"/>
+        <text class="lbl" x="1058" y="736">deploys</text>
+        <path class="arrow" d="M440 752 V732"/>
+        <text class="lbl" x="448" y="744">read</text>
+        <path class="loop" d="M900 876 V888 H6 V420 H12"/>
+        <text class="lbl" x="300" y="912" style="fill: var(--teal)">Running products send signals back: alerts, errors, logs, flag on/off counts</text>
+      </svg>
