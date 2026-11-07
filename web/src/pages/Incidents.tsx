@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Markdown from "react-markdown";
-import { api, ApiError, type IncidentRow, type IncidentView, type Me } from "../api";
+import { api, ApiError, type Analysis, type IncidentRow, type IncidentView, type Me } from "../api";
 import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
 import { ACTION_LABEL, SEVERITY, threadPath, waitingLabel } from "../vocab";
@@ -234,6 +234,7 @@ export function IncidentPage() {
           </ul>
           {!["merged", "closed"].includes(v.status) && <MergeForm id={v.feature_id} onDone={load} />}
         </section>
+        {v.analysis?.kind && <AnalysisPanel a={v.analysis} />}
         {!mine && (
           <section className="panel" aria-labelledby="h-report">
             <h2 id="h-report" className="section-title">{v.postmortem ? "Postmortem" : "Triage"}</h2>
@@ -242,5 +243,51 @@ export function IncidentPage() {
         )}
       </div>
     </>
+  );
+}
+
+const CONFIDENCE: Record<string, string> = { high: "go", medium: "wait", low: "plain" };
+
+function AnalysisPanel({ a }: { a: Analysis }) {
+  const r = a.report;
+  const res = r?.result;
+  const rec = r?.overprovisioning?.recommendation;
+  const who = a.kind === "cost" ? "OpenChoreo's FinOps agent" : "OpenChoreo's root-cause analysis";
+  return (
+    <section className="panel" aria-labelledby="h-analysis">
+      <h2 id="h-analysis" className="section-title">{who}</h2>
+      {a.status === "pending" && <p className="small muted pad">Investigating. The tool waits a few minutes for it before acting.</p>}
+      {a.status === "skipped" && <p className="small muted pad">Not run: {a.why}</p>}
+      {(a.status === "failed" || a.status === "timed_out") && <p className="small muted pad">No report: {a.why || a.status}.</p>}
+      {r && (
+        <div className="pad">
+          {r.summary && <p>{r.summary}</p>}
+          {res?.type === "no_root_cause_identified" && <p className="small muted">No root cause found: {res.explanation}</p>}
+          {(res?.root_causes?.length ?? 0) > 0 && (
+            <ul className="ext-list" style={{ padding: 0 }}>
+              {res!.root_causes!.map((c, n) => (
+                <li key={n}>
+                  <div className="work-line"><span className={`chip ${CONFIDENCE[c.confidence] ?? "plain"}`}>{c.confidence} confidence</span> <strong>{c.summary}</strong></div>
+                  {c.analysis && <div className="small muted">{c.analysis}</div>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {(res?.excluded_causes?.length ?? 0) > 0 && (
+            <p className="small muted">Ruled out: {res!.excluded_causes!.map((x) => x.description).join("; ")}</p>
+          )}
+          {(res?.recommendations?.recommended_actions?.length ?? 0) > 0 && (
+            <p className="small">It recommends: {res!.recommendations!.recommended_actions!.map((x) => x.description).join("; ")}</p>
+          )}
+          {r.overprovisioning?.analysis && <p className="small">{r.overprovisioning.analysis}</p>}
+          {rec && (
+            <p className="small">
+              Right-size to CPU {rec.cpu_request}/{rec.cpu_limit}, memory {rec.memory_request}/{rec.memory_limit}: saves about{" "}
+              {rec.estimated_savings} {rec.currency}. {rec.rationale}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

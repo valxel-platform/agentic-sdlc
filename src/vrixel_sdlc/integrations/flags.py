@@ -36,8 +36,11 @@ class FlagsUnavailable(RuntimeError):
 class FlagService(Protocol):
     def available(self, product_id: str) -> bool: ...
     def ensure(self, product_id: str, key: str, *, name: str, description: str, actor: str) -> None: ...
-    def set(self, product_id: str, key: str, on: bool, *, actor: str) -> None: ...
-    def get(self, product_id: str, key: str) -> bool | None: ...
+    def set(self, product_id: str, key: str, on: bool, *, actor: str) -> None: ...  # off also ends a rollout
+    def get(self, product_id: str, key: str) -> bool | None: ...  # on for anyone
+    # Gradual release: on for this share of users (by the OpenFeature targeting key); 100 is on for all.
+    def set_percent(self, product_id: str, key: str, percent: float, *, actor: str) -> None: ...
+    def percent(self, product_id: str, key: str) -> float | None: ...
 
 
 class StubFlags:
@@ -45,6 +48,7 @@ class StubFlags:
 
     def __init__(self) -> None:
         self.flags: dict[tuple[str, str], bool] = {}
+        self.percents: dict[tuple[str, str], float] = {}
         self.created: dict[tuple[str, str], dict] = {}
         self.log: list[dict] = []
         self._lock = threading.Lock()
@@ -59,12 +63,22 @@ class StubFlags:
                 self.flags.setdefault((product_id, key), False)
 
     def set(self, product_id, key, on, *, actor) -> None:
-        with self._lock:
-            self.flags[(product_id, key)] = bool(on)
-            self.log.append({"product_id": product_id, "key": key, "on": bool(on), "actor": actor})
+        self.set_percent(product_id, key, 100.0 if on else 0.0, actor=actor)
 
     def get(self, product_id, key):
         return self.flags.get((product_id, key))
+
+    def set_percent(self, product_id, key, percent, *, actor) -> None:
+        with self._lock:
+            pct = max(0.0, min(100.0, float(percent)))
+            self.percents[(product_id, key)] = pct
+            self.flags[(product_id, key)] = pct > 0
+            self.log.append({"product_id": product_id, "key": key, "on": pct > 0, "percent": pct, "actor": actor})
+
+    def percent(self, product_id, key):
+        if (product_id, key) not in self.flags:
+            return None
+        return self.percents.get((product_id, key), 100.0 if self.flags[(product_id, key)] else 0.0)
 
 
 class NoFlags:
@@ -80,6 +94,12 @@ class NoFlags:
         raise FlagsUnavailable(f"{product_id} has no flag service")
 
     def get(self, product_id, key):
+        return None
+
+    def set_percent(self, product_id, key, percent, **_):
+        raise FlagsUnavailable(f"{product_id} has no flag service")
+
+    def percent(self, product_id, key):
         return None
 
 
@@ -188,18 +208,41 @@ class FliptFlags:
             self._write(env, "POST", key, payload, self._namespace_revision(env))
 
     def set(self, key: str, on: bool, *, actor: str, env: str | None = None) -> None:
+        """On or off for everyone. Off also removes a gradual release's share: a flag turned off
+        in an incident must be off for every user."""
+        self.set_percent(key, 100.0 if on else 0.0, actor=actor, env=env)
+
+    def set_percent(self, key: str, percent: float, *, actor: str, env: str | None = None) -> None:
+        """On for `percent` of users: a threshold rollout (value true) over a flag that is off,
+        so the rest get off. 100 is plain on, 0 plain off, both with no rollouts."""
         env = env or self.production
         current, revision = self._flag(env, key)
         if current is None:
             raise FliptError(f"flag {key} doesn't exist in Flipt environment {env}")
-        if bool(current.get("enabled", False)) == bool(on):
+        pct = max(0.0, min(100.0, float(percent)))
+        enabled, rollouts = pct >= 100.0, ([] if pct in (0.0, 100.0) else [
+            {"type": "THRESHOLD_ROLLOUT_TYPE", "description": "vrixel gradual release",
+             "threshold": {"percentage": pct, "value": True}}])
+        if bool(current.get("enabled", False)) == enabled and (current.get("rollouts") or []) == rollouts:
             return
         meta = {**(current.get("metadata") or {}), "changed_by": actor}
-        self._write(env, "PUT", key, {**current, "enabled": bool(on), "metadata": meta}, revision)
+        self._write(env, "PUT", key, {**current, "enabled": enabled, "rollouts": rollouts, "metadata": meta}, revision)
 
     def get(self, key: str, env: str | None = None) -> bool | None:
+        pct = self.percent(key, env)
+        return None if pct is None else pct > 0
+
+    def percent(self, key: str, env: str | None = None) -> float | None:
         current, _ = self._flag(env or self.production, key)
-        return None if current is None else bool(current.get("enabled", False))
+        if current is None:
+            return None
+        if current.get("enabled"):
+            return 100.0
+        for r in current.get("rollouts") or []:
+            th = (r or {}).get("threshold") or {}
+            if th.get("value") is True:
+                return float(th.get("percentage") or 0.0)
+        return 0.0
 
 
 class ProductFlags:
@@ -268,3 +311,17 @@ class ProductFlags:
             return svc.get(key) if isinstance(svc, FliptFlags) else svc.get(product_id, key)
         except (FliptError, OSError):
             return None  # views fall back to what the pipeline last set
+
+    def set_percent(self, product_id, key, percent, *, actor) -> None:
+        svc = self.for_product(product_id)
+        if isinstance(svc, FliptFlags):
+            svc.set_percent(key, percent, actor=actor)
+        else:
+            svc.set_percent(product_id, key, percent, actor=actor)
+
+    def percent(self, product_id, key):
+        svc = self.for_product(product_id)
+        try:
+            return svc.percent(key) if isinstance(svc, FliptFlags) else svc.percent(product_id, key)
+        except (FliptError, OSError):
+            return None

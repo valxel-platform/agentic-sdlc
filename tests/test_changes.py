@@ -68,8 +68,15 @@ def alert(status="firing", component="emr-intake-api", fp="fp1", at="2026-11-06T
 def test_a_release_records_who_approved_it_and_the_evidence(eng):
     fid = eng.create(product_id="EMR", title="Consent capture at intake")
     eng.auto_drive(fid)
-    [r] = eng.services.changes.list("EMR")
+    rows = eng.services.changes.list("EMR")
+    [r] = [x for x in rows if x["kind"] == "release"]
     assert (r["kind"], r["type"], r["action"], r["feature_id"]) == ("release", "standard", "deploy", fid)
+    flag = next(x for x in r["targets"] if x["kind"] == "flag")
+    assert flag["percent"] == 5.0 and r["evidence"]["gradual_release"]["steps"] == [5.0, 25.0, 50.0, 100.0]
+    # G6 approved the plan: each step up is its own record, approved by G6, made by the tool.
+    steps = [x for x in rows if x["action"] == "rollout_step"]
+    assert [x["targets"][0]["percent"] for x in steps] == [25.0, 50.0, 100.0]
+    assert all(x["approved_by"] == r["approved_by"] and x["requested_by"] == "agent:rollout" for x in steps)
     assert [a["gate"] for a in r["approvals"]] == ["g1", "g2", "g3", "g4", "g5", "g6"]
     assert {t["kind"] for t in r["targets"]} >= {"component", "flag"}
     assert r["evidence"]["pull_requests"] and r["requested_by"] == eng._state(fid).get("created_by", "")
@@ -82,7 +89,7 @@ def test_the_tools_fix_is_automatic_and_names_the_release_behind_the_incident(en
     [iid] = eng.ingest(alert())
     eng._pool.shutdown(wait=True)  # the hotfix the tool started runs in the background
     rows = eng.services.changes.list("EMR")
-    flag = next(r for r in rows if r["kind"] == "flag")
+    flag = next(r for r in rows if r["action"] == "flag_off")
     assert (flag["type"], flag["action"], flag["incident_id"]) == ("automatic", "flag_off", iid)
     assert flag["approved_by"] == ["platform/remediation.yaml"] and flag["requested_by"] == "agent:remediate"
     [link] = eng.services.changes.links("EMR")
@@ -95,7 +102,7 @@ def test_the_tools_fix_is_automatic_and_names_the_release_behind_the_incident(en
     month = eng.lookback("EMR", 1)["months"][-1]
     assert month["incidents"] == 1 and month["fixed_by_tool"] == 1 and month["escalated"] == 0
     assert month["releases"] == 1 and month["releases_causing_incidents"] == 1 and month["change_failure_rate"] == 1.0
-    assert month["changes"] == {"standard": 1, "automatic": 1}
+    assert month["changes"] == {"standard": 4, "automatic": 1}  # the release, its 3 steps, the flag off
     assert eng.lookback("EMR", 1)["causes"][0]["incidents"] == [iid]
 
 
@@ -115,7 +122,7 @@ def test_on_calls_rollback_is_an_emergency_change_and_a_hotfix_release_too(tmp_p
     eng._pool.shutdown(wait=True)
     eng.auto_drive(hotfix)
     rows = eng.services.changes.list("EMR")
-    off = next(r for r in rows if r["kind"] == "flag")
+    off = next(r for r in rows if r["action"] == "flag_off")
     assert off["type"] == "emergency" and off["approved_by"] == ["oncall-1"]
     fix = next(r for r in rows if r["feature_id"] == hotfix)
     assert fix["type"] == "emergency" and fix["incident_id"] == iid

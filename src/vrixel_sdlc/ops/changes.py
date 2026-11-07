@@ -6,6 +6,8 @@ Every way the tool changes production writes one:
               flag), or a launch turning its features' flags on
     flag      a feature's flag turned off (or on) outside a release
     rollback  a component rolled back to its previous release
+    policy    the tool suspending one of its own actions (calibration)
+    external  a production change the tool learned of but didn't make (OpenChoreo's fix agent)
 
 and each is one of three types:
 
@@ -29,7 +31,7 @@ import threading
 from datetime import datetime, timezone
 from typing import Protocol
 
-KINDS = ("release", "flag", "rollback")
+KINDS = ("release", "flag", "rollback", "policy", "external")
 TYPES = ("standard", "emergency", "automatic")
 GENESIS = "0" * 64
 _CHAINED = ("id", "key", "at", "product_id", "env", "kind", "type", "action", "summary", "targets", "feature_id",
@@ -212,7 +214,8 @@ def evidence_of(state: dict) -> dict:
     return {"pull_requests": prs, "quality": quality, "waivers": waivers}
 
 
-def release_targets(deployments: dict, flag: str = "", flag_on: bool | None = None) -> list[dict]:
+def release_targets(deployments: dict, flag: str = "", flag_on: bool | None = None,
+                    percent: float | None = None) -> list[dict]:
     out = []
     for key, d in sorted((deployments or {}).items()):
         if d.get("env") not in (None, "", "production") and d.get("kind") != "resource":
@@ -222,7 +225,7 @@ def release_targets(deployments: dict, flag: str = "", flag_on: bool | None = No
                     "name": d.get("name") or d.get("component") or d.get("repo") or key,
                     "repo": d.get("repo", ""), "release": d.get("release", "")})
     if flag:
-        out.append({"kind": "flag", "name": flag, "on": bool(flag_on)})
+        out.append({"kind": "flag", "name": flag, "on": bool(flag_on), **({"percent": percent} if percent is not None else {})})
     return out
 
 
@@ -234,11 +237,15 @@ def release_record(state: dict, approver: str, n: int) -> dict:
         key=f"{state['feature_id']}:g6:{n}", product_id=state["product_id"], kind="release",
         type="emergency" if hotfix else "standard", action="deploy",
         summary=f"{state['feature_id']} {state.get('title', '')}".strip(),
-        targets=release_targets(state.get("deployments") or {}, release.get("flag", ""), release.get("flag_on")),
+        targets=release_targets(state.get("deployments") or {}, release.get("flag", ""), release.get("flag_on"),
+                                release.get("flag_percent")),
         feature_id=state["feature_id"], release_id=release.get("release_id", ""),
         incident_id=(state.get("hotfix") or {}).get("incident_id", "") if hotfix else "",
         requested_by=state.get("created_by", ""), approved_by=[a for a in approver.split(", ") if a],
-        approvals=approvals_of(state), evidence=evidence_of(state))
+        approvals=approvals_of(state),
+        evidence={**evidence_of(state), **({"gradual_release": {k: (release.get("rollout_plan") or {}).get(k)
+                                                                for k in ("steps", "bake_minutes", "risk_tier")}}
+                                           if release.get("rollout_plan") else {})})
 
 
 def cause_of(log: ChangeLog, product_id: str, *, feature_id: str = "", component: str = "") -> dict | None:

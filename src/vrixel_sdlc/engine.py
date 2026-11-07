@@ -7,6 +7,8 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
+from datetime import datetime, timedelta, timezone
+
 from langgraph.types import Command
 
 from .events import EventBus
@@ -88,6 +90,17 @@ class PostgresIndex:
         return [dict(r) for r in rows]
 
 
+def openchoreo_auth():
+    """The tool's OpenChoreo client-credentials token, for OpenChoreo's agents (when configured)."""
+    url, secret = os.environ.get("VRIXEL_OPENCHOREO_TOKEN_URL", ""), os.environ.get("VRIXEL_OPENCHOREO_CLIENT_SECRET", "")
+    if not (url and secret):
+        return None
+    from .integrations.mcp_client import ClientCredentials
+
+    return ClientCredentials(url, os.environ.get("VRIXEL_OPENCHOREO_CLIENT_ID") or "service_mcp_client", secret,
+                             scope=os.environ.get("VRIXEL_OPENCHOREO_SCOPE", ""))
+
+
 class FeatureEngine:
     def __init__(self, services: Services, checkpointer, index: FeatureIndex | None = None,
                  bus: EventBus | None = None, workers: int = 4, work: WorkSync | None = None) -> None:
@@ -143,6 +156,14 @@ class FeatureEngine:
             from .ops.changes import InMemoryChangeLog
 
             services.changes = InMemoryChangeLog()
+        from .ops.servicenow import InMemoryReceipts, ServiceNowReceipts, WithReceipts
+
+        if getattr(services, "change_receipts", None) is None:
+            services.change_receipts = InMemoryReceipts()
+        if not isinstance(services.changes, WithReceipts):
+            services.changes = WithReceipts(services.changes, ServiceNowReceipts(
+                lambda pid: (services.snapshot(pid).product.tools or {}).get("change_management"),
+                services.change_receipts))
         if getattr(services, "inventory_snapshots", None) is None:
             from .ops.inventory import InMemorySnapshots
 
@@ -152,6 +173,11 @@ class FeatureEngine:
 
             services.aws_tags = aws_tags_from_env()
         self._inventory_day = ""
+        if getattr(services, "agents", None) is None:
+            from .integrations.openchoreo_agents import from_env as agents_from_env
+
+            services.agents = agents_from_env(services.settings, openchoreo_auth())
+        services.remediation_record = self.remediation_record
         if getattr(services, "pager", None) is None:
             from .ops.paging import from_env
 
@@ -945,7 +971,42 @@ class FeatureEngine:
                            created_by=approver, background=True, initiative_id=initiative or "",
                            not_duplicate_reason=f"Changes what was built, after incident {incident['incident_id']}")
 
+    def remediation_record(self, product_id: str, window_days: int = 90) -> dict:
+        """How the tool's own fixes went for a product (ops/remediation.py calibration)."""
+        from .ops.remediation import track_record
+
+        return track_record([self._state(r["feature_id"]) for r in self._rows(product_id, "incident")], window_days)
+
     def _release_waits(self, packet: dict) -> dict | None:
+        if packet["wait"] == "flag_step":
+            from .ops import rollout as ro
+            from .ops.correlate import short
+
+            pid, key = packet["product_id"], packet["flag"]
+            comps = {short(c) for c in packet.get("components") or []}
+            touching = []
+            for row in self._rows(pid, "incident"):
+                s = self._state(row["feature_id"])
+                sig_comps = {short(x.get("component") or "") for x in self.services.signals.for_incident(row["feature_id"])}
+                if comps & ({short(s.get("component", ""))} | sig_comps):
+                    touching.append(s)
+            return ro.check(on=self.services.flags.get(pid, key), percent=self.services.flags.percent(pid, key),
+                            since=packet["since"], bake_minutes=int(packet.get("bake_minutes") or 60), incidents=touching,
+                            stub=self.services.settings.mode == "stub")
+        if packet["wait"] == "analysis_report":
+            agents = self.services.agents
+            got = None
+            if agents is not None:
+                got = (agents.rca_report if packet.get("kind") == "rca" else agents.cost_report)(packet["report_id"])
+            status = (got or {}).get("status")
+            if status in ("completed", "failed"):
+                return {"status": "success" if status == "completed" else "failure", "report_status": status,
+                        "report": got.get("report"), "reason": "" if status == "completed" else "the analysis failed"}
+            started = datetime.fromisoformat(str(packet["since"]).replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - started > timedelta(minutes=float(packet.get("minutes") or 10)):
+                return {"status": "failure", "report_status": "timed_out",
+                        "reason": f"no report after {packet.get('minutes')} minutes"}
+            return None
         if packet["wait"] == "incident_recovery":
             from .ops.incident import recovery
 
@@ -1193,7 +1254,7 @@ RAIL = [("discovery", "phase"), ("g1", "gate"), ("spec", "phase"), ("g2", "gate"
 
 
 WAIT_STATION = {"ci": "build", "build": "build", "dev": "build", "staging": "release", "production": "operate",
-                "rollout": "operate", "release_train": "g6"}
+                "rollout": "operate", "flag_step": "operate", "release_train": "g6"}
 EXPEDITED = ("discovery", "g1", "spec", "g2", "design", "g3", "architecture", "g4")
 
 

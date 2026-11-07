@@ -11,6 +11,7 @@ const TYPE: Record<string, { label: string; chip: string; says: string }> = {
 };
 const ACTION: Record<string, string> = {
   deploy: "Released", flag_on: "Launched (flags on)", flag_off: "Flag turned off", rollback: "Rolled back",
+  rollout_step: "Widened", suspend_autonomy: "Suspended the tool's own action", applied_outside: "Changed outside the tool",
 };
 
 function pct(v: number | null): string {
@@ -151,7 +152,10 @@ function ChangeRow({ r, open, toggle }: { r: ChangeRecord; open: boolean; toggle
           <button type="button" className="textlink" aria-expanded={open} onClick={toggle}>
             {ACTION[r.action] ?? r.action}: {r.summary}
           </button>
-          <div className="small faint">{r.id}{r.outcome === "failed" && <span className="chip stop" style={{ marginLeft: 6 }}>Failed</span>}</div>
+          <div className="small faint">
+            {r.id}{r.receipt?.number ? `, ${r.receipt.number}` : ""}
+            {r.outcome === "failed" && <span className="chip stop" style={{ marginLeft: 6 }}>Failed</span>}
+          </div>
         </td>
         <td><span className={`chip ${t.chip}`} title={t.says}>{t.label}</span></td>
         <td className="small">{r.approved_by.join(", ") || "–"}</td>
@@ -165,7 +169,7 @@ function ChangeRow({ r, open, toggle }: { r: ChangeRecord; open: boolean; toggle
           <td colSpan={5}>
             <dl className="kv">
               <dt>What changed</dt>
-              <dd>{r.targets.map((x) => `${x.kind} ${x.name}${x.release ? ` (${x.release})` : ""}${x.on !== undefined ? (x.on ? " on" : " off") : ""}`).join("; ") || "–"}</dd>
+              <dd>{r.targets.map((x) => `${x.kind} ${x.name}${x.release ? ` (${x.release})` : ""}${x.on !== undefined ? (x.on ? " on" : " off") : ""}${x.percent !== undefined && x.percent < 100 ? ` for ${x.percent}% of users` : ""}`).join("; ") || "–"}</dd>
               <dt>Asked for by</dt><dd>{r.requested_by || "–"}</dd>
               <dt>Approvals</dt>
               <dd>{r.approvals.length ? r.approvals.map((a) => `${a.gate.toUpperCase()} ${a.approver}`).join(", ") : r.approved_by.join(", ")}</dd>
@@ -181,6 +185,15 @@ function ChangeRow({ r, open, toggle }: { r: ChangeRecord; open: boolean; toggle
               {r.evidence.triage && <><dt>Why</dt><dd>{r.evidence.triage}</dd></>}
               {r.detail && <><dt>What went wrong</dt><dd>{r.detail}</dd></>}
               {thread && <><dt>Record</dt><dd><Link to={threadPath(thread)}>{thread}</Link></dd></>}
+              {r.receipt && (
+                <>
+                  <dt>ServiceNow</dt>
+                  <dd>
+                    {r.receipt.number ? <>{r.receipt.number} ({r.receipt.status})</> : r.receipt.status.replace("_", " ")}
+                    {r.receipt.detail ? `: ${r.receipt.detail}` : ""}
+                  </dd>
+                </>
+              )}
               <dt>Hash</dt><dd className="mono small">{r.hash.slice(0, 16)}… (after {r.prev_hash.slice(0, 8)}…)</dd>
             </dl>
           </td>

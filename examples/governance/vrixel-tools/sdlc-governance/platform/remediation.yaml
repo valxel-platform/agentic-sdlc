@@ -20,6 +20,37 @@ start_hotfix: true
 # Autonomous mitigations per incident. If it isn't fixed after this many, a person is paged.
 attempts: 1
 
+# A second opinion before the tool acts alone: OpenChoreo's SRE agent investigates the incident
+# (logs, metrics, traces) and the tool acts only when a high-confidence root cause from it points
+# at the same component and a change to it. With no analysis for a product, a person is paged.
+require_agreement: true
+without_analysis: page    # or: suspects (act on the release suspect alone)
+
+# OpenChoreo's agents send the product's telemetry to an AI provider: the one the observability
+# plane's agents are configured with. They run only for data classes that may go to that provider
+# (the tool's data_classes setting in config/models.yaml) and never for data that must stay in an
+# excluded region. OpenChoreo's own fix agent (REMED_AGENT) stays off: it would change production
+# outside this policy and the change log.
+analysis:
+  rca:
+    provider: anthropic
+    exclude_regions: [ap-south-1, ap-south-2]
+    wait_minutes: { sev1: 5, sev2: 8, sev3: 10, sev4: 10 }
+  cost:                   # the FinOps agent: right-sizing for budget alerts (metrics, no logs)
+    provider: anthropic
+  fix_agent: false
+
+# The tool's track record: an action whose automatic uses recovered the incident less often than
+# this is suspended for that product until its record improves.
+calibration: { window_days: 90, min_samples: 5, suspend_below: 0.6 }
+
+# Gradual releases: G6 approves this plan. The tool turns the feature's flag on for this share of
+# users, waits (by the feature's risk tier), and steps up while nothing fails; an incident on its
+# components holds it, and the flag going off (the tool's or on-call's flag off) stops it.
+gradual_release:
+  steps: [5, 25, 50, 100]
+  bake_minutes: { low: 30, high: 60, regulated: 120 }
+
 # How long an incident must stay quiet after a mitigation to count as recovered: no new alert,
 # no error report, and errors in the component's logs below the default exceptions rule.
 quiet_minutes: { sev1: 10, sev2: 15, sev3: 30, sev4: 60 }

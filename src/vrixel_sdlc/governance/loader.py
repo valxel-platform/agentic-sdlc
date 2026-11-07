@@ -157,7 +157,8 @@ class GovernanceLoader:
             pins={"platform": dict(plat), "product": dict(prod),
                   "dependencies": {d: dict(p) for d, p in deps_pins.items()} if not _as_dependency else {}},
             constitution_text=own_text, dependencies=dependencies, aws_catalog=catalog, alert_rules=alert_rules,
-            remediation=remediation_mod.for_product(remediation, runtime),
+            remediation=remediation_mod.for_product(remediation, runtime, product.data_class,
+                                                    self.settings.data_classes),
         )
         with self._lock:
             self._cache[key] = snap

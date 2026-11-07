@@ -106,7 +106,9 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
           {f.initiative_id ? <span>Delivers <Link to={threadPath(f.initiative_id)}>{f.initiative_id}</Link></span> : <span>Unplanned work</span>}
           {f.release?.release_id && <span>In <Link to={threadPath(f.release.release_id)}>{f.release.release_id}</Link></span>}
           {f.release?.production && f.release.flag && (f.release.flag_on
-            ? <span className="chip go" title={f.release.flag}>Live</span>
+            ? (f.release.flag_percent !== undefined && f.release.flag_percent < 100
+              ? <span className="chip run" title={f.release.flag}>Gradual release: on for {f.release.flag_percent}% of users</span>
+              : <span className="chip go" title={f.release.flag}>Live</span>)
             : <span className="chip wait" title={f.release.flag}>In production, flag off</span>)}
           {f.flag && <span>Feature flag <code>{f.flag}</code></span>}
           <span title={f.constitution_version}>Governed by {f.constitution_version?.split("+").length ?? 0} constitutions</span>

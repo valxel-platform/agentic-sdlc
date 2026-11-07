@@ -99,7 +99,8 @@ export interface Feature extends FeatureSummary {
   pull_requests: Record<string, { repo: string; number: number; url: string; state: string; merged_by?: string; review_score?: number; task_id?: string }>;
   change_set: { id?: string; merge_order?: string[]; published?: string[] };
   release: { components?: string[]; packages?: string[]; production?: boolean; promoted_by?: string;
-             flag?: string; flag_on?: boolean | null; release_id?: string };
+             flag?: string; flag_on?: boolean | null; release_id?: string; flag_percent?: number;
+             rollout_plan?: { steps: number[]; step: number; bake_minutes: number; stopped?: boolean } };
   initiative_id?: string;
   flag?: string;
   gate_decisions: GateDecision[];
@@ -198,6 +199,23 @@ export interface IncidentView extends Omit<ThreadBase, "kind"> {
   signals: Signal[]; firing: number; suspects: Suspect[];
   root?: { component: string; why: string };
   paging?: PageSend[];
+  analysis?: Analysis;
+  escalated?: boolean;
+}
+/** OpenChoreo's agent's report on an incident: root causes (SRE agent) or right-sizing (FinOps agent). */
+export interface Analysis {
+  kind?: "rca" | "cost"; status?: "pending" | "completed" | "failed" | "timed_out" | "skipped"; why?: string; report_id?: string;
+  report?: {
+    summary?: string;
+    result?: {
+      type: string; explanation?: string;
+      root_causes?: { summary: string; confidence: "high" | "medium" | "low"; analysis?: string }[];
+      excluded_causes?: { description: string; rationale?: string }[];
+      recommendations?: { recommended_actions?: { description: string }[] };
+    };
+    overprovisioning?: { analysis?: string; recommendation?: { cpu_request: string; cpu_limit: string; memory_request: string;
+                         memory_limit: string; estimated_savings: number; currency: string; rationale: string } };
+  } | null;
 }
 /** What happened to each PagerDuty send for an incident (ops/paging.py). */
 export interface PageSend {
@@ -299,13 +317,14 @@ export interface ProductCost {
 }
 
 export interface ChangeRecord {
-  id: string; at: string; product_id: string; env: string; kind: "release" | "flag" | "rollback";
+  id: string; at: string; product_id: string; env: string; kind: "release" | "flag" | "rollback" | "policy" | "external";
   type: "standard" | "emergency" | "automatic"; action: string; summary: string;
-  targets: { kind: string; name: string; release?: string; on?: boolean }[];
+  targets: { kind: string; name: string; release?: string; on?: boolean; percent?: number }[];
   feature_id: string; release_id: string; incident_id: string; requested_by: string; approved_by: string[];
   approvals: { gate: string; lane: string; approver: string; at: string }[];
   evidence: { pull_requests?: string[]; quality?: Record<string, Record<string, unknown>>; waivers?: unknown[]; triage?: string };
   outcome: "done" | "failed"; detail: string; caused_incidents: string[]; hash: string; prev_hash: string;
+  receipt?: { status: "queued" | "closed" | "open" | "failed" | "not_sent"; number?: string; instance?: string; detail?: string } | null;
 }
 export interface LookbackMonth {
   month: string; incidents: number; by_severity: Record<string, number>; components: Record<string, number>;

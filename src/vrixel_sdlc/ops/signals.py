@@ -128,6 +128,9 @@ def from_openchoreo(payload: dict) -> list[dict]:
     }
     if budget:
         sig["category"] = "cost"
+        sig["labels"] |= {"alertValue": str(value if value is not None else ""),
+                          "alertThreshold": str(threshold if threshold is not None else ""),
+                          "window": str(payload.get("alertWindow") or payload.get("window") or "")}
     return [sig]
 
 

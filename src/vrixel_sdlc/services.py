@@ -65,6 +65,9 @@ class Services:
     changes: object = None  # vrixel_sdlc.ops.changes.ChangeLog: every production change, hash-chained
     inventory_snapshots: object = None  # vrixel_sdlc.ops.inventory snapshots: counts per day, for the trend
     aws_tags: object = None  # vrixel_sdlc.ops.inventory.AwsTags, when VRIXEL_AWS_INVENTORY_ROLE is set
+    agents: object = None  # vrixel_sdlc.integrations.openchoreo_agents: OpenChoreo's SRE and FinOps agents
+    change_receipts: object = None  # vrixel_sdlc.ops.servicenow receipts store: ServiceNow numbers per change
+    remediation_record: object = None  # (product, window_days) -> the tool's own fixes' track record, set by the engine
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime

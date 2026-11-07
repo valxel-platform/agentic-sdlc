@@ -63,6 +63,7 @@ class IncidentState(TypedDict, total=False):
     cost_usd: Annotated[float, operator.add]
     tokens_used: Annotated[int, operator.add]
     auto_attempts: Annotated[int, operator.add]  # mitigations the tool took by itself
+    analysis: Annotated[dict, last]  # OpenChoreo's root-cause (or FinOps) analysis: {kind, report_id, status, report}
     escalated: Annotated[bool, last]  # on-call was paged urgently (or told it waits for them)
 
 
@@ -111,8 +112,13 @@ def stub_triage(ctx: dict) -> str:
     if cost and len(cost) == len(sigs):
         lines.append(f"Spend is above what was planned: {cost[-1].get('detail') or cost[-1]['title']}")
         feature = next((s["labels"].get("feature_id") for s in cost if (s.get("labels") or {}).get("feature_id")), "")
+        rec = ((remediation.report_body(ctx.get("analysis")).get("overprovisioning") or {}).get("recommendation") or {}) \
+            if (ctx.get("analysis") or {}).get("kind") == "cost" else {}
+        sizing = (f" OpenChoreo's FinOps agent recommends cpu {rec.get('cpu_request')}/{rec.get('cpu_limit')}, memory "
+                  f"{rec.get('memory_request')}/{rec.get('memory_limit')}, saving about {rec.get('estimated_savings')} "
+                  f"{rec.get('currency', 'USD')}.") if rec else ""
         actions.append(f"- intent_change: feature: bring {feature or 'the spend'} back within its approved cost "
-                       f"(right-size or cut usage): {cost[-1].get('detail', '')}")
+                       f"(right-size or cut usage): {cost[-1].get('detail', '')}{sizing}")
         actions.append("- monitor: if the spend is expected, accept it and record the new figure")
     elif tickets_only and wants:
         lines.append("The product works as built, but not as users need: the intent should change.")
@@ -176,7 +182,98 @@ def build_incident_graph(services, checkpointer=None):
         except Exception:
             may = []
         return {**state, "signals": signals, "suspects": suspects, "observed": observed,
-                "feedback": state.get("feedback", ""), "may": may}
+                "feedback": state.get("feedback", ""), "may": may, "analysis": state.get("analysis") or {}}
+
+    def target(state: IncidentState) -> dict:
+        """Where the failure is, in OpenChoreo's terms."""
+        snap = services.snapshot(state["product_id"])
+        rt = snap.product.runtime or {}
+        comp = state.get("component", "")
+        name = (rt.get("components") or {}).get(comp, comp).rsplit("/", 1)[-1]
+        pipeline = list(rt.get("pipeline") or ["production"])
+        return {"namespace": rt.get("namespace") or "default", "project": rt.get("openchoreo_project") or "",
+                "component": name, "environment": pipeline[-1]}
+
+    def analyze(state: IncidentState) -> dict:
+        """Ask OpenChoreo's agent to investigate: root cause for a failure, right-sizing for a budget
+        alert. Only where the product's data may go to the agent's AI provider."""
+        if state.get("analysis"):
+            return {}
+        signals = services.incident_signals(state["incident_id"])
+        cost = [s for s in signals if s.get("category") == "cost"]
+        kind = "cost" if cost and len(cost) == len(signals) else "rca"
+        agents = getattr(services, "agents", None)
+        a = (policy(state).get("analysis") or {}).get(kind)
+        base = {"kind": kind, "requested_at": now()}
+        if kind == "rca" and not state.get("component"):
+            return {"analysis": {**base, "status": "skipped", "why": "no component to investigate"}}
+        if a is None or agents is None or not (agents.rca_available() if kind == "rca" else agents.cost_available()):
+            return {"analysis": {**base, "status": "skipped", "why": "OpenChoreo's agent isn't set up for the tool"}}
+        if not a.get("allowed"):
+            return {"analysis": {**base, "status": "skipped", "why": a.get("why_not", "")},
+                    "events": [event("analyze", "not_analyzed", a.get("why_not", ""))]}
+        try:
+            where = target(state)
+            if kind == "rca":
+                first = signals[0] if signals else {}
+                rid = agents.request_rca(alert_id=state["incident_id"], alert_name=state["title"],
+                                         description=str(first.get("detail") or "")[:500],
+                                         value=(first.get("labels") or {}).get("alertValue") or 1,
+                                         at=str(first.get("at") or now()), **where)
+            else:
+                s = next((x for x in cost if (x.get("labels") or {}).get("alertThreshold")), None)
+                if s is None or not s.get("component"):
+                    return {"analysis": {**base, "status": "skipped",
+                                         "why": "a budget finding without a component's figures"}}
+                rid = agents.request_cost(budget=float(s["labels"]["alertThreshold"]),
+                                          actual=float(s["labels"].get("alertValue") or 0),
+                                          period=str(s["labels"].get("window") or "30d"), at=str(s.get("at") or now()),
+                                          **{**where, "component": s["component"].rsplit("/", 1)[-1]})
+        except Exception as exc:
+            return {"analysis": {**base, "status": "skipped", "why": f"{type(exc).__name__}: {exc}"},
+                    "events": [event("analyze", "not_analyzed", f"{type(exc).__name__}: {exc}")]}
+        wait = (a.get("wait_minutes") or remediation.ANALYSIS_WAIT).get(state["severity"], 10)
+        return {"analysis": {**base, "status": "pending", "report_id": rid, "wait_minutes": wait},
+                "events": [event("analyze", "requested", f"OpenChoreo's {'SRE' if kind == 'rca' else 'FinOps'} agent: {rid}")]}
+
+    def analysis_wait(state: IncidentState) -> Command:
+        a = state.get("analysis") or {}
+        if a.get("status") != "pending":
+            return Command(goto="triage")
+        res = interrupt({"type": "external", "wait": "analysis_report", "feature_id": state["incident_id"],
+                         "product_id": state["product_id"], "kind": a["kind"], "report_id": a["report_id"],
+                         "label": "Waiting for OpenChoreo's analysis", "since": a.get("requested_at") or now(),
+                         "minutes": a.get("wait_minutes", 10)})
+        if (done := merged(state)) is not None:
+            return done
+        found = {**a, "status": res.get("report_status") or ("completed" if res.get("status") == "success" else "failed"),
+                 "report": res.get("report"), "why": res.get("reason", "")}
+        summary = str(remediation.report_body(found).get("summary") or found["why"] or found["status"])
+        return Command(goto="triage", update={"analysis": found,
+                                              "events": [event("analyze", found["status"], summary[:300])]})
+
+    def analysis_lines(a: dict) -> list[str]:
+        body = remediation.report_body(a)
+        if not body:
+            return [f"OpenChoreo's analysis: {a.get('status', 'none')}{' (' + a['why'] + ')' if a.get('why') else ''}."]
+        if a.get("kind") == "cost":
+            o = body.get("overprovisioning") or {}
+            r = o.get("recommendation") or {}
+            out = [f"OpenChoreo's FinOps agent: {body.get('summary', '')} {o.get('analysis', '')}".strip()]
+            if r:
+                out.append(f"It recommends cpu {r.get('cpu_request')}/{r.get('cpu_limit')}, memory "
+                           f"{r.get('memory_request')}/{r.get('memory_limit')} (saves about "
+                           f"{r.get('estimated_savings')} {r.get('currency', 'USD')}): {r.get('rationale', '')}")
+            return out
+        res = body.get("result") or {}
+        out = [f"OpenChoreo's root-cause analysis: {body.get('summary', '')}"]
+        for rc in (res.get("root_causes") or [])[:3]:
+            out.append(f"- ({rc.get('confidence')}) {rc.get('summary')}: {rc.get('analysis', '')}")
+        for x in (res.get("excluded_causes") or [])[:3]:
+            out.append(f"- ruled out: {x.get('description')}")
+        for x in ((res.get("recommendations") or {}).get("recommended_actions") or [])[:3]:
+            out.append(f"- it recommends: {x.get('description')}")
+        return out
 
     def triage(state: IncidentState) -> dict:
         ctx = context(state)
@@ -185,6 +282,7 @@ def build_incident_graph(services, checkpointer=None):
             "Signals:", *[f"- [{s['source']} {s['status']} {s['severity']}] {s['title']}: {s.get('detail', '')[:300]}"
                           for s in ctx["signals"][-20:]],
             *([f"Root cause candidate: {ctx['component']} ({ctx['root_why']})."] if ctx.get("root_why") else []),
+            *(analysis_lines(state["analysis"]) if state.get("analysis") else []),
             *[f"Joined because {s['labels']['joined_by']}: {s['title']}"
               for s in ctx["signals"] if (s.get("labels") or {}).get("joined_by")][-5:],
             "Recent changes to the component (most recent first):",
@@ -240,17 +338,86 @@ def build_incident_graph(services, checkpointer=None):
             why = ("the tool's mitigation didn't fix it" if state.get("auto_attempts")
                    else "this product's remediation policy lets the tool take no action by itself")
             return Command(goto="escalate", update={"feedback": why})
+        outside = remediation.applied_outside(state.get("analysis"))
+        if outside:
+            log_outside(state, outside)
+            return Command(goto="escalate", update={"feedback": "OpenChoreo's fix agent changed production outside "
+                                                                "the remediation policy: " + "; ".join(outside)[:300]})
+        record = services.remediation_record(state["product_id"], pol["calibration"]["window_days"]) \
+            if callable(getattr(services, "remediation_record", None)) else {}
+        off = remediation.suspended(record, pol["calibration"]) if record else {}
+        events = []
+        if off:
+            pol = {**pol, "autonomous": {k: v for k, v in pol["autonomous"].items() if k not in off}}
+            events += log_suspension(state, off)
         chosen, why = remediation.choose(state.get("actions") or [],
                                          lambda repo: services.suspects(state["product_id"], repo),
                                          state.get("component", ""), pol)
         if not chosen:
-            return Command(goto="escalate", update={"feedback": why})
+            if off:
+                why = "; ".join(off.values()) + f" ({why})"
+            return Command(goto="escalate", update={"feedback": why, "events": events})
+        ok, why = confident(state, pol, chosen[0])
+        events.append(event("auto", "agreed" if ok else "not_confident", why))
+        if not ok:
+            return Command(goto="escalate", update={"feedback": why, "events": events})
         rec = {"gate": "remediation", "lane": state["product_id"], "at": now(), "decision": "approve",
                "approver": remediation.AGENT, "action_ids": [a["id"] for a in chosen]}
         return Command(goto="act", update={
             "actions": chosen, "auto_attempts": 1, "status": "mitigating", "gate_decisions": [rec],
-            "events": [event("auto", "mitigating", ", ".join(f"{a['type']} {a.get('feature_id') or a.get('component') or a.get('repo', '')}".strip()
-                                                             for a in chosen), approver=remediation.AGENT)]})
+            "events": events + [event("auto", "mitigating", ", ".join(
+                f"{a['type']} {a.get('feature_id') or a.get('component') or a.get('repo', '')}".strip() for a in chosen),
+                approver=remediation.AGENT)]})
+
+    def confident(state: IncidentState, pol: dict, action: dict) -> tuple[bool, str]:
+        """Two independent sources before the tool acts alone (policy `require_agreement`)."""
+        if not pol.get("require_agreement", True):
+            return True, "the policy lets the tool act on the release suspect alone"
+        a = state.get("analysis") or {}
+        if a.get("kind") == "rca" and a.get("status") not in (None, "skipped"):
+            comp = action.get("component") if action["type"] == "rollback" else state.get("component", "")
+            return remediation.agreement(a if a.get("status") == "completed" else {"status": a.get("status")},
+                                         comp or state.get("component", ""))
+        if pol.get("without_analysis") == "suspects":
+            return True, f"no root-cause analysis ({a.get('why') or 'not set up'}); the policy lets the tool act on the release suspect alone"
+        return False, f"no second opinion: OpenChoreo's root-cause analysis didn't run ({a.get('why') or 'not set up'})"
+
+    def log_suspension(state: IncidentState, off: dict[str, str]) -> list[dict]:
+        out = []
+        log = getattr(services, "changes", None)
+        for action, why in off.items():
+            out.append(event("auto", "suspended", why))
+            if log is None:
+                continue
+            from . import changes
+
+            try:
+                log.record(changes.new(
+                    key=f"{state['product_id']}:suspend:{action}:{why}", product_id=state["product_id"], kind="policy",
+                    type="automatic", action="suspend_autonomy", summary=f"Suspended the tool's own {action.replace('_', ' ')}",
+                    targets=[{"kind": "policy", "name": f"autonomous.{action}"}], incident_id=state["incident_id"],
+                    requested_by=remediation.AGENT, approved_by=["platform/remediation.yaml (calibration)"],
+                    evidence={"track_record": why}, detail=why))
+            except Exception:
+                pass
+        return out
+
+    def log_outside(state: IncidentState, applied: list[str]) -> None:
+        log = getattr(services, "changes", None)
+        if log is None:
+            return
+        from . import changes
+
+        try:
+            log.record(changes.new(
+                key=f"{state['incident_id']}:outside:{(state.get('analysis') or {}).get('report_id', '')}",
+                product_id=state["product_id"], kind="external", type="automatic", action="applied_outside",
+                summary=f"{state['incident_id']}: OpenChoreo's fix agent changed production",
+                targets=[{"kind": "component", "name": state.get("component", "")}], incident_id=state["incident_id"],
+                requested_by="openchoreo:sre-agent", approved_by=[], evidence={"actions": applied},
+                detail="Applied outside the remediation policy; turn REMED_AGENT off"))
+        except Exception:
+            pass
 
     def escalate(state: IncidentState) -> Command:
         """The tool can't fix it: page on-call urgently, unless nothing is down."""
@@ -474,6 +641,8 @@ def build_incident_graph(services, checkpointer=None):
         return Command(goto=END, update={"gate_decisions": [rec], "status": "closed", "record_pr": pr, "events": events})
 
     g = StateGraph(IncidentState)
+    g.add_node("analyze", analyze)
+    g.add_node("analysis_wait", analysis_wait, destinations=("triage", END))
     g.add_node("triage", triage)
     g.add_node("auto", auto, destinations=("act", "escalate", "decide", END))
     g.add_node("escalate", escalate, destinations=("decide",))
@@ -482,7 +651,8 @@ def build_incident_graph(services, checkpointer=None):
     g.add_node("monitor", monitor, destinations=("postmortem", "decide", "escalate", "triage", END))
     g.add_node("postmortem", postmortem)
     g.add_node("close", close, destinations=("postmortem", END))
-    g.add_edge(START, "triage")
+    g.add_edge(START, "analyze")
+    g.add_edge("analyze", "analysis_wait")
     g.add_edge("triage", "auto")
     g.add_edge("postmortem", "close")
     return g.compile(checkpointer=checkpointer, name="vrixel_incident")

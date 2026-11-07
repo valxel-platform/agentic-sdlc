@@ -219,3 +219,19 @@ def test_the_change_log_chains_in_postgres_and_shows_tampering():
         snaps.put({"product_id": "AG", "day": "2026-11-06", "per_env": {}, "unmanaged": 1})
         snaps.put({"product_id": "AG", "day": "2026-11-06", "per_env": {}, "unmanaged": 2})
         assert [(h["day"], h["unmanaged"]) for h in snaps.history("AG")] == [("2026-11-05", 0), ("2026-11-06", 2)]
+
+
+def test_servicenow_receipts_are_kept_in_postgres():
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from vrixel_sdlc.ops.servicenow import PostgresReceipts
+
+    with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        with pool.connection() as conn:
+            conn.execute("DROP TABLE IF EXISTS vrixel_change_receipts")
+        store = PostgresReceipts(pool)
+        store.put("CHG-1", {"status": "queued"})
+        store.put("CHG-1", {"status": "closed", "number": "CHG0030001"})
+        got = store.get(["CHG-1", "CHG-2"])
+        assert list(got) == ["CHG-1"] and got["CHG-1"]["number"] == "CHG0030001" and store.get([]) == {}
