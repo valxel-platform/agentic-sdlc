@@ -50,6 +50,11 @@ calibration: { window_days: 90, min_samples: 5, suspend_below: 0.6 }
 gradual_release:
   steps: [5, 25, 50, 100]
   bake_minutes: { low: 30, high: 60, regulated: 120 }
+  # Users with the feature on against users with it off (the backend templates log both sides'
+  # requests and failures each minute). A regression stops the release at once, before the bake
+  # time ends: the tool turns the flag off (when flag_off is autonomous above), else on-call is
+  # paged. Checked every half minute, so the bar is high.
+  compare: { min_requests: 200, z: 3.0, min_increase: 0.005, relative: 1.25 }
 
 # How long an incident must stay quiet after a mitigation to count as recovered: no new alert,
 # no error report, and errors in the component's logs below the default exceptions rule.

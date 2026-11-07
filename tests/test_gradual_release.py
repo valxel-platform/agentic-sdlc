@@ -149,3 +149,140 @@ def test_flipt_gets_a_threshold_rollout_and_off_means_off_for_everyone():
     n = len(fake.puts)
     f.set("f", True, actor="x")
     assert len(fake.puts) == n  # nothing to change
+
+
+def launch(eng):
+    a = eng.create(product_id="AG", title="Offline crop log")
+    b = eng.create(product_id="AG", title="Soil sensor import")
+    rid = eng.create_release(product_id="AG", title="Spring season", model="launch", features=[a, b])
+    eng.auto_drive(a)
+    eng.auto_drive(b)
+    g = next(p for p in eng.pending(rid) if p.get("gate") == "release")
+    eng.decide(rid, g["interrupt_id"], {"decision": "approve", "approver": "rm"})
+    keys = [eng.view(f)["release"]["flag"] for f in (a, b)]
+    return rid, a, b, keys
+
+
+def test_a_launch_widens_every_flag_together(eng, real_time):
+    rid, a, b, keys = launch(eng)
+    flags = eng.services.flags
+    assert [flags.percent("AG", k) for k in keys] == [5.0, 5.0] and eng.view(rid)["status"] == "approved"
+    [w] = [p for p in eng.pending(rid) if p.get("wait") == "flag_step"]
+    assert w["flags"] == sorted(keys) and w["label"].startswith("Gradual launch: on for 5%")
+    bake = eng._state(rid)["rollout_plan"]["bake_minutes"]
+    for _ in range(3):
+        real_time["t"] += timedelta(minutes=bake + 1)
+        eng.poke_now(rid)
+    assert [flags.percent("AG", k) for k in keys] == [100.0, 100.0] and eng.view(rid)["status"] == "shipped"
+    steps = [r for r in eng.services.changes.list("AG") if r["action"] == "rollout_step" and r["release_id"] == rid]
+    assert [r["targets"][0]["percent"] for r in steps] == [25.0, 50.0, 100.0] and len(steps[0]["targets"]) == 2
+    launch_rec = next(r for r in eng.services.changes.list("AG") if r["action"] == "flag_on")
+    assert all(t["percent"] == 5.0 for t in launch_rec["targets"])
+
+
+def test_a_flag_turned_off_stops_the_launch_for_the_release_managers(eng, real_time):
+    rid, a, b, keys = launch(eng)
+    eng.services.flags.set("AG", keys[1], False, actor="oncall-1")  # an incident turned one off
+    real_time["t"] += timedelta(minutes=200)
+    eng.poke_now(rid)
+    esc = next(p for p in eng.pending(rid) if p["type"] == "escalation")
+    assert esc["wait"] == "launch_rollout" and keys[1] in esc["reason"]
+    eng.decide(rid, esc["interrupt_id"], {"decision": "abort", "approver": "rm"})
+    assert eng.view(rid)["status"] == "cancelled"
+    assert [eng.services.flags.percent("AG", k) for k in keys] == [0.0, 0.0]  # cancelled: off for everyone
+    off = next(r for r in eng.services.changes.list("AG") if r["action"] == "flag_off" and r["release_id"] == rid)
+    assert off["approved_by"] == ["rm"] and len(off["targets"]) == 2
+
+
+# --------------------------------------------------------------------------- comparing on against off
+
+from vrixel_sdlc.ops import cohorts  # noqa: E402
+from vrixel_sdlc.ops import paging  # noqa: E402
+
+
+def test_the_summary_lines_add_up_and_the_test_is_conservative():
+    f = "emr.f"
+    lines = [cohorts.line(f, (100, 1), (900, 4)), cohorts.line(f, (120, 0), (880, 5)), cohorts.line("other", (5, 5), (5, 0)),
+             '{"message": "vrixel.flag_cohorts {\\"flag\\": \\"emr.f\\", \\"on\\": {\\"requests\\": 10, \\"errors\\": 0}, '
+             '\\"off\\": {\\"requests\\": 10, \\"errors\\": 0}}"}', "unrelated", "vrixel.flag_cohorts {not json"]
+    got = cohorts.parse(lines, [f])[f]
+    assert got == {"on": {"requests": 230, "errors": 1}, "off": {"requests": 1790, "errors": 9}, "lines": 3}
+    assert cohorts.compare(got)["verdict"] == "ok"
+    bad = {"on": {"requests": 400, "errors": 24}, "off": {"requests": 4000, "errors": 20}}
+    r = cohorts.compare(bad)
+    assert r["verdict"] == "regression" and r["on_rate"] == 0.06 and r["off_rate"] == 0.005 and r["z"] > 3
+    assert "6.00% of requests failed with it on (24/400)" in cohorts.describe(f, r)
+    few = {"on": {"requests": 50, "errors": 10}, "off": {"requests": 4000, "errors": 20}}
+    assert cohorts.compare(few)["verdict"] == "too_few"  # 20% is alarming, but 50 requests isn't enough to say
+    tiny = {"on": {"requests": 4000, "errors": 21}, "off": {"requests": 40000, "errors": 160}}
+    assert cohorts.compare(tiny)["verdict"] == "ok"  # 0.5% against 0.4%: not worth stopping a release for
+    assert cohorts.compare({"on": {"requests": 300, "errors": 6}, "off": {"requests": 3000, "errors": 0}})["verdict"] == "regression"
+
+
+@pytest.fixture
+def watched(eng, real_time):
+    eng.services.cohort_logs = cohorts.StubLogs()
+    eng.services.pager = paging.RecordingPager({"EMR": "k", "AG": "k"}, "https://sdlc")
+    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    eng.auto_drive(fid)
+    return eng, fid, eng.view(fid)["release"]["flag"]
+
+
+def test_users_with_it_on_failing_more_stops_it_and_the_tool_turns_it_off(watched):
+    eng, fid, key = watched
+    eng.services.cohort_logs.by_component["emr-intake-api"] = [cohorts.line(key, (400, 24), (4000, 20))]
+    eng.poke_now(fid)  # within the bake time: the comparison doesn't wait for it
+    assert eng.services.flags.percent("EMR", key) == 0.0
+    esc = next(p for p in eng.pending(fid) if p["type"] == "escalation")
+    assert "users with it on fail more" in esc["reason"] and "The tool turned the flag off" in esc["reason"]
+    off = next(r for r in eng.services.changes.list("EMR") if r["action"] == "flag_off")
+    assert off["type"] == "automatic" and off["evidence"]["cohorts"]["verdict"] == "regression"
+    assert eng.services.pager.sent == []  # nothing left on: no page
+    eng.decide(fid, esc["interrupt_id"], {"decision": "resolved", "approver": "rm"})
+    v = eng.view(fid)
+    assert v["release"]["flag_on"] is False and v["release"]["rollout_plan"]["stopped"]
+
+
+def test_without_flag_off_autonomy_it_pages_instead(tmp_path, real_time):
+    root = tmp_path / "g"
+    shutil.copytree(EXAMPLES, root)
+    gov = root / "vrixel-emr" / "emr-governance" / "product.yaml"
+    gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {autonomous: [rollback]}\n", 1))
+    s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local", governance_root=root)
+    eng = FeatureEngine(build_services(s), InMemorySaver())
+    eng.services.cohort_logs = cohorts.StubLogs()
+    eng.services.pager = paging.RecordingPager({"EMR": "k"}, "https://sdlc")
+    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    eng.auto_drive(fid)
+    key = eng.view(fid)["release"]["flag"]
+    eng.services.cohort_logs.by_component["emr-intake-api"] = [cohorts.line(key, (400, 24), (4000, 20))]
+    eng.poke_now(fid)
+    assert eng.services.flags.percent("EMR", key) == 5.0  # left on: a person decides
+    [page] = [x for x in eng.services.pager.sent if x["dedup_key"] == f"{fid}:urgent"]
+    assert "its users fail more" in page["payload"]["summary"]
+
+
+def test_a_healthy_comparison_is_kept_with_each_step_and_no_lines_means_time_alone(watched, real_time):
+    eng, fid, key = watched
+    eng.services.cohort_logs.by_component["emr-intake-api"] = [cohorts.line(key, (400, 1), (4000, 12))]
+    bake = eng.view(fid)["release"]["rollout_plan"]["bake_minutes"]
+    real_time["t"] += timedelta(minutes=bake + 1)
+    eng.poke_now(fid)
+    [h] = eng.view(fid)["release"]["rollout_plan"]["history"]
+    assert h["percent"] == 5.0 and "0.25% of requests failed with it on" in h["cohorts"]
+    eng.services.cohort_logs.by_component.clear()
+    real_time["t"] += timedelta(minutes=bake + 1)
+    eng.poke_now(fid)
+    assert eng.view(fid)["release"]["rollout_plan"]["history"][-1]["cohorts"].startswith("no comparison")
+
+
+def test_a_launch_turns_off_only_the_flag_whose_users_fail_more(eng, real_time):
+    eng.services.cohort_logs = cohorts.StubLogs()
+    rid, a, b, keys = launch(eng)
+    comps = eng.feature_info(a)["components"] + eng.feature_info(b)["components"]
+    eng.services.cohort_logs.by_component[comps[0].rsplit("/", 1)[-1]] = [
+        cohorts.line(keys[0], (400, 1), (4000, 10)), cohorts.line(keys[1], (400, 30), (4000, 10))]
+    eng.poke_now(rid)
+    assert eng.services.flags.percent("AG", keys[0]) == 5.0 and eng.services.flags.percent("AG", keys[1]) == 0.0
+    esc = next(p for p in eng.pending(rid) if p["type"] == "escalation")
+    assert keys[1] in esc["reason"] and keys[0] not in esc["reason"].split("users with it on fail more:")[1]

@@ -178,6 +178,11 @@ class FeatureEngine:
 
             services.agents = agents_from_env(services.settings, openchoreo_auth())
         services.remediation_record = self.remediation_record
+        services.feature_info = self.feature_info
+        if getattr(services, "cohort_logs", None) is None:
+            from .ops.cohorts import from_env as cohorts_from_env
+
+            services.cohort_logs = cohorts_from_env(openchoreo_auth())
         if getattr(services, "pager", None) is None:
             from .ops.paging import from_env
 
@@ -971,6 +976,36 @@ class FeatureEngine:
                            created_by=approver, background=True, initiative_id=initiative or "",
                            not_duplicate_reason=f"Changes what was built, after incident {incident['incident_id']}")
 
+    def _cohorts(self, product_id: str, flags: list[str], packet: dict) -> dict:
+        """Users with each flag on against off, since the step began (ops/cohorts.py). Empty
+        when there's no log source or no summary lines (a UI-only feature)."""
+        from .ops import cohorts as co
+        from .ops.correlate import short
+        from .ops.rollout import _at, _clock
+
+        logs = getattr(self.services, "cohort_logs", None)
+        if logs is None or not packet.get("components"):
+            return {}
+        try:
+            rt = self.services.snapshot(product_id).product.runtime or {}
+            since = _at(packet["since"]) or _clock()
+            lines: list[str] = []
+            for repo in packet["components"]:
+                lines += logs.lines(namespace=rt.get("namespace") or "default", project=rt.get("openchoreo_project") or "",
+                                    component=short((rt.get("components") or {}).get(repo, repo)),
+                                    environment=list(rt.get("pipeline") or ["production"])[-1], since=since, until=_clock())
+        except Exception:
+            return {}
+        counts = co.parse(lines, flags)
+        return {k: co.compare(c, packet.get("compare")) for k, c in counts.items() if c["lines"]}
+
+    def feature_info(self, feature_id: str) -> dict:
+        """A feature's risk tier and production components (repos), for a launch's gradual release."""
+        s = self._state(feature_id)
+        comps = sorted({d.get("repo") for d in (s.get("deployments") or {}).values()
+                        if d.get("env") == "production" and d.get("kind") not in ("resource", "store") and d.get("repo")})
+        return {"risk_tier": s.get("risk_tier"), "components": comps}
+
     def remediation_record(self, product_id: str, window_days: int = 90) -> dict:
         """How the tool's own fixes went for a product (ops/remediation.py calibration)."""
         from .ops.remediation import track_record
@@ -990,9 +1025,23 @@ class FeatureEngine:
                 sig_comps = {short(x.get("component") or "") for x in self.services.signals.for_incident(row["feature_id"])}
                 if comps & ({short(s.get("component", ""))} | sig_comps):
                     touching.append(s)
-            return ro.check(on=self.services.flags.get(pid, key), percent=self.services.flags.percent(pid, key),
-                            since=packet["since"], bake_minutes=int(packet.get("bake_minutes") or 60), incidents=touching,
-                            stub=self.services.settings.mode == "stub")
+            keys = list(packet.get("flags") or [key])
+            off = [k for k in keys if self.services.flags.get(pid, k) is False or self.services.flags.percent(pid, k) == 0]
+            if off:
+                return {"status": "failure", "reason": f"{', '.join(off)} {'was' if len(off) == 1 else 'were'} turned off"}
+            cohorts = self._cohorts(pid, keys, packet)
+            worse = {k: r for k, r in cohorts.items() if r["verdict"] == "regression"}
+            if worse:
+                from .ops.cohorts import describe
+
+                return {"status": "failure", "regression": worse,
+                        "reason": "users with it on fail more: " + "; ".join(describe(k, r) for k, r in worse.items())}
+            res = ro.check(on=self.services.flags.get(pid, key), percent=self.services.flags.percent(pid, key),
+                           since=packet["since"], bake_minutes=int(packet.get("bake_minutes") or 60), incidents=touching,
+                           stub=self.services.settings.mode == "stub")
+            if res and res.get("status") == "success":
+                res["cohorts"] = cohorts
+            return res
         if packet["wait"] == "analysis_report":
             agents = self.services.agents
             got = None

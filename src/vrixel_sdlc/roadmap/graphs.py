@@ -245,6 +245,7 @@ class ReleaseState(TypedDict, total=False):
     evidence: Annotated[str, last]
     lanes: Annotated[list[str], last]
     flags: Annotated[dict, last]
+    rollout_plan: Annotated[dict, last]  # a gradual launch: the plan the release gate approved (ops/rollout.py)
     approved_by: Annotated[str, last]
     gate_decisions: Annotated[list[dict], operator.add]
     events: Annotated[list[dict], operator.add]
@@ -338,12 +339,26 @@ def build_release_graph(services, checkpointer=None):
         events = [event("release", "approved", approver=approvers, lanes=order)]
         status = "approved"
         note = " Its features now promote to production."
+        plan = None
         if state["model"] == "launch":
+            from ..ops.rollout import TIERS_BY_RISK, percent_label, plan_for
+
             failed = []
+            # A gradual launch when the platform asks for one: the release gate approves the plan for
+            # the whole group, held to its riskiest feature's bake time.
+            info = getattr(services, "feature_info", None)
+            tiers = [(info(f) if callable(info) else {}).get("risk_tier") for f in (state.get("flags") or {})]
+            tier = max((t for t in tiers if t in TIERS_BY_RISK), key=TIERS_BY_RISK.index, default=None)
+            plan = plan_for(getattr(snap, "remediation", None), tier) if state.get("flags") else None
+            first = plan["steps"][0] if plan else 100.0
             for fid, key in (state.get("flags") or {}).items():
                 try:
-                    services.flags.set(state["product_id"], key, True, actor=approvers)
-                    events.append(event("release", "flag_on", key, feature=fid))
+                    if plan:
+                        services.flags.set_percent(state["product_id"], key, first, actor=approvers)
+                    else:
+                        services.flags.set(state["product_id"], key, True, actor=approvers)
+                    events.append(event("release", "flag_on", f"{key}{' for ' + percent_label(first) if plan else ''}",
+                                        feature=fid))
                 except Exception as exc:
                     failed.append(key)
                     events.append(event("release", "flag_failed", f"Couldn't turn on {key}: {exc}", feature=fid))
@@ -357,29 +372,149 @@ def build_release_graph(services, checkpointer=None):
                     stored = services.changes.record(new_change(
                         key=f"{state['release_id']}:launch", product_id=state["product_id"], kind="release",
                         type="standard", action="flag_on", summary=f"{state['release_id']} launch: {', '.join(f for f, _ in on)}",
-                        targets=[{"kind": "flag", "name": k, "on": True, "feature_id": f} for f, k in on],
+                        targets=[{"kind": "flag", "name": k, "on": True, "feature_id": f,
+                                  **({"percent": first} if plan else {})} for f, k in on],
                         release_id=state["release_id"], approved_by=[a for a in approvers.split(", ") if a],
                         approvals=[{"gate": "release", "lane": r.get("lane", ""), "approver": r.get("approver", ""),
-                                    "at": r.get("at", "")} for r in records]))
+                                    "at": r.get("at", "")} for r in records],
+                        evidence={"gradual_release": {k: plan[k] for k in ("steps", "bake_minutes", "risk_tier")}} if plan else {}))
                     events.append(event("release", "change_recorded", f"{stored['id']}: launch"))
                 except Exception as exc:
                     events.append(event("release", "change_not_recorded", f"{type(exc).__name__}: {exc}"))
             status = "shipped"
             note = " Flags are on: the features are live."
+            if plan and on:
+                status = "approved"  # shipped once every flag is on for everyone
+                note = (f" Flags are on for {percent_label(first)} of users, then "
+                        f"{', '.join(percent_label(s) for s in plan['steps'][1:])}, each after {plan['bake_minutes']} quiet minutes.")
+            else:
+                plan = None
             if held:
                 note += f" {', '.join(held)} had no flag and now promote{'s' if len(held) == 1 else ''} to production."
             if failed:
                 note += f" Turn on {', '.join(failed)} in Flipt: the pipeline couldn't."
         done = {**state, "approved_by": approvers}
         events += record(done, status, f"{state['release_id']} approved by {approvers}." + note)
-        return Command(goto=END, update={"gate_decisions": records, "status": status, "approved_by": approvers,
-                                         "events": events})
+        update = {"gate_decisions": records, "status": status, "approved_by": approvers, "events": events}
+        if plan:
+            from ..ops.rollout import _clock as rollout_clock
+
+            update["rollout_plan"] = {**plan, "at": rollout_clock().isoformat(), "approved_by": approvers}
+            return Command(goto="launch_rollout", update=update)
+        return Command(goto=END, update=update)
+
+    def launch_rollout(state: ReleaseState) -> Command:
+        """Widen every flag of the launch together, per the plan its gate approved."""
+        from ..graph.pipeline import ESCALATION_DECISIONS, normalize
+        from ..ops import rollout as ro
+        from ..ops.changes import new as new_change
+        from ..ops.remediation import ROLLOUT_AGENT
+
+        plan = dict(state.get("rollout_plan") or {})
+        flags = dict(state.get("flags") or {})
+        steps, step = list(plan.get("steps") or [100.0]), int(plan.get("step", 0))
+        if not flags or step >= len(steps) - 1:
+            return Command(goto=END, update={"status": "shipped"})
+        info = getattr(services, "feature_info", None)
+        components = sorted({c for f in flags for c in ((info(f) if callable(info) else {}).get("components") or [])})
+        res = interrupt({"type": "external", "wait": "flag_step", "feature_id": state["release_id"],
+                         "product_id": state["product_id"], "title": state["title"], "flags": sorted(flags.values()),
+                         "flag": sorted(flags.values())[0], "percent": steps[step], "components": components,
+                         "since": plan.get("at") or ro._clock().isoformat(), "bake_minutes": plan["bake_minutes"],
+                         "compare": plan.get("compare") or {},
+                         "label": f"Gradual launch: on for {ro.percent_label(steps[step])}, watching"})
+        approved = [a for a in str(plan.get("approved_by") or state.get("approved_by") or "").split(", ") if a]
+
+        def change(pct: float, by: str, who: list[str], n: int, why: str) -> list[dict]:
+            if getattr(services, "changes", None) is None:
+                return []
+            try:
+                stored = services.changes.record(new_change(
+                    key=f"{state['release_id']}:launch:{n}:{pct:g}", product_id=state["product_id"], kind="flag",
+                    type="standard", action="rollout_step",
+                    summary=f"{state['release_id']} launch: on for {ro.percent_label(pct)}",
+                    targets=[{"kind": "flag", "name": k, "on": True, "percent": pct, "feature_id": f} for f, k in flags.items()],
+                    release_id=state["release_id"], requested_by=by, approved_by=who,
+                    evidence={"plan": steps, "why": why}))
+                return [event("launch_rollout", "change_recorded", f"{stored['id']}: {stored['summary']}")]
+            except Exception as exc:
+                return [event("launch_rollout", "change_not_recorded", f"{type(exc).__name__}: {exc}")]
+
+        if res.get("status") == "success":
+            nxt = steps[step + 1]
+            try:
+                for key in flags.values():
+                    services.flags.set_percent(state["product_id"], key, nxt, actor=ROLLOUT_AGENT)
+            except Exception as exc:
+                res = {"status": "failure", "reason": f"couldn't widen the flags: {type(exc).__name__}: {exc}"}
+            else:
+                plan |= {"step": step + 1, "at": ro._clock().isoformat(),
+                         "history": list(plan.get("history") or []) + [{"percent": steps[step], "until": res.get("at", "")}]}
+                events = [event("launch_rollout", "widened", f"{', '.join(flags.values())} on for {ro.percent_label(nxt)}")]
+                events += change(nxt, ROLLOUT_AGENT, approved, int(plan.get("attempt", 0)),
+                                 f"quiet for {plan['bake_minutes']} minutes at {ro.percent_label(steps[step])}")
+                done = step + 1 >= len(steps) - 1
+                if done:
+                    events += record({**state, "approved_by": state.get("approved_by", "")}, "shipped",
+                                     f"{state['release_id']}: every flag is on for everyone after a gradual launch.")
+                return Command(goto=END if done else "launch_rollout",
+                               update={"rollout_plan": plan, "events": events, **({"status": "shipped"} if done else {})})
+        pre: list[dict] = []
+        if res.get("regression"):
+            pre, said = ro.on_regression(services, product_id=state["product_id"], thread_id=state["release_id"],
+                                         title=f"{state['release_id']} {state['title']}", flags=flags, res=res,
+                                         policy=getattr(services.snapshot(state["product_id"]), "remediation", None),
+                                         release_id=state["release_id"])
+            res = {**res, "reason": f"{res.get('reason', '')}. {said}"}
+        d = normalize(interrupt({
+            "type": "escalation", "phase": "delivery", "wait": "launch_rollout", "feature_id": state["release_id"],
+            "product_id": state["product_id"], "title": state["title"],
+            "reason": f"The gradual launch stopped at {ro.percent_label(steps[step])}: {res.get('reason', '')}. "
+                      "Retry starts every flag again from the first step; resolved leaves them as they are; "
+                      "abort cancels the launch and turns its flags off.",
+            "findings": [], "results": [], "allowed": list(ESCALATION_DECISIONS)}), ESCALATION_DECISIONS)
+        rec = {"gate": "escalation:delivery:launch_rollout", "lane": state["product_id"], "at": now(), **d}
+        if d["decision"] == "retry":
+            for key in flags.values():
+                services.flags.set_percent(state["product_id"], key, steps[0], actor=d["approver"])
+            attempt = int(plan.get("attempt", 0)) + 1
+            plan |= {"step": 0, "at": ro._clock().isoformat(), "attempt": attempt}
+            return Command(goto="launch_rollout", update={
+                "rollout_plan": plan, "gate_decisions": [rec],
+                "events": pre + [event("launch_rollout", "restarted", res.get("reason", ""), approver=d["approver"])]
+                + change(steps[0], d["approver"], [d["approver"]], attempt, f"restarted after: {res.get('reason', '')}")})
+        final = "cancelled" if d["decision"] == "abort" else "shipped"
+        extra = []
+        if final == "cancelled":  # a cancelled launch is off for everyone
+            for key in flags.values():
+                try:
+                    services.flags.set(state["product_id"], key, False, actor=d["approver"])
+                except Exception as exc:
+                    extra.append(event("launch_rollout", "flag_failed", f"Couldn't turn off {key}: {exc}"))
+            if getattr(services, "changes", None) is not None:
+                try:
+                    stored = services.changes.record(new_change(
+                        key=f"{state['release_id']}:launch:cancelled", product_id=state["product_id"], kind="flag",
+                        type="standard", action="flag_off", summary=f"{state['release_id']} launch cancelled: flags off",
+                        targets=[{"kind": "flag", "name": k, "on": False, "feature_id": f} for f, k in flags.items()],
+                        release_id=state["release_id"], requested_by=d["approver"], approved_by=[d["approver"]],
+                        evidence={"why": res.get("reason", "")}))
+                    extra.append(event("launch_rollout", "change_recorded", f"{stored['id']}: {stored['summary']}"))
+                except Exception as exc:
+                    extra.append(event("launch_rollout", "change_not_recorded", f"{type(exc).__name__}: {exc}"))
+        return Command(goto=END, update={
+            "rollout_plan": {**plan, "stopped": True}, "gate_decisions": [rec], "status": final,
+            "events": pre + extra + [event("launch_rollout", "stopped" if d["decision"] == "abort" else "left_as_is",
+                             d.get("feedback", "") or res.get("reason", ""), approver=d["approver"])]
+            + record(state, final, f"{state['release_id']}: the gradual launch stopped at {ro.percent_label(steps[step])} "
+                                   f"({res.get('reason', '')}); {d['approver']} {'cancelled it' if final == 'cancelled' else 'left it as it is'}.")})
 
     g = StateGraph(ReleaseState)
     g.add_node("plan", plan)
     g.add_node("wait_ready", wait_ready)
     g.add_node("notes", notes)
-    g.add_node("gate", gate, destinations=(END,))
+    g.add_node("gate", gate, destinations=("launch_rollout", END))
+    g.add_node("launch_rollout", launch_rollout, destinations=("launch_rollout", END))
     g.add_edge(START, "plan")
     g.add_edge("plan", "wait_ready")
     g.add_conditional_edges("wait_ready", route_after_wait, ["notes", END])
