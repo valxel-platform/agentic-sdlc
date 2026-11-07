@@ -154,6 +154,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..ops.changes import PostgresChangeLog
 
         services.changes = PostgresChangeLog(pool)
+        from ..ops.servicenow import PostgresReceipts
+
+        services.change_receipts = PostgresReceipts(pool)
         from ..ops.inventory import PostgresSnapshots
 
         services.inventory_snapshots = PostgresSnapshots(pool)
@@ -647,7 +650,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         caused: dict[str, list[str]] = {}
         for x in log.links(product_id or None):
             caused.setdefault(x["change_id"], []).append(x["incident_id"])
-        return [{**r, "caused_incidents": caused.get(r["id"], [])} for r in rows]
+        receipts = eng().services.change_receipts.get([r["id"] for r in rows])
+        return [{**r, "caused_incidents": caused.get(r["id"], []), "receipt": receipts.get(r["id"])} for r in rows]
 
     @api.get("/changes")
     def list_changes(user: User = Depends(current_user), product_id: str | None = None, since: str | None = None,
@@ -668,14 +672,15 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         w = csv.writer(buf)
         w.writerow(["id", "at", "product", "environment", "kind", "type", "action", "summary", "targets", "feature",
                     "release", "incident", "requested_by", "approved_by", "approvals", "pull_requests", "outcome",
-                    "caused_incidents", "prev_hash", "hash"])
+                    "caused_incidents", "servicenow", "prev_hash", "hash"])
         for r in change_rows(user, product_id, since, until):
             w.writerow([r["id"], r["at"], r["product_id"], r["env"], r["kind"], r["type"], r["action"], r["summary"],
                         "; ".join(f"{x.get('kind')}:{x.get('name')}" for x in r["targets"]), r["feature_id"],
                         r["release_id"], r["incident_id"], r["requested_by"], "; ".join(r["approved_by"]),
                         "; ".join(f"{a['gate']}:{a['approver']}" for a in r["approvals"]),
                         "; ".join((r.get("evidence") or {}).get("pull_requests") or []), r["outcome"],
-                        "; ".join(r["caused_incidents"]), r["prev_hash"], r["hash"]])
+                        "; ".join(r["caused_incidents"]), (r.get("receipt") or {}).get("number", ""),
+                        r["prev_hash"], r["hash"]])
         name = f"changes-{product_id or 'all'}.csv"
         return Response(buf.getvalue(), media_type="text/csv",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})

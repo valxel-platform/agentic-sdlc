@@ -49,11 +49,13 @@ providers:
   # VRIXEL_FLIPT_TOKEN_<PRODUCT_ID>, allowed to read and change that product's flags.
   flags:
     flipt: { token_env_prefix: VRIXEL_FLIPT_TOKEN_ }
+  change_management:
+    servicenow: { auth_env_prefix: VRIXEL_SERVICENOW_AUTH_ }   # the organization's own ServiceNow
 
 # Which providers may receive content from a lane of each data class. Agents never put PHI or
 # card data in diagrams or tickets, but design detail of regulated systems still leaves the
 # platform, so add a SaaS provider here only once a vendor agreement (BAA, DPA) covers it.
 data_classes:
-  general: [lucid, drawio, jira, openproject, flipt]
-  phi: [drawio, openproject, flipt]          # Flipt is self-hosted in the product's runtime
-  payments: [drawio, openproject, flipt]
+  general: [lucid, drawio, jira, openproject, flipt, servicenow]
+  phi: [drawio, openproject, flipt, servicenow]          # Flipt is self-hosted in the product's runtime;
+  payments: [drawio, openproject, flipt, servicenow]     # change receipts carry no patient or card data

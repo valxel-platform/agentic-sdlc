@@ -44,7 +44,8 @@ def thread_view(engine, thread_id: str) -> dict:
                       "opened_at": s.get("opened_at", ""), "triage": s.get("triage", ""),
                       "actions": s.get("actions", []), "taken": s.get("taken", []), "links": s.get("links", {}),
                       "postmortem": s.get("postmortem", ""), "signals": signals, "firing": len(still_firing(signals)),
-                      "suspects": engine.suspects(s["product_id"], s.get("component", ""))[:5]}
+                      "suspects": engine.suspects(s["product_id"], s.get("component", ""))[:5],
+                      "analysis": s.get("analysis") or {}, "escalated": bool(s.get("escalated"))}
     feats = engine.feature_summaries(s["product_id"])
     if kind == "initiative":
         d = s.get("draft") or {}

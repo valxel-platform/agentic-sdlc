@@ -513,10 +513,29 @@ Without `VRIXEL_PAGERDUTY_ROUTING_KEYS` (stub mode) nothing is sent.
 
 **The incident.**
 
-1. *Triage* (ops agent): the signals; the released features that changed the component, most recent
-   first, with their flags; recent logs and metrics from OpenChoreo's observability plane; what the
-   tool may do by itself. It writes a summary, impact, likely cause and proposed actions.
-2. *The tool mitigates* when one of triage's actions is in the remediation policy and fits:
+1. *A second opinion*: the tool asks OpenChoreo's SRE agent to investigate the failing component
+   (`POST /api/v1alpha1/rca-agent/analyze`, with the incident as the alert) and waits a few minutes
+   for its report (SEV1 5, SEV2 8, else 10). The agent reads the component's logs, metrics and
+   traces with an AI model, so it runs only where the product's data may go to that model's
+   provider: the policy's `analysis.rca.provider` must be allowed for the product's data class (the
+   same `data_classes` setting the tool's own agents follow), the product's region must not be
+   excluded (data in India stays there), and a product can keep it away entirely
+   (`runtime.remediation.analysis: false`). OpenChoreo's own fix agent (`REMED_AGENT`) must stay off:
+   the policy refuses `fix_agent: true`, and a report showing an action it applied is recorded as a
+   change made outside the tool and pages on-call. Budget alerts go to OpenChoreo's FinOps agent
+   instead, whose right-sizing recommendation goes into the proposed intent change.
+2. *Triage* (ops agent): the signals; OpenChoreo's report (root causes with their confidence, causes
+   ruled out, its recommendations); the released features that changed the component, most recent
+   first, with their flags; recent logs and metrics; what the tool may do by itself. It writes a
+   summary, impact, likely cause and proposed actions.
+3. *The tool mitigates* when one of triage's actions is in the remediation policy, fits, and the
+   second opinion agrees: a high-confidence root cause from OpenChoreo whose evidence is in the same
+   component and that names a change to it (a release, deployment, configuration or flag). No
+   report, a less confident one, or one pointing elsewhere means a person decides
+   (`without_analysis: suspects` lets the tool act on the release suspect alone). Its track record
+   counts too: an action whose automatic uses recovered the incident less than 60% of the time over
+   90 days (at least 5 uses) is suspended for that product, recorded in the change log, until its
+   record improves. The actions:
    - **Turn a feature's flag off**, if the feature reached the failing component in the last 3 days
      and its flag is on. Preferred: it touches only the new behavior.
    - **Roll the component back** to its previous release, if a release reached it in the last day.
@@ -530,11 +549,11 @@ Without `VRIXEL_PAGERDUTY_ROUTING_KEYS` (stub mode) nothing is sent.
      remediation:
        autonomous: [flag_off]     # or false: on-call decides every action
    ```
-3. *Escalate* when it can't (nothing fits, its action failed, or the failure persists): the urgent
+4. *Escalate* when it can't (nothing fits, no agreement, its action failed, or the failure persists): the urgent
    page, and on-call decides (`approvers.oncall`, else G6's approvers): approve some or all actions,
    ask triage to look again, resolve it, or merge it into another incident. After a person decides,
    the tool takes no action by itself on that incident.
-4. *Act*, by the tool or as approved:
+5. *Act*, by the tool or as approved:
    - **Turn a feature's flag off**: the fastest mitigation for a recent launch.
    - **Roll back** the component to its previous release in production.
    - **Start a hotfix**: an expedited feature that skips discovery to architecture but keeps planning,
@@ -542,14 +561,14 @@ Without `VRIXEL_PAGERDUTY_ROUTING_KEYS` (stub mode) nothing is sent.
      written from the incident.
    - **Change the intent**: when the product works as built but not as users need, a new feature
      (G1) or initiative (G0) starts with the incident as evidence, linked to the original work.
-5. *Check it recovered*: alerts that report their own resolution must have resolved; and after a
+6. *Check it recovered*: alerts that report their own resolution must have resolved; and after a
    mitigation, or for signals that never resolve (OpenChoreo rules, GlitchTip, error-report alerts),
    it must stay quiet for `quiet_minutes` (SEV1 10, SEV2 15, SEV3 30, SEV4 60): no new alert or error
    report after the first 5 minutes (the alert rules' look-back), and fewer than 10 errors in the
    component's last 5 minutes of logs. Not quiet by then, or still firing after the window (SEV1 30
    minutes, SEV2 1 hour, SEV3 4 hours, SEV4 1 day): escalate, or back to on-call if already paged.
    Reported problems with no alerts skip this.
-6. *Postmortem* (agent, blameless) and *close*: on-call approves it in working hours (no page), and a
+7. *Postmortem* (agent, blameless) and *close*: on-call approves it in working hours (no page), and a
    governance pull request records it in `incidents/`.
 
 Cost signals (see [Cost](#cost-what-features-and-products-cost)) take the same path. They never
@@ -861,6 +880,34 @@ sides:
 G4 shows the alarms each AWS service comes with. Alarms are named with the data plane's prefix, so
 EventBridge sends only Vrixel's; other alarms in the account are ignored.
 
+## Gradual releases
+
+A feature reaches production behind its flag for a growing share of users
+(`platform/remediation.yaml` `gradual_release`, `ops/rollout.py`):
+
+```yaml
+gradual_release:
+  steps: [5, 25, 50, 100]                              # % of users with the feature on
+  bake_minutes: { low: 30, high: 60, regulated: 120 }  # quiet time per step, by risk tier
+```
+
+G6 approves the whole plan: the flag goes on for the first step, and the tool steps up when the
+step has been quiet for its bake time (no incident open on the feature's production components, and
+none recovered within it). An incident holds it. The flag going off (the tool's or on-call's flag
+off in an incident) stops it, and the release managers decide: start again from the first step,
+leave it off, or stop the feature. Each step is a change record approved by G6's approvers and made
+by `agent:rollout`; the feature page shows the share it's on for. In Flipt it is a threshold
+rollout (`THRESHOLD_ROLLOUT_TYPE`, value true) over a flag that is off; turning the flag off removes
+the rollout too, so off is off for everyone.
+
+Flipt buckets users by the OpenFeature targeting key: services pass the signed-in user, the web
+template a random per-browser id in `localStorage`, the mobile template a random per-install id in
+secure storage, so each person keeps the same answer as the share grows. A product can release at
+once (`runtime.remediation.gradual_release: false`) or choose its own steps
+(`gradual_release: {steps: [10, 100]}`). Launches (release groups) still turn their flags on for
+everyone at the launch gate, and store apps keep their stores' staged rollout. Stub delivery
+compresses bake times, as it does deployments.
+
 ## Change management: every production change, and looking back
 
 Every way the tool changes production writes one record to the change log (`ops/changes.py`),
@@ -895,6 +942,27 @@ share that caused an incident (change failure rate), and the releases behind the
 
 Changes made outside the tool (kubectl, the AWS console) aren't in the log. Direct production
 access should be break-glass: time-limited, approved and logged.
+
+**ServiceNow receipts.** A product whose organization keeps its change records in ServiceNow gets
+each record there too, as a receipt: a closed change_request made after the fact, which never holds
+a release up (the gates already approved it):
+
+```yaml
+tools:
+  change_management:
+    provider: servicenow
+    instance: https://acme.service-now.com
+    assignment_group: Platform Engineering
+    types: {standard: normal, emergency: emergency, automatic: emergency}   # the defaults
+    close: {state: "3", done: successful, failed: unsuccessful}             # your state model's values
+```
+
+`VRIXEL_SERVICENOW_AUTH_<PRODUCT>` holds the Authorization header. The change_request's
+`correlation_id` is the tool's change id, so a retry finds the one it made; the description carries
+what changed, who asked, the approvals per gate, the pull requests and the record's hash. Where the
+instance's state model won't let it be closed that way, it stays open and the Changes page says so,
+next to its ServiceNow number. Gating releases on ServiceNow approval isn't supported: changes are
+approved at the tool's gates.
 
 ## Resource inventory: what runs where
 

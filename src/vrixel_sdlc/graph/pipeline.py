@@ -275,16 +275,31 @@ def make_gate(gate: str, services):
             key = state.get("flag", "")
             dark = bool(rel and rel["model"] == "launch" and rel["status"] != "cancelled")
             flag_on = False
+            from ..ops.rollout import percent_label, plan_for
+
+            # A gradual release when the platform asks for one: G6 approves the whole plan.
+            plan = plan_for(getattr(snap, "remediation", None), state.get("risk_tier")) if key and not dark else None
             if key:
                 try:
-                    if not dark:
+                    if not dark and plan:
+                        services.flags.set_percent(state["product_id"], key, plan["steps"][0], actor=d["approver"])
+                        update["events"].append(event(gate, "gradual_release", f"{key} on for {percent_label(plan['steps'][0])}; "
+                                                      f"then {', '.join(percent_label(s) for s in plan['steps'][1:])}, each after "
+                                                      f"{plan['bake_minutes']} quiet minutes", approver=approvers))
+                    elif not dark:
                         services.flags.set(state["product_id"], key, True, actor=d["approver"])
                     flag_on = not dark
                 except Exception as exc:  # the release still goes out, dark; say so plainly
+                    plan = None
                     update["events"].append(event(gate, "flag_failed",
                                                   f"Couldn't turn on {key}: {exc}. Turn it on in Flipt.",
                                                   approver=d["approver"]))
             release |= {"flag": key, "flag_on": flag_on if key else None, "release_id": rel["id"] if rel else ""}
+            if plan and flag_on:
+                from ..ops.rollout import _clock as rollout_clock
+
+                release |= {"rollout_plan": {**plan, "at": rollout_clock().isoformat(), "approved_by": approvers},
+                            "flag_percent": plan["steps"][0]}
             # VX-3: production promotion is a human action, in each product's own runtime. In
             # production the approver promotes in the OpenChoreo portal and a watcher resumes this
             # thread; the stub records it here.
@@ -975,13 +990,13 @@ def make_rollout(services):
         apps = sorted((d for d in (state.get("deployments") or {}).values()
                        if d.get("kind") == "store" and d.get("env") == "production"), key=lambda d: d["repo"])
         if not apps:
-            return Command(goto="operate")
+            return Command(goto="flag_rollout")
         snap = services.feature_snapshot(state)
         policy = store.rollout_policy(snap.product.repo_standards)
         ro = dict(state.get("rollout") or {})
         step, attempt = int(ro.get("step", 0)), int(ro.get("attempt", 0))
         if step >= len(policy["steps"]):
-            return Command(goto="operate")
+            return Command(goto="flag_rollout")
         fraction = policy["steps"][step]
         since = ro.get("at") or next((e.get("at") for e in reversed(state.get("events") or [])
                                       if e.get("node") == "production_wait"), None)
@@ -995,7 +1010,7 @@ def make_rollout(services):
         if res["status"] == "success":
             history.append({"fraction": fraction, "at": res.get("at", now()), "attempt": attempt})
             done = step + 1 >= len(policy["steps"])
-            return Command(goto="operate" if done else "rollout", update={
+            return Command(goto="flag_rollout" if done else "rollout", update={
                 "rollout": {"step": step + 1, "attempt": 0, "at": res.get("at", now()), "history": history},
                 "events": [event("rollout", "widened", f"{', '.join(a['repo'] for a in apps)} at {store.percent(fraction)}")]})
         # Unhealthy (or stuck): stop the Play rollout where it is, then let people decide.
@@ -1005,12 +1020,95 @@ def make_rollout(services):
                     "sha": a["sha"], "halt": True, "feature_id": state["feature_id"]})
             except Exception:
                 pass
-        return _people_said(state, "rollout", res, ok="operate", retry="rollout", extra={
+        return _people_said(state, "rollout", res, ok="flag_rollout", retry="rollout", extra={
             "rollout": {"step": step, "attempt": attempt + 1, "at": ro.get("at") or since, "history": history,
                         "halted": True},
             "events": [event("rollout", "halted", res.get("reason", ""))]})
 
-    return rollout, ("rollout", "operate", END)
+    return rollout, ("rollout", "flag_rollout", END)
+
+
+def make_flag_rollout(services):
+    """Widen a feature's flag step by step, per the plan G6 approved (ops/rollout.py)."""
+    from ..ops import rollout as ro
+    from ..ops.changes import new as new_change
+    from ..ops.remediation import ROLLOUT_AGENT
+
+    def record(state: FeatureState, release: dict, pct: float, *, by: str, approved: list[str], n: int,
+               note: str) -> list[dict]:
+        log = getattr(services, "changes", None)
+        if log is None:
+            return []
+        try:
+            stored = log.record(new_change(
+                key=f"{state['feature_id']}:rollout:{n}:{pct:g}", product_id=state["product_id"], kind="flag",
+                type="standard", action="rollout_step", summary=f"{state['feature_id']} {state['title']}: on for {ro.percent_label(pct)}",
+                targets=[{"kind": "flag", "name": release.get("flag", ""), "on": True, "percent": pct}],
+                feature_id=state["feature_id"], release_id=release.get("release_id", ""), requested_by=by,
+                approved_by=approved, evidence={"plan": (release.get("rollout_plan") or {}).get("steps"), "why": note}))
+            return [event("flag_rollout", "change_recorded", f"{stored['id']}: {stored['summary']}")]
+        except Exception as exc:
+            return [event("flag_rollout", "change_not_recorded", f"{type(exc).__name__}: {exc}")]
+
+    def flag_rollout(state: FeatureState) -> Command:
+        release = dict(state.get("release") or {})
+        plan = dict(release.get("rollout_plan") or {})
+        key = release.get("flag", "")
+        if not plan or not key:
+            return Command(goto="operate")
+        steps, step = list(plan["steps"]), int(plan.get("step", 0))
+        if step >= len(steps) - 1:
+            return Command(goto="operate")
+        components = sorted({d["repo"] for d in (state.get("deployments") or {}).values()
+                             if d.get("env") == "production" and d.get("kind") not in ("resource", "store") and d.get("repo")})
+        res = interrupt({"type": "external", "wait": "flag_step", "feature_id": state["feature_id"],
+                         "product_id": state["product_id"], "title": state["title"], "flag": key,
+                         "percent": steps[step], "components": components, "since": plan.get("at") or ro._clock().isoformat(),
+                         "bake_minutes": plan["bake_minutes"],
+                         "label": f"Gradual release: on for {ro.percent_label(steps[step])}, watching"})
+        approved = [a for a in str(plan.get("approved_by") or release.get("promoted_by") or "").split(", ") if a]
+        history = list(plan.get("history") or [])
+        if res.get("status") == "success":
+            nxt = steps[step + 1]
+            try:
+                services.flags.set_percent(state["product_id"], key, nxt, actor=ROLLOUT_AGENT)
+            except Exception as exc:
+                res = {"status": "failure", "reason": f"couldn't widen {key}: {type(exc).__name__}: {exc}"}
+            else:
+                history.append({"percent": steps[step], "until": res.get("at", now()), "quiet_since": res.get("quiet_since", "")})
+                plan |= {"step": step + 1, "at": ro._clock().isoformat(), "history": history}
+                release |= {"rollout_plan": plan, "flag_percent": nxt, "flag_on": True}
+                events = [event("flag_rollout", "widened", f"{key} on for {ro.percent_label(nxt)}")]
+                events += record(state, release, nxt, by=ROLLOUT_AGENT, approved=approved, n=plan.get("attempt", 0),
+                                 note=f"quiet for {plan['bake_minutes']} minutes at {ro.percent_label(steps[step])}")
+                return Command(goto="flag_rollout" if step + 1 < len(steps) - 1 else "operate",
+                               update={"release": release, "events": events})
+        # Stopped: the flag went off (an incident's flag off) or couldn't be widened.
+        d = ask_release_managers(state, "flag_rollout", {
+            "reason": f"The gradual release stopped at {ro.percent_label(steps[step])}: {res.get('reason', '')}. "
+                      "Retry starts again from the first step; resolved leaves the flag as it is."})
+        rec = _record("escalation:delivery:flag_rollout", "delivery", d)
+        if d["decision"] == "abort":
+            return Command(goto=END, update={"gate_decisions": [rec], "status": "aborted",
+                                             "events": [event("flag_rollout", "aborted", d.get("feedback", ""), approver=d["approver"])]})
+        if d["decision"] == "retry":
+            try:
+                services.flags.set_percent(state["product_id"], key, steps[0], actor=d["approver"])
+            except Exception as exc:
+                return Command(goto="operate", update={"gate_decisions": [rec], "events": [
+                    event("flag_rollout", "flag_failed", f"Couldn't turn {key} back on: {exc}", approver=d["approver"])]})
+            attempt = int(plan.get("attempt", 0)) + 1
+            plan |= {"step": 0, "at": ro._clock().isoformat(), "attempt": attempt, "history": history + [{"stopped_at": steps[step], "reason": res.get("reason", "")}]}
+            release |= {"rollout_plan": plan, "flag_percent": steps[0], "flag_on": True}
+            events = [event("flag_rollout", "restarted", f"{key} on for {ro.percent_label(steps[0])} again", approver=d["approver"])]
+            events += record(state, release, steps[0], by=d["approver"], approved=[d["approver"]], n=attempt,
+                             note=f"restarted after: {res.get('reason', '')}")
+            return Command(goto="flag_rollout", update={"gate_decisions": [rec], "release": release, "events": events})
+        release |= {"rollout_plan": {**plan, "stopped": True}, "flag_percent": 0.0, "flag_on": False}
+        return Command(goto="operate", update={"gate_decisions": [rec], "release": release, "events": [
+            event("flag_rollout", "left_off", d.get("feedback", "") or res.get("reason", ""), approver=d["approver"])]})
+
+    return flag_rollout, ("flag_rollout", "operate", END)
 
 
 def acceptance_targets(services, state: FeatureState, stage: str, deployed: list[dict]) -> list[dict]:
@@ -1065,6 +1163,8 @@ def build_pipeline(services, checkpointer=None):
     g.add_node("production_wait", node, destinations=dest)
     node, dest = make_rollout(services)
     g.add_node("rollout", node, destinations=dest)
+    node, dest = make_flag_rollout(services)
+    g.add_node("flag_rollout", node, destinations=dest)
     g.add_node("finalize", finalize)
 
     g.add_node("hotfix_brief", make_hotfix_brief(services))

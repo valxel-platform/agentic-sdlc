@@ -207,7 +207,7 @@ def _tools(raw, entry: RegistryEntry, tools: ToolsConfig | None, problems: list[
         return {}
     tools = tools or ToolsConfig()
     out: dict = {}
-    for capability in ("diagrams", "work_tracking", "flags"):
+    for capability in ("diagrams", "work_tracking", "flags", "change_management"):
         spec = raw.get(capability)
         if spec is None:
             continue
@@ -231,11 +231,36 @@ def _tools(raw, entry: RegistryEntry, tools: ToolsConfig | None, problems: list[
             spec = _flags(spec, entry, runtime, problems)
             if spec is None:
                 continue
+        if capability == "change_management":
+            spec = _change_management(spec, problems)
+            if spec is None:
+                continue
         out[capability] = spec
-    unknown = set(raw) - {"diagrams", "work_tracking", "flags"}
+    unknown = set(raw) - {"diagrams", "work_tracking", "flags", "change_management"}
     if unknown:
         problems.append(f"tools has unknown keys {sorted(unknown)}")
     return out
+
+
+def _change_management(spec: dict, problems: list[str]) -> dict | None:
+    """tools.change_management: receipts of every production change in the organization's
+    ServiceNow (ops/servicenow.py). Receipts only: they never hold a release up."""
+    import re
+
+    if not re.fullmatch(r"https://[A-Za-z0-9.-]+(:\d+)?/?", str(spec.get("instance") or "")):
+        problems.append("tools.change_management.instance must be the ServiceNow instance's https URL")
+        return None
+    if spec.get("mode", "receipt") != "receipt":
+        problems.append("tools.change_management.mode: only receipt is supported (changes are approved at the gates)")
+        return None
+    types = spec.get("types") or {}
+    if set(types) - {"standard", "emergency", "automatic"} or any(v not in ("normal", "standard", "emergency")
+                                                                   for v in types.values()):
+        problems.append("tools.change_management.types maps standard, emergency and automatic to normal, standard or emergency")
+        return None
+    return {"provider": "servicenow", "instance": str(spec["instance"]).rstrip("/"), "mode": "receipt",
+            "assignment_group": str(spec.get("assignment_group") or ""), "cmdb_ci": str(spec.get("cmdb_ci") or ""),
+            "types": dict(types), "close": {str(k): str(v) for k, v in (spec.get("close") or {}).items()}}
 
 
 def _flags(spec: dict, entry: RegistryEntry, runtime: dict | None, problems: list[str]) -> dict | None:
