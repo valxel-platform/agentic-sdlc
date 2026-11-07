@@ -14,8 +14,8 @@ from vrixel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 CATALOG = resources.load_catalog((EXAMPLES / "vrixel-tools/sdlc-governance/platform/aws-resources.yaml").read_text())
-REPOS = [{"name": "o/ag-api", "role": "provider"}, {"name": "o/ag-worker", "role": "event-worker"},
-         {"name": "o/ag-web", "role": "consumer"}]
+REPOS = [{"name": "o/farm-api", "role": "provider"}, {"name": "o/farm-worker", "role": "event-worker"},
+         {"name": "o/farm-web", "role": "consumer"}]
 AWS = {"region": "us-east-2", "accounts": {"dev": "1" * 12, "staging": "2" * 12, "production": "3" * 12}}
 
 
@@ -25,13 +25,13 @@ def ctx(**over):
 
 
 def hld(resources_body: str, adrs: str = "- ADR-1: Use DynamoDB for field-state and Kinesis for readings") -> str:
-    return f"# HLD\n\n## ADRs\n{adrs}\n\n## Resources\n{resources_body}\n\n## Endpoints\n- o/ag-api: project\n"
+    return f"# HLD\n\n## ADRs\n{adrs}\n\n## Resources\n{resources_body}\n\n## Endpoints\n- o/farm-api: project\n"
 
 
 GOOD = """- field-state: dynamodb-table; partition_key=field_id, indexes=by-farm:farm_id+by-crop:crop_id; size production=large
-  reads, writes: ag-api
+  reads, writes: farm-api
 - readings: kinesis-stream; retention_hours=168
-  writes: ag-api; reads: ag-worker"""
+  writes: farm-api; reads: farm-worker"""
 
 
 def test_the_catalog_and_the_products_accounts_are_checked():
@@ -49,33 +49,33 @@ def test_a_design_declares_its_services_and_who_uses_them():
     entries = {e["name"]: e for e in resources.parse_resources(hld(GOOD))}
     assert entries["field-state"]["params"] == {"partition_key": "field_id", "indexes": "by-farm:farm_id+by-crop:crop_id"}
     assert entries["field-state"]["sizes"] == {"production": "large"}
-    assert entries["readings"]["access"] == {"ag-api": {"write"}, "ag-worker": {"read"}}
+    assert entries["readings"]["access"] == {"farm-api": {"write"}, "farm-worker": {"read"}}
     assert resources.check(hld(GOOD), REPOS, ctx()) == []
 
 
 @pytest.mark.parametrize(("body", "adrs", "context", "finding"), [
-    ("- cache: memcached\n  reads: ag-api", None, {}, "isn't in the platform catalog"),
-    ("- ids: workload-identity; component=ag-api\n  reads: ag-api", None, {}, "isn't in the platform catalog"),
-    ("- field-state: dynamodb-table\n  reads: ag-api", None, {}, "needs partition_key"),
-    ("- readings: kinesis-stream; retention_hours=2\n  writes: ag-api", None, {}, "between 24 and 8760"),
-    ("- readings: kinesis-stream; shards=4\n  writes: ag-api", None, {}, "has no parameter shards"),
+    ("- cache: memcached\n  reads: farm-api", None, {}, "isn't in the platform catalog"),
+    ("- ids: workload-identity; component=farm-api\n  reads: farm-api", None, {}, "isn't in the platform catalog"),
+    ("- field-state: dynamodb-table\n  reads: farm-api", None, {}, "needs partition_key"),
+    ("- readings: kinesis-stream; retention_hours=2\n  writes: farm-api", None, {}, "between 24 and 8760"),
+    ("- readings: kinesis-stream; shards=4\n  writes: farm-api", None, {}, "has no parameter shards"),
     ("- readings: kinesis-stream", None, {}, "no component reads or writes it"),
-    ("- readings: kinesis-stream\n  writes: ag-web", None, {}, "runs outside the platform"),
-    ("- readings: kinesis-stream\n  writes: ag-ghost", None, {}, "not a component"),
-    ("- alerts: sns-topic\n  reads: ag-api", "- ADR-1: SNS for alerts", {}, "offers ['write'], not read"),
-    ("- readings: kinesis-stream\n  watches: ag-api", None, {}, "'watches' is not an access"),
-    ("- readings: kinesis-stream; size qa=small\n  writes: ag-api", None, {}, "not one of the product's environments"),
-    ("- readings: kinesis-stream; size dev=huge\n  writes: ag-api", None, {}, "has no size huge"),
-    ("- readings: kinesis-stream\n  writes: ag-api", "- ADR-1: Extend the API", {}, "not a platform default"),
-    ("- readings: kinesis-stream\n  writes: ag-api", None, {"aws": None}, "has no AWS accounts"),
-    ("- field-state: dynamodb-table; partition_key=id\n  writes: ag-api", None,
+    ("- readings: kinesis-stream\n  writes: farm-web", None, {}, "runs outside the platform"),
+    ("- readings: kinesis-stream\n  writes: farm-ghost", None, {}, "not a component"),
+    ("- alerts: sns-topic\n  reads: farm-api", "- ADR-1: SNS for alerts", {}, "offers ['write'], not read"),
+    ("- readings: kinesis-stream\n  watches: farm-api", None, {}, "'watches' is not an access"),
+    ("- readings: kinesis-stream; size qa=small\n  writes: farm-api", None, {}, "not one of the product's environments"),
+    ("- readings: kinesis-stream; size dev=huge\n  writes: farm-api", None, {}, "has no size huge"),
+    ("- readings: kinesis-stream\n  writes: farm-api", "- ADR-1: Extend the API", {}, "not a platform default"),
+    ("- readings: kinesis-stream\n  writes: farm-api", None, {"aws": None}, "has no AWS accounts"),
+    ("- field-state: dynamodb-table; partition_key=id\n  writes: farm-api", None,
      {"aws_existing": [{"name": "field-state", "type": "dynamodb-table", "parameters": {"partition_key": "field_id"}}]},
      "replaces it and its data"),
-    ("- field-state: s3-bucket\n  writes: ag-api", "- ADR-1: S3 for field-state", {"aws_existing": [{"name": "field-state", "type": "dynamodb-table"}]},
+    ("- field-state: s3-bucket\n  writes: farm-api", "- ADR-1: S3 for field-state", {"aws_existing": [{"name": "field-state", "type": "dynamodb-table"}]},
      "changing its type replaces it"),
-    ("- Bad_Name: s3-bucket\n  writes: ag-api", "- ADR-1: S3 for Bad_Name", {}, "lowercase letters"),
+    ("- Bad_Name: s3-bucket\n  writes: farm-api", "- ADR-1: S3 for Bad_Name", {}, "lowercase letters"),
     ("- readings kinesis", None, {}, "Can't read resource line"),
-    ("- field-state: dynamodb-table; partition_key=id, indexes=a:b+\n  reads: ag-api", None, {}, "separate items with +"),
+    ("- field-state: dynamodb-table; partition_key=id, indexes=a:b+\n  reads: farm-api", None, {}, "separate items with +"),
 ])
 def test_resource_findings(body, adrs, context, finding):
     text = hld(body, adrs) if adrs else hld(body)
@@ -84,7 +84,7 @@ def test_resource_findings(body, adrs, context, finding):
 
 
 def test_naming_a_service_needs_a_resources_section():
-    text = "# HLD\n\n## ADRs\n- ADR-1: Keep field state in DynamoDB\n\n## Endpoints\n- o/ag-api: project\n"
+    text = "# HLD\n\n## ADRs\n- ADR-1: Keep field state in DynamoDB\n\n## Endpoints\n- o/farm-api: project\n"
     assert "no Resources section" in resources.check(text, REPOS, ctx())[0]
     assert resources.check(text.replace("DynamoDB", "Postgres"), REPOS, ctx()) == []
 
@@ -101,26 +101,26 @@ def test_g4_sees_the_cost_and_the_plan_gives_least_privilege():
     rows = {r["name"]: r for r in s["resources"]}
     assert rows["field-state"]["sizes"] == {"dev": "small", "staging": "small", "production": "large"}
     assert s["monthly_usd"] == {"dev": 20.0, "staging": 20.0, "production": 660.0}
-    assert rows["readings"]["access"] == {"ag-api": ["write"], "ag-worker": ["read"]}
+    assert rows["readings"]["access"] == {"farm-api": ["write"], "farm-worker": ["read"]}
 
-    plan = resources.plan(hld(GOOD), CATALOG, lambda c: ("agtech", None), product_id="AG", feature_id="AG-1",
+    plan = resources.plan(hld(GOOD), CATALOG, lambda c: ("farm", None), product_id="FARM", feature_id="FARM-1",
                           data_class="general")
-    assert [p["name"] for p in plan[:2]] == ["ag-api-identity", "ag-worker-identity"]
+    assert [p["name"] for p in plan[:2]] == ["farm-api-identity", "farm-worker-identity"]
     readings = next(p for p in plan if p["name"] == "readings")
-    writer = next(c for c in readings["parameters"]["consumers"] if c["component"] == "ag-api")
+    writer = next(c for c in readings["parameters"]["consumers"] if c["component"] == "farm-api")
     assert "kinesis:PutRecord" in writer["actions"] and "kinesis:GetRecords" not in writer["actions"]
-    assert readings["owner"] == "ag-api" and readings["parameters"]["tags"]["vrixel:feature"] == "AG-1"
+    assert readings["owner"] == "farm-api" and readings["parameters"]["tags"]["vrixel:feature"] == "FARM-1"
     state = next(p for p in plan if p["name"] == "field-state")
     assert state["parameters"]["indexes"] == ["by-farm:farm_id", "by-crop:crop_id"]  # the ResourceType's list
 
 
 def test_coders_get_the_workload_bindings():
-    snippet = resources.workload_snippet(hld(GOOD), CATALOG, "ag-worker")
+    snippet = resources.workload_snippet(hld(GOOD), CATALOG, "farm-worker")
     assert "- ref: readings" in snippet and "stream: READINGS_STREAM" in snippet and "field-state" not in snippet
-    text = resources.instruction({"hld_text": hld(GOOD), "aws_catalog": CATALOG}, {"repo": "o/ag-api"})
+    text = resources.instruction({"hld_text": hld(GOOD), "aws_catalog": CATALOG}, {"repo": "o/farm-api"})
     assert "field-state (dynamodb-table, read/write)" in text and "FIELD_STATE_TABLE" in text
     assert "DynamoDB Local" in text and "never keys" in text
-    assert resources.instruction({"hld_text": hld(GOOD), "aws_catalog": CATALOG}, {"repo": "o/ag-web"}) == ""
+    assert resources.instruction({"hld_text": hld(GOOD), "aws_catalog": CATALOG}, {"repo": "o/farm-web"}) == ""
     guide = resources.catalog_guide(CATALOG, "general")
     assert "dynamodb-table (Amazon DynamoDB)" in guide and "workload-identity" not in guide
 
@@ -155,15 +155,15 @@ def test_g4_approves_the_services_and_the_pipeline_creates_them_in_every_environ
             return _m(*a, **kw)
 
         setattr(oc, method, logged)
-    v = engine.auto_drive(engine.start(product_id="AG", title="Field log",
+    v = engine.auto_drive(engine.start(product_id="FARM", title="Field log",
                                        description="Keep each field's latest state in DynamoDB")["feature_id"])
     assert v["status"] == "done"
     g4 = seen["g4"]
     assert [r["type"] for r in g4["resources"]] == ["dynamodb-table"] and g4["region"] == "us-east-2"
     assert g4["monthly_usd"]["production"] == 60.0
 
-    assert set(oc.resources) == {"agtech-field-api-identity", "field-log-dynamodb"}
-    assert oc.resources["field-log-dynamodb"]["parameters"]["consumers"][0]["component"] == "agtech-field-api"
+    assert set(oc.resources) == {"farm-field-api-identity", "field-log-dynamodb"}
+    assert oc.resources["field-log-dynamodb"]["parameters"]["consumers"][0]["component"] == "farm-field-api"
     binds = [(b["name"], b["env"], b["size"], b["actor_type"]) for b in oc.resource_bindings]
     assert ("field-log-dynamodb", "dev", "small", "agent") in binds
     assert ("field-log-dynamodb", "production", "medium", "human") in binds
@@ -175,7 +175,7 @@ def test_g4_approves_the_services_and_the_pipeline_creates_them_in_every_environ
 
 def test_a_resource_that_fails_to_come_up_goes_to_people(engine):
     engine.services.openchoreo.resource_results[("field-log-dynamodb", "dev")] = "failed"
-    v = engine.auto_drive(engine.start(product_id="AG", title="Field log",
+    v = engine.auto_drive(engine.start(product_id="FARM", title="Field log",
                                        description="Keep each field's latest state in DynamoDB")["feature_id"],
                           max_steps=14, decisions={"escalation:delivery": {"decision": "abort", "feedback": "no table"}})
     assert v["status"] == "aborted"
@@ -251,16 +251,16 @@ def test_the_openchoreo_adapter_creates_binds_and_promotes_resources():
     server, st = fake_openchoreo_resources()
     oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
     params = {"partition_key": "id", "consumers": []}
-    assert oc.apply_resource(name="field-state", type="dynamodb-table", parameters=params, project="agtech") == {
+    assert oc.apply_resource(name="field-state", type="dynamodb-table", parameters=params, project="farm") == {
         "name": "field-state", "release": "field-state-r1", "change": "created"}
     assert st["calls"][0] == ("create", "field-state", "dynamodb-table", "ClusterResourceType")
     assert oc.apply_resource(name="field-state", type="dynamodb-table", parameters=params,
-                             project="agtech")["change"] == "unchanged"
+                             project="farm")["change"] == "unchanged"
     with pytest.raises(ValueError, match="never replaces"):
-        oc.apply_resource(name="field-state", type="s3-bucket", parameters={}, project="agtech")
-    assert oc.list_resources(project="agtech") == [{"name": "field-state", "type": "dynamodb-table", "parameters": params}]
+        oc.apply_resource(name="field-state", type="s3-bucket", parameters={}, project="farm")
+    assert oc.list_resources(project="farm") == [{"name": "field-state", "type": "dynamodb-table", "parameters": params}]
 
-    scope = {"name": "field-state", "project": "agtech"}
+    scope = {"name": "field-state", "project": "farm"}
     oc.bind_resource(env="dev", size="small", actor="agent:dev", actor_type="agent", retain=True, **scope)
     assert ("bind", "field-state", "dev", "field-state-r1", "Retain", "small") in st["calls"]
     assert oc.resource_status(env="dev", **scope)["state"] == "progressing"
@@ -270,7 +270,7 @@ def test_the_openchoreo_adapter_creates_binds_and_promotes_resources():
 
     # A changed resource gets a new release; staging gets what dev runs, not the newest.
     oc.apply_resource(name="field-state", type="dynamodb-table", parameters={**params, "ttl_attribute": "x"},
-                      project="agtech")
+                      project="farm")
     rec = oc.bind_resource(env="staging", size="small", actor="agent:staging", actor_type="agent", **scope)
     assert rec["release"] == "field-state-r1"
     with pytest.raises(PermissionError):

@@ -3,14 +3,14 @@
     roadmap/
       goals.yaml                    outcomes for a period: id, title, measure, period (parent: later,
                                     for a portfolio goal the product goal rolls up to)
-      initiatives/INI-EMR-1.md      one approved initiative per file
-      releases/REL-EMR-1.md         one release per file: a launch group or a release train
+      initiatives/INI-CLN-1.md      one approved initiative per file
+      releases/REL-CLN-1.md         one release per file: a launch group or a release train
 
 Initiatives and releases are Markdown with YAML front matter, like ADRs: people read documents,
 the tool reads data. They change through pull requests, which the pipeline opens when an
 initiative is approved at its gate and when a release is created or completes.
 
-Scope is the product today. Ids carry the product (INI-EMR-1), goals may name a `parent`, and the
+Scope is the product today. Ids carry the product (INI-CLN-1), goals may name a `parent`, and the
 `scope` field is reserved, so a portfolio level can sit above products later without a rewrite.
 """
 

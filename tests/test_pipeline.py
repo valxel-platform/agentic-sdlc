@@ -7,7 +7,7 @@ ALL_KINDS = {"OPP", "PRD", "UX", "HLD", "PLAN", "BUILD", "REL", "OPS"}
 
 
 def test_low_risk_feature_runs_end_to_end_without_g5(engine, services):
-    v = engine.start(product_id="AG", title="Offline crop log", description="Log crop observations offline")
+    v = engine.start(product_id="FARM", title="Offline crop log", description="Log crop observations offline")
     assert [p["gate"] for p in v["pending"]] == ["g1"]
 
     v = engine.auto_drive(v["feature_id"])
@@ -20,13 +20,13 @@ def test_low_risk_feature_runs_end_to_end_without_g5(engine, services):
     assert "g5" not in gates  # low-risk PRs auto-merge
     assert all(pr["state"] == "merged" and pr["merged_by"] == "agent:merge-train" for pr in v["pull_requests"].values())
     assert v["release"]["production"] is True and v["release"]["promoted_by"] == "auto-approver"
-    caps = {c["id"] for c in services.catalog.lookup("AG")}
-    assert any(c.startswith("CAP-AG-OFFLINE_CROP_LOG") for c in caps)  # knowledge write-back
+    caps = {c["id"] for c in services.catalog.lookup("FARM")}
+    assert any(c.startswith("CAP-FARM-OFFLINE_CROP_LOG") for c in caps)  # knowledge write-back
     assert v["usage"]["calls"] > 10 and v["cost_usd"] > 0
 
 
 def test_trace_links_connect_the_artifact_chain(engine):
-    v = engine.auto_drive(engine.start(product_id="AG", title="Field notes")["feature_id"])
+    v = engine.auto_drive(engine.start(product_id="FARM", title="Field notes")["feature_id"])
     snap = engine.graph.get_state(engine._config(v["feature_id"])).values
     links = {tuple(x) for x in snap["trace_links"]}
     fid = v["feature_id"]
@@ -36,7 +36,7 @@ def test_trace_links_connect_the_artifact_chain(engine):
 
 
 def test_regulated_product_requires_g5_and_merges_as_the_approver(engine):
-    fid = engine.start(product_id="EMR", title="Consent check on intake")["feature_id"]
+    fid = engine.start(product_id="CLN", title="Consent check on intake")["feature_id"]
     for gate in ("g1", "g2"):
         approve(engine, fid, gate)
     approve(engine, fid, "g3")
@@ -52,14 +52,14 @@ def test_regulated_product_requires_g5_and_merges_as_the_approver(engine):
 
 
 def test_auth_paths_make_a_general_product_high_risk(engine):
-    v = engine.start(product_id="AG", title="Farmer login", description="Add auth for farmer accounts")
+    v = engine.start(product_id="FARM", title="Farmer login", description="Add auth for farmer accounts")
     v = engine.auto_drive(v["feature_id"])
     assert v["risk_tier"] == "high"
     assert "g5" in [g["gate"] for g in v["gate_decisions"]]
 
 
 def test_design_and_architecture_gates_are_pending_in_parallel(engine):
-    fid = engine.start(product_id="AG", title="Yield chart")["feature_id"]
+    fid = engine.start(product_id="FARM", title="Yield chart")["feature_id"]
     approve(engine, fid, "g1")
     v = approve(engine, fid, "g2")
     assert sorted(p["gate"] for p in v["pending"]) == ["g3", "g4"]
@@ -71,7 +71,7 @@ def test_design_and_architecture_gates_are_pending_in_parallel(engine):
 
 
 def test_revise_at_g3_reruns_design_with_feedback(engine, services):
-    fid = engine.start(product_id="AG", title="Yield chart")["feature_id"]
+    fid = engine.start(product_id="FARM", title="Yield chart")["feature_id"]
     approve(engine, fid, "g1")
     approve(engine, fid, "g2")
     [g3] = [p for p in engine.pending(fid) if p["gate"] == "g3"]
@@ -89,7 +89,7 @@ def test_revise_at_g3_reruns_design_with_feedback(engine, services):
 
 
 def test_evaluator_loop_fixes_a_defective_prd(engine):
-    v = engine.start(product_id="AG", title="Soil sensor import", simulate_faults={"spec": 1})
+    v = engine.start(product_id="FARM", title="Soil sensor import", simulate_faults={"spec": 1})
     v = approve(engine, v["feature_id"], "g1")
     assert v["loop_count"]["spec"] == 2
     assert v["phase_status"]["spec"] == "passed"
@@ -97,7 +97,7 @@ def test_evaluator_loop_fixes_a_defective_prd(engine):
 
 
 def test_persistent_failure_escalates_after_the_loop_cap(engine, services):
-    fid = engine.start(product_id="AG", title="Soil sensor import", simulate_faults={"spec": 9})["feature_id"]
+    fid = engine.start(product_id="FARM", title="Soil sensor import", simulate_faults={"spec": 9})["feature_id"]
     v = approve(engine, fid, "g1")
     [esc] = v["pending"]
     assert esc["type"] == "escalation" and esc["phase"] == "spec"
@@ -120,7 +120,7 @@ def test_persistent_failure_escalates_after_the_loop_cap(engine, services):
 
 
 def test_budget_exhaustion_escalates_and_can_be_raised(engine):
-    v = engine.start(product_id="AG", title="Weather alerts", budget_usd=0.000001)
+    v = engine.start(product_id="FARM", title="Weather alerts", budget_usd=0.000001)
     v = approve(engine, v["feature_id"], "g1")  # the supervisor checks the budget before each phase
     [esc] = v["pending"]
     assert esc["type"] == "escalation" and esc["phase"] == "spec" and "budget" in esc["reason"]
@@ -131,7 +131,7 @@ def test_budget_exhaustion_escalates_and_can_be_raised(engine):
 
 
 def test_build_retries_only_failing_tasks(engine, services):
-    v = engine.start(product_id="AG", title="Harvest export", simulate_faults={"build": 1})
+    v = engine.start(product_id="FARM", title="Harvest export", simulate_faults={"build": 1})
     v = engine.auto_drive(v["feature_id"])
     assert v["status"] == "done"
     assert v["loop_count"]["build"] == 2
@@ -141,7 +141,7 @@ def test_build_retries_only_failing_tasks(engine, services):
 
 
 def test_takeover_waits_for_handback(engine):
-    fid = engine.start(product_id="AG", title="Pest report")["feature_id"]
+    fid = engine.start(product_id="FARM", title="Pest report")["feature_id"]
     approve(engine, fid, "g1")
     approve(engine, fid, "g2")
     [g4] = [p for p in engine.pending(fid) if p["gate"] == "g4"]
@@ -153,14 +153,14 @@ def test_takeover_waits_for_handback(engine):
 
 
 def test_abort_stops_the_thread(engine):
-    v = engine.start(product_id="POS", title="Tip jar")
+    v = engine.start(product_id="SHOP", title="Tip jar")
     [g1] = v["pending"]
     v = engine.decide(v["feature_id"], g1["interrupt_id"], {"decision": "abort", "approver": "po"})
     assert v["status"] == "aborted" and v["pending"] == []
 
 
 def test_invalid_decisions_are_rejected_before_resuming(engine):
-    v = engine.start(product_id="AG", title="Irrigation plan")
+    v = engine.start(product_id="FARM", title="Irrigation plan")
     [g1] = v["pending"]
     with pytest.raises(InvalidDecision):
         engine.decide(v["feature_id"], g1["interrupt_id"], {"decision": "resolved", "approver": "x"})
@@ -177,11 +177,11 @@ def test_agents_cannot_promote_to_production(services):
 
 
 def test_apx_merges_library_before_provider_before_consumer(engine):
-    v = engine.auto_drive(engine.start(product_id="APX", title="Idempotent refunds")["feature_id"])
+    v = engine.auto_drive(engine.start(product_id="PAY", title="Idempotent refunds")["feature_id"])
     assert v["status"] == "done"
-    assert v["change_set"]["merge_order"] == ["vrixel-apx/apx-contracts", "vrixel-apx/apx-ledger",
-                                              "vrixel-apx/apx-gateway"]
-    assert all(pr["url"].startswith("https://github.com/vrixel-apx/") for pr in v["pull_requests"].values())
+    assert v["change_set"]["merge_order"] == ["acme-pay/pay-contracts", "acme-pay/pay-ledger",
+                                              "acme-pay/pay-gateway"]
+    assert all(pr["url"].startswith("https://github.com/acme-pay/") for pr in v["pull_requests"].values())
 
 
 def _gates_statuses(services, pr):
@@ -192,7 +192,7 @@ def _gates_statuses(services, pr):
 def test_github_sees_when_the_gates_have_passed(engine, services):
     """Each pull request carries vrixel/gates: pending while the pipeline decides, success just
     before the merge train merges the exact commit the gates saw."""
-    fid = engine.start(product_id="EMR", title="Consent check on intake")["feature_id"]
+    fid = engine.start(product_id="CLN", title="Consent check on intake")["feature_id"]
     for gate in ("g1", "g2", "g3", "g4"):
         v = approve(engine, fid, gate)
     prs = list(v["pull_requests"].values())
@@ -206,7 +206,7 @@ def test_github_sees_when_the_gates_have_passed(engine, services):
 
 
 def test_an_aborted_change_fails_its_gates_status(engine, services):
-    fid = engine.start(product_id="EMR", title="Consent check on intake")["feature_id"]
+    fid = engine.start(product_id="CLN", title="Consent check on intake")["feature_id"]
     for gate in ("g1", "g2", "g3", "g4"):
         v = approve(engine, fid, gate)
     (g5,) = engine.pending(fid)

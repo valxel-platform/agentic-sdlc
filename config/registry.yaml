@@ -7,6 +7,9 @@
 #   context.md        product context pack for agents (optional)
 # The tool reads them at feature intake and pins the commit SHA for the feature's lifetime.
 #
+# The products below are fictional examples (examples/governance). A real deployment keeps its
+# own registry in a private config directory and sets VRIXEL_CONFIG_DIR.
+#
 # Only what the platform must control stays here: where each governance repo is, the
 # product's data class (it decides which model providers may see its data), its API
 # workspace, and the limits a product may tighten but never loosen.
@@ -36,9 +39,9 @@ limits:
 # A shared lane serves regulated products, so its data class is phi: changes to it always go
 # through G5, and only providers approved for PHI see its code.
 products:
-  EMR: { kind: product, org: vrixel-emr,             repo: emr-governance, ref: main, data_class: phi,      workspace: wrkspc-emr }
-  AG:  { kind: product, org: vrixel-agtech,          repo: ag-governance, ref: main, data_class: general,  workspace: wrkspc-shared }
-  POS: { kind: product, org: vrixel-pos,             repo: pos-governance, ref: main, data_class: payments, workspace: wrkspc-shared }
-  MS:  { kind: product, org: vrixel-medspa,          repo: ms-governance, ref: main, data_class: phi,      workspace: wrkspc-medspa }
-  APX: { kind: product, org: vrixel-apx,             repo: apx-governance, ref: main, data_class: payments, workspace: wrkspc-apx }
-  SS:  { kind: shared,  org: vrixel-shared-services, repo: ss-governance, ref: main, data_class: phi,      workspace: wrkspc-shared-services }
+  CLN: { kind: product, org: acme-clinic,             repo: cln-governance, ref: main, data_class: phi,      workspace: wrkspc-clinic }
+  FARM:  { kind: product, org: acme-farm,          repo: farm-governance, ref: main, data_class: general,  workspace: wrkspc-shared }
+  SHOP: { kind: product, org: acme-shop,             repo: shop-governance, ref: main, data_class: payments, workspace: wrkspc-shared }
+  DNT:  { kind: product, org: acme-dental,          repo: dnt-governance, ref: main, data_class: phi,      workspace: wrkspc-dental }
+  PAY: { kind: product, org: acme-pay,             repo: pay-governance, ref: main, data_class: payments, workspace: wrkspc-pay }
+  SS:  { kind: shared,  org: acme-shared, repo: ss-governance, ref: main, data_class: phi,      workspace: wrkspc-shared-services }

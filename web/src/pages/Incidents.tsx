@@ -129,7 +129,7 @@ function MergeForm({ id, onDone }: { id: string; onDone: () => void }) {
   return (
     <form className="pad small" onSubmit={(e) => void submit(e)}>
       <label className="field">Same failure as incident
-        <input value={into} onChange={(e) => setInto(e.target.value)} placeholder="e.g. EMR-INC-4" pattern="[A-Z0-9]+-INC-[0-9]+" required />
+        <input value={into} onChange={(e) => setInto(e.target.value)} placeholder="e.g. CLN-INC-4" pattern="[A-Z0-9]+-INC-[0-9]+" required />
       </label>
       <button className="btn secondary small-btn" type="submit">Merge into it</button>
       {err && <p className="error-note" role="alert">{err}</p>}

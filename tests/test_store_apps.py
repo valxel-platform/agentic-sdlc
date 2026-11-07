@@ -19,14 +19,14 @@ from vrixel_sdlc.repo_roles import REPO_ORDER
 from vrixel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-APP, BFF = "vrixel-agtech/agtech-mobile", "vrixel-agtech/agtech-bff"
+APP, BFF = "acme-farm/farm-mobile", "acme-farm/farm-bff"
 
 
 @pytest.fixture
 def services(tmp_path):
     root = tmp_path / "governance"
     shutil.copytree(EXAMPLES, root)
-    manifest = root / "vrixel-agtech" / "ag-governance" / "product.yaml"
+    manifest = root / "acme-farm" / "farm-governance" / "product.yaml"
     data = yaml.safe_load(manifest.read_text())
     for r in data["repos"]:
         if r["name"] == APP:
@@ -77,7 +77,7 @@ def released(services, kind="vrixel-release"):
 
 
 def test_a_store_app_is_released_at_each_stage_then_rolled_out(engine, services, monkeypatch):
-    v = engine.auto_drive(engine.start(product_id="AG", title="Offline crop log")["feature_id"])
+    v = engine.auto_drive(engine.start(product_id="FARM", title="Offline crop log")["feature_id"])
     fid = v["feature_id"]
     prs = {pr["repo"]: pr for pr in v["pull_requests"].values()}
     assert prs[APP]["state"] == "merged"
@@ -107,7 +107,7 @@ def test_a_store_app_is_released_at_each_stage_then_rolled_out(engine, services,
 
 
 def test_an_unhealthy_release_is_halted_and_goes_to_people(engine, services, monkeypatch):
-    fid = engine.auto_drive(engine.start(product_id="AG", title="Offline crop log")["feature_id"])["feature_id"]
+    fid = engine.auto_drive(engine.start(product_id="FARM", title="Offline crop log")["feature_id"])["feature_id"]
     services.github.release_result = "failure"
     Clock(monkeypatch).hours(25)
     check_waits(engine, fid)
@@ -130,7 +130,7 @@ def test_an_unhealthy_release_is_halted_and_goes_to_people(engine, services, mon
 
 def test_a_failed_store_build_goes_to_the_release_managers(engine, services):
     services.github.release_result = "failure"
-    v = engine.auto_drive(engine.start(product_id="AG", title="Offline crop log")["feature_id"], max_steps=12,
+    v = engine.auto_drive(engine.start(product_id="FARM", title="Offline crop log")["feature_id"], max_steps=12,
                           decisions={"escalation:delivery": {"decision": "abort", "feedback": "store build broken"}})
     assert v["status"] == "aborted"
     assert [d["payload"]["stage"] for d in released(services)] == ["dev"]
@@ -148,9 +148,9 @@ def test_rollout_policy_is_checked():
 
 
 REPOS = [
-    {"name": "o/ag-api", "role": "provider"},
-    {"name": "o/ag-bff", "role": "bff"},
-    {"name": "o/ag-mobile", "role": "mobile"},
+    {"name": "o/farm-api", "role": "provider"},
+    {"name": "o/farm-bff", "role": "bff"},
+    {"name": "o/farm-mobile", "role": "mobile"},
 ]
 
 
@@ -160,15 +160,15 @@ def hld(endpoints: str) -> str:
 
 def test_a_mobile_app_reaches_the_product_only_through_the_bff():
     lines = _endpoint_lines(REPOS)
-    assert "- o/ag-mobile: none; calls ag-bff" in lines
+    assert "- o/farm-mobile: none; calls farm-bff" in lines
     assert _endpoints(hld("\n".join(lines)), REPOS, {"repos": REPOS}) == []
 
-    direct = hld("- o/ag-bff: external; calls ag-api\n- o/ag-api: project\n- o/ag-mobile: none; calls ag-api, ag-bff\n")
-    assert any("calls ag-api directly" in f for f in _endpoints(direct, REPOS, {"repos": REPOS}))
-    exposed = hld("- o/ag-bff: external; calls ag-api\n- o/ag-api: project\n- o/ag-mobile: external; calls ag-bff\n")
+    direct = hld("- o/farm-bff: external; calls farm-api\n- o/farm-api: project\n- o/farm-mobile: none; calls farm-api, farm-bff\n")
+    assert any("calls farm-api directly" in f for f in _endpoints(direct, REPOS, {"repos": REPOS}))
+    exposed = hld("- o/farm-bff: external; calls farm-api\n- o/farm-api: project\n- o/farm-mobile: external; calls farm-bff\n")
     assert any("visibility is none" in f for f in _endpoints(exposed, REPOS, {"repos": REPOS}))
     no_bff = [r for r in REPOS if r["role"] != "bff"]
-    lonely = hld("- o/ag-api: project\n- o/ag-mobile: none\n")
+    lonely = hld("- o/farm-api: project\n- o/farm-mobile: none\n")
     assert any("has no BFF" in f for f in _endpoints(lonely, no_bff, {"repos": no_bff}))
 
 

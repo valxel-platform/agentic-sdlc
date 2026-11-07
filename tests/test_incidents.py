@@ -22,7 +22,7 @@ from vrixel_sdlc.services import build_services
 from vrixel_sdlc.web.auth import AuthConfig
 
 ROOT = Path(__file__).resolve().parents[1]
-API = "vrixel-emr/emr-intake-api"
+API = "acme-clinic/cln-intake-api"
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def make(tmp_path, gov_root):
     return FeatureEngine(svc, InMemorySaver()), svc
 
 
-def alert(status="firing", fingerprint="fp1", component="emr-intake-api", severity="critical", name="HighErrorRate",
+def alert(status="firing", fingerprint="fp1", component="cln-intake-api", severity="critical", name="HighErrorRate",
           at="2026-11-03T21:00:00Z"):
     return {"alerts": [{"status": status, "fingerprint": fingerprint, "startsAt": at,
                         "labels": {"alertname": name, "severity": severity, "component": component},
@@ -51,7 +51,7 @@ def gate(eng, tid, name):
 
 
 def released_feature(eng, title="Consent capture at intake"):
-    fid = eng.create(product_id="EMR", title=title)
+    fid = eng.create(product_id="CLN", title=title)
     assert eng.auto_drive(fid)["status"] == "done"
     return fid
 
@@ -61,21 +61,21 @@ def released_feature(eng, title="Consent capture at intake"):
 
 def test_signals_are_normalized():
     [a] = from_alertmanager(alert(severity="warning"))
-    assert (a["source"], a["status"], a["severity"], a["component"]) == ("prometheus", "firing", "sev3", "emr-intake-api")
+    assert (a["source"], a["status"], a["severity"], a["component"]) == ("prometheus", "firing", "sev3", "cln-intake-api")
     assert from_alertmanager(alert(status="resolved"))[0]["status"] == "resolved"
     [s] = from_sentry({"action": "created", "data": {"issue": {
-        "id": "42", "title": "TypeError in consent form", "level": "error", "project": {"slug": "emr-web"},
-        "web_url": "https://sentry.io/i/42", "tags": [["vrixel_product", "EMR"]]}}}, "issue")
-    assert (s["severity"], s["product_id"], s["component"], s["fingerprint"]) == ("sev2", "EMR", "emr-web", "sentry:42")
-    [t] = from_ticket({"product_id": "EMR", "title": "Can't edit consent", "description": "x", "reporter": "fd-1"})
+        "id": "42", "title": "TypeError in consent form", "level": "error", "project": {"slug": "cln-web"},
+        "web_url": "https://sentry.io/i/42", "tags": [["vrixel_product", "CLN"]]}}}, "issue")
+    assert (s["severity"], s["product_id"], s["component"], s["fingerprint"]) == ("sev2", "CLN", "cln-web", "sentry:42")
+    [t] = from_ticket({"product_id": "CLN", "title": "Can't edit consent", "description": "x", "reporter": "fd-1"})
     assert t["source"] == "ticket" and t["severity"] == "sev3" and t["labels"]["reporter"] == "fd-1"
-    assert from_ticket({"product_id": "EMR"}) == []
+    assert from_ticket({"product_id": "CLN"}) == []
 
 
 def test_signals_map_to_a_product_and_component(tmp_path, gov_root):
     _, svc = make(tmp_path, gov_root)
     [a] = from_alertmanager(alert())
-    assert resolve_product(svc, a) == ("EMR", API)
+    assert resolve_product(svc, a) == ("CLN", API)
     [b] = from_alertmanager(alert(component="nobody-knows-me"))
     assert resolve_product(svc, b) == ("", "")
 
@@ -87,14 +87,14 @@ def test_an_alert_opens_an_incident_and_the_tool_turns_the_new_feature_off_and_s
     eng, svc = make(tmp_path, gov_root)
     fid = released_feature(eng)
     key = eng.view(fid)["release"]["flag"]
-    assert svc.flags.get("EMR", key) is True
+    assert svc.flags.get("CLN", key) is True
 
     [iid] = eng.ingest(from_alertmanager(alert()))
-    assert iid == "EMR-INC-1"
+    assert iid == "CLN-INC-1"
     v = eng.view(iid)
     # The feature released an hour ago is the likely cause: the tool turned its flag off by itself
     # (platform/remediation.yaml), started the fix, and is watching it recover. Nobody was asked.
-    assert svc.flags.get("EMR", key) is False
+    assert svc.flags.get("CLN", key) is False
     assert [(t["type"], t["ok"], t["by"]) for t in v["taken"]] == [("flag_off", True, "agent:remediate"),
                                                                     ("hotfix", True, "agent:remediate")]
     assert v["status"] == "monitoring" and not [p for p in eng.pending(iid) if p["type"] == "gate"]
@@ -107,7 +107,7 @@ def test_an_alert_opens_an_incident_and_the_tool_turns_the_new_feature_off_and_s
     assert eng._state(hotfix)["track"] == "hotfix" and "Hotfix design" in eng.artifact(hotfix, "HLD")["content"]
 
 
-def no_autonomy(gov_root, product="vrixel-emr/emr-governance"):
+def no_autonomy(gov_root, product="acme-clinic/cln-governance"):
     """The product turns the tool's own production actions off: on-call decides everything."""
     gov = gov_root / product / "product.yaml"
     gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {autonomous: false}\n", 1))
@@ -120,23 +120,23 @@ def test_with_autonomy_off_on_call_decides_before_anything_happens(tmp_path, gov
     key = eng.view(fid)["release"]["flag"]
     [iid] = eng.ingest(from_alertmanager(alert()))
     g = gate(eng, iid, "incident")
-    assert g["approvers"] == ["vrixel-emr/release-managers"]  # on-call falls back to G6's approvers
+    assert g["approvers"] == ["acme-clinic/release-managers"]  # on-call falls back to G6's approvers
     assert g["severity"] == "sev1" and g["suspects"][0]["feature_id"] == fid
     assert [a["type"] for a in g["actions"]] == ["flag_off", "hotfix"]
-    assert svc.flags.get("EMR", key) is True  # nothing happens before a person decides
+    assert svc.flags.get("CLN", key) is True  # nothing happens before a person decides
     assert any(e["kind"] == "not_paged" and e["node"] == "escalate" for e in eng.view(iid)["events"])
     eng.decide(iid, g["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
     v = eng.view(iid)
-    assert svc.flags.get("EMR", key) is False and v["taken"][0]["by"] == "oncall-1"
+    assert svc.flags.get("CLN", key) is False and v["taken"][0]["by"] == "oncall-1"
     assert [t["ok"] for t in v["taken"]] == [True, True] and v["status"] == "monitoring"
 
 
 def test_a_hotfix_starts_at_planning_and_on_call_approves_merge_and_release(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
-    gov = gov_root / "vrixel-emr" / "emr-governance" / "product.yaml"
-    gov.write_text(gov.read_text().replace("approvers:\n", "approvers:\n  oncall:\n  - vrixel-emr/oncall\n", 1))
-    incident = {"incident_id": "EMR-INC-9", "product_id": "EMR", "title": "5xx on intake", "severity": "sev2"}
-    hid = eng.create(product_id="EMR", title="Hotfix: guard null consent", track="hotfix",
+    gov = gov_root / "acme-clinic" / "cln-governance" / "product.yaml"
+    gov.write_text(gov.read_text().replace("approvers:\n", "approvers:\n  oncall:\n  - acme-clinic/oncall\n", 1))
+    incident = {"incident_id": "CLN-INC-9", "product_id": "CLN", "title": "5xx on intake", "severity": "sev2"}
+    hid = eng.create(product_id="CLN", title="Hotfix: guard null consent", track="hotfix",
                      hotfix={**incident, "repo": API, "change": "guard null consent", "approved_by": "oncall-1"})
     seen = {}
     for _ in range(10):
@@ -145,10 +145,10 @@ def test_a_hotfix_starts_at_planning_and_on_call_approves_merge_and_release(tmp_
             break
         seen[p[0]["gate"]] = p[0]["approvers"]
         eng.decide(hid, p[0]["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
-    assert set(seen) <= {"g5", "g6"} and seen["g6"] == ["vrixel-emr/oncall"]
+    assert set(seen) <= {"g5", "g6"} and seen["g6"] == ["acme-clinic/oncall"]
     v = eng.auto_drive(hid)
     assert v["status"] == "done" and v["release"]["flag"] == "" and v["release"]["flag_on"] is None  # a fix has no flag of its own
-    assert not [c for c in svc.catalog.lookup("EMR") if c.get("feature") == hid]  # a fix is not a capability
+    assert not [c for c in svc.catalog.lookup("CLN") if c.get("feature") == hid]  # a fix is not a capability
 
 
 def test_signals_join_their_open_incident(tmp_path, gov_root):
@@ -157,9 +157,9 @@ def test_signals_join_their_open_incident(tmp_path, gov_root):
     assert eng.ingest(from_alertmanager(alert())) == [a]  # same alert
     assert eng.ingest(from_alertmanager(alert(fingerprint="fp2", name="HighLatency"))) == [a]  # same component
     # The web app calls the API (consumer and provider): failing together, it's one incident.
-    assert eng.ingest(from_alertmanager(alert(fingerprint="fp3", component="emr-web"))) == [a]
+    assert eng.ingest(from_alertmanager(alert(fingerprint="fp3", component="cln-web"))) == [a]
     joined = svc.signals.for_incident(a)[-1]
-    assert joined["labels"]["joined_by"].startswith("calls: emr-web calls emr-intake-api")
+    assert joined["labels"]["joined_by"].startswith("calls: cln-web calls cln-intake-api")
     assert eng.ingest(from_alertmanager(alert(component="unknown-svc"))) == []
     assert len(svc.signals.for_incident(a)) == 4
 
@@ -186,7 +186,7 @@ def test_recovery_leads_to_a_postmortem_recorded_in_git(tmp_path, gov_root, monk
     eng.decide(iid, pm["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
     v = eng.view(iid)
     assert v["status"] == "closed"
-    assert ("vrixel-emr/emr-governance", f"vrixel/{iid}", f"incidents/{iid}.md") in svc.github.files
+    assert ("acme-clinic/cln-governance", f"vrixel/{iid}", f"incidents/{iid}.md") in svc.github.files
     # closed: a new firing of the same alert opens a new incident
     [again] = eng.ingest(from_alertmanager(alert()))
     assert again != iid
@@ -219,10 +219,10 @@ def test_on_call_can_pick_actions_ask_again_or_close(tmp_path, gov_root):
     eng.decide(iid, g["interrupt_id"], {"decision": "approve", "approver": "oncall-1", "action_ids": ["A1"]})
     v = eng.view(iid)
     assert [t["type"] for t in v["taken"]] == ["flag_off"] and not v["links"]  # no hotfix started
-    assert svc.flags.get("EMR", eng.view(fid)["release"]["flag"]) is False
+    assert svc.flags.get("CLN", eng.view(fid)["release"]["flag"]) is False
 
     # Hours later, the web app failing on its own is another incident.
-    [other] = eng.ingest(from_alertmanager(alert(fingerprint="z", component="emr-web", at="2026-11-04T02:00:00Z")))
+    [other] = eng.ingest(from_alertmanager(alert(fingerprint="z", component="cln-web", at="2026-11-04T02:00:00Z")))
     assert other != iid
     eng.decide(other, gate(eng, other, "incident")["interrupt_id"],
                {"decision": "resolve", "approver": "oncall-1", "feedback": "False alarm: synthetic check"})
@@ -231,19 +231,19 @@ def test_on_call_can_pick_actions_ask_again_or_close(tmp_path, gov_root):
 
 def test_with_no_recent_change_triage_proposes_a_rollback_by_a_person(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
-    [iid] = eng.ingest(from_alertmanager(alert(component="emr-web", fingerprint="w")))
+    [iid] = eng.ingest(from_alertmanager(alert(component="cln-web", fingerprint="w")))
     g = gate(eng, iid, "incident")
     assert [a["type"] for a in g["actions"]] == ["rollback"]
     eng.decide(iid, g["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
     assert svc.openchoreo.rollbacks[-1]["actor"] == "oncall-1"
     with pytest.raises(PermissionError):
-        svc.openchoreo.rollback(component="emr-web", env="production", actor="agent", actor_type="agent")
+        svc.openchoreo.rollback(component="cln-web", env="production", actor="agent", actor_type="agent")
 
 
 def test_a_user_report_becomes_an_intent_change(tmp_path, gov_root):
     eng, _ = make(tmp_path, gov_root)
     released_feature(eng, "Consent form at registration")
-    [iid] = eng.ingest(from_ticket({"product_id": "EMR", "title": "Front desk can't edit consent after saving",
+    [iid] = eng.ingest(from_ticket({"product_id": "CLN", "title": "Front desk can't edit consent after saving",
                                     "description": "Staff expected to correct mistakes in the consent form"}))
     g = gate(eng, iid, "incident")
     assert [(a["type"], a["scope"]) for a in g["actions"]] == [("intent_change", "feature")]
@@ -261,8 +261,8 @@ def test_agents_see_recent_incidents(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
     released_feature(eng)
     eng.ingest(from_alertmanager(alert()))
-    text = render(svc.knowledge.collect(svc.snapshot("EMR")))
-    assert "## Recent production incidents" in text and "EMR-INC-1 (sev1" in text
+    text = render(svc.knowledge.collect(svc.snapshot("CLN")))
+    assert "## Recent production incidents" in text and "CLN-INC-1 (sev1" in text
 
 
 # --------------------------------------------------------------------------- API
@@ -277,18 +277,18 @@ def test_webhooks_and_reporting_a_problem(tmp_path, gov_root, monkeypatch):
     monkeypatch.setenv("VRIXEL_SENTRY_CLIENT_SECRET", "s3c")
     assert client.post("/api/signals/alertmanager", content=body, headers={"authorization": "Bearer no"}).status_code == 401
     r = client.post("/api/signals/alertmanager", content=body, headers={"authorization": "Bearer t0k"})
-    assert r.status_code == 202 and r.json()["incidents"] == ["EMR-INC-1"]
+    assert r.status_code == 202 and r.json()["incidents"] == ["CLN-INC-1"]
 
     sentry = json.dumps({"action": "created", "data": {"issue": {"id": "7", "title": "Crash", "level": "fatal",
-                                                                 "project": {"slug": "emr-web"}}}}).encode()
+                                                                 "project": {"slug": "cln-web"}}}}).encode()
     sig = hmac.new(b"s3c", sentry, hashlib.sha256).hexdigest()
     assert client.post("/api/signals/sentry", content=sentry, headers={"sentry-hook-signature": "bad"}).status_code == 401
     r = client.post("/api/signals/sentry", content=sentry, headers={"sentry-hook-signature": sig})
-    assert r.json()["incidents"] == ["EMR-INC-2"]
+    assert r.json()["incidents"] == ["CLN-INC-2"]
 
-    client.post("/api/auth/dev-login", json={"login": "fd-1", "orgs": ["vrixel-emr"]})
-    r = client.post("/api/incidents", json={"product_id": "EMR", "title": "Printer labels cut off", "description": "x"})
-    assert r.status_code == 201 and r.json()["feature_id"] == "EMR-INC-3"
+    client.post("/api/auth/dev-login", json={"login": "fd-1", "orgs": ["acme-clinic"]})
+    r = client.post("/api/incidents", json={"product_id": "CLN", "title": "Printer labels cut off", "description": "x"})
+    assert r.status_code == 201 and r.json()["feature_id"] == "CLN-INC-3"
     rows = client.get("/api/incidents").json()
-    assert [x["feature_id"] for x in rows] == ["EMR-INC-3", "EMR-INC-2", "EMR-INC-1"]
-    assert all(x["feature_id"].startswith("EMR-FEAT") for x in client.get("/api/features").json())
+    assert [x["feature_id"] for x in rows] == ["CLN-INC-3", "CLN-INC-2", "CLN-INC-1"]
+    assert all(x["feature_id"].startswith("CLN-FEAT") for x in client.get("/api/features").json())

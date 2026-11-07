@@ -10,9 +10,9 @@ ClusterResourceType backed by a Crossplane Composition (vrixel-tools/platform-re
 
        ## Resources
        - field-readings: kinesis-stream; retention_hours=168
-         writes: agtech-sensor-api; reads: agtech-field-worker
+         writes: farm-sensor-api; reads: farm-field-worker
        - field-state: dynamodb-table; partition_key=field_id; size production=large
-         reads, writes: agtech-field-worker
+         reads, writes: farm-field-worker
 
    A service other than the platform defaults needs an ADR naming it. G4 shows the approver the
    services, each component's access and the monthly cost per environment.

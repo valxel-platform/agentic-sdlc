@@ -26,7 +26,7 @@ jobs:
       - run: pytest
         env:
           VRIXEL_TEST_DATABASE_URL: postgresql://vrixel:vrixel@localhost:5432/vrixel
-      - run: vrixel demo --product EMR --fault spec=1 --revise
+      - run: vrixel demo --product CLN --fault spec=1 --revise
 
   web:
     runs-on: ubuntu-latest

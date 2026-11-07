@@ -63,7 +63,7 @@ def external(engine, fid):
     return [p for p in engine.pending(fid) if p["type"] == "external"]
 
 
-def to_build(engine, product="AG", title="Offline crop log"):
+def to_build(engine, product="FARM", title="Offline crop log"):
     """Start a feature and approve gates until it waits on something other than a gate."""
     v = engine.start(product_id=product, title=title, description="Record observations offline")
     fid = v["feature_id"]
@@ -83,7 +83,7 @@ def test_red_ci_holds_the_feature_without_bothering_people(engine, services):
     fid = v["feature_id"]
     (wait,) = external(engine, fid)
     assert wait["wait"] == "ci" and {t["repo"] for t in wait["targets"]} == {
-        "vrixel-agtech/agtech-field-api", "vrixel-agtech/agtech-mobile"}
+        "acme-farm/farm-field-api", "acme-farm/farm-mobile"}
     assert engine.inbox() == []  # nothing for a person to decide
     assert next(s for s in v["rail"] if s["key"] == "build")["state"] == "current"
     with pytest.raises(RuntimeError, match="waiting on CI checks"):
@@ -122,24 +122,24 @@ def test_a_person_can_vouch_for_ci(engine, services):
 def test_builds_run_on_the_merge_commit_and_report_back_to_github(engine, services):
     v = engine.auto_drive(to_build(engine)["feature_id"])
     runs = v["runs"]
-    assert set(runs) == {"vrixel-agtech/agtech-field-api", "vrixel-agtech/agtech-mobile"}
+    assert set(runs) == {"acme-farm/farm-field-api", "acme-farm/farm-mobile"}
     for repo, run in runs.items():
         pr = next(p for p in v["pull_requests"].values() if p["repo"] == repo)
-        assert run["sha"] == pr["merge_sha"] and run["project"] == "agtech" and run["state"] == "success"
+        assert run["sha"] == pr["merge_sha"] and run["project"] == "farm" and run["state"] == "success"
     contexts = {(s["repo"], s["context"]) for s in services.github.statuses}
-    assert ("vrixel-agtech/agtech-mobile", "openchoreo/build") in contexts
-    assert ("vrixel-agtech/agtech-mobile", "openchoreo/production") in contexts
+    assert ("acme-farm/farm-mobile", "openchoreo/build") in contexts
+    assert ("acme-farm/farm-mobile", "openchoreo/production") in contexts
     files = [f[2] for f in services.github.files]
-    assert ".vrixel/changes/AG-FEAT-1/TASK-1.md" in files
+    assert ".vrixel/changes/FARM-FEAT-1/TASK-1.md" in files
 
 
 def test_failed_build_asks_release_managers_and_retry_rebuilds(engine, services, tmp_path):
-    services.openchoreo.run_results["vrixel-agtech/agtech-mobile"] = "failed"
+    services.openchoreo.run_results["acme-farm/farm-mobile"] = "failed"
     v = to_build(engine)
     fid = v["feature_id"]
     (esc,) = engine.pending(fid)
     assert esc["type"] == "escalation" and esc["phase"] == "delivery" and esc["wait"] == "build"
-    assert "agtech-mobile" in esc["reason"]
+    assert "farm-mobile" in esc["reason"]
     runs_before = len(services.openchoreo.runs)
     services.openchoreo.run_results.clear()
     engine.decide(fid, esc["interrupt_id"], {"decision": "retry", "approver": "rm"})
@@ -150,7 +150,7 @@ def test_failed_build_asks_release_managers_and_retry_rebuilds(engine, services,
 
 
 def test_staging_rollout_waits_until_ready(engine, services):
-    services.openchoreo.deploy_results[("vrixel-agtech/agtech-field-api", "staging")] = "progressing"
+    services.openchoreo.deploy_results[("acme-farm/farm-field-api", "staging")] = "progressing"
     v = to_build(engine)
     fid = v["feature_id"]
     (wait,) = external(engine, fid)
@@ -163,7 +163,7 @@ def test_staging_rollout_waits_until_ready(engine, services):
     assert v["pending"][0]["gate"] == "g6"
     assert {d["env"] for d in v["deployments"].values()} == {"staging"}
     release = engine.artifact(fid, "REL")["content"]
-    assert "vrixel-agtech/agtech-mobile: staging, release agtech-mobile-r1" in release
+    assert "acme-farm/farm-mobile: staging, release farm-mobile-r1" in release
 
 
 def test_production_is_bound_for_the_human_approver(engine, services):
@@ -187,12 +187,12 @@ def test_waits_time_out_into_a_failure():
 
 
 def test_shared_lane_publishes_packages_and_is_not_deployed(engine, services):
-    v = engine.start(product_id="AG", title="Audit trail for field edits",
+    v = engine.start(product_id="FARM", title="Audit trail for field edits",
                      description="Record who changed a field, with the shared audit framework")
     v = engine.auto_drive(v["feature_id"])
     assert v["status"] == "done"
-    assert "vrixel-shared-services/ss-audit-framework" not in v["runs"]
-    assert "vrixel-shared-services/ss-audit-framework" not in v["deployments"]
+    assert "acme-shared/ss-audit-framework" not in v["runs"]
+    assert "acme-shared/ss-audit-framework" not in v["deployments"]
 
 
 # --------------------------------------------------------------------------- GitHub REST adapter
@@ -298,10 +298,10 @@ def test_github_adapter_branch_note_pr_checks_and_merge():
     assert gh.put_file(repo="o/r", branch="feature/X-1", path=".vrixel/changes/X-1/TASK-1.md",
                        content="note", message="m")["unchanged"]
 
-    pr = gh.open_pr(repo="o/r", branch="feature/X-1", title="X-1 TASK-1", body="b", files=[], labels=["product:AG"])
-    again = gh.open_pr(repo="o/r", branch="feature/X-1", title="X-1 TASK-1", body="b", files=[], labels=["product:AG"])
+    pr = gh.open_pr(repo="o/r", branch="feature/X-1", title="X-1 TASK-1", body="b", files=[], labels=["product:FARM"])
+    again = gh.open_pr(repo="o/r", branch="feature/X-1", title="X-1 TASK-1", body="b", files=[], labels=["product:FARM"])
     assert pr["number"] == again["number"] and len(api.pulls) == 1  # found by head branch, not duplicated
-    assert pr["head_sha"] == first["sha"] and again["labels"] == ["product:AG"]
+    assert pr["head_sha"] == first["sha"] and again["labels"] == ["product:FARM"]
 
     sha = pr["head_sha"]
     assert gh.checks(repo="o/r", sha=sha)["state"] == "success"  # no CI configured
@@ -372,9 +372,9 @@ def fake_openchoreo():
 def test_openchoreo_adapter_builds_deploys_and_promotes():
     server, st = fake_openchoreo()
     oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
-    run = oc.run_workflow(component="vrixel-agtech/agtech-field-api", ref="m3rge", kind="main", project="agtech")
-    assert st["calls"][0] == ("trigger", "vrixel", "agtech", "agtech-field-api", "m3rge")
-    scope = {"component": "vrixel-agtech/agtech-field-api", "project": "agtech"}
+    run = oc.run_workflow(component="acme-farm/farm-field-api", ref="m3rge", kind="main", project="farm")
+    assert st["calls"][0] == ("trigger", "vrixel", "farm", "farm-field-api", "m3rge")
+    scope = {"component": "acme-farm/farm-field-api", "project": "farm"}
     assert oc.run_status(run_id=run["run_id"], **scope)["status"] == "running"
     st["runs"][run["run_id"]] = "Failed"
     failed = oc.run_status(run_id=run["run_id"], **scope)
@@ -382,51 +382,51 @@ def test_openchoreo_adapter_builds_deploys_and_promotes():
     st["runs"][run["run_id"]] = "Succeeded"
     assert oc.run_status(run_id=run["run_id"], **scope)["status"] == "succeeded"
 
-    st["latest"] = "agtech-field-api-7f3a"
+    st["latest"] = "farm-field-api-7f3a"
     oc.promote(env="dev", actor="agent:dev", actor_type="agent", **scope)
     assert oc.deployment(env="dev", **scope)["state"] == "progressing"
-    st["bindings"][("agtech-field-api", "dev")]["status"]["conditions"][0]["status"] = "True"
-    assert oc.deployment(env="dev", **scope) == {"state": "ready", "release": "agtech-field-api-7f3a", "url": ""}
+    st["bindings"][("farm-field-api", "dev")]["status"]["conditions"][0]["status"] = "True"
+    assert oc.deployment(env="dev", **scope) == {"state": "ready", "release": "farm-field-api-7f3a", "url": ""}
     assert oc.deployment(env="staging", **scope)["state"] == "absent"
 
     rec = oc.promote(env="staging", actor="agent:staging", actor_type="agent", **scope)
-    assert rec["release"] == "agtech-field-api-7f3a"  # the release dev runs, not a rebuild
+    assert rec["release"] == "farm-field-api-7f3a"  # the release dev runs, not a rebuild
     with pytest.raises(PermissionError):
         oc.promote(env="production", actor="agent:x", actor_type="agent", **scope)
     oc.promote(env="production", actor="rm", actor_type="human", **scope)
-    assert ("bind", "agtech-field-api", "production", "agtech-field-api-7f3a") in st["calls"]
+    assert ("bind", "farm-field-api", "production", "farm-field-api-7f3a") in st["calls"]
 
-    st["latest"] = "agtech-field-api-9b21"  # a later build redeploys dev by updating its binding
+    st["latest"] = "farm-field-api-9b21"  # a later build redeploys dev by updating its binding
     oc.promote(env="dev", actor="agent:dev", actor_type="agent", **scope)
-    assert ("rebind", "agtech-field-api-dev", "agtech-field-api-9b21", "Active") in st["calls"]
+    assert ("rebind", "farm-field-api-dev", "farm-field-api-9b21", "Active") in st["calls"]
 
 
 # --------------------------------------------------------------------------- wiring
 
 
 def test_runtime_component_names_are_validated(tmp_path, gov_root):
-    path = gov_root / "vrixel-agtech" / "ag-governance" / "product.yaml"
+    path = gov_root / "acme-farm" / "farm-governance" / "product.yaml"
     path.write_text(path.read_text().replace(
         "  pipeline: [dev, staging, production]",
         "  pipeline: [dev, staging, production]\n  namespace: vrixel\n  components:\n"
-        "    vrixel-agtech/agtech-mobile: field-app\n    vrixel-emr/emr-web: nope"))
+        "    acme-farm/farm-mobile: field-app\n    acme-clinic/cln-web: nope"))
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a",
                       governance_source="local", governance_root=gov_root)
-    with pytest.raises(GovernanceError, match="vrixel-emr/emr-web, which is not one of this product's repos"):
-        build_services(s).snapshot("AG")
+    with pytest.raises(GovernanceError, match="acme-clinic/cln-web, which is not one of this product's repos"):
+        build_services(s).snapshot("FARM")
 
 
 def test_component_mapping_and_namespace_reach_openchoreo(tmp_path, gov_root):
-    path = gov_root / "vrixel-agtech" / "ag-governance" / "product.yaml"
+    path = gov_root / "acme-farm" / "farm-governance" / "product.yaml"
     path.write_text(path.read_text().replace(
         "  pipeline: [dev, staging, production]",
         "  pipeline: [dev, staging, production]\n  namespace: vrixel\n  components:\n"
-        "    vrixel-agtech/agtech-mobile: field-app"))
+        "    acme-farm/farm-mobile: field-app"))
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a",
                       governance_source="local", governance_root=gov_root)
     eng = FeatureEngine(build_services(s), InMemorySaver())
     v = eng.auto_drive(to_build(eng)["feature_id"])
-    run = v["runs"]["vrixel-agtech/agtech-mobile"]
+    run = v["runs"]["acme-farm/farm-mobile"]
     assert run["component"] == "field-app" and run["namespace"] == "vrixel"
 
 
@@ -462,7 +462,7 @@ def test_github_webhook_is_verified_and_resumes_the_feature(monkeypatch, engine,
 def test_ready_deployments_start_each_repos_post_deploy_suite(engine, services):
     v = to_build(engine)
     sent = [(d["repo"], d["payload"]["stage"]) for d in services.github.dispatches]
-    for repo in ("vrixel-agtech/agtech-field-api", "vrixel-agtech/agtech-mobile"):
+    for repo in ("acme-farm/farm-field-api", "acme-farm/farm-mobile"):
         assert {(repo, "dev"), (repo, "staging"), (repo, "production")} <= set(sent)
     d = services.github.dispatches[0]
     assert d["event_type"] == "vrixel-deployed" and d["payload"]["sha"] == v["runs"][d["repo"]]["sha"]

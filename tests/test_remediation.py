@@ -19,7 +19,7 @@ from vrixel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 POLICY = EXAMPLES / "vrixel-tools" / "sdlc-governance" / "platform" / "remediation.yaml"
-EMR = "vrixel-emr/emr-governance"
+CLN = "acme-clinic/cln-governance"
 NOW = datetime(2026, 11, 6, 22, 0, tzinfo=timezone.utc)
 
 
@@ -135,11 +135,11 @@ def make(tmp_path, root):
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",
                       governance_root=root)
     svc = build_services(s)
-    svc.pager = paging.RecordingPager({"EMR": "emr-key", "AG": "ag-key"}, "https://sdlc")
+    svc.pager = paging.RecordingPager({"CLN": "cln-key", "FARM": "farm-key"}, "https://sdlc")
     return FeatureEngine(svc, InMemorySaver()), svc
 
 
-def alert(status="firing", component="emr-intake-api", severity="error", fp="fp1", at="2026-11-06T21:00:00Z"):
+def alert(status="firing", component="cln-intake-api", severity="error", fp="fp1", at="2026-11-06T21:00:00Z"):
     return from_alertmanager({"alerts": [{"status": status, "fingerprint": fp, "startsAt": at,
                                           "labels": {"alertname": "HighErrorRate", "severity": severity,
                                                      "component": component}}]})
@@ -155,7 +155,7 @@ def urgent(svc):
 
 def test_a_failed_mitigation_pages_on_call(tmp_path, root):
     eng, svc = make(tmp_path, root)
-    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    fid = eng.create(product_id="CLN", title="Consent capture at intake")
     eng.auto_drive(fid)
 
     def broken(*a, **k):
@@ -171,20 +171,20 @@ def test_a_failed_mitigation_pages_on_call(tmp_path, root):
 
 
 def test_still_failing_after_the_tools_rollback_pages_on_call(tmp_path, root, monkeypatch):
-    gov = root / EMR / "product.yaml"
+    gov = root / CLN / "product.yaml"
     gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {autonomous: [rollback]}\n", 1))
     eng, svc = make(tmp_path, root)
-    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    fid = eng.create(product_id="CLN", title="Consent capture at intake")
     eng.auto_drive(fid)
-    oc = {"alertName": "emr-intake-api-exceptions", "alertSeverity": "warning", "alertType": "log",
-          "project": "emr", "component": "emr-intake-api", "environment": "production",
+    oc = {"alertName": "cln-intake-api-exceptions", "alertSeverity": "warning", "alertType": "log",
+          "project": "cln", "component": "cln-intake-api", "environment": "production",
           "alertTimestamp": datetime.now(timezone.utc).isoformat()}
     [iid] = eng.alarm_changes(from_openchoreo(oc))["incidents"]
     v = eng.view(iid)
     assert v["taken"][0]["type"] == "rollback" and v["taken"][0]["by"] == "agent:remediate"
     [rb] = svc.openchoreo.rollbacks
     assert rb["actor"] == "agent:remediate" and rb["env"] == "production"
-    assert svc.flags.get("EMR", eng.view(fid)["release"]["flag"]) is True  # flag_off isn't this product's
+    assert svc.flags.get("CLN", eng.view(fid)["release"]["flag"]) is True  # flag_off isn't this product's
     # The rule fires again 20 minutes later; at 31 (SEV3 needs 30 quiet minutes) the tool gives up.
     refired = datetime.now(timezone.utc) + timedelta(minutes=20)
     monkeypatch.setattr(incident_mod, "_clock", lambda: refired)
@@ -197,12 +197,12 @@ def test_still_failing_after_the_tools_rollback_pages_on_call(tmp_path, root, mo
     g = gate(eng, iid)
     assert len(svc.openchoreo.rollbacks) == 1  # one try, then a person
     eng.decide(iid, g["interrupt_id"], {"decision": "approve", "approver": "oncall-1", "action_ids": []})
-    assert ("EMR-INC-1:urgent", "acknowledge") in [(s["dedup_key"], s["event_action"]) for s in svc.pager.sent]
+    assert ("CLN-INC-1:urgent", "acknowledge") in [(s["dedup_key"], s["event_action"]) for s in svc.pager.sent]
 
 
 def test_a_quiet_incident_after_the_tools_fix_reaches_the_postmortem_without_a_page(tmp_path, root, monkeypatch):
     eng, svc = make(tmp_path, root)
-    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    fid = eng.create(product_id="CLN", title="Consent capture at intake")
     eng.auto_drive(fid)
     [iid] = eng.ingest(alert())  # SEV2
     monkeypatch.setattr(incident_mod, "_clock", lambda: datetime.now(timezone.utc) + timedelta(minutes=16))
@@ -213,10 +213,10 @@ def test_a_quiet_incident_after_the_tools_fix_reaches_the_postmortem_without_a_p
 
 def test_a_merge_ends_an_incident_the_tool_is_watching(tmp_path, root):
     eng, svc = make(tmp_path, root)
-    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    fid = eng.create(product_id="CLN", title="Consent capture at intake")
     eng.auto_drive(fid)
     [a] = eng.ingest(alert())
-    [b] = eng.ingest(alert(component="emr-web", fp="w", at="2026-11-07T09:00:00Z"))
+    [b] = eng.ingest(alert(component="cln-web", fp="w", at="2026-11-07T09:00:00Z"))
     assert a != b and [p.get("wait") for p in eng.pending(a)] == ["incident_recovery"]
     out = eng.merge_incidents(a, b, approver="oncall-1", reason="same outage")
     assert out["ended"] is True and eng._state(a)["status"] == "merged" and not eng.pending(a)
@@ -224,8 +224,8 @@ def test_a_merge_ends_an_incident_the_tool_is_watching(tmp_path, root):
 
 def test_a_cost_finding_waits_for_on_call_without_paging(tmp_path, root):
     eng, svc = make(tmp_path, root)
-    budget = {"alertName": "agtech-budget", "alertSeverity": "critical", "alertType": "budget", "alertValue": 212.4,
-              "alertThreshold": 150, "project": "agtech", "environment": "production"}
+    budget = {"alertName": "farm-budget", "alertSeverity": "critical", "alertType": "budget", "alertValue": 212.4,
+              "alertThreshold": 150, "project": "farm", "environment": "production"}
     [iid] = eng.alarm_changes(from_openchoreo(budget))["incidents"]
     assert gate(eng, iid) and svc.pager.sent == []
     ev = [e for e in eng.view(iid)["events"] if e["node"] == "escalate"]
@@ -233,8 +233,8 @@ def test_a_cost_finding_waits_for_on_call_without_paging(tmp_path, root):
 
 
 def test_governance_refuses_a_bad_remediation_setting(tmp_path, root):
-    gov = root / EMR / "product.yaml"
+    gov = root / CLN / "product.yaml"
     gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {autonomous: [deploy]}\n", 1))
     eng, _ = make(tmp_path, root)
     with pytest.raises(GovernanceError, match="runtime.remediation.autonomous"):
-        eng.services.snapshot("EMR")
+        eng.services.snapshot("CLN")

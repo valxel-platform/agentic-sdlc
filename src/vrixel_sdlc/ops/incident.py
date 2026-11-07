@@ -73,8 +73,8 @@ def section(text: str, heading: str) -> str:
 
 
 def parse_actions(text: str) -> list[dict]:
-    """'## Proposed actions' bullets: '- flag_off: EMR-FEAT-3', '- rollback: vrixel-emr/emr-api',
-    '- hotfix: vrixel-emr/emr-api: what to change', '- intent_change: feature|initiative: the new intent',
+    """'## Proposed actions' bullets: '- flag_off: CLN-FEAT-3', '- rollback: acme-clinic/cln-api',
+    '- hotfix: acme-clinic/cln-api: what to change', '- intent_change: feature|initiative: the new intent',
     '- monitor: why no action is needed'."""
     out = []
     for n, m in enumerate(_ACTION.finditer(section(text, "Proposed actions"))):

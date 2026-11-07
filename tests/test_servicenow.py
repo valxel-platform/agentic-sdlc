@@ -48,26 +48,26 @@ class FakeSN:
 
 def record(log=None, **kw):
     log = log or changes.InMemoryChangeLog()
-    return log.record(changes.new(key=kw.get("key", "k1"), product_id="EMR", kind="release", type=kw.get("type", "standard"),
-                                  action="deploy", summary="EMR-FEAT-1 Consent capture at intake",
-                                  targets=[{"kind": "component", "name": "emr-intake-api", "release": "api-7"},
-                                           {"kind": "flag", "name": "emr.f", "on": True, "percent": 5.0}],
-                                  feature_id="EMR-FEAT-1", requested_by="dev",
+    return log.record(changes.new(key=kw.get("key", "k1"), product_id="CLN", kind="release", type=kw.get("type", "standard"),
+                                  action="deploy", summary="CLN-FEAT-1 Consent capture at intake",
+                                  targets=[{"kind": "component", "name": "cln-intake-api", "release": "api-7"},
+                                           {"kind": "flag", "name": "cln.f", "on": True, "percent": 5.0}],
+                                  feature_id="CLN-FEAT-1", requested_by="dev",
                                   approved_by=["rm-1"], approvals=[{"gate": "g6", "approver": "rm-1", "at": "t"}],
-                                  evidence={"pull_requests": ["https://github.com/vrixel-emr/emr-intake-api/pull/7"]},
+                                  evidence={"pull_requests": ["https://github.com/acme-clinic/cln-intake-api/pull/7"]},
                                   outcome=kw.get("outcome", "done")))
 
 
 def receipts(http, store=None, spec=SPEC, auth="Basic dTpw"):
     return ServiceNowReceipts(lambda pid: spec, store or InMemoryReceipts(),
-                              env={"VRIXEL_SERVICENOW_AUTH_EMR": auth} if auth else {}, opener=http, delays=(0, 0))
+                              env={"VRIXEL_SERVICENOW_AUTH_CLN": auth} if auth else {}, opener=http, delays=(0, 0))
 
 
 def test_the_receipt_says_what_changed_and_who_approved_it():
     b = body_for(record(), SPEC)
     assert b["type"] == "normal" and b["correlation_id"] == "vrixel:CHG-1" and b["correlation_display"] == "vrixel-sdlc"
-    assert b["short_description"] == "[standard] EMR-FEAT-1 Consent capture at intake"
-    assert "component emr-intake-api release api-7" in b["description"] and "for 5% of users" in b["description"]
+    assert b["short_description"] == "[standard] CLN-FEAT-1 Consent capture at intake"
+    assert "component cln-intake-api release api-7" in b["description"] and "for 5% of users" in b["description"]
     assert "G6 rm-1" in b["description"] and "pull/7" in b["description"] and b["assignment_group"] == "Platform Engineering"
     assert body_for(record(type="automatic"), SPEC)["type"] == "emergency"
     assert body_for(record(type="automatic"), {**SPEC, "types": {"automatic": "standard"}})["type"] == "standard"
@@ -107,7 +107,7 @@ def test_busy_servicenow_is_retried_and_missing_credentials_said_plainly():
     nocred = receipts(FakeSN(), auth="")
     nocred.send(record())
     assert nocred.store.get(["CHG-1"])["CHG-1"] | {"at": ""} == {
-        "status": "not_sent", "detail": "set VRIXEL_SERVICENOW_AUTH_EMR", "change_id": "CHG-1", "at": ""}
+        "status": "not_sent", "detail": "set VRIXEL_SERVICENOW_AUTH_CLN", "change_id": "CHG-1", "at": ""}
 
 
 def test_only_new_records_are_sent_and_only_for_products_that_want_it():
@@ -118,26 +118,26 @@ def test_only_new_records_are_sent_and_only_for_products_that_want_it():
             sent.append(rec["id"])
             self.store.put(rec["id"], {"status": "queued"})
 
-    log = WithReceipts(changes.InMemoryChangeLog(), Spy(lambda pid: SPEC if pid == "EMR" else None, InMemoryReceipts()))
+    log = WithReceipts(changes.InMemoryChangeLog(), Spy(lambda pid: SPEC if pid == "CLN" else None, InMemoryReceipts()))
     record(log)
     record(log)  # the same change again
-    log.record(changes.new(key="ag", product_id="AG", kind="release", type="standard", action="deploy", summary="s", targets=[]))
+    log.record(changes.new(key="farm", product_id="FARM", kind="release", type="standard", action="deploy", summary="s", targets=[]))
     assert sent == ["CHG-1"] and len(log.list()) == 2  # the log still has everything
 
 
 def test_product_yaml_turns_it_on_and_refuses_what_it_cant_do(tmp_path):
     root = tmp_path / "g"
     shutil.copytree(EXAMPLES, root)
-    gov = root / "vrixel-emr" / "emr-governance" / "product.yaml"
+    gov = root / "acme-clinic" / "cln-governance" / "product.yaml"
     base = gov.read_text()
     gov.write_text(base.replace("tools:\n", "tools:\n  change_management:\n    provider: servicenow\n"
                                            "    instance: https://acme.service-now.com\n"
                                            "    assignment_group: Platform Engineering\n", 1))
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local", governance_root=root)
     eng = FeatureEngine(build_services(s), InMemorySaver())
-    spec = eng.services.snapshot("EMR").product.tools["change_management"]
+    spec = eng.services.snapshot("CLN").product.tools["change_management"]
     assert spec["instance"] == "https://acme.service-now.com" and spec["mode"] == "receipt"
-    eng.auto_drive(eng.create(product_id="EMR", title="Consent capture at intake"))
+    eng.auto_drive(eng.create(product_id="CLN", title="Consent capture at intake"))
     got = eng.services.change_receipts.get(["CHG-1"])["CHG-1"]
     assert got["status"] == "not_sent"  # no credentials in this test; the release went out anyway
     for bad in ("    mode: gate\n", "    types: {standard: major}\n"):
@@ -145,4 +145,4 @@ def test_product_yaml_turns_it_on_and_refuses_what_it_cant_do(tmp_path):
                                                "    instance: https://acme.service-now.com\n" + bad, 1))
         eng2 = FeatureEngine(build_services(s), InMemorySaver())
         with pytest.raises(GovernanceError, match="change_management"):
-            eng2.services.snapshot("EMR")
+            eng2.services.snapshot("CLN")

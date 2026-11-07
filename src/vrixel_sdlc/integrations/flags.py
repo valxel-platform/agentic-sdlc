@@ -24,7 +24,7 @@ from typing import Callable, Protocol
 
 
 def flag_key(product_id: str, feature_id: str, title: str) -> str:
-    """e.g. emr.emr-feat-3.check-in-kiosk. Flipt keys allow letters, digits, '-', '_' and '.'."""
+    """e.g. cln.cln-feat-3.check-in-kiosk. Flipt keys allow letters, digits, '-', '_' and '.'."""
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40].strip("-")
     return f"{product_id.lower()}.{feature_id.lower()}.{slug}"
 

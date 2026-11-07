@@ -1,0 +1,7 @@
+# Sample goals for the tool's demo and tests. A product's goals: outcomes for a period, each with
+# a measure. Initiatives name the goal they serve; `parent` is reserved for a portfolio goal.
+goals:
+  - id: GOAL-CLN-1
+    title: Clinics check patients in faster
+    measure: Median front-desk check-in time under 3 minutes
+    period: 2027-H1

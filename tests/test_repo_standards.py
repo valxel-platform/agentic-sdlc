@@ -46,23 +46,23 @@ def target(svc, repo: str) -> rs.Target:
 
 def test_managed_repos_come_from_governance_the_registry_and_the_platform_list(svc):
     ts = {t.repo: t for t in rs.targets(svc)}
-    assert ts["vrixel-emr/emr-governance"].kind == "governance"
-    assert ts["vrixel-emr/emr-intake-api"].kind == "lane"
+    assert ts["acme-clinic/cln-governance"].kind == "governance"
+    assert ts["acme-clinic/cln-intake-api"].kind == "lane"
     assert ts["vrixel-tools/template-service"].kind == "template" and ts["vrixel-tools/template-service"].plan["is_template"]
     assert ts["vrixel-tools/agentic-sdlc"].plan["ruleset"]["required_checks"] == ["test", "web"]
     assert ts["vrixel-tools/agentic-sdlc"].plan["visibility"] == "public"
     assert all(t.plan["visibility"] == "public" for t in ts.values())  # every repo is public
     assert ts["vrixel-tools/template-agent"].plan["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
-    gov = ts["vrixel-emr/emr-governance"].plan
+    gov = ts["acme-clinic/cln-governance"].plan
     assert gov["ruleset"]["required_checks"] == [] and gov["tag_ruleset"] == {}
     # No GitHub review: people approve in the pipeline's gates, and pull requests merge on checks.
-    rules = ts["vrixel-emr/emr-intake-api"].plan["ruleset"]
+    rules = ts["acme-clinic/cln-intake-api"].plan["ruleset"]
     assert rules["required_approvals"] == 0 and not rules["code_owner_review"] and not rules["require_last_push_approval"]
 
 
 def test_apply_brings_a_hand_made_repo_on_standard(svc):
     gh = StubGitHub()
-    repo = "vrixel-emr/emr-intake-api"
+    repo = "acme-clinic/cln-intake-api"
     existing(gh, repo)
     t = target(svc, repo)
     before = rs.reconcile(gh, t, apply=False)
@@ -84,7 +84,7 @@ def test_apply_brings_a_hand_made_repo_on_standard(svc):
     assert rules["pull_request"]["required_approving_review_count"] == 0  # pull requests only; checks decide
     assert [c["context"] for c in rules["required_status_checks"]["required_status_checks"]] == ["unit", "contract", "CodeQL", "vrixel/gates"]
     assert {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"} in branch["bypass_actors"]
-    assert gh.org_properties["vrixel-emr"] == ["vrixel_data_class", "vrixel_managed", "vrixel_product"]
+    assert gh.org_properties["acme-clinic"] == ["vrixel_data_class", "vrixel_managed", "vrixel_product"]
     assert rs.reconcile(gh, t, apply=True).applied == []  # nothing left to do: safe to repeat
 
 
@@ -104,7 +104,7 @@ def test_without_advanced_security_codeql_is_not_required(svc):
 
 def test_drift_after_someone_changes_a_setting_is_reported_and_fixed(svc):
     gh = StubGitHub()
-    repo = "vrixel-emr/emr-governance"
+    repo = "acme-clinic/cln-governance"
     existing(gh, repo, files=False)
     t = target(svc, repo)
     rs.reconcile(gh, t, apply=True)
@@ -122,13 +122,13 @@ def test_drift_after_someone_changes_a_setting_is_reported_and_fixed(svc):
 
 def test_what_is_never_changed_automatically(svc):
     gh = StubGitHub()
-    existing(gh, "vrixel-emr/emr-web", visibility="private")
-    rep = rs.reconcile(gh, target(svc, "vrixel-emr/emr-web"), apply=True)
+    existing(gh, "acme-clinic/cln-web", visibility="private")
+    rep = rs.reconcile(gh, target(svc, "acme-clinic/cln-web"), apply=True)
     assert ("visibility", "manual") in {(d.area, d.fix) for d in rep.drift}  # never flipped automatically
-    missing = rs.reconcile(gh, target(svc, "vrixel-emr/emr-intake-api"), apply=True)
+    missing = rs.reconcile(gh, target(svc, "acme-clinic/cln-intake-api"), apply=True)
     assert not missing.exists and not missing.ok and missing.applied == []
-    existing(gh, "vrixel-apx/apx-governance", archived=True)
-    assert rs.reconcile(gh, target(svc, "vrixel-apx/apx-governance"), apply=False).drift == []
+    existing(gh, "acme-pay/pay-governance", archived=True)
+    assert rs.reconcile(gh, target(svc, "acme-pay/pay-governance"), apply=False).drift == []
 
 
 def test_the_cli_reports_and_exits_nonzero_on_drift(svc, capsys, monkeypatch):
@@ -246,12 +246,12 @@ def test_repo_state_without_advanced_security_and_org_properties():
 def test_the_platform_app_keeps_its_merge_train_bypass_on_lane_repos(svc, monkeypatch):
     monkeypatch.setenv("VRIXEL_GITHUB_APP_ID", "424242")
     gh = StubGitHub()
-    existing(gh, "vrixel-emr/emr-intake-api")
-    existing(gh, "vrixel-emr/emr-governance")
-    for repo in ("vrixel-emr/emr-intake-api", "vrixel-emr/emr-governance"):
+    existing(gh, "acme-clinic/cln-intake-api")
+    existing(gh, "acme-clinic/cln-governance")
+    for repo in ("acme-clinic/cln-intake-api", "acme-clinic/cln-governance"):
         rs.reconcile(gh, target(svc, repo), apply=True)
-    lane = gh.repos["vrixel-emr/emr-intake-api"]["state"]["rulesets"]["vrixel-default-branch"]["bypass_actors"]
-    gov = gh.repos["vrixel-emr/emr-governance"]["state"]["rulesets"]["vrixel-default-branch"]["bypass_actors"]
+    lane = gh.repos["acme-clinic/cln-intake-api"]["state"]["rulesets"]["vrixel-default-branch"]["bypass_actors"]
+    gov = gh.repos["acme-clinic/cln-governance"]["state"]["rulesets"]["vrixel-default-branch"]["bypass_actors"]
     assert {"actor_id": 424242, "actor_type": "Integration", "bypass_mode": "pull_request"} in lane
     assert all(a["actor_type"] != "Integration" for a in gov)  # governance changes are people's to merge
 
@@ -273,19 +273,19 @@ def test_missing_app_permissions_are_named():
 def test_a_repo_that_fails_doesnt_stop_the_run(svc):
     class Broken(StubGitHub):
         def repo_state(self, *, repo):
-            if repo.endswith("emr-governance"):
+            if repo.endswith("cln-governance"):
                 raise RuntimeError("App lacks members: read")
             return super().repo_state(repo=repo)
 
     gh = Broken()
     reports = {r.repo: r for r in rs.run(svc, gh, apply=False)}
-    assert reports["vrixel-emr/emr-governance"].errors == ["RuntimeError: App lacks members: read"]
+    assert reports["acme-clinic/cln-governance"].errors == ["RuntimeError: App lacks members: read"]
     assert len(reports) > 20  # the rest were still checked
 
 
 def test_private_repos_on_github_free_have_no_rulesets(svc):
     gh = StubGitHub()
-    repo = "vrixel-emr/emr-governance"
+    repo = "acme-clinic/cln-governance"
     existing(gh, repo, visibility="private",
              available={"code_scanning": False, "secret_scanning": False, "rulesets": False})
     rep = rs.reconcile(gh, target(svc, repo), apply=True)
@@ -300,32 +300,32 @@ def test_private_repos_on_github_free_have_no_rulesets(svc):
 
 def test_codeowners_at_the_root_counts_and_public_repos_take_vulnerability_reports(svc):
     gh = StubGitHub()
-    repo = "vrixel-emr/emr-governance"
+    repo = "acme-clinic/cln-governance"
     existing(gh, repo, files=False)
-    gh.files[(repo, "main", "CODEOWNERS")] = "* @vrixel-emr/product-owners"
+    gh.files[(repo, "main", "CODEOWNERS")] = "* @acme-clinic/product-owners"
     gh.files[(repo, "main", "SECURITY.md")] = "x"
     rep = rs.reconcile(gh, target(svc, repo), apply=True)
     assert rep.ok and rep.drift == []
     assert gh.repos[repo]["state"]["security"]["private_vulnerability_reporting"] is True
-    existing(gh, "vrixel-emr/emr-web", visibility="private")
-    rep = rs.reconcile(gh, target(svc, "vrixel-emr/emr-web"), apply=False)
+    existing(gh, "acme-clinic/cln-web", visibility="private")
+    rep = rs.reconcile(gh, target(svc, "acme-clinic/cln-web"), apply=False)
     assert [d.fix for d in rep.drift if d.item == "private_vulnerability_reporting"] == ["unavailable"]
 
 
 def test_lane_repos_require_the_gates_status_from_the_platform_app_only(svc, monkeypatch):
     monkeypatch.setenv("VRIXEL_GITHUB_APP_ID", "4242")
     ts = {t.repo: t for t in rs.targets(svc)}
-    lane = ts["vrixel-emr/emr-intake-api"].plan["ruleset"]
+    lane = ts["acme-clinic/cln-intake-api"].plan["ruleset"]
     assert lane["gates_check"] == "vrixel/gates"
     rules = {r["type"]: r.get("parameters") for r in ruleset_body(lane)["rules"]}
     assert {"context": "vrixel/gates", "integration_id": 4242} in rules["required_status_checks"]["required_status_checks"]
     # The pipeline doesn't deliver to governance, templates or the tool, so nothing would post it there.
-    for repo in ("vrixel-emr/emr-governance", "vrixel-tools/template-service", "vrixel-tools/agentic-sdlc"):
+    for repo in ("acme-clinic/cln-governance", "vrixel-tools/template-service", "vrixel-tools/agentic-sdlc"):
         assert not ts[repo].plan["ruleset"]["gates_check"]
 
     # A ruleset whose gates check anyone could set is drift.
     gh = StubGitHub()
-    repo = "vrixel-emr/emr-intake-api"
+    repo = "acme-clinic/cln-intake-api"
     existing(gh, repo)
     t = ts[repo]
     rs.reconcile(gh, t, apply=True)
@@ -340,7 +340,7 @@ def test_a_dependency_graph_that_is_off_is_reported_for_a_person(svc):
     """No API turns it on, and dependency review fails without it: tell someone exactly where."""
     ts = {t.repo: t for t in rs.targets(svc)}
     gh = StubGitHub()
-    repo = "vrixel-emr/emr-intake-api"
+    repo = "acme-clinic/cln-intake-api"
     existing(gh, repo)
     rs.reconcile(gh, ts[repo], apply=True)
     gh.repos[repo].setdefault("state", {}).setdefault("security", {})["dependency_graph"] = False

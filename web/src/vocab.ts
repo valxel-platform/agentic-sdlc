@@ -48,7 +48,7 @@ export const ACTION_LABEL: Record<string, string> = {
 export const HORIZONS: Record<string, string> = { now: "Now", next: "Next", later: "Later" };
 export const MODELS: Record<string, string> = { launch: "Launch group", train: "Release train" };
 
-/** Where a thread lives in the app: features, initiatives and releases share ids like EMR-INI-1. */
+/** Where a thread lives in the app: features, initiatives and releases share ids like CLN-INI-1. */
 export function threadPath(id: string): string {
   const kind = id.split("-")[1];
   return kind === "INI" ? `/initiatives/${id}` : kind === "REL" ? `/releases/${id}`

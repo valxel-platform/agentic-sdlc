@@ -32,7 +32,7 @@ class WorkTracker(Protocol):
 
 
 def marker_label(marker: str) -> str:
-    """Jira labels cannot contain spaces: 'AG-FEAT-1 AC-1' -> 'vrixel-AG-FEAT-1-AC-1'."""
+    """Jira labels cannot contain spaces: 'FARM-FEAT-1 AC-1' -> 'vrixel-FARM-FEAT-1-AC-1'."""
     return "vrixel-" + re.sub(r"[^A-Za-z0-9_-]+", "-", marker).strip("-")
 
 

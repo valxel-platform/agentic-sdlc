@@ -308,7 +308,7 @@ class WorkSync:
     def items(self, feature_id: str) -> list[dict]:
         rows = self.links.get(feature_id)
         order = {"epic": 0, "story": 1, "task": 2}
-        # "item" is our key (epic, AC-1, TASK-1); "key" is the tracker's (AG-12, #431).
+        # "item" is our key (epic, AC-1, TASK-1); "key" is the tracker's (FARM-12, #431).
         return sorted(({**v, "item": k} for k, v in rows.items() if not k.startswith("_")),
                       key=lambda r: (order.get(r.get("kind"), 9), int(r["item"].rsplit("-", 1)[-1])
                                      if r["item"][-1:].isdigit() else 0))

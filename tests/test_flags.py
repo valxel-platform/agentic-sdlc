@@ -17,10 +17,10 @@ from vrixel_sdlc.ops.signals import from_alertmanager
 from vrixel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
-AG_FLAGS = """
+FARM_FLAGS = """
   flags:
     provider: flipt
-    url: https://flipt.agtech.example.com/
+    url: https://flipt.farm.example.com/
 """
 
 
@@ -66,7 +66,7 @@ class FakeFlipt:
         e["rev"] += 1
         return 200, {"resource": {"key": body["key"], "payload": payload}, "revision": str(e["rev"])}
 
-    def enabled(self, env, key, ns="ag"):
+    def enabled(self, env, key, ns="farm"):
         flag = self.envs[env]["flags"].get((ns, key))
         return None if flag is None else bool(flag.get("enabled", False))
 
@@ -78,8 +78,8 @@ def gov_root(tmp_path):
     return root
 
 
-def with_flipt(gov_root, extra=AG_FLAGS):
-    p = gov_root / "vrixel-agtech" / "ag-governance" / "product.yaml"
+def with_flipt(gov_root, extra=FARM_FLAGS):
+    p = gov_root / "acme-farm" / "farm-governance" / "product.yaml"
     p.write_text(p.read_text().replace("tools:\n", "tools:" + extra, 1))
 
 
@@ -91,7 +91,7 @@ def make(tmp_path, gov_root, *, flipt=None, live=False, token="t0ken"):
         def product_flags(pid):
             p = svc.snapshot(pid).product
             return p.tools.get("flags") or {}, p.runtime or {}
-        svc.flags = ProductFlags(product_flags, live=live, env={"VRIXEL_FLIPT_TOKEN_AG": token} if token else {},
+        svc.flags = ProductFlags(product_flags, live=live, env={"VRIXEL_FLIPT_TOKEN_FARM": token} if token else {},
                                  transport_for=lambda url, tok: flipt)
     return FeatureEngine(svc, InMemorySaver()), svc
 
@@ -114,27 +114,27 @@ def drive_to(eng, fid, last_gate):
 
 def test_flipt_creates_the_flag_off_in_production_and_on_before_it():
     fake = FakeFlipt()
-    f = FliptFlags(fake, namespace="ag", environments={"dev": "dev", "staging": "staging", "production": "production"})
-    f.ensure("ag.ag-feat-1.crop-log", name="AG-FEAT-1 Crop log", description="x", actor="arch")
-    assert [fake.enabled(e, "ag.ag-feat-1.crop-log") for e in ("dev", "staging", "production")] == [True, True, False]
-    assert all("ag" in fake.envs[e]["namespaces"] for e in fake.envs)  # the product's namespace was created
+    f = FliptFlags(fake, namespace="farm", environments={"dev": "dev", "staging": "staging", "production": "production"})
+    f.ensure("farm.farm-feat-1.crop-log", name="FARM-FEAT-1 Crop log", description="x", actor="arch")
+    assert [fake.enabled(e, "farm.farm-feat-1.crop-log") for e in ("dev", "staging", "production")] == [True, True, False]
+    assert all("farm" in fake.envs[e]["namespaces"] for e in fake.envs)  # the product's namespace was created
     body = next(b for m, p, b in fake.calls if m == "POST" and p.endswith("/resources"))
     assert body["payload"]["@type"] == "flipt.core.Flag" and body["payload"]["type"] == "BOOLEAN_FLAG_TYPE"
 
-    fake.envs["dev"]["flags"][("ag", "ag.ag-feat-1.crop-log")]["enabled"] = False  # someone turned it off
-    f.ensure("ag.ag-feat-1.crop-log", name="AG-FEAT-1 Crop log", description="x", actor="arch")
-    assert fake.enabled("dev", "ag.ag-feat-1.crop-log") is False  # ensure never changes an existing flag
+    fake.envs["dev"]["flags"][("farm", "farm.farm-feat-1.crop-log")]["enabled"] = False  # someone turned it off
+    f.ensure("farm.farm-feat-1.crop-log", name="FARM-FEAT-1 Crop log", description="x", actor="arch")
+    assert fake.enabled("dev", "farm.farm-feat-1.crop-log") is False  # ensure never changes an existing flag
 
-    assert f.get("ag.ag-feat-1.crop-log") is False
-    f.set("ag.ag-feat-1.crop-log", True, actor="rm")
-    assert f.get("ag.ag-feat-1.crop-log") is True and fake.enabled("staging", "ag.ag-feat-1.crop-log") is True
-    meta = fake.envs["production"]["flags"][("ag", "ag.ag-feat-1.crop-log")]["metadata"]
+    assert f.get("farm.farm-feat-1.crop-log") is False
+    f.set("farm.farm-feat-1.crop-log", True, actor="rm")
+    assert f.get("farm.farm-feat-1.crop-log") is True and fake.enabled("staging", "farm.farm-feat-1.crop-log") is True
+    meta = fake.envs["production"]["flags"][("farm", "farm.farm-feat-1.crop-log")]["metadata"]
     assert meta["changed_by"] == "rm" and meta["approved_by"] == "arch"
 
 
 def test_flipt_retries_a_stale_revision_once_and_reports_missing_flags():
     fake = FakeFlipt()
-    f = FliptFlags(fake, namespace="ag", environments={"dev": "dev", "production": "production"})
+    f = FliptFlags(fake, namespace="farm", environments={"dev": "dev", "production": "production"})
     f.ensure("k", name="n", description="d", actor="a")
     fake.conflict_next = True
     f.set("k", True, actor="rm")
@@ -148,13 +148,13 @@ def test_flipt_retries_a_stale_revision_once_and_reports_missing_flags():
 
 def test_flipt_environments_can_be_renamed():
     fake = FakeFlipt(envs=("development", "prod"))
-    f = FliptFlags(fake, namespace="ag", environments={"dev": "development", "production": "prod"})
+    f = FliptFlags(fake, namespace="farm", environments={"dev": "development", "production": "prod"})
     f.ensure("k", name="n", description="d", actor="a")
     assert fake.enabled("development", "k") is True and fake.enabled("prod", "k") is False
 
 
 def test_flag_keys_are_valid_flipt_keys():
-    assert flag_key("EMR", "EMR-FEAT-3", "Check-in kiosk: walk-ins & QR!") == "emr.emr-feat-3.check-in-kiosk-walk-ins-qr"
+    assert flag_key("CLN", "CLN-FEAT-3", "Check-in kiosk: walk-ins & QR!") == "cln.cln-feat-3.check-in-kiosk-walk-ins-qr"
 
 
 # --------------------------------------------------------------------------- per-product routing
@@ -164,33 +164,33 @@ def test_products_route_to_their_own_flipt_or_fall_back(tmp_path, gov_root):
     with_flipt(gov_root)
     fake = FakeFlipt()
     _, svc = make(tmp_path, gov_root, flipt=fake, live=True)
-    assert svc.flags.describe("AG") == "flipt" and svc.flags.available("AG")
-    assert svc.flags.describe("EMR") == "none" and not svc.flags.available("EMR")  # live, no Flipt
-    assert isinstance(svc.flags.for_product("EMR"), NoFlags)
+    assert svc.flags.describe("FARM") == "flipt" and svc.flags.available("FARM")
+    assert svc.flags.describe("CLN") == "none" and not svc.flags.available("CLN")  # live, no Flipt
+    assert isinstance(svc.flags.for_product("CLN"), NoFlags)
     _, svc = make(tmp_path, gov_root, flipt=fake, live=False)
-    assert svc.flags.describe("EMR") == "stub"  # stub delivery keeps in-memory flags
+    assert svc.flags.describe("CLN") == "stub"  # stub delivery keeps in-memory flags
     _, svc = make(tmp_path, gov_root, flipt=fake, live=True, token="")
-    assert svc.flags.describe("AG") == "none"  # configured, but the platform holds no token
+    assert svc.flags.describe("FARM") == "none"  # configured, but the platform holds no token
 
 
 def test_product_yaml_validates_the_flag_service(tmp_path, gov_root):
-    with_flipt(gov_root, "\n  flags:\n    provider: flipt\n    url: https://flipt.agtech.example.com\n"
+    with_flipt(gov_root, "\n  flags:\n    provider: flipt\n    url: https://flipt.farm.example.com\n"
                          "    environments: {dev: development, qa: qa}\n")
     _, svc = make(tmp_path, gov_root)
     with pytest.raises(GovernanceError, match="not in runtime.pipeline"):
-        svc.snapshot("AG")
+        svc.snapshot("FARM")
 
     shutil.rmtree(gov_root)
     shutil.copytree(ROOT / "examples" / "governance", gov_root)
     with_flipt(gov_root, "\n  flags:\n    provider: launchdarkly\n")
     with pytest.raises(GovernanceError, match="must be one of"):
-        make(tmp_path, gov_root)[1].snapshot("AG")
+        make(tmp_path, gov_root)[1].snapshot("FARM")
 
     shutil.rmtree(gov_root)
     shutil.copytree(ROOT / "examples" / "governance", gov_root)
     with_flipt(gov_root)
-    spec = make(tmp_path, gov_root)[1].snapshot("AG").product.tools["flags"]
-    assert spec == {"provider": "flipt", "url": "https://flipt.agtech.example.com", "namespace": "ag",
+    spec = make(tmp_path, gov_root)[1].snapshot("FARM").product.tools["flags"]
+    assert spec == {"provider": "flipt", "url": "https://flipt.farm.example.com", "namespace": "farm",
                     "environments": {"dev": "dev", "staging": "staging", "production": "production"}}
 
 
@@ -201,8 +201,8 @@ def test_g4_creates_the_flag_and_the_build_uses_it_then_g6_turns_it_on(tmp_path,
     with_flipt(gov_root)
     fake = FakeFlipt()
     eng, svc = make(tmp_path, gov_root, flipt=fake, live=True)
-    fid = eng.create(product_id="AG", title="Offline crop log")
-    key = flag_key("AG", fid, "Offline crop log")
+    fid = eng.create(product_id="FARM", title="Offline crop log")
+    key = flag_key("FARM", fid, "Offline crop log")
     assert drive_to(eng, fid, "g6")["gate"] == "g6"  # low risk: no G5
     v = eng.view(fid)
     assert [fake.enabled(e, key) for e in ("dev", "staging", "production")] == [True, True, False]
@@ -215,17 +215,17 @@ def test_g4_creates_the_flag_and_the_build_uses_it_then_g6_turns_it_on(tmp_path,
 
 
 def test_the_build_must_use_the_flag():
-    ctx = {"flag": "ag.ag-feat-1.crop-log"}
-    ok = {"TASK-1": {"role": "provider", "repo": "o/api", "tests_passed": True, "summary": "Feature flag: ag.ag-feat-1.crop-log"}}
+    ctx = {"flag": "farm.farm-feat-1.crop-log"}
+    ok = {"TASK-1": {"role": "provider", "repo": "o/api", "tests_passed": True, "summary": "Feature flag: farm.farm-feat-1.crop-log"}}
     lib = {"TASK-1": {"role": "library", "repo": "o/lib", "tests_passed": True, "summary": "contracts"}}
     bad = {"TASK-1": {"role": "consumer", "repo": "o/web", "tests_passed": True, "summary": "no flag here"}}
     assert flag_findings(ctx, ok) == [] and flag_findings(ctx, lib) == [] and flag_findings({"flag": ""}, bad) == []
-    assert flag_findings(ctx, bad) == ["No task builds behind feature flag ag.ag-feat-1.crop-log: gate the new behavior in o/web"]
+    assert flag_findings(ctx, bad) == ["No task builds behind feature flag farm.farm-feat-1.crop-log: gate the new behavior in o/web"]
 
 
 def test_without_a_flag_service_a_feature_ships_without_a_flag(tmp_path, gov_root):
-    eng, svc = make(tmp_path, gov_root, flipt=FakeFlipt(), live=True)  # AG has no tools.flags
-    fid = eng.create(product_id="AG", title="Offline crop log")
+    eng, svc = make(tmp_path, gov_root, flipt=FakeFlipt(), live=True)  # FARM has no tools.flags
+    fid = eng.create(product_id="FARM", title="Offline crop log")
     v = eng.auto_drive(fid)
     assert v["status"] == "done" and v["release"]["flag"] == "" and v["release"]["flag_on"] is None
     assert any(e["kind"] == "flag" and "No flag service" in e["detail"] for e in v["events"])
@@ -233,9 +233,9 @@ def test_without_a_flag_service_a_feature_ships_without_a_flag(tmp_path, gov_roo
 
 def test_without_a_flag_service_a_launch_holds_its_features_after_staging(tmp_path, gov_root):
     eng, _ = make(tmp_path, gov_root, flipt=FakeFlipt(), live=True)
-    a = eng.create(product_id="AG", title="Offline crop log")
-    b = eng.create(product_id="AG", title="Soil sensor import")
-    rid = eng.create_release(product_id="AG", title="Spring season", model="launch", features=[a, b])
+    a = eng.create(product_id="FARM", title="Offline crop log")
+    b = eng.create(product_id="FARM", title="Soil sensor import")
+    rid = eng.create_release(product_id="FARM", title="Spring season", model="launch", features=[a, b])
     for f in (a, b):
         v = eng.auto_drive(f)
         [w] = [p for p in v["pending"] if p["type"] == "external"]
@@ -253,8 +253,8 @@ def test_a_launch_with_flipt_ships_dark_then_turns_flipt_flags_on(tmp_path, gov_
     with_flipt(gov_root)
     fake = FakeFlipt()
     eng, _ = make(tmp_path, gov_root, flipt=fake, live=True)
-    a = eng.create(product_id="AG", title="Offline crop log")
-    rid = eng.create_release(product_id="AG", title="Spring season", model="launch", features=[a])
+    a = eng.create(product_id="FARM", title="Offline crop log")
+    rid = eng.create_release(product_id="FARM", title="Spring season", model="launch", features=[a])
     v = eng.auto_drive(a)
     key = v["release"]["flag"]
     assert v["release"]["production"] and v["release"]["flag_on"] is False and fake.enabled("production", key) is False
@@ -270,11 +270,11 @@ def test_the_tool_turns_a_flipt_flag_off(tmp_path, gov_root):
     pol.write_text(pol.read_text().replace("without_analysis: page", "without_analysis: suspects"))
     fake = FakeFlipt()
     eng, _ = make(tmp_path, gov_root, flipt=fake, live=True)
-    fid = eng.create(product_id="AG", title="Offline crop log")
+    fid = eng.create(product_id="FARM", title="Offline crop log")
     key = eng.auto_drive(fid)["release"]["flag"]
     [iid] = eng.ingest(from_alertmanager({"alerts": [{
         "status": "firing", "fingerprint": "f", "startsAt": "2026-11-03T21:00:00Z",
-        "labels": {"alertname": "Errors", "severity": "critical", "product": "AG"},
+        "labels": {"alertname": "Errors", "severity": "critical", "product": "FARM"},
         "annotations": {"summary": "errors"}}]}))
     # A feature just released, its flag on: the tool turns it off by itself, in production only.
     assert ("flag_off", fid, "agent:remediate") in [(x["type"], x.get("feature_id"), x["by"])

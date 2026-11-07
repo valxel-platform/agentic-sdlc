@@ -13,12 +13,12 @@ STD = load_standards(ROOT / "config" / "repos.yaml")
 
 
 class Product:
-    product_id = "EMR"
-    org = "vrixel-emr"
+    product_id = "CLN"
+    org = "acme-clinic"
     data_class = "phi"
-    approvers = {"g5": ["vrixel-emr/tech-leads"], "security": ["vrixel-emr/security"]}
+    approvers = {"g5": ["acme-clinic/tech-leads"], "security": ["acme-clinic/security"]}
     high_risk_paths = ["src/auth"]
-    repos = [type("R", (), {"name": "vrixel-emr/emr-intake-api", "role": "provider"})()]
+    repos = [type("R", (), {"name": "acme-clinic/cln-intake-api", "role": "provider"})()]
 
 
 def test_every_role_has_a_template_and_checks():
@@ -35,19 +35,19 @@ def test_dependencies_merge_first():
 
 def test_new_agent_and_mcp_server_repos_are_planned_with_their_checks():
     hld = """## ADRs
-- ADR-EMR-FEAT-9-1: Create vrixel-emr/emr-care-mcp-server: agents need care data as tools
-- ADR-EMR-FEAT-9-2: Create vrixel-emr/emr-intake-agent: referrals are triaged by an agent
+- ADR-CLN-FEAT-9-1: Create acme-clinic/cln-care-mcp-server: agents need care data as tools
+- ADR-CLN-FEAT-9-2: Create acme-clinic/cln-intake-agent: referrals are triaged by an agent
 ## New repos
-- vrixel-emr/emr-care-mcp-server (mcp-server): Care data as MCP tools [ADR-EMR-FEAT-9-1]
-- vrixel-emr/emr-intake-agent (agent): Turns referrals into care tasks [ADR-EMR-FEAT-9-2]
+- acme-clinic/cln-care-mcp-server (mcp-server): Care data as MCP tools [ADR-CLN-FEAT-9-1]
+- acme-clinic/cln-intake-agent (agent): Turns referrals into care tasks [ADR-CLN-FEAT-9-2]
 ## Affected repos
-- vrixel-emr/emr-intake-api (provider)
-- vrixel-emr/emr-intake-agent (agent)
+- acme-clinic/cln-intake-api (provider)
+- acme-clinic/cln-intake-agent (agent)
 """
     proposals = parse_new_repos(hld)
     assert [(p["role"], bool(p["adr"])) for p in proposals] == [("mcp-server", True), ("agent", True)]
     assert [r["role"] for r in parse_affected_repos(hld)] == ["provider", "agent"]
-    policy = {"org": "vrixel-emr", "prefix": "emr-", "pattern": STD.naming["pattern"], "max_length": 50,
+    policy = {"org": "acme-clinic", "prefix": "cln-", "pattern": STD.naming["pattern"], "max_length": 50,
               "roles": sorted(STD.roles)}
     assert check_proposal(policy, proposals, set()) == []
 
@@ -64,10 +64,10 @@ def test_new_agent_and_mcp_server_repos_are_planned_with_their_checks():
 
 
 def test_architecture_view_shows_agents_tools_and_gateway():
-    repos = [{"name": "vrixel-emr/emr-intake-api", "role": "provider"},
-             {"name": "vrixel-emr/emr-care-mcp-server", "role": "mcp-server"},
-             {"name": "vrixel-emr/emr-intake-agent", "role": "agent"}]
-    chart = _flowchart({"product_id": "EMR", "product_name": "EMR"}, repos)
+    repos = [{"name": "acme-clinic/cln-intake-api", "role": "provider"},
+             {"name": "acme-clinic/cln-care-mcp-server", "role": "mcp-server"},
+             {"name": "acme-clinic/cln-intake-agent", "role": "agent"}]
+    chart = _flowchart({"product_id": "CLN", "product_name": "CLN"}, repos)
     assert '|"MCP tools"|' in chart and '|"models"| llm_gateway' in chart
     assert chart.count('|"versioned API"|') == 1  # the MCP server calls the provider
 

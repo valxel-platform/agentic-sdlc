@@ -10,8 +10,8 @@ from vrixel_sdlc.api.app import create_app
 from vrixel_sdlc.web.auth import AuthConfig, GitHubOAuth
 
 SECRET = "x" * 40
-EMR_TEAMS = ["vrixel-emr/product-owners", "vrixel-emr/architects", "vrixel-emr/design",
-             "vrixel-emr/tech-leads", "vrixel-emr/release-managers"]
+CLN_TEAMS = ["acme-clinic/product-owners", "acme-clinic/architects", "acme-clinic/design",
+             "acme-clinic/tech-leads", "acme-clinic/release-managers"]
 
 
 def wait_idle(engine, fid, timeout=10.0):
@@ -47,23 +47,23 @@ def test_api_requires_sign_in(client):
 
 
 def test_only_listed_approvers_can_decide_and_decisions_record_the_signed_in_user(client, engine):
-    sign_in(client, "maria", teams=EMR_TEAMS)
-    r = client.post("/api/features", json={"product_id": "EMR", "title": "Consent check on intake"})
+    sign_in(client, "maria", teams=CLN_TEAMS)
+    r = client.post("/api/features", json={"product_id": "CLN", "title": "Consent check on intake"})
     assert r.status_code == 201
     fid = r.json()["feature_id"]
     wait_idle(engine, fid)
 
     [item] = client.get("/api/inbox?mine=true").json()
-    assert item["gate"] == "g1" and item["can_decide"] and item["approvers"] == ["vrixel-emr/product-owners"]
+    assert item["gate"] == "g1" and item["can_decide"] and item["approvers"] == ["acme-clinic/product-owners"]
 
-    sign_in(client, "dev-without-teams", orgs=["vrixel-emr"])
+    sign_in(client, "dev-without-teams", orgs=["acme-clinic"])
     assert client.get("/api/inbox?mine=true").json() == []
     [seen] = client.get("/api/inbox").json()
     assert seen["can_decide"] is False
     denied = client.post(f"/api/features/{fid}/decisions/{item['interrupt_id']}", json={"decision": "approve"})
     assert denied.status_code == 403
 
-    sign_in(client, "maria", teams=EMR_TEAMS)
+    sign_in(client, "maria", teams=CLN_TEAMS)
     ok = client.post(f"/api/features/{fid}/decisions/{item['interrupt_id']}",
                      json={"decision": "approve", "active_minutes": 4, "approver": "someone-else"})
     assert ok.status_code == 202
@@ -73,16 +73,16 @@ def test_only_listed_approvers_can_decide_and_decisions_record_the_signed_in_use
 
 
 def test_intents_need_membership_of_the_lane_org(client):
-    sign_in(client, "ag-person", orgs=["vrixel-agtech"])
+    sign_in(client, "farm-person", orgs=["acme-farm"])
     me = client.get("/api/me").json()
-    assert [lane["id"] for lane in me["lanes"]] == ["AG"]
-    r = client.post("/api/features", json={"product_id": "EMR", "title": "Not my product"})
+    assert [lane["id"] for lane in me["lanes"]] == ["FARM"]
+    r = client.post("/api/features", json={"product_id": "CLN", "title": "Not my product"})
     assert r.status_code == 403
 
 
 def test_board_and_feature_detail_show_the_rail(client, engine):
-    sign_in(client, "maria", teams=EMR_TEAMS)
-    fid = client.post("/api/features", json={"product_id": "EMR", "title": "Allergy list"}).json()["feature_id"]
+    sign_in(client, "maria", teams=CLN_TEAMS)
+    fid = client.post("/api/features", json={"product_id": "CLN", "title": "Allergy list"}).json()["feature_id"]
     wait_idle(engine, fid)
     [row] = client.get("/api/features").json()
     assert row["feature_id"] == fid and row["created_by"] == "maria"
@@ -95,17 +95,17 @@ def test_board_and_feature_detail_show_the_rail(client, engine):
 
 
 def test_guided_intake_conversation_submits_a_feature(client, engine):
-    sign_in(client, "priya", orgs=["vrixel-agtech", "vrixel-pos"])
+    sign_in(client, "priya", orgs=["acme-farm", "acme-shop"])
     s = client.post("/api/intake", json={}).json()
-    assert s["messages"][0]["role"] == "agent" and s["lanes"] == ["AG", "POS"]
+    assert s["messages"][0]["role"] == "agent" and s["lanes"] == ["FARM", "SHOP"]
 
     s = client.post(f"/api/intake/{s['id']}/messages",
                     json={"text": "Farmers need to log field observations while offline."}).json()
     assert s["draft"]["problem"].startswith("Farmers need") and s["draft"]["title"]
     assert "Which product" in s["messages"][-1]["text"] and s["draft"]["product_id"] == ""
 
-    s = client.post(f"/api/intake/{s['id']}/messages", json={"text": "It's for AgTech"}).json()
-    assert s["draft"]["product_id"] == "AG" and "Who will use" in s["messages"][-1]["text"]
+    s = client.post(f"/api/intake/{s['id']}/messages", json={"text": "It's for Farm app"}).json()
+    assert s["draft"]["product_id"] == "FARM" and "Who will use" in s["messages"][-1]["text"]
     s = client.post(f"/api/intake/{s['id']}/messages", json={"text": "Smallholder farmers on low-end phones"}).json()
     assert not s["ready"]
     early = client.post(f"/api/intake/{s['id']}/submit", json={})
@@ -116,28 +116,28 @@ def test_guided_intake_conversation_submits_a_feature(client, engine):
 
     s = client.patch(f"/api/intake/{s['id']}/draft", json={"title": "Offline field observations"}).json()
     assert s["draft"]["title"] == "Offline field observations"
-    assert client.patch(f"/api/intake/{s['id']}/draft", json={"product_id": "EMR"}).status_code == 403
+    assert client.patch(f"/api/intake/{s['id']}/draft", json={"product_id": "CLN"}).status_code == 403
 
     s = client.post(f"/api/intake/{s['id']}/submit", json={}).json()
     fid = s["feature_id"]
-    assert fid.startswith("AG-FEAT-")
+    assert fid.startswith("FARM-FEAT-")
     v = wait_idle(engine, fid)
     assert v["title"] == "Offline field observations" and v["created_by"] == "priya"
     assert "Success measure: 60% of field visits" in v["description"]
     assert client.post(f"/api/intake/{s['id']}/submit", json={}).status_code == 409
 
-    sign_in(client, "someone-else", orgs=["vrixel-agtech"])
+    sign_in(client, "someone-else", orgs=["acme-farm"])
     assert client.get(f"/api/intake/{s['id']}").status_code == 404  # conversations are private
 
 
 def test_intake_stops_a_duplicate_until_the_creator_says_how_it_differs(client, engine):
-    sign_in(client, "maria", orgs=["vrixel-emr"])
-    first = engine.create(product_id="EMR", title="Faster patient intake for walk-ins",
+    sign_in(client, "maria", orgs=["acme-clinic"])
+    first = engine.create(product_id="CLN", title="Faster patient intake for walk-ins",
                           description="Front desk needs faster patient intake for walk-ins")
     s = client.post("/api/intake", json={}).json()
     s = client.post(f"/api/intake/{s['id']}/messages",
                     json={"text": "Front desk needs faster patient intake for walk-ins"}).json()
-    assert s["draft"]["product_id"] == "EMR"  # only one lane: chosen without asking
+    assert s["draft"]["product_id"] == "CLN"  # only one lane: chosen without asking
     for text in ("Front-desk staff at busy clinics", "Check-in time under 3 minutes"):
         s = client.post(f"/api/intake/{s['id']}/messages", json={"text": text}).json()
     assert s["draft"]["similar"][0]["id"] == first and s["draft"]["similar"][0]["duplicate"]
@@ -156,21 +156,21 @@ def test_intake_stops_a_duplicate_until_the_creator_says_how_it_differs(client, 
 
 
 def test_creating_a_duplicate_feature_needs_a_reason(client, engine):
-    sign_in(client, "maria", orgs=["vrixel-emr"])
-    body = {"product_id": "EMR", "title": "Lab results viewer", "description": "Show lab results to clinicians"}
+    sign_in(client, "maria", orgs=["acme-clinic"])
+    body = {"product_id": "CLN", "title": "Lab results viewer", "description": "Show lab results to clinicians"}
     first = client.post("/api/features", json=body).json()["feature_id"]
     wait_idle(engine, first)
     again = client.post("/api/features", json=body)
     assert again.status_code == 409 and again.json()["detail"]["similar"][0]["id"] == first
     ok = client.post("/api/features", json={**body, "not_duplicate_reason": "For patients, not clinicians"})
     assert ok.status_code == 201
-    unrelated = client.post("/api/features", json={"product_id": "EMR", "title": "Referral triage",
+    unrelated = client.post("/api/features", json={"product_id": "CLN", "title": "Referral triage",
                                                    "description": "Route incoming referrals to the right clinic"})
     assert unrelated.status_code == 201
 
 
 def test_mutations_must_be_json(client):
-    sign_in(client, "maria", teams=EMR_TEAMS)
+    sign_in(client, "maria", teams=CLN_TEAMS)
     r = client.post("/api/intake", content="x", headers={"content-type": "application/x-www-form-urlencoded"})
     assert r.status_code == 415
 
@@ -181,7 +181,7 @@ def test_events_stream_reports_feature_progress(engine):
     async def collect():
         q = engine.bus.subscribe()
         await asyncio.get_running_loop().run_in_executor(
-            None, lambda: engine.create(product_id="AG", title="Rain gauge import"))
+            None, lambda: engine.create(product_id="FARM", title="Rain gauge import"))
         out = []
         while not q.empty():
             out.append(q.get_nowait())
@@ -217,9 +217,9 @@ class FakeGitHub:
         if url.endswith("/user"):
             return FakeResp(json.dumps({"login": "maria", "name": "Maria", "avatar_url": "a"}).encode())
         if "/user/orgs" in url:
-            return FakeResp(json.dumps([{"login": "vrixel-emr"}]).encode())
+            return FakeResp(json.dumps([{"login": "acme-clinic"}]).encode())
         if "/user/teams" in url:
-            return FakeResp(json.dumps([{"slug": "architects", "organization": {"login": "vrixel-emr"}}]).encode())
+            return FakeResp(json.dumps([{"slug": "architects", "organization": {"login": "acme-clinic"}}]).encode())
         raise AssertionError(url)
 
 
@@ -240,13 +240,13 @@ def test_github_sign_in_flow(engine):
         r = client.get(f"/api/auth/callback?code=the-code&state={q['state'][0]}", follow_redirects=False)
         assert r.status_code == 302 and "secure" in r.headers["set-cookie"].lower()
         me = client.get("/api/me").json()
-        assert me["login"] == "maria" and me["teams"] == ["vrixel-emr/architects"]
-        assert [lane["id"] for lane in me["lanes"]] == ["EMR"]
+        assert me["login"] == "maria" and me["teams"] == ["acme-clinic/architects"]
+        assert [lane["id"] for lane in me["lanes"]] == ["CLN"]
         assert "gho_abc" not in r.headers["set-cookie"]  # the GitHub token is never stored
 
 
 def test_tampered_session_cookies_are_rejected(client):
-    sign_in(client, "maria", teams=EMR_TEAMS)
+    sign_in(client, "maria", teams=CLN_TEAMS)
     token = client.cookies.get("vrixel_session")
     # Change the first character of the signature: the last one of a base64 string can carry
     # unused bits, so changing it doesn't always change the signature.

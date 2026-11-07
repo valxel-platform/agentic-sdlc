@@ -20,7 +20,7 @@ class ConstitutionError(ValueError):
 @dataclass(frozen=True)
 class Constitution:
     text: str
-    version: str  # e.g. "platform@1.0.0#a1b2c3d+emr@1.0.0#9f8e7d6"
+    version: str  # e.g. "platform@1.0.0#a1b2c3d+cln@1.0.0#9f8e7d6"
     article_ids: tuple[str, ...]
 
     def product_articles(self) -> tuple[str, ...]:

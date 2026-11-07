@@ -3,8 +3,8 @@
 Each product may keep one acceptance repo (role `acceptance`, from vrixel-tools/template-acceptance):
 Playwright Test in TypeScript, API and event tests for every feature, browser tests when the
 feature changes a web app. Tests are tagged with the feature and acceptance criteria they prove
-(`@EMR-FEAT-12`, `@EMR-FEAT-12/AC-3`), the capability (`@cap-consent`) and the components they
-reach (`@comp-emr-intake-api`), and declare what they cover (`covers` annotations: routes with an
+(`@CLN-FEAT-12`, `@CLN-FEAT-12/AC-3`), the capability (`@cap-consent`) and the components they
+reach (`@comp-cln-intake-api`), and declare what they cover (`covers` annotations: routes with an
 optional status, events, pages). The repo's fixtures fail a test that reaches what it doesn't declare.
 The repo's `catalog.json` lists every test with those fields.
 
@@ -49,7 +49,7 @@ def parse_plan(plan: str) -> list[PlannedTest]:
     """'## Acceptance tests' lines:
     - AC-2: extend consent/capture.spec.ts "records consent"
     - AC-3: replace consent/expiry.spec.ts "expires after a year"
-    - AC-4: add consent/withdraw.spec.ts covers: emr-intake-api PUT /api/v1/consents/{id}, event vrixel.consent.withdrawn.v1
+    - AC-4: add consent/withdraw.spec.ts covers: cln-intake-api PUT /api/v1/consents/{id}, event vrixel.consent.withdrawn.v1
     """
     out = []
     for ac, action, file, title, covers, because in _LINE.findall(section(plan, "Acceptance tests")):
@@ -62,7 +62,7 @@ def split_covers(text: str) -> list[str]:
 
 
 def norm_cover(c: str) -> str:
-    """'emr-intake-api  put /api/v1/x 202' -> 'emr-intake-api PUT /api/v1/x 202'; events and pages as written."""
+    """'cln-intake-api  put /api/v1/x 202' -> 'cln-intake-api PUT /api/v1/x 202'; events and pages as written."""
     parts = c.split()
     if len(parts) >= 3 and parts[1].upper() in ("GET", "POST", "PUT", "PATCH", "DELETE"):
         return " ".join([parts[0], parts[1].upper(), *parts[2:]])
@@ -194,7 +194,7 @@ def selection(feature_id: str, repos: list[dict], stage: str) -> dict:
         tags.append("@critical")
     ui = any(r.get("role") == "consumer" for r in repos)
     # Tags hold only letters, digits and dashes (safe in a regex); each ends at a space or the end
-    # of the title, so @EMR-FEAT-1 doesn't select @EMR-FEAT-12.
+    # of the title, so @CLN-FEAT-1 doesn't select @CLN-FEAT-12.
     tags = [re.sub(r"[^A-Za-z0-9@-]", "-", t) for t in tags]
     grep = "|".join(t + r"(?=\s|$)" for t in tags)
     return {"grep": grep, "tags": tags, "projects": ["api", "ui"] if ui else ["api"]}

@@ -24,7 +24,7 @@ def gov_root(tmp_path):
 
 
 def set_repos(gov_root, block: str):
-    path = gov_root / "vrixel-emr" / "emr-governance" / "product.yaml"
+    path = gov_root / "acme-clinic" / "cln-governance" / "product.yaml"
     text = re.sub(r"^repos:\n(?:- .*\n(?:  .*\n)*)+", block, path.read_text(), flags=re.M)
     path.write_text(text)
 
@@ -37,12 +37,12 @@ def make(tmp_path, gov_root):
 
 
 def test_first_feature_proposes_creates_and_builds_the_first_repo(tmp_path, gov_root):
-    set_repos(gov_root, "repos: []\nrepo_prefix: emr-\n")
+    set_repos(gov_root, "repos: []\nrepo_prefix: cln-\n")
     eng, svc = make(tmp_path, gov_root)
-    assert svc.snapshot("EMR").product.repos == ()
+    assert svc.snapshot("CLN").product.repos == ()
 
     seen = {}
-    fid = eng.start(product_id="EMR", title="Patient registration")["feature_id"]
+    fid = eng.start(product_id="CLN", title="Patient registration")["feature_id"]
     while True:
         p = [x for x in eng.pending(fid) if x["type"] == "gate"]
         if not p:
@@ -52,12 +52,12 @@ def test_first_feature_proposes_creates_and_builds_the_first_repo(tmp_path, gov_
     v = eng.auto_drive(fid)
     assert v["status"] == "done"
 
-    new = "vrixel-emr/emr-patient-registration-service"
+    new = "acme-clinic/cln-patient-registration-service"
     [plan] = seen["g4"]["new_repos"]
     assert plan["repo"] == new and plan["template"] == "vrixel-tools/template-service"
     assert new in svc.github.repos  # created on the golden path
     assert any(pr["repo"] == new for pr in svc.github.prs.values())  # the build worked in it
-    gov_pr = [pr for pr in svc.github.prs.values() if pr["repo"] == "vrixel-emr/emr-governance" and "repos" in pr["branch"]]
+    gov_pr = [pr for pr in svc.github.prs.values() if pr["repo"] == "acme-clinic/cln-governance" and "repos" in pr["branch"]]
     assert gov_pr and new in gov_pr[0]["body"]
 
 
@@ -65,11 +65,11 @@ def test_no_repos_needs_a_prefix(tmp_path, gov_root):
     set_repos(gov_root, "repos: []\n")
     _, svc = make(tmp_path, gov_root)
     with pytest.raises(GovernanceError, match="set repo_prefix"):
-        svc.snapshot("EMR")
+        svc.snapshot("CLN")
 
 
 def test_prefix_must_be_a_name_prefix(tmp_path, gov_root):
-    set_repos(gov_root, "repos: []\nrepo_prefix: EMR_\n")
+    set_repos(gov_root, "repos: []\nrepo_prefix: CLN_\n")
     _, svc = make(tmp_path, gov_root)
-    with pytest.raises(GovernanceError, match="repo_prefix 'EMR_'"):
-        svc.snapshot("EMR")
+    with pytest.raises(GovernanceError, match="repo_prefix 'CLN_'"):
+        svc.snapshot("CLN")

@@ -49,7 +49,7 @@ VISIBILITIES = ("none", "project", "namespace", "internal", "external")
 
 
 def parse_endpoints(hld: str) -> list[dict]:
-    """'## Endpoints' bullets: '- vrixel-emr/emr-bff: external; calls emr-intake-api, emr-web' ->
+    """'## Endpoints' bullets: '- acme-clinic/cln-bff: external; calls cln-intake-api, cln-web' ->
     who may reach each component (OpenChoreo endpoint visibility) and what it calls (VX-17)."""
     out = []
     for repo, vis, calls in _ENDPOINT.findall(section(hld, "Endpoints")):
@@ -62,8 +62,8 @@ _EVENT = re.compile(r"^- (vrixel\.[a-z0-9_-]+\.[a-z0-9_-]+\.v\d+)\s*:\s*(.+?)\s*
 
 
 def parse_events(hld: str) -> list[dict]:
-    """'## Events' bullets: '- vrixel.consent.recorded.v1: published by emr-intake-api, applied by
-    emr-consent-worker' -> event type and description (VX-16)."""
+    """'## Events' bullets: '- vrixel.consent.recorded.v1: published by cln-intake-api, applied by
+    cln-consent-worker' -> event type and description (VX-16)."""
     return [{"type": t, "about": a} for t, a in _EVENT.findall(section(hld, "Events"))]
 
 
