@@ -6,52 +6,14 @@ part; [How the design maps to code](../README.md#how-the-design-maps-to-code) an
 
 The tool is one Python service with one Postgres database. Agents do the work, people decide at
 gates, and each product's own governance repo sets the rules the tool must follow. Everything
-outside the tool box below belongs to the products or to third parties, and the tool reaches each
+outside the dashed frame below belongs to the products or to third parties, and the tool reaches each
 through an interface with an offline stub, so the whole pipeline runs deterministically in tests.
-Running products close the loop: their alerts, errors, logs and flag on/off counts come back to the
-tool as production signals.
 
-```mermaid
-flowchart TB
-  people["People<br/>product owners, designers, architects,<br/>release managers, on-call"]
-  signals["Production signals<br/>Prometheus, Sentry or GlitchTip, OpenChoreo rules,<br/>CloudWatch, AWS Budgets, support tickets"]
-  hooks["GitHub webhooks<br/>CI results, PR events"]
+![The agentic SDLC tool: people, production signals and GitHub webhooks enter its API; the engine runs the roadmap, feature pipeline and incident workflows, which use agents through the model gateway and act under the production policy through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, Jira or OpenProject, Lucid or draw.io, AWS and the Backstage catalog. It reads governance pinned per feature and deploys products, which send signals back.](architecture.svg)
 
-  gov[("Governance repos, read and pinned per feature<br/>tools config, platform constitution and policies,<br/>each product's product.yaml, constitution, ADRs, roadmap")]
-
-  subgraph TOOL["Agentic SDLC tool: one service, one Postgres"]
-    direction TB
-    api["API and web app<br/>decisions inbox, features, new intent chat, incidents"]
-    engine["Engine<br/>starts threads, routes decisions, resolves waits<br/>on CI, builds, deploys, flag steps, analysis"]
-    subgraph WF["Workflows: LangGraph threads checkpointed in Postgres"]
-      direction LR
-      roadmap["Roadmap<br/>goals, initiatives, releases,<br/>launch groups; gate G0"]
-      pipeline["Feature pipeline<br/>discovery to operate, merge train,<br/>flag rollout; gates G1 to G6"]
-      incidents["Incidents<br/>analyze, triage, act,<br/>monitor, postmortem"]
-    end
-    agents["Agents<br/>roles from plugin skills, checks then critic,<br/>Claude Code or generic runtime"]
-    policy["Production policy<br/>when to act alone, on/off cohorts, call graph,<br/>change log, inventory, FinOps, paging"]
-    gateway["Model gateway<br/>role to model, providers per data class,<br/>cache-first prompts, usage ledger"]
-    api --> engine --> WF
-    WF --> agents
-    WF --> policy
-    agents --> gateway
-  end
-
-  providers["Model providers<br/>allowed per data class"]
-
-  OUT["Systems it works through<br/>GitHub: PRs, CI, merge train<br/>OpenChoreo: builds, environments, logs, root-cause agent<br/>Flipt: flags and percentage rollouts<br/>PagerDuty: pages when it can't fix it<br/>ServiceNow: change receipts<br/>Jira or OpenProject: epics and initiatives<br/>Lucid or draw.io: architecture diagrams<br/>AWS via Crossplane: resources and alarms<br/>Backstage catalog: capabilities"]
-
-  products["Products built from the templates<br/>service, event worker, agent, MCP server, BFF, web app, mobile app"]
-
-  people --> TOOL
-  signals --> TOOL
-  hooks --> TOOL
-  gov --> TOOL
-  TOOL --> providers
-  TOOL --> OUT
-  OUT -- deploys --> products
-```
+The diagram is [architecture.svg](architecture.svg). [architecture.html](architecture.html) is the
+same page with the flows and rules laid out together: download it or serve the `docs/` folder
+with GitHub Pages to view it in a browser.
 
 ## How work moves through it
 
@@ -111,5 +73,5 @@ flowchart TB
 
 ## Keeping this current
 
-Update this page in the same pull request as any change that adds, removes or moves a part of the
-tool shown here.
+Update this page, `architecture.svg` and `architecture.html` in the same pull request as any change
+that adds, removes or moves a part of the tool shown here.
