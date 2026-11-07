@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 COMPRESS_IN_STUB = True
 DEFAULT_TIER = "high"
+TIERS_BY_RISK = ("low", "high", "regulated")
 
 
 def _clock() -> datetime:
@@ -44,7 +45,7 @@ def plan_for(policy: dict | None, risk_tier: str | None) -> dict | None:
         return None
     tier = risk_tier if risk_tier in g["bake_minutes"] else DEFAULT_TIER
     return {"steps": list(g["steps"]), "bake_minutes": int(g["bake_minutes"].get(tier, 60)), "risk_tier": tier,
-            "step": 0, "history": []}
+            "compare": dict(g.get("compare") or {}), "step": 0, "history": []}
 
 
 def percent_label(p: float) -> str:
@@ -70,3 +71,54 @@ def check(*, on: bool | None, percent: float | None, since: str, bake_minutes: i
     if (stub and COMPRESS_IN_STUB) or now - quiet_from >= timedelta(minutes=bake_minutes):
         return {"status": "success", "at": now.isoformat(), "quiet_since": quiet_from.isoformat()}
     return None
+
+
+def on_regression(services, *, product_id: str, thread_id: str, title: str, flags: dict[str, str], res: dict,
+                  policy: dict | None, release_id: str = "") -> tuple[list[dict], str]:
+    """Users with a flag on fail more (ops/cohorts.py): turn the regressing flags off when the
+    remediation policy lets the tool turn flags off, else page on-call urgently. Returns
+    (events, what happened) for the release managers' decision."""
+    from datetime import datetime as _dt
+
+    from ..roadmap.graphs import event
+    from .changes import new as new_change
+    from .cohorts import describe
+    from .remediation import ROLLOUT_AGENT
+
+    worse = res.get("regression") or {}
+    keys = {f: k for f, k in flags.items() if k in worse}
+    events: list[dict] = []
+    if "flag_off" in ((policy or {}).get("autonomous") or {}):
+        for fid, key in keys.items():
+            try:
+                services.flags.set(product_id, key, False, actor=ROLLOUT_AGENT)
+            except Exception as exc:
+                events.append(event("rollout", "flag_failed", f"Couldn't turn off {key}: {exc}"))
+                continue
+            events.append(event("rollout", "flag_off", describe(key, worse[key])))
+            log = getattr(services, "changes", None)
+            if log is not None:
+                try:
+                    stored = log.record(new_change(
+                        key=f"{thread_id}:regression:{key}:{_dt.now().strftime('%Y%m%d%H%M')}", product_id=product_id,
+                        kind="flag", type="automatic", action="flag_off",
+                        summary=f"{title}: turned {key} off, its users fail more",
+                        targets=[{"kind": "flag", "name": key, "on": False, "feature_id": fid}],
+                        feature_id=fid if fid.startswith(product_id) and "-FEAT-" in fid else "", release_id=release_id,
+                        requested_by=ROLLOUT_AGENT, approved_by=["platform/remediation.yaml"],
+                        evidence={"cohorts": worse[key]}, detail=describe(key, worse[key])))
+                    events.append(event("rollout", "change_recorded", f"{stored['id']}: {stored['summary']}"))
+                except Exception as exc:
+                    events.append(event("rollout", "change_not_recorded", f"{type(exc).__name__}: {exc}"))
+        return events, "The tool turned the flag off: " + "; ".join(describe(k, worse[k]) for k in keys.values())
+    pager = getattr(services, "pager", None)
+    if pager is not None:
+        try:
+            said = pager.trigger({"incident_id": thread_id, "product_id": product_id, "title": title, "severity": "sev2",
+                                  "data_class": "phi", "source": "gradual-release",
+                                  "why": "its users fail more and the tool may not turn flags off"}, urgent=True)
+            events.append(event("rollout", "paged", said))
+        except Exception as exc:
+            events.append(event("rollout", "not_paged", f"{type(exc).__name__}: {exc}"))
+    return events, "The flag is still on (this product doesn't let the tool turn flags off): " + "; ".join(
+        describe(k, worse[k]) for k in keys.values())

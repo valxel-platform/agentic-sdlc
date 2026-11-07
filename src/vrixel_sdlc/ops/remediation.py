@@ -122,7 +122,16 @@ def _gradual(raw: dict) -> dict:
     bake = {"low": 30, "high": 60, "regulated": 120, **(raw.get("bake_minutes") or {})}
     if set(bake) - set(RISK_TIERS) or not all(isinstance(v, int) and v >= 1 for v in bake.values()):
         raise PolicyError("gradual_release.bake_minutes are whole minutes per risk tier (low, high, regulated)")
-    return {"steps": [float(s) for s in steps], "bake_minutes": bake}
+    from .cohorts import DEFAULTS
+
+    cmp_ = {**DEFAULTS, **(raw.get("compare") or {})}
+    if (set(cmp_) - set(DEFAULTS) or not (isinstance(cmp_["min_requests"], int) and cmp_["min_requests"] >= 30)
+            or not 1.0 <= float(cmp_["z"]) <= 6.0 or not 0 <= float(cmp_["min_increase"]) < 1
+            or float(cmp_["relative"]) < 1.0):
+        raise PolicyError("gradual_release.compare: min_requests at least 30, z 1 to 6, min_increase 0 to 1, relative at least 1")
+    return {"steps": [float(s) for s in steps], "bake_minutes": bake,
+            "compare": {"min_requests": int(cmp_["min_requests"]), "z": float(cmp_["z"]),
+                        "min_increase": float(cmp_["min_increase"]), "relative": float(cmp_["relative"])}}
 
 
 def for_product(policy: dict, runtime: dict | None, data_class: str = "", data_classes: dict | None = None) -> dict:
@@ -157,7 +166,8 @@ def for_product(policy: dict, runtime: dict | None, data_class: str = "", data_c
     if own.get("gradual_release") is False:
         gradual = None
     elif gradual and isinstance(own.get("gradual_release"), dict) and own["gradual_release"].get("steps"):
-        gradual = {**gradual, "steps": _gradual({**gradual, **own["gradual_release"]})["steps"]}
+        gradual = {**gradual, "steps": _gradual({**gradual, "compare": gradual.get("compare"),
+                                                 **own["gradual_release"]})["steps"]}
     return {**policy, "autonomous": auto, "analysis": analysis, "gradual_release": gradual}
 
 

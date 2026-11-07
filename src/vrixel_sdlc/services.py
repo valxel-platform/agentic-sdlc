@@ -68,6 +68,8 @@ class Services:
     agents: object = None  # vrixel_sdlc.integrations.openchoreo_agents: OpenChoreo's SRE and FinOps agents
     change_receipts: object = None  # vrixel_sdlc.ops.servicenow receipts store: ServiceNow numbers per change
     remediation_record: object = None  # (product, window_days) -> the tool's own fixes' track record, set by the engine
+    feature_info: object = None  # feature id -> {risk_tier, components}, set by the engine
+    cohort_logs: object = None  # vrixel_sdlc.ops.cohorts log source: users with a flag on against off
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime

@@ -900,13 +900,33 @@ by `agent:rollout`; the feature page shows the share it's on for. In Flipt it is
 rollout (`THRESHOLD_ROLLOUT_TYPE`, value true) over a flag that is off; turning the flag off removes
 the rollout too, so off is off for everyone.
 
+**Users with it on against users with it off.** Time alone can miss a feature that hurts only
+the users who have it: at 5% its errors are a small share of the component's. The backend
+templates (service, agent, MCP server) count, per flag, the requests that evaluated it and how many
+failed (a 5xx, an exception, or for MCP a JSON-RPC error or a tool result with `isError`), apart for
+users who got it on and off, and log one `vrixel.flag_cohorts {...}` line per flag a minute. The
+tool sums those lines from OpenChoreo's logs (`VRIXEL_OPENCHOREO_OBSERVER_URL`,
+`ops/cohorts.py`) since the step began and runs a one-sided two-proportion z-test. It checks every
+half minute, so the bar is high (`gradual_release.compare`): at least 200 requests on each side, z
+at least 3, and at least half a percentage point and 25% more failures with it on. A regression
+stops the release at once, without waiting for the bake time: the tool turns the flag off (a change
+of type automatic) when the product lets it turn flags off, and otherwise pages on-call urgently;
+then the release managers decide. Each step's comparison is kept with the step. A UI-only feature,
+or a component on an older template, has no such lines, and its steps go by time alone (the step
+says so).
+
 Flipt buckets users by the OpenFeature targeting key: services pass the signed-in user, the web
 template a random per-browser id in `localStorage`, the mobile template a random per-install id in
 secure storage, so each person keeps the same answer as the share grows. A product can release at
 once (`runtime.remediation.gradual_release: false`) or choose its own steps
-(`gradual_release: {steps: [10, 100]}`). Launches (release groups) still turn their flags on for
-everyone at the launch gate, and store apps keep their stores' staged rollout. Stub delivery
-compresses bake times, as it does deployments.
+(`gradual_release: {steps: [10, 100]}`).
+
+**Launches** (release groups) go the same way: the launch gate approves the plan for the whole
+group, held to its riskiest feature's bake time, and every flag widens together. A flag that goes
+off, or whose users fail more (only that flag is turned off), stops the launch for the release
+managers: start again, leave it as it is, or cancel it, which turns all its flags off. The
+release's record says shipped once every flag is on for everyone. Store apps keep their stores'
+staged rollout. Stub delivery compresses bake times, as it does deployments.
 
 ## Change management: every production change, and looking back
 
