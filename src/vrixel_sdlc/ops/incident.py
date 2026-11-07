@@ -536,7 +536,8 @@ def build_incident_graph(services, checkpointer=None):
                     key = services.flag_of(a["feature_id"])
                     if not key:
                         raise ValueError(f"{a['feature_id']} has no feature flag")
-                    services.flags.set(state["product_id"], key, False, actor=approver)
+                    # The flag lives in the feature's product: a product built on this one may own it.
+                    services.flags.set(a["feature_id"].split("-FEAT-", 1)[0] if "-FEAT-" in a["feature_id"] else state["product_id"], key, False, actor=approver)
                     result = f"turned off {key}"
                 elif a["type"] == "rollback":
                     comp = a["component"] or state.get("component", "")

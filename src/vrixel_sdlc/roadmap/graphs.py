@@ -448,8 +448,14 @@ def build_release_graph(services, checkpointer=None):
             except Exception as exc:
                 res = {"status": "failure", "reason": f"couldn't widen the flags: {type(exc).__name__}: {exc}"}
             else:
+                from ..ops.cohorts import describe_groups
+
+                seen = res.get("cohorts") or {}
                 plan |= {"step": step + 1, "at": ro._clock().isoformat(),
-                         "history": list(plan.get("history") or []) + [{"percent": steps[step], "until": res.get("at", "")}]}
+                         "history": list(plan.get("history") or []) + [{
+                             "percent": steps[step], "until": res.get("at", ""),
+                             "cohorts": "; ".join(describe_groups(k, seen[k]) for k in sorted(seen))
+                             or "no comparison (no summary lines): time alone"}]}
                 events = [event("launch_rollout", "widened", f"{', '.join(flags.values())} on for {ro.percent_label(nxt)}")]
                 events += change(nxt, ROLLOUT_AGENT, approved, int(plan.get("attempt", 0)),
                                  f"quiet for {plan['bake_minutes']} minutes at {ro.percent_label(steps[step])}")

@@ -233,7 +233,7 @@ def choose(actions: list[dict], suspects_for, component: str, policy: dict,
     for a in actions:
         if a["type"] == "flag_off" and "flag_off" in auto:
             s = next((x for x in suspects_for(component) if x.get("feature_id") == a.get("feature_id")), None)
-            if s and s.get("flag") and s.get("flag_on") and recent(s, auto["flag_off"]):
+            if s and s.get("flag") and s.get("flag_on") and s.get("flag_off_allowed", True) and recent(s, auto["flag_off"]):
                 chosen = a
                 break
     if chosen is None:

@@ -901,19 +901,45 @@ rollout (`THRESHOLD_ROLLOUT_TYPE`, value true) over a flag that is off; turning 
 the rollout too, so off is off for everyone.
 
 **Users with it on against users with it off.** Time alone can miss a feature that hurts only
-the users who have it: at 5% its errors are a small share of the component's. The backend
-templates (service, agent, MCP server) count, per flag, the requests that evaluated it and how many
-failed (a 5xx, an exception, or for MCP a JSON-RPC error or a tool result with `isError`), apart for
-users who got it on and off, and log one `vrixel.flag_cohorts {...}` line per flag a minute. The
-tool sums those lines from OpenChoreo's logs (`VRIXEL_OPENCHOREO_OBSERVER_URL`,
-`ops/cohorts.py`) since the step began and runs a one-sided two-proportion z-test. It checks every
-half minute, so the bar is high (`gradual_release.compare`): at least 200 requests on each side, z
-at least 3, and at least half a percentage point and 25% more failures with it on. A regression
-stops the release at once, without waiting for the bake time: the tool turns the flag off (a change
-of type automatic) when the product lets it turn flags off, and otherwise pages on-call urgently;
-then the release managers decide. Each step's comparison is kept with the step. A UI-only feature,
-or a component on an older template, has no such lines, and its steps go by time alone (the step
-says so).
+the users who have it: at 5% its errors are a small share of the component's. The templates
+count, per flag, the work that evaluated it and how much failed, apart for users who got it on and
+off, and log one `vrixel.flag_cohorts {...}` line per flag a minute:
+
+| Template | Counts | A failure is |
+|---|---|---|
+| service, agent | requests | a 5xx or an unhandled exception |
+| MCP server | requests | also a JSON-RPC error or a tool result with `isError` |
+| event worker | delivery attempts | an exception, or the message going to the dead-letter topic |
+| web, mobile | user-minutes (a minute in which the app used the flag) | a minute with an unhandled error or a failed API call |
+
+The web and mobile apps post their counts to the BFF once a minute (`POST /flag-cohorts` with the
+session and CSRF token, `/mobile/flag-cohorts` with the bearer token). The BFF accepts them only
+from a signed-in user, at most once a minute each, caps them (120 per side, errors no more than
+the total), adds them up and logs the lines with `"source": "web"` or `"mobile"`; one user can't
+swing a comparison. The BFF checks no flags of its own: it is a gateway that forwards to the
+services, which count their own requests, so counting there too would count the same request
+twice.
+
+The tool sums the lines from OpenChoreo's logs (`VRIXEL_OPENCHOREO_OBSERVER_URL`,
+`ops/cohorts.py`) across the product's whole project, not only the feature's components: anything
+that checks the flag counts, including a component the feature didn't change. It compares each
+component (and the web and mobile apps) on its own, with a one-sided two-proportion z-test,
+because a busy component that's fine would dilute one that isn't. It checks every half minute, so
+the bar is high (`gradual_release.compare`): at least 200 on each side, z at least 3, and at least
+half a percentage point and 25% more failures with it on. A regression in any one of them stops
+the release at once, without waiting for the bake time: the tool turns the flag off (a change of
+type automatic) when the product lets it turn flags off, and otherwise pages on-call urgently;
+then the release managers decide. Each step keeps every component's comparison. A feature with no
+such lines anywhere goes by time alone (the step says so).
+
+**Failures around it.** A feature that breaks a provider shows up first as errors in its callers
+(the web app among them), and a caller's new traffic can break what it calls. So an incident in a
+component that calls the feature's components or that they call (the call graph from the
+contracts and `runtime.calls`, across the lanes the product builds on) holds the rollout as one in
+its own components does. And while it is rolling out, the feature is a suspect for those
+incidents, even another lane's: triage can propose its flag off, and the tool turns it off by
+itself when the policies of both the incident's product and the feature's product allow flag off
+and OpenChoreo's analysis agrees.
 
 Flipt buckets users by the OpenFeature targeting key: services pass the signed-in user, the web
 template a random per-browser id in `localStorage`, the mobile template a random per-install id in
