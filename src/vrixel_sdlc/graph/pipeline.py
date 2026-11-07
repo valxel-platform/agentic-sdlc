@@ -1075,11 +1075,11 @@ def make_flag_rollout(services):
             except Exception as exc:
                 res = {"status": "failure", "reason": f"couldn't widen {key}: {type(exc).__name__}: {exc}"}
             else:
-                from ..ops.cohorts import describe
+                from ..ops.cohorts import describe_groups
 
                 cmp_ = (res.get("cohorts") or {}).get(key)
                 history.append({"percent": steps[step], "until": res.get("at", now()), "quiet_since": res.get("quiet_since", ""),
-                                "cohorts": describe(key, cmp_) if cmp_ else "no comparison (no summary lines): time alone"})
+                                "cohorts": describe_groups(key, cmp_) if cmp_ else "no comparison (no summary lines): time alone"})
                 plan |= {"step": step + 1, "at": ro._clock().isoformat(), "history": history}
                 release |= {"rollout_plan": plan, "flag_percent": nxt, "flag_on": True}
                 events = [event("flag_rollout", "widened", f"{key} on for {ro.percent_label(nxt)}")]

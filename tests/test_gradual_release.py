@@ -286,3 +286,70 @@ def test_a_launch_turns_off_only_the_flag_whose_users_fail_more(eng, real_time):
     assert eng.services.flags.percent("AG", keys[0]) == 5.0 and eng.services.flags.percent("AG", keys[1]) == 0.0
     esc = next(p for p in eng.pending(rid) if p["type"] == "escalation")
     assert keys[1] in esc["reason"] and keys[0] not in esc["reason"].split("users with it on fail more:")[1]
+
+
+def test_each_component_and_app_is_compared_on_its_own_across_the_whole_project(watched):
+    """The web app (relayed by the BFF as source web) regresses while the busy API is fine: pooled
+    together the API's volume would hide it. The web app isn't one of the feature's components;
+    the project-wide query finds it anyway."""
+    eng, fid, key = watched
+    lines = [cohorts.line(key, (4000, 20), (40000, 200))]
+    eng.services.cohort_logs.by_component["emr-intake-api"] = lines
+    eng.services.cohort_logs.by_component["emr-bff"] = [cohorts.line(key, (300, 15), (3000, 3), source="web")]
+    pooled = cohorts.parse([*lines, eng.services.cohort_logs.by_component["emr-bff"][0]], [key])[key]
+    assert cohorts.compare(pooled)["verdict"] == "ok"  # what a single pooled comparison would have said
+    eng.poke_now(fid)
+    assert eng.services.flags.percent("EMR", key) == 0.0
+    esc = next(p for p in eng.pending(fid) if p["type"] == "escalation")
+    assert f"{key} in web: 5.00% of requests failed with it on" in esc["reason"]
+    off = next(r for r in eng.services.changes.list("EMR") if r["action"] == "flag_off")
+    assert off["evidence"]["cohorts"]["group"] == "web"
+
+
+def test_a_step_keeps_every_components_comparison(watched, real_time):
+    eng, fid, key = watched
+    eng.services.cohort_logs.by_component["emr-intake-api"] = [cohorts.line(key, (400, 1), (4000, 12))]
+    eng.services.cohort_logs.by_component["emr-bff"] = [cohorts.line(key, (250, 0), (2500, 2), source="mobile")]
+    real_time["t"] += timedelta(minutes=eng.view(fid)["release"]["rollout_plan"]["bake_minutes"] + 1)
+    eng.poke_now(fid)
+    [h] = eng.view(fid)["release"]["rollout_plan"]["history"]
+    assert f"{key} in emr-intake-api: 0.25%" in h["cohorts"] and f"{key} in mobile: 0.00%" in h["cohorts"]
+
+
+@pytest.fixture
+def ledger(eng, real_time):
+    """EMR builds on APX; EMR's web app calls APX's ledger, which the feature doesn't change."""
+    fid = eng.create(product_id="EMR", title="Consent capture at intake")
+    eng.auto_drive(fid)
+    assert "vrixel-apx/apx-ledger" not in eng.feature_info(fid)["components"]
+    return eng, fid, eng.view(fid)["release"]["flag"]
+
+
+def test_a_feature_still_rolling_out_is_a_suspect_for_the_components_around_it(ledger):
+    eng, fid, key = ledger
+    assert eng.services.flags.percent("EMR", key) == 5.0
+    [s] = [x for x in eng.suspects("APX", "vrixel-apx/apx-ledger") if x["feature_id"] == fid]
+    assert s["flag"] == key and s["flag_on"] and "rolling out to 5%" in s["via"] and s["product_id"] == "EMR"
+    assert "via" not in [x for x in eng.suspects("EMR", "vrixel-emr/emr-intake-api") if x["feature_id"] == fid][0]
+    assert not [x for x in eng.suspects("EMR", "vrixel-emr/emr-unrelated") if x["feature_id"] == fid]
+    # Once it's on for everyone it's an ordinary release: not a suspect for components it didn't change.
+    st = eng._state(fid)
+    st["release"]["flag_percent"] = 100.0
+    real = eng._state
+    eng._state = lambda f: st if f == fid else real(f)
+    assert not [x for x in eng.suspects("APX", "vrixel-apx/apx-ledger") if x["feature_id"] == fid]
+
+
+def test_an_incident_in_a_component_it_calls_holds_the_rollout_and_can_turn_its_flag_off(ledger):
+    eng, fid, key = ledger
+    comps = eng.feature_info(fid)["components"]
+    assert eng._touching("EMR", comps) == []
+    [iid] = eng.ingest(from_alertmanager({"alerts": [{"status": "firing", "fingerprint": "l",
+                                                      "startsAt": datetime.now(timezone.utc).isoformat(),
+                                                      "labels": {"alertname": "Errors", "severity": "error",
+                                                                 "component": "apx-ledger"}}]}))
+    assert iid.startswith("APX-")
+    [t] = eng._touching("EMR", comps)  # it holds the rollout too
+    assert t["incident_id"] == iid and t["touch"] == "calls or is called by it"
+    # The ledger's incident is APX's, but EMR's rolling-out feature is a suspect and its flag goes off.
+    assert eng.services.flags.percent("EMR", key) == 0.0

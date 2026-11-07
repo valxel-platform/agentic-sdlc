@@ -934,21 +934,61 @@ class FeatureEngine:
 
     def suspects(self, product_id: str, repo: str = "") -> list[dict]:
         """Released features that changed the component, most recent first (all recent ones when the
-        component is unknown): the first places triage looks."""
+        component is unknown): the first places triage looks. Features of the products built on
+        this one count too (they can change its repos and they call its components).
+
+        A feature still rolling out (its flag on for some users) is a suspect too when it changed a
+        component that calls the failing one or that the failing one calls, so the incident can
+        turn its flag off: a broken provider shows up as errors in its callers, the web app
+        included, and a caller's new traffic can break what it calls."""
+        from .ops.correlate import graph_for, short
+
+        products = [product_id]
+        if repo:
+            for pid in self.services.settings.registry:
+                if pid == product_id:
+                    continue
+                try:
+                    if product_id in self.services.snapshot(pid).product.depends_on:
+                        products.append(pid)
+                except Exception:
+                    continue
+        graphs: dict = {}
         out = []
-        for row in self._rows(product_id, "feature"):
-            s = self._state(row["feature_id"])
-            rel = s.get("release") or {}
-            if not rel.get("production"):
-                continue
-            repos = set((s.get("change_set") or {}).get("merge_order") or []) | \
-                {pr["repo"] for pr in (s.get("pull_requests") or {}).values()}
-            if repo and repo not in repos:
-                continue
-            at = next((g["at"] for g in reversed(s.get("gate_decisions") or []) if g["gate"] == "g6"), "")
-            out.append({"feature_id": row["feature_id"], "title": s.get("title", ""), "released_at": at,
-                        "flag": rel.get("flag", ""), "flag_on": self._flag_on(s), "repos": sorted(repos),
-                        "track": s.get("track", "standard")})
+        for pid in products:
+            for row in self._rows(pid, "feature"):
+                s = self._state(row["feature_id"])
+                rel = s.get("release") or {}
+                if not rel.get("production"):
+                    continue
+                repos = set((s.get("change_set") or {}).get("merge_order") or []) | \
+                    {pr["repo"] for pr in (s.get("pull_requests") or {}).values()}
+                via = ""
+                if repo and repo not in repos:
+                    rolling = bool(rel.get("rollout_plan")) and 0 < float(rel.get("flag_percent") or 0) < 100
+                    if not rolling:
+                        continue
+                    if pid not in graphs:
+                        try:
+                            graphs[pid] = graph_for(self.services.snapshot(pid))
+                        except Exception:
+                            graphs[pid] = None
+                    if graphs[pid] is None or not any(graphs[pid].related(r, repo) for r in repos):
+                        continue
+                    via = (f"rolling out to {float(rel.get('flag_percent')):g}% in a component that {short(repo)} "
+                           f"calls or is called by")
+                at = next((g["at"] for g in reversed(s.get("gate_decisions") or []) if g["gate"] == "g6"), "")
+                extra: dict = {"via": via} if via else {}
+                if pid != product_id:
+                    # Another product's flag: the tool turns it off by itself only if that product lets it.
+                    try:
+                        mine = "flag_off" in ((self.services.snapshot(pid).remediation or {}).get("autonomous") or {})
+                    except Exception:
+                        mine = False
+                    extra |= {"product_id": pid, "flag_off_allowed": mine}
+                out.append({"feature_id": row["feature_id"], "title": s.get("title", ""), "released_at": at,
+                            "flag": rel.get("flag", ""), "flag_on": self._flag_on(s), "repos": sorted(repos),
+                            "track": s.get("track", "standard"), **extra})
         return sorted(out, key=lambda x: x["released_at"], reverse=True)
 
     def start_hotfix(self, incident: dict, *, repo: str, change: str, approver: str) -> str:
@@ -977,27 +1017,57 @@ class FeatureEngine:
                            not_duplicate_reason=f"Changes what was built, after incident {incident['incident_id']}")
 
     def _cohorts(self, product_id: str, flags: list[str], packet: dict) -> dict:
-        """Users with each flag on against off, since the step began (ops/cohorts.py). Empty
-        when there's no log source or no summary lines (a UI-only feature)."""
+        """Users with each flag on against off, since the step began, per component and per app
+        (ops/cohorts.py): {flag: {group: comparison}}. The whole project's summary lines count, not
+        only the feature's components: anything that checks the flag is watched. Empty when there's
+        no log source or no summary lines (a UI-only feature on an older template)."""
         from .ops import cohorts as co
-        from .ops.correlate import short
         from .ops.rollout import _at, _clock
 
         logs = getattr(self.services, "cohort_logs", None)
-        if logs is None or not packet.get("components"):
+        if logs is None:
             return {}
         try:
             rt = self.services.snapshot(product_id).product.runtime or {}
             since = _at(packet["since"]) or _clock()
-            lines: list[str] = []
-            for repo in packet["components"]:
-                lines += logs.lines(namespace=rt.get("namespace") or "default", project=rt.get("openchoreo_project") or "",
-                                    component=short((rt.get("components") or {}).get(repo, repo)),
-                                    environment=list(rt.get("pipeline") or ["production"])[-1], since=since, until=_clock())
+            entries = logs.entries(namespace=rt.get("namespace") or "default", project=rt.get("openchoreo_project") or "",
+                                   environment=list(rt.get("pipeline") or ["production"])[-1], since=since, until=_clock())
         except Exception:
             return {}
-        counts = co.parse(lines, flags)
-        return {k: co.compare(c, packet.get("compare")) for k, c in counts.items() if c["lines"]}
+        out: dict[str, dict] = {}
+        for k, groups in co.parse_entries(entries, flags).items():
+            got = {g: {**co.compare(c, packet.get("compare")), "group": g} for g, c in groups.items() if c["lines"]}
+            if got:
+                out[k] = got
+        return out
+
+    def _touching(self, product_id: str, components) -> list[dict]:
+        """Incidents a rollout of these components should wait out: in one of them, or in a component
+        that calls them or that they call (the call graph, across the lanes the product builds on),
+        web and mobile apps included.
+        A feature that breaks a provider shows up first as errors in its callers."""
+        from .ops.correlate import graph_for, short
+
+        comps = {short(c) for c in components or [] if short(c)}
+        if not comps:
+            return []
+        try:
+            snap = self.services.snapshot(product_id)
+            graph, lanes = graph_for(snap), list(snap.product.depends_on)
+        except Exception:
+            graph, lanes = None, []
+        out = []
+        # The lanes it builds on too: their components are called by this product's.
+        for row in [r for pid in [product_id, *lanes] for r in self._rows(pid, "incident")]:
+            s = self._state(row["feature_id"])
+            theirs = {short(s.get("component", ""))} | {short(x.get("component") or "")
+                                                         for x in self.services.signals.for_incident(row["feature_id"])}
+            theirs.discard("")
+            if comps & theirs:
+                out.append({**s, "touch": "same component"})
+            elif graph is not None and any(graph.related(a, b) for a in comps for b in theirs):
+                out.append({**s, "touch": "calls or is called by it"})
+        return out
 
     def feature_info(self, feature_id: str) -> dict:
         """A feature's risk tier and production components (repos), for a launch's gradual release."""
@@ -1015,26 +1085,24 @@ class FeatureEngine:
     def _release_waits(self, packet: dict) -> dict | None:
         if packet["wait"] == "flag_step":
             from .ops import rollout as ro
-            from .ops.correlate import short
 
             pid, key = packet["product_id"], packet["flag"]
-            comps = {short(c) for c in packet.get("components") or []}
-            touching = []
-            for row in self._rows(pid, "incident"):
-                s = self._state(row["feature_id"])
-                sig_comps = {short(x.get("component") or "") for x in self.services.signals.for_incident(row["feature_id"])}
-                if comps & ({short(s.get("component", ""))} | sig_comps):
-                    touching.append(s)
+            touching = self._touching(pid, packet.get("components") or [])
             keys = list(packet.get("flags") or [key])
             off = [k for k in keys if self.services.flags.get(pid, k) is False or self.services.flags.percent(pid, k) == 0]
             if off:
                 return {"status": "failure", "reason": f"{', '.join(off)} {'was' if len(off) == 1 else 'were'} turned off"}
             cohorts = self._cohorts(pid, keys, packet)
-            worse = {k: r for k, r in cohorts.items() if r["verdict"] == "regression"}
+            # Any one component (or app) where its users fail more stops the step: the worst one per flag.
+            worse = {}
+            for k, groups in cohorts.items():
+                bad = [r for r in groups.values() if r["verdict"] == "regression"]
+                if bad:
+                    worse[k] = max(bad, key=lambda r: r["on_rate"] - r["off_rate"])
             if worse:
                 from .ops.cohorts import describe
 
-                return {"status": "failure", "regression": worse,
+                return {"status": "failure", "regression": worse, "cohorts": cohorts,
                         "reason": "users with it on fail more: " + "; ".join(describe(k, r) for k, r in worse.items())}
             res = ro.check(on=self.services.flags.get(pid, key), percent=self.services.flags.percent(pid, key),
                            since=packet["since"], bake_minutes=int(packet.get("bake_minutes") or 60), incidents=touching,
