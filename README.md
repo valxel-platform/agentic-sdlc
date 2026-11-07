@@ -9,6 +9,9 @@ gates, evaluator loops, escalations, the model gateway, the usage ledger and pro
 constitutions. It runs offline and deterministically. Each stub sits behind an interface you
 replace with the real integration (see [Replacing the stubs](#replacing-the-stubs)).
 
+**[Architecture](docs/architecture.md)**: how the parts fit together, how a feature and an
+incident move through the tool, and the design rules.
+
 ```
 discovery ─G1─ spec ─G2─┬─ design ───────G3─┬─ join ─ provision new repos ─ plan ─ build ─ CI ─[G5 if high risk]─ merge train
                         └─ architecture ─G4─┘    ─ build, deploy dev and staging ─ release ─G6─ production ─ operate
