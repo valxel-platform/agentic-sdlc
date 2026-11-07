@@ -318,10 +318,36 @@ def make_gate(gate: str, services):
             release |= {"production": bool(release.get("components")), "stable": release.get("packages", []),
                         "promoted_by": d["approver"]}
             update["release"] = release
+            if release["production"] or release.get("flag_on"):
+                record_change(services, release_record_for(state, update, records, approvers), update, gate)
         return Command(goto="production_wait" if gate == "g6" else target, update=update)
 
     dest = ("production_wait",) if gate == "g6" else (tuple(target) if isinstance(target, list) else (target,))
     return gate_node, (*dest, phase, END)
+
+
+def release_record_for(state: FeatureState, update: dict, records: list[dict], approvers: str) -> dict:
+    """The change record for a G6 release, from the feature and what this approval just did."""
+    from ..ops.changes import release_record
+
+    n = sum(1 for g in state.get("gate_decisions") or [] if g.get("gate") == "g6")
+    now_state = {**state, "deployments": {**(state.get("deployments") or {}), **(update.get("deployments") or {})},
+                 "release": update.get("release") or state.get("release") or {},
+                 "gate_decisions": [*(state.get("gate_decisions") or []), *records]}
+    return release_record(now_state, approvers, n)
+
+
+def record_change(services, rec: dict, update: dict, node: str) -> None:
+    """Write a production change to the change log. A log that can't be written is said plainly:
+    the change happened, and an auditor will look for it."""
+    log = getattr(services, "changes", None)
+    if log is None:
+        return
+    try:
+        stored = log.record(rec)
+        update.setdefault("events", []).append(event(node, "change_recorded", f"{stored['id']}: {rec['summary']}"))
+    except Exception as exc:
+        update.setdefault("events", []).append(event(node, "change_not_recorded", f"{type(exc).__name__}: {exc}"))
 
 
 def assign_flag(services, state: FeatureState, actor: str) -> tuple[str, dict]:

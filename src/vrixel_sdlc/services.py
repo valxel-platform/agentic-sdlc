@@ -62,6 +62,9 @@ class Services:
     cost_ledger: object = None  # vrixel_sdlc.finops.ledger.CostLedger
     alarms: object = None  # vrixel_sdlc.ops.alarms board: every CloudWatch alarm's current state
     pager: object = None  # vrixel_sdlc.ops.paging.Pager: pages on-call when an incident opens
+    changes: object = None  # vrixel_sdlc.ops.changes.ChangeLog: every production change, hash-chained
+    inventory_snapshots: object = None  # vrixel_sdlc.ops.inventory snapshots: counts per day, for the trend
+    aws_tags: object = None  # vrixel_sdlc.ops.inventory.AwsTags, when VRIXEL_AWS_INVENTORY_ROLE is set
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime

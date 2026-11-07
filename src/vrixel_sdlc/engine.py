@@ -139,6 +139,19 @@ class FeatureEngine:
         self.merged: dict[str, str] = {}  # incident -> the one it was merged into
         services.merged_into = self.merged.get
         services.incidents = self.incident_summaries
+        if getattr(services, "changes", None) is None:
+            from .ops.changes import InMemoryChangeLog
+
+            services.changes = InMemoryChangeLog()
+        if getattr(services, "inventory_snapshots", None) is None:
+            from .ops.inventory import InMemorySnapshots
+
+            services.inventory_snapshots = InMemorySnapshots()
+        if getattr(services, "aws_tags", None) is None:
+            from .ops.inventory import aws_tags_from_env
+
+            services.aws_tags = aws_tags_from_env()
+        self._inventory_day = ""
         if getattr(services, "pager", None) is None:
             from .ops.paging import from_env
 
@@ -263,6 +276,13 @@ class FeatureEngine:
             while not self._stop.wait(interval_s):
                 for fid in self.waiting_on_external():
                     self.poke(fid)
+                today = time.strftime("%Y-%m-%d", time.gmtime())
+                if today != self._inventory_day:  # one inventory snapshot a day, for the trend
+                    self._inventory_day = today
+                    try:
+                        self.snapshot_inventories()
+                    except Exception:
+                        pass
                 if time.time() - self._cost_checked > 3600:  # cost data moves daily; hourly is plenty
                     self._cost_checked = time.time()
                     for job in (self.collect_costs, self.review_costs):
@@ -330,6 +350,58 @@ class FeatureEngine:
     # --- roadmap: initiatives and releases ------------------------------------------------
     def _state(self, thread_id: str) -> dict:
         return self._g(thread_id).get_state(self._config(thread_id)).values or {}
+
+    def inventory(self, product_id: str) -> dict:
+        """What the product runs in each environment, read live (ops/inventory.py)."""
+        from .ops.inventory import collect
+
+        known: dict = {"components": {}, "resources": {}, "store_apps": {}}
+        for row in self._rows(product_id, "feature"):
+            s = self._state(row["feature_id"])
+            for r in s.get("resources") or []:
+                known["resources"].setdefault(r["name"], {"type": r.get("type", ""), "sizes": r.get("sizes") or {},
+                                                          "feature_id": row["feature_id"]})
+            for key, d in (s.get("deployments") or {}).items():
+                if d.get("kind") == "resource":
+                    continue
+                if d.get("kind") == "store":
+                    if d.get("env") == "production" or key not in known["store_apps"]:
+                        known["store_apps"][key] = {"env": d.get("env", ""), "version": str(d.get("release") or d.get("sha", ""))[:40],
+                                                    "feature_id": row["feature_id"]}
+                    continue
+                known["components"][d.get("repo") or key] = {
+                    "component": d.get("component") or key, "project": d.get("project"), "namespace": d.get("namespace"),
+                    "feature_id": row["feature_id"]}  # features in order: the latest release wins
+        snap = self.services.snapshot(product_id)
+        costs = self.services.cost_ledger.query(product_id=product_id, stage="run") + \
+            self.services.cost_ledger.query(product_id=product_id, stage="build")
+        return collect(self.services.openchoreo, snap, known, costs=costs, aws=self.services.aws_tags)
+
+    def snapshot_inventories(self, day: str | None = None) -> int:
+        """Keep today's counts for every product (the watcher, once a day)."""
+        from .ops.inventory import snapshot_row
+
+        n = 0
+        for pid in self.services.settings.registry:
+            try:
+                if self.services.snapshot(pid).product.runtime is None:
+                    continue  # a shared lane runs nothing
+                row = snapshot_row(self.inventory(pid))
+                self.services.inventory_snapshots.put({**row, "day": day or row["day"]})
+                n += 1
+            except Exception:
+                continue
+        return n
+
+    def lookback(self, product_id: str, months: int = 6, now=None) -> dict:
+        """Incidents and changes per month (ops/lookback.py)."""
+        from .ops.lookback import months_back, report
+
+        incidents = [{**self._state(r["feature_id"]), "incident_id": r["feature_id"]}
+                     for r in self._rows(product_id, "incident")]
+        log = self.services.changes
+        return {"product_id": product_id,
+                **report(incidents, log.list(product_id), log.links(product_id), months_back(months, now))}
 
     def _rows(self, product_id: str, kind: str) -> list[dict]:
         return [r for r in self.index.all() if r["product_id"] == product_id and r.get("kind", "feature") == kind]

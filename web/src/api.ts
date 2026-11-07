@@ -298,7 +298,50 @@ export interface ProductCost {
               run_month_usd: number; approved_monthly_usd?: number | null }[];
 }
 
+export interface ChangeRecord {
+  id: string; at: string; product_id: string; env: string; kind: "release" | "flag" | "rollback";
+  type: "standard" | "emergency" | "automatic"; action: string; summary: string;
+  targets: { kind: string; name: string; release?: string; on?: boolean }[];
+  feature_id: string; release_id: string; incident_id: string; requested_by: string; approved_by: string[];
+  approvals: { gate: string; lane: string; approver: string; at: string }[];
+  evidence: { pull_requests?: string[]; quality?: Record<string, Record<string, unknown>>; waivers?: unknown[]; triage?: string };
+  outcome: "done" | "failed"; detail: string; caused_incidents: string[]; hash: string; prev_hash: string;
+}
+export interface LookbackMonth {
+  month: string; incidents: number; by_severity: Record<string, number>; components: Record<string, number>;
+  fixed_by_tool: number; escalated: number; open: number; changes: Record<string, number>; failed_changes: number;
+  releases: number; releases_causing_incidents: number; change_failure_rate: number | null;
+  recover_minutes_median: number | null; recover_minutes_max: number | null;
+}
+export interface Lookback {
+  product_id: string; months: LookbackMonth[];
+  total: { incidents: number; fixed_by_tool: number; escalated: number; releases: number; releases_causing_incidents: number;
+           failed_changes: number; change_failure_rate: number | null };
+  causes: { change_id: string; summary: string; at: string; incidents: string[] }[];
+}
+export interface InventoryItem {
+  kind: "component" | "resource" | "store_app"; name: string; type?: string; env: string; state: string; release: string;
+  size?: string; feature_id: string; repo?: string; cost_30d_usd?: number; planned_monthly_usd?: number | null;
+  outputs?: { name: string; value: string }[]; secrets?: { output: string; name: string; key: string }[];
+  ids: { openchoreo?: string; binding?: string; kubectl?: string; aws_account?: string; aws_region?: string; arn?: string; stores?: string };
+}
+export interface EnvSummary {
+  components: number; resources: number; store_apps: number; not_ready?: number; cost_30d_usd: number; planned_monthly_usd: number;
+}
+export interface Inventory {
+  product_id: string; at: string; project: string; namespace: string; pipeline: string[]; items: InventoryItem[];
+  summary: { per_env: Record<string, EnvSummary>; production: EnvSummary; lower: EnvSummary };
+  unmanaged: { env: string; account: string; arn: string; resource_tag: string; feature: string }[];
+  aws: string; problems: string[];
+}
+
 export const api = {
+  changes: (productId: string, since?: string) =>
+    request<ChangeRecord[]>("GET", `/changes?product_id=${encodeURIComponent(productId)}${since ? `&since=${since}` : ""}`),
+  verifyChanges: () => request<{ ok: boolean; records: number; broken_at: string | null }>("GET", "/changes/verify"),
+  lookback: (productId: string, months = 6) =>
+    request<Lookback>("GET", `/reports/lookback?product_id=${encodeURIComponent(productId)}&months=${months}`),
+  inventory: (productId: string) => request<Inventory>("GET", `/inventory/${encodeURIComponent(productId)}`),
   featureCost: (id: string) => request<FeatureCost>("GET", `/features/${encodeURIComponent(id)}/cost`),
   productCost: (productId: string, month?: string) =>
     request<ProductCost>("GET", `/costs/${encodeURIComponent(productId)}${month ? `?month=${month}` : ""}`),

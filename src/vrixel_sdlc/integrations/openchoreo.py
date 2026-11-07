@@ -59,6 +59,17 @@ class OpenChoreo(Protocol):
                       retain: bool = False) -> dict: ...  # retain: keep the data if the binding goes
     def resource_status(self, *, name: str, env: str, project: str,
                         namespace: str | None = None) -> dict: ...  # {"state": ready|progressing|failed|absent, "message"}
+    # Inventory (read only): where a component runs and what a resource is, per environment.
+    def component_bindings(self, *, component: str, project: str | None = None,
+                           namespace: str | None = None) -> list[dict]: ...  # [{"env", "release", "state", "binding"}]
+    def resource_bindings_of(self, *, name: str, project: str,
+                             namespace: str | None = None) -> list[dict]: ...
+    # [{"env", "release", "state", "binding", "size", "outputs": [{"name", "value"} | {"name", "secret": {"name", "key"}}]}]
+
+
+# Who may roll production back: a person, or the tool under the platform's remediation policy
+# (ops/remediation.py: only a recent release, and the release restored was already approved).
+ROLLBACK_ACTORS = ("human", "policy")
 
 
 # Who may roll production back: a person, or the tool under the platform's remediation policy
@@ -190,6 +201,24 @@ class StubOpenChoreo:
             return {"state": "absent", "message": ""}
         state = self.resource_results.get((name, env), "ready")
         return {"state": state, "message": "" if state == "ready" else f"{name} is {state} in {env}"}
+
+    def component_bindings(self, *, component, project=None, namespace=None) -> list[dict]:
+        with self._lock:
+            current = self.deployments.get(component)
+            rolled = sum(1 for r in self.rollbacks if r["component"] == component)
+        if current not in PIPELINE:
+            return []
+        return [{"env": env, "release": f"{component.rsplit('/', 1)[-1]}-r{2 - rolled if env == 'production' else 2}",
+                 "state": self.deploy_results.get((component, env), "ready"), "binding": f"{component.rsplit('/', 1)[-1]}-{env}"}
+                for env in PIPELINE[:PIPELINE.index(current) + 1]]
+
+    def resource_bindings_of(self, *, name, project, namespace=None) -> list[dict]:
+        with self._lock:
+            latest = {b["env"]: b for b in self.resource_bindings if b["name"] == name}
+            outputs = dict(getattr(self, "resource_outputs", {}))
+        return [{"env": env, "release": b["release"], "size": b["size"], "binding": f"{name}-{env}",
+                 "state": self.resource_results.get((name, env), "ready"), "outputs": list(outputs.get((name, env), []))}
+                for env, b in latest.items()]
 
     def deployment(self, *, component, env, project=None, namespace=None) -> dict:
         with self._lock:
@@ -508,6 +537,38 @@ class OpenChoreoMcp:
                 **common, ("name",): f"{name}-{env}", ("project_name",): project, ("resource_name",): name,
                 ("environment",): env})
         return {"name": name, "env": env, "size": size, "release": release, "actor": actor, "actor_type": actor_type}
+
+    @staticmethod
+    def _state_of(b: dict) -> str:
+        ready = _condition(b, "Ready")
+        if ready == "True":
+            return "ready"
+        failed = any(isinstance(c, dict) and c.get("status") == "False" and "fail" in str(c.get("reason", "")).lower()
+                     for c in _get(b, "status.conditions") or [])
+        return "failed" if failed else "progressing"
+
+    def component_bindings(self, *, component, project=None, namespace=None) -> list[dict]:
+        return [{"env": self._env_of(b), "release": self._release_of(b), "state": self._state_of(b),
+                 "binding": str(_get(b, "name", "metadata.name") or "")}
+                for b in self._bindings(component, project, namespace)]
+
+    def resource_bindings_of(self, *, name, project, namespace=None) -> list[dict]:
+        out = []
+        for b in self._resource_bindings(name, namespace):
+            outputs = []
+            for o in _get(b, "status.outputs", "outputs") or []:
+                if not isinstance(o, dict) or not o.get("name"):
+                    continue
+                if o.get("value") not in (None, ""):
+                    outputs.append({"name": o["name"], "value": str(o["value"])})
+                else:  # a secret or config map stays on the data plane: only where it is
+                    ref = o.get("secretKeyRef") or o.get("configMapKeyRef") or {}
+                    outputs.append({"name": o["name"], "secret": {"name": str(ref.get("name", "")),
+                                                                  "key": str(ref.get("key", ""))}})
+            out.append({"env": self._env_of(b), "release": str(_get(b, "spec.resourceRelease", "resourceRelease") or ""),
+                        "state": self._state_of(b), "binding": str(_get(b, "name", "metadata.name") or ""),
+                        "size": str(_get(b, "spec.resourceTypeEnvironmentConfigs.size") or ""), "outputs": outputs})
+        return out
 
     def resource_status(self, *, name, env, project, namespace=None) -> dict:
         b = next((x for x in self._resource_bindings(name, namespace) if self._env_of(x) == env), None)
