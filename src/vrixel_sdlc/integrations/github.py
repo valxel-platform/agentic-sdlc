@@ -249,6 +249,11 @@ class StubGitHub:
         r = self._repo(repo, "create_repo")
         created = "created" not in r
         r.setdefault("created", {"template": template, "private": private, "description": description})
+        if created and template:  # a repo made from a template starts with its files
+            with self._lock:
+                for (src, branch, path), content in list(self.files.items()):
+                    if src == template and branch == "main":
+                        self.files.setdefault((repo, "main", path), content)
         return "created" if created else "exists"
 
     def update_repo(self, *, repo, merge, default_branch, description=None, features=None, is_template=None) -> None:

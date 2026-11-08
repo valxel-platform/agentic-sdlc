@@ -375,6 +375,18 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if not can_decide(user, {"approvers": oncall_approvers(eng().services.snapshot(product_id).product)}):
             raise HTTPException(403, "Only the product's on-call can merge or split incidents")
 
+    @api.get("/signals/unmatched")
+    def unmatched_signals(limit: int = 100, user: User = Depends(current_user)) -> dict:
+        """Signals that matched no product (the last 30 days, newest first), with why: a mislabelled
+        alert, an unregistered component. They may come from any product, so only members of the
+        platform's org see them."""
+        if not user.member_of(eng().services.settings.platform.org):
+            raise HTTPException(403, "Only members of the platform's organization see unmatched signals")
+        rows = eng().unmatched_signals(max(1, min(limit, 500)))
+        keep = ("source", "title", "component", "product_id", "severity", "env", "status", "fingerprint", "url",
+                "labels", "reason", "received_at", "at")
+        return {"count": len(rows), "signals": [{k: r.get(k) for k in keep if k in r} for r in rows]}
+
     @api.post("/incidents/{incident_id}/merge")
     def merge_incident(incident_id: str, body: dict, user: User = Depends(current_user)) -> dict:
         """On-call: this incident is the same failure as another; its signals move there."""

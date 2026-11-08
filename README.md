@@ -226,6 +226,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 | Area | Setting |
 | --- | --- |
 | Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-bff`, `-library`, `-event-worker`, `-mcp-server`, `-agent`, `-acceptance`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
+| Name | The template's name replaced by the component's in the files the template lists in `.vrixel/identity` (its Workload, app and component name), so its logs, traces and error reports name it |
 | Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
 | Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
@@ -489,6 +490,13 @@ the product's repos and OpenChoreo components) and a severity (SEV1 to SEV4 from
 Sentry level). A signal joins the open incident for the same alert, issue or component; otherwise a
 firing one opens a new incident. Signals are stored in the platform database. A webhook answers as
 soon as its signals are recorded and on-call is paged; triage runs after it.
+
+A signal that matches no product (a missing label, a component the registry doesn't know, an
+OpenChoreo project no product runs in) opens no incident, but it isn't dropped: the tool logs a
+warning and keeps it for 30 days with the reason, such as "component billing-cron matches no
+product's repos or OpenChoreo components". Members of the platform's org see them at the bottom of
+the Incidents page and at `GET /api/signals/unmatched`, so the source can be fixed before it
+matters. They may come from any product, so nobody else sees them.
 
 **Paging on-call (PagerDuty).** Each product has a PagerDuty service; the tool sends it events with
 the service's Events API v2 integration key (`ops/paging.py`). Two kinds of page, each its own
@@ -801,8 +809,11 @@ decision start there, and when a joining signal moves it, triage runs again. On-
 incidents (`POST /api/incidents/{id}/merge`, or "Merge into it" on the incident page) and take a
 wrongly joined signal out (`/split`, "Not the same failure"), which opens its own incident.
 
-A Sentry project's slug should be the component's name (or tag events with `component`), and
-events should carry `vrixel_product`, so issues map to the right product and component.
+The templates tag every error report with `component`, the component's name, so an issue maps to
+its component whatever the Sentry or GlitchTip project is called. The name comes from the files a
+template lists in `.vrixel/identity` (its workload, app and component files): when the tool creates
+a repo from a template, it replaces the template's name with the component's in each of them. Events
+may also carry `vrixel_product`; without it the component alone finds the product.
 
 ## Error tracking: Sentry or self-hosted GlitchTip
 
@@ -838,7 +849,7 @@ recipient per GlitchTip project:
   the same incident as the failures it caused elsewhere. The request goes only to the product's
   configured `url`.
 
-Name each GlitchTip project after its component, as with Sentry.
+The `component` tag maps GlitchTip issues to components the same way.
 
 ## Component alert rules: logs and exceptions
 

@@ -58,6 +58,10 @@ def start_new_service(eng, product="CLN", title="Consent registry"):
 
 def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
+    tpl = "vrixel-tools/template-service"
+    svc.github.files[(tpl, "main", ".vrixel/identity")] = "# files that carry the template's name\nworkload.yaml\nsrc/main/resources/application.yaml\nmissing.txt\n"
+    svc.github.files[(tpl, "main", "workload.yaml")] = "metadata:\n  name: template-service\n"
+    svc.github.files[(tpl, "main", "src/main/resources/application.yaml")] = "spring:\n  application:\n    name: template-service\n"
     seen = {}
     v = approve_gates(eng, start_new_service(eng), seen)
     assert v["status"] == "done"
@@ -77,6 +81,10 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     codeowners = svc.github.files[(NEW, "main", ".github/CODEOWNERS")]
     assert "* @acme-clinic/tech-leads" in codeowners and "/src/phi/ @acme-clinic/security" in codeowners
     assert svc.openchoreo.components[NEW]["component_type"] == "deployment/service"
+    # Its Workload, app name and error reports carry its component's name, so its signals route to it.
+    short = NEW.split("/", 1)[1]
+    assert svc.github.files[(NEW, "main", "workload.yaml")] == f"metadata:\n  name: {short}\n"
+    assert f"name: {short}" in svc.github.files[(NEW, "main", "src/main/resources/application.yaml")]
 
     manifest = svc.github.files[("acme-clinic/cln-governance", "vrixel/CLN-FEAT-1-repos", "product.yaml")]
     assert {"name": NEW, "role": "provider"} in yaml.safe_load(manifest)["repos"]

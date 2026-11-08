@@ -248,12 +248,37 @@ class SignalStore(Protocol):
     # Correlation (ops/correlate.py): open incidents, and moving signals between them.
     def open_incidents(self, product_id: str) -> list[str]: ...
     def move(self, from_incident: str, to_incident: str, fingerprint: str | None = None) -> int: ...
+    # Signals that matched no product: kept so a mislabelled alert is seen and fixed, not lost.
+    def add_unmatched(self, signal: dict, reason: str) -> None: ...
+    def unmatched(self, limit: int = 100) -> list[dict]: ...
+
+
+# How long a signal that matched no product is kept.
+UNMATCHED_DAYS = 30
+
+
+def unmatched_reason(services, signal: dict) -> str:
+    """Why resolve_product found no product for this signal, in words someone fixing the source can act on."""
+    pid = signal.get("product_id") or ""
+    comp = signal.get("component") or ""
+    project = (signal.get("labels") or {}).get("project", "")
+    if pid and pid not in services.settings.registry:
+        return f"it names product {pid}, which isn't in the registry"
+    if comp and project:
+        return (f"component {comp} matches no product's repos or OpenChoreo components, and OpenChoreo project "
+                f"{project} belongs to no product")
+    if comp:
+        return f"component {comp} matches no product's repos or OpenChoreo components"
+    if project:
+        return f"OpenChoreo project {project} belongs to no product"
+    return "it names no product, component or OpenChoreo project"
 
 
 class InMemorySignalStore:
     def __init__(self) -> None:
         self.rows: list[dict] = []
         self.closed: set[str] = set()
+        self.unmatched_rows: list[dict] = []
         self._lock = threading.Lock()
 
     def add(self, incident_id, product_id, signal) -> None:
@@ -291,6 +316,15 @@ class InMemorySignalStore:
                     n += 1
             return n
 
+    def add_unmatched(self, signal, reason) -> None:
+        with self._lock:
+            self.unmatched_rows.append({**signal, "reason": reason, "received_at": now()})
+            del self.unmatched_rows[:-1000]
+
+    def unmatched(self, limit=100) -> list[dict]:
+        with self._lock:
+            return [dict(r) for r in reversed(self.unmatched_rows[-limit:])]
+
 
 class PostgresSignalStore:
     DDL = (
@@ -300,6 +334,10 @@ class PostgresSignalStore:
              closed BOOLEAN NOT NULL DEFAULT false, at TIMESTAMPTZ NOT NULL DEFAULT now())""",
         "CREATE INDEX IF NOT EXISTS vrixel_signals_incident ON vrixel_signals (incident_id)",
         "CREATE INDEX IF NOT EXISTS vrixel_signals_open ON vrixel_signals (product_id, closed)",
+        """CREATE TABLE IF NOT EXISTS vrixel_unmatched_signals (
+             id BIGSERIAL PRIMARY KEY, data JSONB NOT NULL, reason TEXT NOT NULL,
+             received_at TIMESTAMPTZ NOT NULL DEFAULT now())""",
+        "CREATE INDEX IF NOT EXISTS vrixel_unmatched_signals_at ON vrixel_unmatched_signals (received_at)",
     )
 
     def __init__(self, pool) -> None:
@@ -345,6 +383,19 @@ class PostgresSignalStore:
                 "UPDATE vrixel_signals SET incident_id = %s WHERE incident_id = %s AND (%s::text IS NULL OR fingerprint = %s)",
                 (to_incident, from_incident, fingerprint, fingerprint))
             return cur.rowcount
+
+    def add_unmatched(self, signal, reason) -> None:
+        with self.pool.connection() as conn:
+            conn.execute("INSERT INTO vrixel_unmatched_signals (data, reason) VALUES (%s::jsonb, %s)",
+                         (json.dumps(signal, default=str), reason))
+            conn.execute("DELETE FROM vrixel_unmatched_signals WHERE received_at < now() - make_interval(days => %s)",
+                         (UNMATCHED_DAYS,))
+
+    def unmatched(self, limit=100) -> list[dict]:
+        with self.pool.connection() as conn:
+            rows = conn.execute("SELECT data, reason, received_at FROM vrixel_unmatched_signals ORDER BY id DESC LIMIT %s",
+                                (limit,)).fetchall()
+        return [{**dict(r["data"]), "reason": r["reason"], "received_at": r["received_at"].isoformat()} for r in rows]
 
 
 def still_firing(signals: list[dict]) -> list[dict]:

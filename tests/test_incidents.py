@@ -292,3 +292,37 @@ def test_webhooks_and_reporting_a_problem(tmp_path, gov_root, monkeypatch):
     rows = client.get("/api/incidents").json()
     assert [x["feature_id"] for x in rows] == ["CLN-INC-3", "CLN-INC-2", "CLN-INC-1"]
     assert all(x["feature_id"].startswith("CLN-FEAT") for x in client.get("/api/features").json())
+
+
+def test_a_signal_for_no_product_is_kept_with_why_for_the_platform_team(tmp_path, gov_root, monkeypatch):
+    """Not dropped: a mislabelled alert or an unregistered component shows up where the platform
+    team can fix its source."""
+    from vrixel_sdlc.ops.signals import from_openchoreo
+
+    eng, _ = make(tmp_path, gov_root)
+    assert eng.ingest(from_alertmanager(alert(component="billing-cron"))) == []
+    assert eng.ingest(from_alertmanager({"alerts": [{"status": "firing", "fingerprint": "x", "labels": {
+        "alertname": "Down", "vrixel_product": "NOPE"}}]})) == []
+    assert eng.ingest(from_openchoreo({"alertName": "errors", "namespace": "default", "project": "ghost",
+                                       "component": "", "environment": "production"})) == []
+    assert eng.ingest(from_ticket({"title": "Something broke"})) == []
+    got = eng.unmatched_signals()
+    assert [s["reason"] for s in got] == [
+        "it names no product, component or OpenChoreo project",
+        "OpenChoreo project ghost belongs to no product",
+        "it names product NOPE, which isn't in the registry",
+        "component billing-cron matches no product's repos or OpenChoreo components",
+    ]
+    assert got[-1]["title"] == "HighErrorRate on billing-cron" and got[-1]["received_at"]
+    # A signal that does match still opens its incident, and isn't listed.
+    assert eng.ingest(from_alertmanager(alert())) == ["CLN-INC-1"]
+    assert len(eng.unmatched_signals()) == 4
+
+    client = TestClient(create_app(eng, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
+    assert client.get("/api/signals/unmatched").status_code == 401
+    client.post("/api/auth/dev-login", json={"login": "maria", "orgs": ["acme-clinic"]})
+    assert client.get("/api/signals/unmatched").status_code == 403  # could be any product's: platform team only
+    client.post("/api/auth/dev-login", json={"login": "platform-owner", "orgs": ["vrixel-tools"]})
+    r = client.get("/api/signals/unmatched?limit=2").json()
+    assert r["count"] == 2 and r["signals"][0]["source"] == "ticket"
+    assert set(r["signals"][1]) >= {"title", "reason", "received_at", "fingerprint"}

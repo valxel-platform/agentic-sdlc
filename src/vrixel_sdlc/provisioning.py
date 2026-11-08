@@ -5,10 +5,11 @@ existing repo will not do. The evaluator checks the proposal against config/repo
 approves it with the rest of the architecture. After G3 and G4, the provision step creates each
 repo in the product's org and applies the standards, so the rest of the pipeline works on it:
 
-  repo from the role's template -> merge settings -> security features (dependency graph,
-  Dependabot, secret scanning with push protection, CodeQL default setup) -> CODEOWNERS ->
-  team access from the gate approvers -> topics and custom properties -> branch ruleset with
-  required reviews and checks -> OpenChoreo component -> a governance PR registering the repo.
+  repo from the role's template -> the component's name in the files the template lists
+  (.vrixel/identity) -> merge settings -> security features (dependency graph, Dependabot,
+  secret scanning with push protection, CodeQL default setup) -> CODEOWNERS -> team access from
+  the gate approvers -> topics and custom properties -> branch ruleset with required reviews and
+  checks -> OpenChoreo component -> a governance PR registering the repo.
 
 Every step is safe to repeat. Until the governance PR merges, the feature carries the new repos
 itself (Services.feature_snapshot), so its change set, risk tier and delivery include them.
@@ -175,6 +176,36 @@ def plan(product, proposal: dict, standards: dict) -> dict:
     }
 
 
+# A template lists, one path per line, the files that carry its own name (the Workload's name, the
+# app's name, the component its error reports are tagged with). A new repo gets its component's name
+# in each, so its Workload, logs, traces and error reports name it, and its alerts and errors are
+# routed to it (ops/signals.py resolve_product).
+IDENTITY_FILE = ".vrixel/identity"
+
+
+def component_name(product, repo: str) -> str:
+    """The repo's OpenChoreo component name: runtime.components, else the repo's short name."""
+    named = ((product.runtime or {}).get("components") or {}).get(repo)
+    return str(named or repo.split("/", 1)[-1])
+
+
+def give_identity(gh, repo: str, template: str, component: str, branch: str, feature_id: str) -> str:
+    """Replace the template's name with the component's in the files the template lists."""
+    old = template.split("/", 1)[-1]
+    listed = gh.get_file(repo=repo, path=IDENTITY_FILE, ref="")
+    if listed is None:
+        return f"{template} lists no files to name"
+    changed = []
+    for path in [ln.strip() for ln in listed.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]:
+        text = gh.get_file(repo=repo, path=path, ref="")
+        if text is None or old not in text:
+            continue
+        gh.put_file(repo=repo, branch=branch, path=path, content=text.replace(old, component),
+                    message=f"{feature_id}: name the component {component}")
+        changed.append(path)
+    return f"named {component} in {', '.join(changed)}" if changed else f"no file names {old}"
+
+
 def add_repo_to_manifest(text: str, repo: str, role: str) -> str:
     """Append a repo to product.yaml's `repos:` list, keeping the rest of the file as written."""
     if f"name: {repo}" in text:
@@ -219,6 +250,9 @@ class RepoProvisioner:
         gh = self.github
         ok = step("create", lambda: gh.create_repo(repo=repo, template=p["template"], private=p["visibility"] != "public",
                                                    description=p["purpose"]))
+        if ok and p.get("template"):
+            ok = step("identity", lambda: give_identity(gh, repo, p["template"], component_name(product, repo),
+                                                        p["default_branch"], feature_id))
         ok = ok and step("settings", lambda: gh.update_repo(repo=repo, merge=p["merge"], default_branch=p["default_branch"],
                                                             description=p["purpose"], features=p.get("features")))
         ok = ok and step("security", lambda: gh.enable_security(repo=repo, **p["security"]))

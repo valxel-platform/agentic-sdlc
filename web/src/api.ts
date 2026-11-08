@@ -226,6 +226,10 @@ export interface IncidentRow {
   opened_at: string; firing: number; links: Record<string, string>;
 }
 
+export interface UnmatchedSignal {
+  source: string; title: string; component?: string; product_id?: string; severity?: string; env?: string;
+  status?: string; fingerprint: string; url?: string; labels?: Record<string, string>; reason: string; received_at: string;
+}
 export interface Candidate { title: string; description: string; started?: boolean }
 export interface InitiativeDraft {
   goal: string; new_goal: { title: string; measure: string } | null; measure: string; horizon: string;
@@ -380,6 +384,7 @@ export const api = {
   splitSignal: (id: string, fingerprint: string) =>
     request<{ new_incident: string | null }>("POST", `/incidents/${encodeURIComponent(id)}/split`, { fingerprint }),
   incidents: () => request<IncidentRow[]>("GET", "/incidents"),
+  unmatchedSignals: () => request<{ count: number; signals: UnmatchedSignal[] }>("GET", "/signals/unmatched"),
   reportProblem: (body: { product_id: string; title: string; description: string; severity: string; component?: string }) =>
     request<{ feature_id: string }>("POST", "/incidents", body),
   roadmap: (productId: string) => request<Roadmap>("GET", `/roadmap/${encodeURIComponent(productId)}`),
