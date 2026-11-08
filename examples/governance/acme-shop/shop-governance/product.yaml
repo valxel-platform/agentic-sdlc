@@ -1,4 +1,4 @@
-# Shop governance manifest, read by the Vrixel agentic SDLC tool.
+# Shop governance manifest, read by the Vrixel SDLC tool.
 # Changes are pull requests approved by the product owner (see CODEOWNERS).
 # The tool rejects values that loosen platform limits.
 product_id: SHOP
