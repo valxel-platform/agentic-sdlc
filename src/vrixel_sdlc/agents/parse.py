@@ -19,6 +19,28 @@ def section(text: str, heading: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """The text before the first '## ' heading, and each section as (heading, full text)."""
+    parts = re.split(r"(?m)^(?=## )", text or "")
+    head = parts[0] if parts and not parts[0].startswith("## ") else ""
+    return head, [(p.splitlines()[0][3:].strip(), p) for p in parts if p.startswith("## ")]
+
+
+def merge_sections(previous: str, revision: str) -> str:
+    """The previous document with the revision's sections in place: a section with the same
+    heading is replaced, a new one is added at the end, and the rest is kept as it was. A revision
+    that starts with a '# ' title replaces the text before the first section too."""
+    head, old = split_sections(previous)
+    new_head, new = split_sections(revision)
+    if not new:  # not sections at all: the whole document again
+        return revision
+    replaced = dict(new)
+    out = [new_head if new_head.lstrip().startswith("# ") else head]
+    out += [replaced.pop(h, body) for h, body in old]
+    out += [body for h, body in new if h in replaced]
+    return "\n\n".join(p.strip("\n") for p in out if p.strip()) + "\n"
+
+
 def bullets(text: str) -> list[str]:
     return [ln[2:].strip() for ln in text.splitlines() if ln.startswith("- ")]
 

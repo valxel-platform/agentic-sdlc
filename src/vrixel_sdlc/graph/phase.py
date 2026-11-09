@@ -17,7 +17,7 @@ from langgraph.types import Send
 from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers
-from ..agents.parse import parse_affected_repos, parse_tasks
+from ..agents.parse import merge_sections, parse_affected_repos, parse_tasks
 from ..config import ProductConfig
 from ..provisioning import naming_policy
 from ..evaluators import critique, run_checks
@@ -223,6 +223,12 @@ def build_phase_subgraph(phase: str, services):
             tail.append(f"Human feedback to address: {ctx['feedback']}")
         if ctx["prior_findings"]:
             tail.append("Evaluator findings to fix:\n" + "\n".join(f"- {f}" for f in ctx["prior_findings"]))
+        # A retry revises: the previous draft goes in, and only the sections that change come back.
+        previous = (s.get("draft") or {}).get("content", "") if attempt > 1 else ""
+        if previous:
+            tail.append("Revise your previous draft (below) to fix the findings. Reply with only the sections you "
+                        "change, each starting with its '## ' heading line; sections you leave out are kept as they "
+                        "are.\n\n<previous_draft>\n" + previous + "\n</previous_draft>")
         if phase == "architecture" and ctx.get("aws_catalog"):
             from ..resources import catalog_guide
 
@@ -233,7 +239,8 @@ def build_phase_subgraph(phase: str, services):
         left = s["budget_remaining_usd"] - float((s.get("usage") or {}).get("cost_usd", 0.0))
         res = call_agent(services, role=spec.role, phase=phase, ctx=ctx, skills=spec.skills,
                          tail="\n".join(t for t in tail if t), stub_text=template(ctx, defective), budget_usd=left)
-        return {"attempt": attempt, "draft": {"kind": spec.kind, "content": res.text},
+        content = merge_sections(previous, res.text) if previous else res.text
+        return {"attempt": attempt, "draft": {"kind": spec.kind, "content": content},
                 "usage": {"tokens": res.tokens, "cost_usd": res.cost_usd}}
 
     def evaluate(s: PhaseState) -> dict:

@@ -120,3 +120,41 @@ def test_a_session_is_capped_by_its_role_and_by_what_is_left_of_the_budget():
     assert session_cap(task(None), role) == 8.0
     assert session_cap(task(3.25), role) == 3.25
     assert session_cap(task(-1.0), role) == 0.0
+
+
+def test_a_retry_returns_only_the_sections_it_changes():
+    from vrixel_sdlc.agents.parse import merge_sections
+
+    prev = "# PRD: X\nFeature: F\n\n## Goals\n- G1\n\n## Acceptance criteria\n- AC-1: vague\n\n## Constitution articles\n- VX-5\n"
+    rev = "## Acceptance criteria\n- AC-1: Given a, when b, then c\n\n## Non-goals\n- none\n"
+    assert merge_sections(prev, rev) == (
+        "# PRD: X\nFeature: F\n\n## Goals\n- G1\n\n## Acceptance criteria\n- AC-1: Given a, when b, then c\n\n"
+        "## Constitution articles\n- VX-5\n\n## Non-goals\n- none\n")
+    assert merge_sections(prev, "# PRD: Y\n\n## Goals\n- G2\n").startswith("# PRD: Y\n\n## Goals\n- G2\n\n## Acceptance")
+    assert merge_sections(prev, "no sections at all") == "no sections at all"
+
+
+def test_a_retry_sends_the_previous_draft_and_keeps_what_it_did_not_change(svc, monkeypatch):
+    tails = []
+    real = svc.runtime_for
+
+    def spy(role):
+        rt = real(role)
+
+        class Spy:
+            name, capabilities = rt.name, rt.capabilities
+
+            def run(self, task):
+                if task.role == "spec":
+                    tails.append(task.layers.tail)
+                return rt.run(task)
+        return Spy()
+
+    monkeypatch.setattr(svc, "runtime_for", spy)
+    eng = FeatureEngine(svc, InMemorySaver())
+    fid = eng.create(product_id="FARM", title="Offline crop log", simulate_faults={"spec": 1})
+    v = eng.auto_drive(fid)
+    assert v["status"] == "done" and v["loop_count"]["spec"] == 2
+    assert "<previous_draft>" not in tails[0] and "<previous_draft>" in tails[1] and "is not testable" in tails[1]
+    prd = svc.artifacts.load(eng._state(fid)["artifacts"]["PRD"])
+    assert prd.count("## Acceptance criteria") == 1 and "Given a signed-in user" in prd
