@@ -1296,6 +1296,8 @@ rules (`vrixel_sdlc/performance.py`):
 | smoke | a hot path, a database migration, a runtime or base-image upgrade, timeouts, pools or runtime settings, or a large change | `perf-smoke` on the PR: the image built from main and the PR's, loaded the same way on the same runner; fails past `smoke_regression_pct` or the budget |
 | full | an API contract change, a new or changed event handler, or an HLD whose **Performance** section says the feature adds traffic | the smoke test, then `performance` in staging: the expected peak times `staging_load_factor`, judged against the budget and the last release's run |
 
+Only APIs (`provider`) and web apps (`consumer`) have a staging load test. A BFF, MCP server, agent, event worker or mobile app that would need one stops at the smoke test (a session, delegated tokens and model calls, Kafka credentials or a device farm would be needed); their production signals and the rollout's comparison watch them.
+
 The HLD's Performance section (expected load, new traffic, data growth, journeys) feeds the rules;
 data growth flags the nightly soak test. The reviewer agent lists performance risks it sees (an
 N+1 query, a call inside a loop, an unbounded read): any raises the level to at least smoke. Agents

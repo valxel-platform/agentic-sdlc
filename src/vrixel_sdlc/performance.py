@@ -43,6 +43,12 @@ DEFAULT_BUDGETS: dict[str, dict[str, float]] = {
     "agent": {"turns_max": 8, "run_p95_s": 60},
 }
 
+# Roles whose templates run a staging load test. The others stop at the PR's smoke test: a BFF
+# needs a person's session, an MCP server or agent a delegated token and paid model calls, an event
+# worker the environment's Kafka credentials, a mobile app a device farm. Their production signals
+# (consumer lag, run timings, app start in Sentry, the rollout's comparison) watch them instead.
+STAGING_ROLES = ("provider", "consumer")
+
 KIND_OF_ROLE = {"provider": "api", "bff": "api", "mcp-server": "api", "consumer": "web", "mobile": "mobile",
                 "event-worker": "event-worker", "agent": "agent"}
 
@@ -187,6 +193,9 @@ def decide(repo: str, role: str, files: list[str], *, hld: str = "", perf: dict 
         d.reasons.append("the design says data volume grows: watch the nightly soak test")
     for c in concerns or []:
         d.raise_to("smoke", f"the reviewer: {c}")
+    if d.level == "full" and role not in STAGING_ROLES:
+        d.level = "smoke"
+        d.reasons.append(f"a {role} has no staging load test: the pull request's smoke test covers it")
     return d
 
 

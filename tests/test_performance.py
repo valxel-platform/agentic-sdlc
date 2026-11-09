@@ -48,7 +48,7 @@ def test_a_products_performance_settings_are_checked():
     ("provider", ["src/main/resources/application.yaml"], "", "smoke"),
     ("provider", ["api/openapi.yaml", "src/main/java/com/x/A.java"], "", "full"),
     ("provider", ["src/main/java/com/x/greeting/GreetingController.java"], HLD_TRAFFIC, "full"),
-    ("event-worker", ["src/main/java/com/vrixel/worker/x/SavedHandler.java"], "", "full"),
+    ("event-worker", ["src/main/java/com/vrixel/worker/x/SavedHandler.java"], "", "smoke"),  # no staging test
     ("library", ["src/main/java/com/x/Ids.java", "gradle/libs.versions.toml"], HLD_TRAFFIC, "none"),
     ("consumer", ["src/app/Intake.tsx"], HLD_TRAFFIC, "full"),
     ("provider", [f"src/main/java/com/x/M{i}.java" for i in range(15)], "", "smoke"),
