@@ -130,6 +130,10 @@ class Limits:
     max_budget_usd: float = 500.0
     max_initiative_budget_usd: float = 5000.0
     required_gates: tuple[str, ...] = ("g1", "g2", "g3", "g4", "g5", "g6")
+    # A gate sent back this many times suggests taking the phase over; at max_gate_revisions it
+    # can't be sent back again: a person takes it over (edits the document and hands it back) or stops it.
+    takeover_after_revisions: int = 2
+    max_gate_revisions: int = 3
 
 
 @dataclass(frozen=True)
@@ -250,6 +254,8 @@ def load_settings(
             max_budget_usd=float(lim.get("max_budget_usd", 500)),
             max_initiative_budget_usd=float(lim.get("max_initiative_budget_usd", 5000)),
             required_gates=tuple(lim.get("required_gates", Limits.required_gates)),
+            takeover_after_revisions=int(lim.get("takeover_after_revisions", 2)),
+            max_gate_revisions=int(lim.get("max_gate_revisions", 3)),
         ),
         registry=registry,
         roles={name: RoleConfig(**spec) for name, spec in models_raw["roles"].items()},

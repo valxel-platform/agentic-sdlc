@@ -17,6 +17,7 @@ from ..agents import structured
 from ..agents.context import build_layers
 from ..gateway import CallTags
 from ..runtime import AgentTask
+from .. import lessons
 from . import rubrics
 
 _JSON = re.compile(r"\{.*\}", re.S)
@@ -43,14 +44,14 @@ def quoted(evidence: str, content: str) -> bool:
     return len(q) >= 3 and q in _plain(content)
 
 
-def stub_verdict(content: str, phase: str = "") -> str:
+def stub_verdict(content: str, phase: str = "", items: tuple[rubrics.Item, ...] | None = None) -> str:
     """Deterministic stub: every item met with a quote from the document, unless the document is
     visibly incomplete, when the first must-have item isn't."""
     lines = [ln.strip("# ").strip() for ln in content.splitlines() if ln.strip("# ").strip()]
     quote = lines[0][:80] if lines else ""
     short = len(content) <= 120
     items = [{"id": i.id, "met": not (short and n == 0), "evidence": "" if (short and n == 0) else quote}
-             for n, i in enumerate(rubrics.for_phase(phase))]
+             for n, i in enumerate(rubrics.for_phase(phase) if items is None else items)]
     return json.dumps({"items": items, "score": 0.5 if short else 0.9, "notes": []})
 
 
@@ -85,7 +86,8 @@ def critique(services, *, phase: str, rubric_skills: tuple[str, ...], content: s
              role: str = "critic") -> CriticVerdict:
     snap = services.snapshot(ctx["product_id"], ctx.get("governance"))
     product = snap.product
-    items = rubrics.for_phase(phase)
+    # The phase's checklist, plus the product's approved lessons marked to be checked.
+    items = rubrics.for_phase(phase) + lessons.checklist(snap.lessons, phase)
     ask = (f"Check this {phase} document against the checklist below and the constitution. For each item, say "
            "whether it is met; when it is, copy a short exact quote from the document that shows it (evidence). "
            "Also give your overall score from 0 to 1, and notes on what to improve.\n\nChecklist:\n"
@@ -100,7 +102,7 @@ def critique(services, *, phase: str, rubric_skills: tuple[str, ...], content: s
         layers = build_layers(role="critic", skills=rubric_skills, constitution=snap.constitution, product=product,
                               product_context=snap.product_context, parent_texts=ctx.get("parent_texts", {}), tail=tail)
         res = services.runtime_for(role).run(AgentTask(
-            role=role, phase=phase, tags=tags, layers=layers, stub_text=stub_verdict(content, phase), max_tokens=1024,
+            role=role, phase=phase, tags=tags, layers=layers, stub_text=stub_verdict(content, phase, items), max_tokens=1024,
             schema=structured.schema(structured.CriticReply)))
         tokens, cost = tokens + res.tokens, cost + res.cost_usd
         reply, error = structured.parse(res.text, structured.CriticReply)

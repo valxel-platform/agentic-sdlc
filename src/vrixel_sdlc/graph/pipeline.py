@@ -22,6 +22,7 @@ from ..integrations.openchoreo import PIPELINE
 from ..state import GATES, PHASES, FeatureState, GateDecision
 from .. import store
 from ..waits import LABELS, STORE_TIMEOUT_S, TIMEOUT_S
+from .. import lessons
 from .phase import capability_id, design_knowledge, event, gates_status, make_phase_node, now, touched_lanes
 
 GATE_DECISIONS = ("approve", "revise", "takeover", "abort")
@@ -54,6 +55,48 @@ def _record(gate: str, phase: str, d: dict, lane: str = "") -> GateDecision:
     if d.get("waited_minutes") is not None:
         rec["waited_minutes"] = round(float(d["waited_minutes"]), 2)
     return rec
+
+
+# Phases whose work is a document a person can edit when they take it over.
+DOC_PHASES = ("discovery", "spec", "design", "architecture", "plan")
+SENT_BACK = ("revise", "retry")
+
+
+def correction_history(state: FeatureState, phase: str) -> list[dict]:
+    """People's earlier corrections to this phase in this feature (sent back, taken over), oldest first."""
+    return [{k: g.get(k, "") for k in ("gate", "decision", "approver", "reason", "feedback", "at")}
+            for g in state.get("gate_decisions", []) or []
+            if g.get("phase") == phase and g.get("decision") in SENT_BACK + ("takeover", "handback", "resolved")
+            and (g.get("decision") in SENT_BACK or g.get("feedback"))]
+
+
+def times_sent_back(state: FeatureState, phase: str) -> int:
+    return sum(1 for g in state.get("gate_decisions", []) or [] if g.get("phase") == phase and g.get("decision") in SENT_BACK)
+
+
+def human_artifact(services, state: FeatureState, phase: str, content: str) -> dict:
+    """A person's own version of a phase's document (after a takeover or an escalation): saved as
+    the next version, and read like an agent's (tasks from a plan, lanes from an HLD)."""
+    spec = PHASE_SPECS[phase]
+    parents = [r["id"] for k, r in (state.get("artifacts") or {}).items() if k in spec.parents]
+    ref = services.artifacts.save(feature_id=state["feature_id"], kind=spec.kind, phase=phase, content=content,
+                                  parents=parents, constitution_version=state.get("constitution_version", ""))
+    update: dict = {"artifacts": {spec.kind: ref}, "trace_links": [[p, ref["id"]] for p in parents]}
+    if phase == "plan":
+        update["tasks"] = parse_tasks(content)
+    if phase == "architecture":
+        update["lanes_touched"] = touched_lanes(services.feature_snapshot(state),
+                                                [r["name"] for r in parse_affected_repos(content)])
+    return update
+
+
+def correction(state: FeatureState, gate: str, phase: str, kind: str, d: dict, n: int = 0,
+               changes: dict | None = None) -> dict:
+    """One person's correction, for learning (vrixel_sdlc.lessons)."""
+    return {"product_id": state["product_id"], "feature_id": state["feature_id"], "gate": gate, "phase": phase,
+            "kind": kind, "reason": str(d.get("reason") or ""), "feedback": d.get("feedback", ""),
+            "lesson": str(d.get("lesson") or ""), "remember": bool(d.get("remember") or d.get("lesson")),
+            "approver": d.get("approver", ""), "n": n, "changes": changes or {}}
 
 
 def after_ci(state: FeatureState) -> str:
@@ -183,7 +226,13 @@ def make_gate(gate: str, services):
                     preset = {"decision": "approve", "approver": res.get("approver", ""), "active_minutes": 0.0,
                               "feedback": f"Approved with release {rel['id']}"}
 
+        limits = services.settings.limits
+        history, sent_back = correction_history(state, phase), times_sent_back(state, phase)
+        allowed = [x for x in GATE_DECISIONS if not (x == "revise" and sent_back >= limits.max_gate_revisions)]
         records, d = [], None
+        corrections: list[dict] = []
+        taken: list[tuple[dict, str, str]] = []  # (decision, agents' draft, person's version)
+        human: str | None = None
         for lane_id in approving:
             lane = lanes[lane_id]
             if preset is not None:
@@ -227,9 +276,15 @@ def make_gate(gate: str, services):
                 # Each lane reviews the PRs in its own org.
                 "pull_requests": sorted(k for k, pr in state.get("pull_requests", {}).items()
                                         if pr["repo"].split("/", 1)[0] == lane.org) if gate == "g5" else [],
-                "allowed": list(GATE_DECISIONS),
+                # A phase going round in circles: what people already asked for, how often it went
+                # back, and (from takeover_after_revisions) a suggestion to take it over instead.
+                # At max_gate_revisions it can't be sent back again.
+                "history": history, "revisions": sent_back, "stuck": sent_back >= limits.takeover_after_revisions,
+                "allowed": allowed,
             }
-            d = normalize(interrupt(packet), GATE_DECISIONS)
+            if human is not None:  # an earlier lane took it over: later lanes decide on that version
+                packet["preview"] = human[:2000]
+            d = normalize(interrupt(packet), tuple(allowed))
             records.append(_record(gate, phase, d, lane_id))
             if state.get("pilot"):  # what the trial rule would have done, beside what the person did
                 from ..pilot import shadow_auto_approval
@@ -238,18 +293,50 @@ def make_gate(gate: str, services):
                 if shadow:
                     records[-1]["shadow_auto"] = shadow
             if d["decision"] == "takeover":
-                hb = normalize(interrupt({"type": "handback", "gate": gate, "phase": phase, "lane": lane_id,
-                                          "feature_id": state["feature_id"], "allowed": list(HANDBACK_DECISIONS)}),
-                               HANDBACK_DECISIONS)
+                draft = human if human is not None else (services.artifacts.load(ref) if ref else "")
+                hb = normalize(interrupt({
+                    "type": "handback", "gate": gate, "phase": phase, "lane": lane_id,
+                    "feature_id": state["feature_id"], "product_id": state["product_id"], "title": state["title"],
+                    "artifact": ref, "history": history, "approvers": packet["approvers"],
+                    # The document to edit: hand it back with your version, or as it is.
+                    "content": draft if phase in DOC_PHASES else "", "allowed": list(HANDBACK_DECISIONS)}),
+                    HANDBACK_DECISIONS)
                 records.append(_record(gate, phase, hb, lane_id))
+                said = {**hb, "feedback": hb["feedback"] or d["feedback"], "reason": hb.get("reason") or d.get("reason"),
+                        "remember": hb.get("remember") or d.get("remember"), "lesson": hb.get("lesson") or d.get("lesson")}
+                mine = hb.get("artifact_content")
+                if hb["decision"] == "handback" and mine and mine.strip() != draft.strip():
+                    taken.append((said, draft, mine))
+                    human = mine
+                else:
+                    corrections.append(correction(state, gate, phase, "takeover", said, len(records)))
                 d = {**hb, "decision": "abort" if hb["decision"] == "abort" else "approve"}
+            elif d["decision"] in ("revise", "abort"):
+                corrections.append(correction(state, gate, phase, d["decision"], d, len(records)))
             if d["decision"] != "approve":
                 break  # one lane's revise or abort decides the gate
 
+        # After the last question (code here runs once): keep what people wrote, and learn from it.
+        human_update: dict = {}
+        for said, draft, mine in taken:
+            corrections.append(correction(state, gate, phase, "takeover", said, len(records),
+                                          changes=lessons.changes(draft, mine)))
+        if human is not None:
+            human_update = human_artifact(services, state, phase, human)
+            ref = human_update["artifacts"][kind]
+            if gate == "g4":
+                review = design_review_for(services, snap, ref, state)
+        # Aborts teach only when someone asked to remember why.
+        learned = lessons.learn(services, state, [c for c in corrections if c["kind"] != "abort" or c["remember"]])
+
         if d["decision"] == "revise":
-            return Command(goto=phase, update={
-                "gate_decisions": records, "feedback": {phase: d["feedback"]}, "approvals": {gate: False},
-                "events": [event(gate, "revise", d["feedback"], approver=d["approver"])],
+            # Earlier feedback stays with the agents too, so a second round doesn't undo the first.
+            earlier = list(dict.fromkeys(h["feedback"] for h in history if h["feedback"] and h["feedback"] != d["feedback"]))
+            said = d["feedback"] + ("\n\nEarlier feedback on this phase, still to keep:\n"
+                                    + "\n".join(f"- {f}" for f in earlier) if earlier else "")
+            return Command(goto=phase, update=human_update | {
+                "gate_decisions": records, "feedback": {phase: said}, "approvals": {gate: False},
+                "events": [event(gate, "revise", d["feedback"], approver=d["approver"], round=sent_back + 1)] + learned,
             })
         if d["decision"] == "abort":
             gates_status(services, (state.get("pull_requests") or {}).values(), "failure",
@@ -258,12 +345,16 @@ def make_gate(gate: str, services):
                 services.catalog.register({**_design_entry(state, state["design"]), "status": "abandoned"})
             return Command(goto=END, update={
                 "gate_decisions": records, "status": "aborted",
-                "events": [event(gate, "aborted", d["feedback"], approver=d["approver"])],
+                "events": [event(gate, "aborted", d["feedback"], approver=d["approver"])] + learned,
             })
 
         approvers = ", ".join(r["approver"] for r in records if r["decision"] in ("approve", "handback"))
-        update: dict = {"gate_decisions": records, "approvals": {gate: True},
-                        "events": [event(gate, "approved", d["feedback"], approver=approvers, lanes=approving)]}
+        update: dict = human_update | {"gate_decisions": records, "approvals": {gate: True},
+                                       "events": [event(gate, "approved", d["feedback"], approver=approvers, lanes=approving)]}
+        if human is not None:
+            update["events"].append(event(gate, "taken_over", f"{kind} written by {approvers}", approver=approvers,
+                                          artifact=ref["id"]))
+        update["events"] += learned
         if gate == "g4" and review is not None:
             # Approved designs are visible to every other feature of the product while in flight.
             design = {k: review[k] for k in ("builds_on", "supersedes", "contracts", "record")}
@@ -432,6 +523,8 @@ def make_escalation(phase: str, services):
 
     def escalate(state: FeatureState) -> Command:
         esc = state.get("escalations", {}).get(phase, {})
+        last = (state.get("artifacts") or {}).get(spec.kind)
+        draft = services.artifacts.load(last) if last and phase in DOC_PHASES else ""
         packet = {
             "type": "escalation", "phase": phase, "feature_id": state["feature_id"],
             "product_id": state["product_id"], "title": state["title"],
@@ -439,32 +532,37 @@ def make_escalation(phase: str, services):
             "artifact": state.get("artifacts", {}).get(spec.kind),
             "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
             "budget_usd": state.get("token_budget_usd"),
+            # What people already asked for, and the agents' last draft to finish yourself.
+            "history": correction_history(state, phase), "revisions": times_sent_back(state, phase),
+            "content": draft,
             "allowed": list(ESCALATION_DECISIONS),
         }
         d = normalize(interrupt(packet), ESCALATION_DECISIONS)
         rec = _record(f"escalation:{phase}", phase, d)
         update: dict = {"gate_decisions": [rec]}
+        mine = d.get("artifact_content") or ""
+        changed = d["decision"] == "resolved" and bool(mine.strip()) and mine.strip() != draft.strip()
+        said = correction(state, f"escalation:{phase}", phase, "resolved" if changed else d["decision"], d,
+                          len(state.get("gate_decisions") or []) + 1,
+                          changes=lessons.changes(draft, mine) if changed else None)
+        teaches = d["decision"] == "retry" or changed or said["remember"]
+        learned = lessons.learn(services, state, [said] if teaches else [])
         if d.get("budget_usd"):  # a human may raise the budget, up to the platform ceiling
             update["token_budget_usd"] = min(float(d["budget_usd"]), services.settings.limits.max_budget_usd)
 
         if d["decision"] == "abort":
-            update |= {"status": "aborted", "events": [event(f"escalate_{phase}", "aborted", d["feedback"])]}
+            update |= {"status": "aborted", "events": [event(f"escalate_{phase}", "aborted", d["feedback"])] + learned}
             return Command(goto=END, update=update)
         if d["decision"] == "retry":
             update |= {"feedback": {phase: d["feedback"]},
-                       "events": [event(f"escalate_{phase}", "retry", d["feedback"], approver=d["approver"])]}
+                       "events": [event(f"escalate_{phase}", "retry", d["feedback"], approver=d["approver"])] + learned}
             return Command(goto=phase, update=update)
 
         # resolved: the human took the phase over and hands back a finished artifact.
         update |= {"phase_status": {phase: "resolved"}, "escalations": {phase: {**esc, "resolved": True}},
-                   "events": [event(f"escalate_{phase}", "resolved", d["feedback"], approver=d["approver"])]}
-        if d.get("artifact_content"):
-            ref = services.artifacts.save(
-                feature_id=state["feature_id"], kind=spec.kind, phase=phase, content=d["artifact_content"],
-                parents=[r["id"] for k, r in state.get("artifacts", {}).items() if k in spec.parents],
-                constitution_version=state.get("constitution_version", ""),
-            )
-            update["artifacts"] = {spec.kind: ref}
+                   "events": [event(f"escalate_{phase}", "resolved", d["feedback"], approver=d["approver"])] + learned}
+        if mine.strip() and (changed or not draft):
+            update |= human_artifact(services, state, phase, mine)
         if phase == "plan":
             ref = update.get("artifacts", {}).get("PLAN") or state.get("artifacts", {}).get("PLAN")
             update["tasks"] = parse_tasks(services.artifacts.load(ref)) if ref else []

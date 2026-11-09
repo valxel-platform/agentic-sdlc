@@ -128,7 +128,11 @@ class DecisionIn(BaseModel):
     feedback: str = ""
     active_minutes: float = Field(default=0.0, ge=0)
     budget_usd: float | None = Field(default=None, gt=0, description="Escalations only: raise the feature budget")
-    artifact_content: str | None = Field(default=None, description="Escalations only: the human's finished artifact")
+    artifact_content: str | None = Field(default=None, description="Escalations and hand-backs: the person's own "
+                                        "version of the phase's document")
+    remember: bool = Field(False, description="Learn from this correction: propose a lesson for future features")
+    lesson: str | None = Field(default=None, max_length=400, description="The lesson in the person's words "
+                               "(implies remember)")
     action_ids: list[str] | None = Field(default=None, description="Incidents only: which proposed actions to approve")
     reason: str | None = Field(default=None, description="Why it's sent back (revise, retry, abort): one of the "
                                "pilot's reasons, e.g. missing_requirement, wrong_approach, quality")
@@ -193,6 +197,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..pilot import PostgresEffortStore
 
         services.effort = PostgresEffortStore(pool)
+        from ..lessons import PostgresLessonStore
+
+        services.lessons = PostgresLessonStore(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
@@ -761,6 +768,18 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
             return PlainTextResponse(markdown(rep), media_type="text/markdown")
         return rep
+
+    @api.get("/products/{product_id}/lessons")
+    def product_lessons(product_id: str, user: User = Depends(current_user)) -> dict:
+        """What the tool learned from people's corrections: lessons approved in the product's
+        governance repo, and lessons proposed there (pull requests) waiting for review."""
+        from ..lessons import overview
+
+        member_of(user, product_id)
+        try:
+            return overview(eng().services, product_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
     # --- resource inventory ---
     @api.get("/inventory/{product_id}")

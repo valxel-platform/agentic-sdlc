@@ -18,6 +18,7 @@ from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers
 from ..agents.parse import merge_sections, parse_affected_repos, parse_tasks
+from .. import lessons
 from ..config import ProductConfig
 from ..provisioning import naming_policy
 from ..evaluators import critique, run_checks
@@ -173,6 +174,10 @@ def resources_instruction(ctx: dict, task: dict) -> str:
     return instruction(ctx, task)
 
 
+# Roles that don't produce or review a phase's work: they get no lessons.
+NO_LESSON_ROLES = ("knowledge", "router", "intake")
+
+
 def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str, ...], tail: str,
                stub_text: str | None, max_tokens: int = 4096, schema: dict | None = None,
                budget_usd: float | None = None) -> AgentResult:
@@ -184,6 +189,9 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
     missing = PHASE_SPECS[phase].required_capabilities - runtime.capabilities
     if missing:
         raise RuntimeError(f"Runtime {runtime.name} lacks {sorted(missing)} required by phase {phase}")
+    learned = lessons.instruction(snap.lessons, phase) if role not in NO_LESSON_ROLES else ""
+    if learned:  # what people taught earlier features of this product, for this phase
+        tail = f"{tail}\n\n{learned}"
     layers = build_layers(
         role=role, skills=skills, constitution=snap.constitution, product=product,
         parent_texts=ctx.get("parent_texts", {}), tail=tail, product_context=snap.product_context,
