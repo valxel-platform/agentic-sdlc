@@ -205,6 +205,7 @@ def check_name(feature_id: str, stage: str) -> str:
 
 
 _AC_RESULT = re.compile(r"^\s*[-*]?\s*(AC-\d+)\s*:\s*(passed|failed|skipped)\b", re.M | re.I)
+_PERFORMANCE = re.compile(r"^\s*[-*]?\s*Performance\s*:\s*(passed|failed)\b\s*(?:\((.*)\))?", re.M | re.I)
 _DURATION = re.compile(r"duration\s*:\s*(\d+(?:\.\d+)?)\s*s", re.I)
 
 
@@ -216,4 +217,8 @@ def parse_report(summary: str) -> dict:
         if acs.get(ac) != "failed":  # one failing test fails the criterion
             acs[ac] = state
     m = _DURATION.search(summary or "")
-    return {"acs": acs, "duration_s": float(m.group(1)) if m else None}
+    perf = _PERFORMANCE.search(summary or "")
+    return {"acs": acs, "duration_s": float(m.group(1)) if m else None,
+            # The journey load test, when the run had one: "Performance: passed (p95 210 ms, ...)".
+            "performance": {"passed": perf.group(1).lower() == "passed", "text": (perf.group(2) or "").strip()}
+            if perf else None}

@@ -59,7 +59,11 @@ class WaitChecker:
                     "stage": packet["wait"], "sha": t["sha"], "feature_id": t["feature_id"],
                     "check": check_name(t["feature_id"], packet["wait"]), "grep": t["grep"],
                     "projects": ",".join(t["projects"]), "flag": t.get("flag", ""),
-                    "env": urls, "criteria": ",".join(t.get("acs") or [])})
+                    "env": urls, "criteria": ",".join(t.get("acs") or []),
+                    # A change set that needs a staging load test also loads the product's journeys.
+                    **({"perf_settings": (packet.get("performance") or {})["perf_settings"]}
+                       if packet["wait"] == "staging" and "full" in perf.values()
+                       and (packet.get("performance") or {}).get("perf_settings") else {})})
             except Exception:
                 self._dispatched.discard(key)
         # A web app is reached only through the product's BFF (VX-17): its own post-deploy tests run

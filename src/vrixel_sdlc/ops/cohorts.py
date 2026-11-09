@@ -18,6 +18,14 @@ sides, z at least 3, and an increase that matters both absolutely and relatively
 (platform/remediation.yaml `gradual_release.compare`). A regression stops the release: the tool
 turns the flag off (when the policy lets it) and the release managers decide.
 
+Latency counts the same way. Percentiles can't be summed across pods and minutes, but counts
+can: each line also says how many requests were slow, slower than the component's latency budget
+(500 ms by default, the API budget at the 95th percentile; `FLAG_COHORTS_SLOW_MS`). The "on" users
+being slow more often, by the same test and bar, stops the release too. A share of slow requests
+over 5% means the 95th percentile is over the budget; the step's history says so.
+
+    vrixel.flag_cohorts {"flag": "...", "on": {"requests": 40, "errors": 0, "slow": 3}, ...}
+
 A feature with no such lines (UI only, or a component on an older template) falls back to time
 alone, and the step's history says so.
 """
@@ -48,18 +56,22 @@ def _record(text: str) -> dict | None:
 
 
 def _empty() -> dict:
-    return {"on": {"requests": 0, "errors": 0}, "off": {"requests": 0, "errors": 0}, "lines": 0}
+    return {"on": {"requests": 0, "errors": 0, "slow": 0}, "off": {"requests": 0, "errors": 0, "slow": 0},
+            "lines": 0, "timed": 0}
 
 
 def _add(into: dict, rec: dict) -> None:
+    timed = all("slow" in (rec.get(side) or {}) for side in ("on", "off"))
     for side in ("on", "off"):
         s = rec.get(side) or {}
         try:
             into[side]["requests"] += max(0, int(s.get("requests", 0)))
             into[side]["errors"] += max(0, int(s.get("errors", 0)))
+            into[side]["slow"] += max(0, int(s.get("slow", 0)))
         except (TypeError, ValueError):
             continue
     into["lines"] += 1
+    into["timed"] += 1 if timed else 0
 
 
 def parse(lines, flags: list[str]) -> dict[str, dict]:
@@ -92,31 +104,60 @@ def describe_groups(flag: str, groups: dict[str, dict]) -> str:
     return "; ".join(describe(flag, {**r, "group": r.get("group") or g}) for g, r in sorted(groups.items()))
 
 
+def _ztest(e1: int, n1: int, e0: int, n0: int, c: dict) -> tuple[float, float, float | None, bool]:
+    """A one-sided two-proportion z-test: the "on" share against the "off" share, and whether it is
+    worse by the policy's bar (z, an absolute and a relative increase)."""
+    p1, p0 = e1 / n1, e0 / n0
+    p = (e1 + e0) / (n1 + n0)
+    se = math.sqrt(p * (1 - p) * (1 / n1 + 1 / n0))
+    z = (p1 - p0) / se if se > 0 else (math.inf if p1 > p0 else 0.0)
+    worse = z >= c["z"] and p1 - p0 >= c["min_increase"] and (p0 == 0 or p1 / p0 >= c["relative"])
+    return p1, p0, (round(z, 2) if math.isfinite(z) else None), worse
+
+
+SLOW_SHARE_P95 = 0.05  # more than 5% of requests over the latency budget: the 95th percentile is over it
+
+
 def compare(counts: dict, cfg: dict | None = None) -> dict:
-    """Whether users with the flag on fail more than users with it off.
-    {"verdict": regression | ok | too_few, "on_rate", "off_rate", "z", ...}."""
+    """Whether users with the flag on fail more, or are slow more often, than users with it off.
+    {"verdict": regression | ok | too_few, "on_rate", "off_rate", "z", "worse": [errors, latency],
+    "slow": {...} when the lines count slow requests}."""
     c = {**DEFAULTS, **(cfg or {})}
     n1, e1 = counts["on"]["requests"], min(counts["on"]["errors"], counts["on"]["requests"])
     n0, e0 = counts["off"]["requests"], min(counts["off"]["errors"], counts["off"]["requests"])
     base = {"on_requests": n1, "on_errors": e1, "off_requests": n0, "off_errors": e0}
     if n1 < c["min_requests"] or n0 < c["min_requests"]:
-        return {**base, "verdict": "too_few", "on_rate": None, "off_rate": None, "z": None}
-    p1, p0 = e1 / n1, e0 / n0
-    p = (e1 + e0) / (n1 + n0)
-    se = math.sqrt(p * (1 - p) * (1 / n1 + 1 / n0))
-    z = (p1 - p0) / se if se > 0 else (math.inf if p1 > p0 else 0.0)
-    worse = (z >= c["z"] and p1 - p0 >= c["min_increase"] and (p0 == 0 or p1 / p0 >= c["relative"]))
-    return {**base, "verdict": "regression" if worse else "ok", "on_rate": round(p1, 5), "off_rate": round(p0, 5),
-            "z": round(z, 2) if math.isfinite(z) else None}
+        return {**base, "verdict": "too_few", "on_rate": None, "off_rate": None, "z": None, "worse": []}
+    p1, p0, z, errors_worse = _ztest(e1, n1, e0, n0, c)
+    out = {**base, "on_rate": round(p1, 5), "off_rate": round(p0, 5), "z": z,
+           "worse": ["errors"] if errors_worse else []}
+    # Latency, only when every line counted slow requests (a mix of old and new pods would undercount).
+    if counts.get("timed") and counts.get("timed") == counts.get("lines"):
+        s1, s0 = min(counts["on"].get("slow", 0), n1), min(counts["off"].get("slow", 0), n0)
+        q1, q0, zs, slow_worse = _ztest(s1, n1, s0, n0, c)
+        out["slow"] = {"on_slow": s1, "off_slow": s0, "on_rate": round(q1, 5), "off_rate": round(q0, 5), "z": zs,
+                       "on_p95_over_budget": q1 > SLOW_SHARE_P95, "off_p95_over_budget": q0 > SLOW_SHARE_P95}
+        if slow_worse:
+            out["worse"].append("latency")
+    out["verdict"] = "regression" if out["worse"] else "ok"
+    return out
 
 
 def describe(flag: str, r: dict) -> str:
     where = f" in {r['group']}" if r.get("group") else ""
     if r["verdict"] == "too_few":
         return f"{flag}{where}: too few requests to compare yet ({r['on_requests']} on, {r['off_requests']} off)"
-    return (f"{flag}{where}: {r['on_rate'] * 100:.2f}% of requests failed with it on ({r['on_errors']}/{r['on_requests']}) "
+    text = (f"{flag}{where}: {r['on_rate'] * 100:.2f}% of requests failed with it on ({r['on_errors']}/{r['on_requests']}) "
             f"against {r['off_rate'] * 100:.2f}% with it off ({r['off_errors']}/{r['off_requests']})"
             + (f", z {r['z']}" if r.get("z") is not None else ""))
+    s = r.get("slow")
+    if s:
+        text += (f"; {s['on_rate'] * 100:.1f}% were slow with it on against {s['off_rate'] * 100:.1f}% with it off"
+                 + (f", z {s['z']}" if s.get("z") is not None else "")
+                 + (" (its 95th percentile is over the latency budget)" if s["on_p95_over_budget"] else ""))
+    if r.get("worse") == ["latency"]:
+        text += ": slower with it on"
+    return text
 
 
 class ObserverLogs:
@@ -168,8 +209,12 @@ class StubLogs:
         return [(c, line) for c, lines in self.by_component.items() for line in lines]
 
 
-def line(flag: str, on: tuple[int, int], off: tuple[int, int], source: str = "") -> str:
-    rec = {"flag": flag, "on": {"requests": on[0], "errors": on[1]}, "off": {"requests": off[0], "errors": off[1]}}
+def line(flag: str, on: tuple, off: tuple, source: str = "") -> str:
+    """A summary line for tests: on and off as (requests, errors) or (requests, errors, slow)."""
+    def side(v: tuple) -> dict:
+        return {"requests": v[0], "errors": v[1], **({"slow": v[2]} if len(v) > 2 else {})}
+
+    rec = {"flag": flag, "on": side(on), "off": side(off)}
     return f"{MARKER} {json.dumps({**rec, **({'source': source} if source else {})})}"
 
 

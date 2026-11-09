@@ -934,6 +934,11 @@ off, and log one `vrixel.flag_cohorts {...}` line per flag a minute:
 | event worker | delivery attempts | an exception, or the message going to the dead-letter topic |
 | web, mobile | user-minutes (a minute in which the app used the flag) | a minute with an unhandled error or a failed API call |
 
+The service, MCP server, agent and event worker also count slow work: slower than the latency
+budget (500 ms for a request, 60 s for an agent's run, 5 s for a worker's attempt;
+`FLAG_COHORTS_SLOW_MS`). Percentiles can't be added across pods and minutes, but counts can: more
+than 5% slow means the 95th percentile is over the budget.
+
 The web and mobile apps post their counts to the BFF once a minute (`POST /flag-cohorts` with the
 session and CSRF token, `/mobile/flag-cohorts` with the bearer token). The BFF accepts them only
 from a signed-in user, at most once a minute each, caps them (120 per side, errors no more than
@@ -948,7 +953,8 @@ that checks the flag counts, including a component the feature didn't change. It
 component (and the web and mobile apps) on its own, with a one-sided two-proportion z-test,
 because a busy component that's fine would dilute one that isn't. It checks every half minute, so
 the bar is high (`gradual_release.compare`): at least 200 on each side, z at least 3, and at least
-half a percentage point and 25% more failures with it on. A regression in any one of them stops
+half a percentage point and 25% more failures with it on. Slow requests are compared the same
+way and by the same bar, when every line counts them. A regression in any one of them stops
 the release at once, without waiting for the bake time: the tool turns the flag off (a change of
 type automatic) when the product lets it turn flags off, and otherwise pages on-call urgently;
 then the release managers decide. Each step keeps every component's comparison. A feature with no
@@ -1273,8 +1279,8 @@ Budgets, and which changes need a performance test, are policy; the templates ru
 (`performance:`): APIs answer 95% of requests within 500 ms and 99% within 1 s with under 1% errors;
 web pages reach Largest Contentful Paint within 2.5 s with under 200 ms of Total Blocking Time, a
 layout shift under 0.1 and at most 200 KB of compressed JavaScript; events reach their store within
-5 s; mobile apps start cold within 2 s with a bundle under 3 MB; agents finish a run within 8 model
-turns.
+5 s; mobile apps start cold within 2 s with a JavaScript bundle under 3 MB compressed; agents finish a
+run within 8 model turns.
 
 ```yaml
 # <product>-governance/product.yaml
@@ -1306,6 +1312,18 @@ the template's `perf-smoke` job, and asks for the staging load test with the pos
 (`performance` in the dispatch). Both suites read only the repos that need them, and G5 and G6
 show each repo's level and why. A failed performance suite goes back to the agents like any red
 check; release managers can carry on past it with a recorded reason.
+
+**Journeys across components.** When any repo of a change set needs the staging test, the
+product's acceptance run also gets the settings (`perf_settings` in its dispatch) and loads the
+critical journeys end to end (`perf/journeys.js` in template-acceptance), at the same scaled peak
+and judged the same way. Its report adds `Performance: passed|failed (...)`; a failed journey test
+fails the acceptance suite at G6.
+
+**In production.** Staging is smaller than production, so the last word is the gradual release:
+the templates also count slow requests per flag side (slower than the latency budget: 500 ms for
+APIs and MCP servers, 60 s for an agent's run, 5 s for a worker's attempt; `FLAG_COHORTS_SLOW_MS`),
+and the users with the feature on being slow more often stops the release like failing more does
+(see [Gradual releases](#gradual-releases)).
 
 ## Predictable results
 

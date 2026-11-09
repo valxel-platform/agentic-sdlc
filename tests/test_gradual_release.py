@@ -206,7 +206,8 @@ def test_the_summary_lines_add_up_and_the_test_is_conservative():
              '{"message": "vrixel.flag_cohorts {\\"flag\\": \\"cln.f\\", \\"on\\": {\\"requests\\": 10, \\"errors\\": 0}, '
              '\\"off\\": {\\"requests\\": 10, \\"errors\\": 0}}"}', "unrelated", "vrixel.flag_cohorts {not json"]
     got = cohorts.parse(lines, [f])[f]
-    assert got == {"on": {"requests": 230, "errors": 1}, "off": {"requests": 1790, "errors": 9}, "lines": 3}
+    assert got == {"on": {"requests": 230, "errors": 1, "slow": 0}, "off": {"requests": 1790, "errors": 9, "slow": 0},
+                   "lines": 3, "timed": 0}
     assert cohorts.compare(got)["verdict"] == "ok"
     bad = {"on": {"requests": 400, "errors": 24}, "off": {"requests": 4000, "errors": 20}}
     r = cohorts.compare(bad)
@@ -353,3 +354,23 @@ def test_an_incident_in_a_component_it_calls_holds_the_rollout_and_can_turn_its_
     assert t["incident_id"] == iid and t["touch"] == "calls or is called by it"
     # The ledger's incident is PAY's, but CLN's rolling-out feature is a suspect and its flag goes off.
     assert eng.services.flags.percent("CLN", key) == 0.0
+
+
+def test_users_with_it_on_being_slower_stops_the_release(watched):
+    """Same error rate, but 12% of the "on" users' requests are over the latency budget against 2%."""
+    eng, fid, key = watched
+    eng.services.cohort_logs.by_component["cln-intake-api"] = [cohorts.line(key, (2000, 4, 240), (20000, 40, 400))]
+    eng.poke_now(fid)
+    assert eng.services.flags.percent("CLN", key) == 0.0
+    esc = next(p for p in eng.pending(fid) if p["type"] == "escalation")
+    assert "users with it on are slower" in esc["reason"] and "12.0% were slow with it on" in esc["reason"]
+    assert "95th percentile is over the latency budget" in esc["reason"]
+
+
+def test_latency_is_compared_only_when_every_line_counts_slow_requests():
+    key = "cln.f.kiosk"
+    mixed = cohorts.parse([cohorts.line(key, (2000, 4, 240), (20000, 40, 400)), cohorts.line(key, (10, 0), (100, 0))], [key])
+    r = cohorts.compare(mixed[key])
+    assert "slow" not in r and r["verdict"] == "ok"
+    same = cohorts.compare(cohorts.parse([cohorts.line(key, (2000, 4, 50), (20000, 40, 400))], [key])[key])
+    assert same["verdict"] == "ok" and not same["slow"]["on_p95_over_budget"]

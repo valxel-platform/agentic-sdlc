@@ -1116,12 +1116,13 @@ class FeatureEngine:
             for k, groups in cohorts.items():
                 bad = [r for r in groups.values() if r["verdict"] == "regression"]
                 if bad:
-                    worse[k] = max(bad, key=lambda r: r["on_rate"] - r["off_rate"])
+                    worse[k] = max(bad, key=lambda r: (r["on_rate"] - r["off_rate"]) + ((r.get("slow") or {}).get("on_rate", 0) - (r.get("slow") or {}).get("off_rate", 0)))
             if worse:
                 from .ops.cohorts import describe
 
                 return {"status": "failure", "regression": worse, "cohorts": cohorts,
-                        "reason": "users with it on fail more: " + "; ".join(describe(k, r) for k, r in worse.items())}
+                        "reason": ("users with it on fail more: " if any("errors" in r.get("worse", ["errors"]) for r in worse.values())
+                                   else "users with it on are slower: ") + "; ".join(describe(k, r) for k, r in worse.items())}
             res = ro.check(on=self.services.flags.get(pid, key), percent=self.services.flags.percent(pid, key),
                            since=packet["since"], bake_minutes=int(packet.get("bake_minutes") or 60), incidents=touching,
                            stub=self.services.settings.mode == "stub")

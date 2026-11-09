@@ -159,3 +159,34 @@ def test_a_failed_smoke_test_goes_back_to_the_agents(engine, services):
     assert owed and owed[0]["state"] == "pending"
     retries = [e for e in engine.view(fid)["events"] if e["node"] == "ci_wait" and e["kind"] == "retry"]
     assert retries and "perf-smoke / report" in " ".join(retries[0].get("findings") or [retries[0]["detail"]])
+
+
+def test_the_acceptance_report_carries_the_journey_load_test():
+    from vrixel_sdlc.acceptance import parse_report
+    from vrixel_sdlc.quality.sources import acceptance_result
+
+    ok = "- AC-1: passed\nDuration: 40s\nPerformance: passed (p95 210 ms (budget 500 ms), errors 0.0%)\n"
+    assert parse_report(ok)["performance"] == {"passed": True, "text": "p95 210 ms (budget 500 ms), errors 0.0%"}
+    assert parse_report("- AC-1: passed\n")["performance"] is None
+    target = {"repo": "o/acc", "acs": ["AC-1"]}
+    assert acceptance_result("acceptance", "staging", target, ok, "success", "", {}).state == "passed"
+    bad = ok.replace("Performance: passed (p95 210 ms", "Performance: failed (p95_ms 640 ms is over the budget of 500 ms")
+    res = acceptance_result("acceptance", "staging", target, bad, "failure", "", {})
+    assert res.state == "failed" and "journey load test failed: p95_ms 640 ms" in res.message
+
+
+def test_the_acceptance_run_loads_journeys_only_when_staging_needs_a_load_test(services):
+    from vrixel_sdlc.waits import WaitChecker
+
+    settings = {"perf_settings": {"peak_rps": 50, "load_factor": 0.1}}
+    def packet(wait, level):
+        return {"feature_id": "F", "wait": wait, "since": level, "performance": settings, "quality": {"targets": [
+            {"repo": "o/svc", "sha": "1", "perf": level},
+            {"repo": "o/acc", "kind": "acceptance", "sha": "2", "feature_id": "F", "grep": "", "projects": [],
+             "acs": ["AC-1"]}]}}
+    w = WaitChecker(services)
+    for wait, level in (("staging", "full"), ("staging", "smoke"), ("dev", "full")):
+        w._start_post_deploy(packet(wait, level), [{"repo": "o/svc", "url": "https://svc"}])
+    sent = [d for d in services.github.dispatches if d["event_type"] == "vrixel-acceptance"]
+    assert [("perf_settings" in d["payload"]) for d in sent] == [True, False, False]
+    assert all(len(d["payload"]) <= 10 for d in services.github.dispatches)
