@@ -22,6 +22,27 @@ const REASONS: [string, string][] = [
   ["format", "Format or structure"], ["compliance", "Compliance or security"], ["other", "Something else"],
 ];
 
+/** "Remember this": the correction becomes a proposed lesson for this product's future features. */
+function RememberField({ on, setOn, lesson, setLesson }: {
+  on: boolean; setOn: (v: boolean) => void; lesson: string; setLesson: (v: string) => void;
+}) {
+  return (
+    <div className="field">
+      <label className="radio">
+        <input id="decision-remember" type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} />
+        <span>Remember this for future features</span>
+      </label>
+      {on && (
+        <label className="field">The lesson, in one line (optional: otherwise it's written from your feedback)
+          <input id="decision-lesson" value={lesson} maxLength={400} onChange={(e) => setLesson(e.target.value)}
+            placeholder="e.g. Every spec says how long data is kept" />
+        </label>
+      )}
+      <p className="small faint">It's proposed as a pull request to the product's governance repo. Once merged, agents follow it.</p>
+    </div>
+  );
+}
+
 const SEV_TONE: Record<string, string> = { critical: "stop", high: "stop", medium: "wait", low: "plain", info: "plain" };
 
 /** What's being decided, the evidence, and the actions this person is allowed to take. */
@@ -34,13 +55,16 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   const [content, setContent] = useState("");
   const [picked, setPicked] = useState<string[] | null>(null);
   const [reason, setReason] = useState("");
+  const [remember, setRemember] = useState(false);
+  const [lesson, setLesson] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   useEffect(() => {
     opened.current = Date.now();
-    setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(""); setErr(""); setPicked(null); setReason("");
-  }, [item.interrupt_id]);
+    setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(item.content ?? ""); setErr(""); setPicked(null);
+    setReason(""); setRemember(false); setLesson("");
+  }, [item.interrupt_id, item.content]);
 
   async function send(decision: string, extra: Record<string, unknown> = {}) {
     setBusy(true);
@@ -49,7 +73,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     const minutes = Math.min(120, Math.round(((Date.now() - opened.current) / 60000) * 10) / 10);
     try {
       await api.decide(featureId, item.interrupt_id, {
-        decision, feedback, active_minutes: minutes, ...(reason ? { reason } : {}), ...extra,
+        decision, feedback, active_minutes: minutes, ...(reason ? { reason } : {}),
+        ...(remember ? { remember: true, ...(lesson.trim() ? { lesson: lesson.trim() } : {}) } : {}), ...extra,
       });
       onDone();
     } catch (e) {
@@ -79,6 +104,10 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   const delivery = item.phase === "delivery";
   const security = item.phase === "security";
   const fixLabel = item.stage === "pr" ? "Have agents fix them" : "Scan again";
+  const canRevise = item.allowed ? item.allowed.includes("revise") : true;
+  // Whether the person changed the document they were given (only then is it sent).
+  const edited = content.trim() !== "" && content.trim() !== (item.content ?? "").trim();
+  const learnable = !roadmapGate && !delivery && !security;
   const retryLabel = { build: "Rebuild", dev: "Deploy again", staging: "Deploy again", production: "Ask for G6 again" }[item.wait ?? ""] ?? "Try again";
 
   return (
@@ -107,7 +136,12 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             {retryLabel} tries the failed step again. Carry on anyway moves the feature forward without it.
           </p>
         )}
-        {item.type === "handback" && <p className="muted">Finish the work yourself, then hand it back so the pipeline continues.</p>}
+        {item.type === "handback" && (
+          <p className="muted">
+            {item.content ? "Edit the document below, then hand it back: your version is kept, and the agents learn from what you changed."
+              : "Finish the work yourself, then hand it back so the pipeline continues."}
+          </p>
+        )}
       </div>
 
       {item.summary && <p>{item.summary}</p>}
@@ -140,6 +174,31 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         <div>
           <h3>{delivery ? "What went wrong" : "What the evaluators found"}</h3>
           <ul className="findings">{item.findings.map((f) => <li key={f}>{f}</li>)}</ul>
+        </div>
+      )}
+
+      {item.type === "gate" && item.stuck && (
+        <div className="note" role="status">
+          <strong>Sent back {item.revisions} times.</strong>{" "}
+          {canRevise
+            ? "Taking it over may be quicker: you edit the document yourself and hand it back, and the agents learn from what you changed."
+            : "It can't be sent back again. Take it over to finish the document yourself, or stop the feature."}
+        </div>
+      )}
+
+      {item.history && item.history.length > 0 && (
+        <div>
+          <h3>What people asked for before</h3>
+          <ol className="plain-ol small">
+            {item.history.map((h, n) => (
+              <li key={`${h.at}-${n}`}>
+                <strong>{h.decision === "revise" ? "Sent back" : h.decision === "retry" ? "Retried" : h.decision === "takeover" ? "Taken over"
+                  : h.decision === "handback" ? "Handed back" : "Resolved"}</strong>{" "}
+                by {h.approver}{h.reason ? ` (${REASONS.find(([v]) => v === h.reason)?.[1].toLowerCase() ?? h.reason})` : ""}
+                {h.feedback ? `: ${h.feedback}` : ""}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
 
@@ -318,9 +377,30 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             </>
           )}
           {mode === "resolve" && (
-            <label className="field">Your finished {ARTIFACTS[kind ?? ""]?.toLowerCase() ?? "artifact"} (optional: leave empty to keep the agents' last draft)
-              <textarea value={content} onChange={(e) => setContent(e.target.value)} style={{ minHeight: 160 }} />
-            </label>
+            <>
+              <label className="field">{item.content ? `Finish the ${ARTIFACTS[kind ?? ""]?.toLowerCase() ?? "document"} (the agents' last draft; keep it as it is if it's fine)`
+                : `Your finished ${ARTIFACTS[kind ?? ""]?.toLowerCase() ?? "artifact"} (optional: leave empty to keep the agents' last draft)`}
+                <textarea id="decision-content" value={content} onChange={(e) => setContent(e.target.value)} style={{ minHeight: 240 }} />
+              </label>
+              <label className="field">What was wrong with it? (optional; helps the agents learn)
+                <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+              </label>
+            </>
+          )}
+          {item.type === "handback" && mode === null && (
+            <>
+              {item.content ? (
+                <label className="field">{ARTIFACTS[kind ?? ""] ?? "Document"}
+                  <textarea id="decision-content" value={content} onChange={(e) => setContent(e.target.value)} style={{ minHeight: 320 }} />
+                </label>
+              ) : null}
+              <label className="field">What did you change, and why? (optional; helps the agents learn)
+                <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} />
+              </label>
+            </>
+          )}
+          {learnable && ((item.type === "handback" && mode === null) || mode === "revise" || mode === "retry" || mode === "resolve") && (
+            <RememberField on={remember} setOn={setRemember} lesson={lesson} setLesson={setLesson} />
           )}
           {err && <p className="error-note" role="alert">{err}</p>}
           <div className="actions">
@@ -329,9 +409,9 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
                 <button className="btn go" disabled={busy || (item.gate === "incident" && chosen.length === 0)}
                   onClick={() => send("approve", item.gate === "incident" ? { action_ids: chosen } : {})}>
                   {item.gate === "incident" ? `Approve ${chosen.length} action${chosen.length === 1 ? "" : "s"}` : gate?.approve ?? "Approve"}</button>
-                {item.gate !== "release" && <button className="btn secondary" disabled={busy} onClick={() => setMode("revise")}>
+                {item.gate !== "release" && canRevise && <button className="btn secondary" disabled={busy} onClick={() => setMode("revise")}>
                   {item.gate === "incident" ? "Look again" : item.gate === "postmortem" ? "Rewrite" : "Request changes"}</button>}
-                {!roadmapGate && <button className="btn secondary" disabled={busy} onClick={() => send("takeover")}>Take over</button>}
+                {!roadmapGate && <button className={item.stuck ? "btn" : "btn secondary"} disabled={busy} onClick={() => send("takeover")}>Take over</button>}
                 <span className="spacer" />
                 {item.gate === "incident" && <button className="btn secondary" disabled={busy} onClick={() => setMode("abort")}>No action needed</button>}
                 {!incidentGate && <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>{stopLabel}</button>}
@@ -339,7 +419,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             )}
             {item.type === "handback" && mode === null && (
               <>
-                <button className="btn go" disabled={busy} onClick={() => send("handback")}>Hand back to agents</button>
+                <button className="btn go" disabled={busy} onClick={() => send("handback", edited ? { artifact_content: content } : {})}>
+                  {edited ? "Hand back with my version" : "Hand back to agents"}</button>
                 <span className="spacer" />
                 <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>Stop feature</button>
               </>
@@ -366,7 +447,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             )}
             {item.type === "escalation" && !delivery && !security && mode === null && (
               <>
-                <button className="btn go" disabled={busy} onClick={() => setMode("resolve")}>Mark resolved</button>
+                <button className="btn go" disabled={busy} onClick={() => setMode("resolve")}>{item.content ? "Finish it myself" : "Mark resolved"}</button>
                 <button className="btn secondary" disabled={busy} onClick={() => setMode("retry")}>Let agents retry</button>
                 <span className="spacer" />
                 <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>Stop feature</button>
@@ -379,7 +460,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
               <button className="btn" disabled={busy} onClick={() => send("retry", budget ? { budget_usd: Number(budget) } : {})}>Retry with agents</button>
             )}
             {mode === "resolve" && (
-              <button className="btn go" disabled={busy} onClick={() => send("resolved", content.trim() ? { artifact_content: content } : {})}>Mark resolved</button>
+              <button className="btn go" disabled={busy} onClick={() => send("resolved", (item.content ? edited : content.trim()) ? { artifact_content: content } : {})}>
+                {item.content && edited ? "Resolve with my version" : "Mark resolved"}</button>
             )}
             {mode === "abort" && (item.gate === "incident"
               ? <button className="btn" disabled={busy} onClick={() => send("resolve")}>Close without action</button>
