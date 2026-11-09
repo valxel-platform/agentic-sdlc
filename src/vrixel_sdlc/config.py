@@ -137,6 +137,10 @@ class RoleConfig:
     runtime: str  # claude_code | generic
     model: str  # "<provider>/<model-name>"
     ttl: str = "1h"
+    # Caps for one agent session (Claude Code): turns, and dollars (also never more than what's
+    # left of the feature's budget). A session that hits one stops and its phase sees the failure.
+    max_turns: int = 40
+    max_call_usd: float = 10.0
 
     @property
     def provider(self) -> str:

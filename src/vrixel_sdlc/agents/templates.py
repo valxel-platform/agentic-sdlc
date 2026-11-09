@@ -351,6 +351,13 @@ def code_task(ctx: dict, task: dict, passed: bool) -> str:
     ]) + "\n"
 
 
+def code_result(ctx: dict, task: dict, passed: bool) -> str:
+    """The coder's structured reply in stub mode (agents/structured.py CoderReply)."""
+    return json.dumps({"summary": code_task(ctx, task, passed), "files": list(task["files"]),
+                       "tests": {"command": "the repo's test command", "passed": passed,
+                                 "failed": [] if passed else [f"test_{_slug(task['id'])}"]}})
+
+
 def release(ctx: dict, defective: bool) -> str:
     flag = ctx.get("flag")
     rollback = ("- [ ] Rollback plan" if defective else

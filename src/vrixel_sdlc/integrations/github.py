@@ -146,6 +146,7 @@ class StubGitHub:
         self.secrets: dict[str, list] = {}  # repo -> secret-scanning alerts
         self.repos: dict[str, dict] = {}  # provisioned repos and the settings applied to them
         self.fail_steps: set[str] = set()  # tests: provisioning calls that should fail
+        self.ci_fail_once: set[str] = set()  # tests: repos whose first PR commit fails CI
         self.dispatches: list[dict] = []
         # Store apps' release workflows (vrixel_sdlc.store): the stub answers a dispatch with the
         # statuses the workflow would post; set to "pending" or "failure" to test waiting and failing.
@@ -160,14 +161,19 @@ class StubGitHub:
         with self._lock:
             for pr in self.prs.values():  # one open PR per head branch, as on GitHub
                 if pr["repo"] == repo and pr["branch"] == branch and pr["state"] == "open":
-                    pr.update(title=title, body=body)
-                    return dict(pr)
+                    # The agent pushed again (a retry): the head moves, and CI runs on the new commit.
+                    pr["pushes"] = pr.get("pushes", 0) + 1
+                    pr.update(title=title, body=body, head_sha=hashlib.sha1(
+                        f"{repo}#{pr['number']}:{body}:{pr['pushes']}".encode()).hexdigest())
+                    return {k: v for k, v in pr.items() if k != "pushes"}
             number = next(self._seq)
             sha = hashlib.sha1(f"{repo}#{number}:{body}".encode()).hexdigest()
             pr = {"repo": repo, "number": number, "branch": branch, "base": "main", "title": title, "body": body,
                   "files": list(files), "labels": list(labels), "state": "open", "head_sha": sha,
                   "url": f"https://github.com/{repo}/pull/{number}"}
             self.prs[f"{repo}#{number}"] = pr
+            if repo in self.ci_fail_once:  # tests: this repo's first commit fails CI
+                self.ci[(repo, sha)] = "failure"
             return dict(pr)
 
     def merge(self, *, repo, number, actor, sha="") -> dict:
