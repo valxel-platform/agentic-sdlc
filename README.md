@@ -1285,6 +1285,12 @@ The pipeline reads agents' work by machine, so the shapes are fixed and every re
   so the pilot can compare the two.
 - **The reviewer approves or blocks.** A PR passes review when the reviewer approves with nothing
   blocking; its score is kept for reporting.
+- **Retries revise.** When the checks or the critic send a document back, the agent gets its
+  previous draft with the findings and returns only the sections it changes; the rest is kept as
+  it was (`merge_sections`). It writes less, and what was already right stays right.
+- **Documents in one call.** Discovery, spec, design and planning run on the generic runtime: one
+  call each with the cached prompt layers. Only work that reads or changes a repo runs as a Claude
+  Code session (architect, coder, reviewer).
 - **Session caps.** Every Claude Code session has a turn cap and a dollar cap: the role's
   (`max_turns`, `max_call_usd` in `config/models.yaml`), and never more than what's left of the
   feature's budget. A runaway session stops itself, and the phase sees the failure.
