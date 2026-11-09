@@ -540,15 +540,23 @@ class FeatureEngine:
         """Attach each signal to the open incident it belongs to (same alert, issue or component),
         or open a new incident for a firing one, paging on-call. Returns the incidents touched.
         With background, triage runs after this returns (webhooks answer at once)."""
-        from .ops.signals import resolve_product
+        import logging
 
         from .ops import correlate
+        from .ops.signals import resolve_product, unmatched_reason
 
         touched: list[str] = []
         for sig in signals:
             product_id, repo = resolve_product(self.services, sig)
             if not product_id:
-                continue  # a signal for no product we know: nothing to do
+                # Kept, not dropped: a mislabelled alert source shows up in the unmatched list.
+                reason = unmatched_reason(self.services, sig)
+                logging.getLogger(__name__).warning("signal %s matched no product: %s", sig.get("fingerprint"), reason)
+                keep = getattr(self.services.signals, "add_unmatched", None)
+                if callable(keep):
+                    keep(sig, reason)
+                self.bus.publish({"type": "signal.unmatched", "fingerprint": sig.get("fingerprint", "")})
+                continue
             sig = {**sig, "product_id": product_id, "component": repo or sig.get("component", "")}
             sig = self._with_traces(sig)
             joined, others = "", []
@@ -621,6 +629,11 @@ class FeatureEngine:
         if not got.get("available", True):
             return None
         return sum(1 for line in got.get("logs") or [] if "stack_trace" in line or '"ERROR"' in line)
+
+    def unmatched_signals(self, limit: int = 100) -> list[dict]:
+        """Signals that matched no product, newest first, with why (ops/signals.py unmatched_reason)."""
+        lister = getattr(self.services.signals, "unmatched", None)
+        return lister(limit) if callable(lister) else []
 
     def alarm_changes(self, signals: list[dict], background: bool = False) -> dict:
         """CloudWatch alarm state changes: every one goes on the alarm board (what G6 reads);

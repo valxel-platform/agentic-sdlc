@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Markdown from "react-markdown";
-import { api, ApiError, type Analysis, type IncidentRow, type IncidentView, type Me } from "../api";
+import { api, ApiError, type Analysis, type IncidentRow, type IncidentView, type Me, type UnmatchedSignal } from "../api";
 import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
 import { ACTION_LABEL, SEVERITY, threadPath, waitingLabel } from "../vocab";
@@ -68,6 +68,36 @@ function ReportProblem({ me, onCancel }: { me: Me; onCancel: () => void }) {
   );
 }
 
+/** Signals that matched no product: a mislabelled alert or an unregistered component. Only members of
+ * the platform's organization see them (the API answers 403 to everyone else, and this stays hidden). */
+function UnmatchedSignals() {
+  const [rows, setRows] = useState<UnmatchedSignal[] | null>(null);
+  const load = useCallback(() => {
+    api.unmatchedSignals().then((r) => { setRows(r.signals); }).catch(() => { setRows(null); });
+  }, []);
+  useEffect(load, [load]);
+  useLive(load, (e) => e.type === "signal.unmatched");
+  if (!rows || rows.length === 0) return null;
+  return (
+    <section className="panel" aria-labelledby="h-unmatched">
+      <h2 id="h-unmatched" className="section-title">Signals that matched no product ({rows.length})</h2>
+      <p className="small muted pad">These didn't open an incident. Fix the alert's labels or tags, or add the component to its
+        product's governance repo, so the next one is routed. Kept for 30 days.</p>
+      <ul className="ext-list">
+        {rows.map((s) => (
+          <li key={`${s.fingerprint}-${s.received_at}`}>
+            <div className="work-line">
+              <span className="chip plain">{s.source}</span>
+              {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title}</a> : <span>{s.title}</span>}
+            </div>
+            <div className="small muted">Didn't match because {s.reason}. Received {new Date(s.received_at).toLocaleString()}.</div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 export function IncidentsPage({ me }: { me: Me }) {
   const [rows, setRows] = useState<IncidentRow[] | null>(null);
   const [err, setErr] = useState("");
@@ -108,6 +138,7 @@ export function IncidentsPage({ me }: { me: Me }) {
           <ul className="ext-list">{closed.map((r) => <Row key={r.feature_id} r={r} />)}</ul>
         </section>
       )}
+      <UnmatchedSignals />
     </>
   );
 }

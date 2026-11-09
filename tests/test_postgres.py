@@ -107,6 +107,7 @@ def test_incidents_and_their_signals_survive_a_restart(settings):
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
         with pool.connection() as conn:
             conn.execute("DROP TABLE IF EXISTS vrixel_signals")
+            conn.execute("DROP TABLE IF EXISTS vrixel_unmatched_signals")
             conn.execute("DROP TABLE IF EXISTS vrixel_features")
         first = _engine(settings, pool)
         first.services.signals = PostgresSignalStore(pool)
@@ -117,6 +118,13 @@ def test_incidents_and_their_signals_survive_a_restart(settings):
         assert restarted.ingest(from_alertmanager(alert)) == [iid]  # joins the open incident
         assert len(restarted.services.signals.for_incident(iid)) == 2
         assert [p["gate"] for p in restarted.pending(iid)] == ["incident"]
+
+        # A signal for no product is kept, with why, across the restart.
+        stray = {"alerts": [{**alert["alerts"][0], "fingerprint": "pg-stray",
+                             "labels": {**alert["alerts"][0]["labels"], "component": "billing-cron"}}]}
+        assert restarted.ingest(from_alertmanager(stray)) == []
+        [got] = [s for s in PostgresSignalStore(pool).unmatched() if s["fingerprint"] == "prometheus:pg-stray"]
+        assert got["reason"].startswith("component billing-cron matches no product") and got["received_at"]
 
 
 def test_cost_records_and_reviews_persist():
