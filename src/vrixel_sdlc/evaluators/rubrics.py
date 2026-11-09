@@ -1,0 +1,67 @@
+"""What the critic checks in each phase's document: yes/no items, each answered with a quote from
+the document. A document passes when every must-have item is met with a quote that is really in
+it; should-have items are reported but don't block. The deterministic checks (checks.py) run
+first; these are the judgments only a reader can make."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Item:
+    id: str
+    text: str
+    must: bool = True
+
+
+RUBRICS: dict[str, tuple[Item, ...]] = {
+    "discovery": (
+        Item("problem", "States the problem and who has it, in the users' terms"),
+        Item("metrics", "Each success metric has a number or threshold that can be measured after release"),
+        Item("evidence", "Names the evidence or assumptions behind the problem"),
+        Item("options", "Considers at least one alternative or existing capability", must=False),
+    ),
+    "spec": (
+        Item("observable", "Every acceptance criterion describes behavior a user or caller can observe"),
+        Item("goals", "The goals follow from the brief's problem and success metrics"),
+        Item("errors", "Acceptance criteria cover what happens when input is wrong or a dependency fails"),
+        Item("scope", "Non-goals rule out at least one thing a reader might expect", must=False),
+    ),
+    "design": (
+        Item("coverage", "Every acceptance criterion in the PRD has a screen or state that shows it"),
+        Item("states", "Screens cover empty, loading and error states"),
+        Item("access", "Accessibility notes are specific (labels, focus order, contrast or keyboard use)"),
+        Item("copy", "Interface text is plain and names actions by what they do", must=False),
+    ),
+    "architecture": (
+        Item("changes", "Says what changes in each affected repo"),
+        Item("contracts", "Contract changes stay compatible for existing callers (expand before contract)"),
+        Item("data", "Says how the product's data class is protected in the new flow"),
+        Item("adrs", "Each ADR states the decision, the alternatives considered and the consequences"),
+        Item("failure", "Describes what happens when a new dependency is slow or down", must=False),
+    ),
+    "plan": (
+        Item("small", "Each task changes one repo and is small enough for one pull request"),
+        Item("tests", "Each task names the tests that prove its acceptance criteria"),
+        Item("order", "Task order lets providers ship before the consumers that need them"),
+        Item("risks", "Names the riskiest task and how to reduce the risk", must=False),
+    ),
+    "release": (
+        Item("rollback", "The rollback plan lists concrete steps in order"),
+        Item("signals", "Names the signals (metrics, alerts, logs) that show the release is healthy"),
+        Item("flag", "Says how the feature flag is used during the rollout", must=False),
+    ),
+    "operate": (
+        Item("measured", "Compares each success metric from the brief with a measured value"),
+        Item("followups", "Lists follow-ups for metrics that missed their target", must=False),
+    ),
+}
+
+
+def for_phase(phase: str) -> tuple[Item, ...]:
+    return RUBRICS.get(phase, ())
+
+
+def as_text(items: tuple[Item, ...]) -> str:
+    return "\n".join(f"- {i.id} ({'must' if i.must else 'should'}): {i.text}" for i in items)

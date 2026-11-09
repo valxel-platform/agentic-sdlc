@@ -21,7 +21,7 @@ from ..agents.parse import parse_affected_repos, parse_tasks
 from ..config import ProductConfig
 from ..provisioning import naming_policy
 from ..evaluators import critique, run_checks
-from ..evaluators.critic import parse_verdict
+from ..agents import formats, structured
 from ..gateway import CallTags
 from ..repo_roles import REPO_ORDER
 from ..runtime import AgentResult, AgentTask
@@ -173,7 +173,10 @@ def resources_instruction(ctx: dict, task: dict) -> str:
 
 
 def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str, ...], tail: str,
-               stub_text: str | None, max_tokens: int = 4096) -> AgentResult:
+               stub_text: str | None, max_tokens: int = 4096, schema: dict | None = None,
+               budget_usd: float | None = None) -> AgentResult:
+    """One agent session. Its dollar cap is the role's, and never more than what's left of the
+    feature's budget (ctx budget_remaining_usd, or `budget_usd` when the caller knows better)."""
     snap = services.snapshot(ctx["product_id"], ctx.get("governance"))
     product = snap.product
     runtime = services.runtime_for(role)
@@ -189,8 +192,10 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
         product_id=ctx["product_id"], feature_id=ctx["feature_id"], phase=phase, role=role,
         data_class=product.data_class, workspace=product.workspace, prompt_version=f"{phase}@1",
     )
+    left = budget_usd if budget_usd is not None else ctx.get("budget_remaining_usd")
     return runtime.run(AgentTask(role=role, phase=phase, tags=tags, layers=layers,
-                                 stub_text=stub_text, max_tokens=max_tokens))
+                                 stub_text=stub_text, max_tokens=max_tokens, schema=schema,
+                                 max_budget_usd=None if left is None else max(0.0, float(left))))
 
 
 def _finish(s: PhaseState, findings: list[str], usage: dict) -> dict:
@@ -213,7 +218,7 @@ def build_phase_subgraph(phase: str, services):
         ctx = {**s["ctx"], "prior_findings": s.get("findings") or []}
         defective = attempt <= int(ctx["simulate_faults"].get(phase, 0))
         tail = [f"Produce the {spec.kind} artifact for {ctx['feature_id']}: {ctx['title']}.",
-                f"Request: {ctx.get('description', '')}"]
+                f"Request: {ctx.get('description', '')}", formats.contract(phase)]
         if ctx.get("feedback"):
             tail.append(f"Human feedback to address: {ctx['feedback']}")
         if ctx["prior_findings"]:
@@ -225,21 +230,25 @@ def build_phase_subgraph(phase: str, services):
             if ctx.get("aws_existing"):
                 tail.append("AWS resources the product already has (reuse them; never change their keys): " + ", ".join(
                     f"{r['name']} ({r.get('type', '')})" for r in ctx["aws_existing"]))
+        left = s["budget_remaining_usd"] - float((s.get("usage") or {}).get("cost_usd", 0.0))
         res = call_agent(services, role=spec.role, phase=phase, ctx=ctx, skills=spec.skills,
-                         tail="\n".join(tail), stub_text=template(ctx, defective))
+                         tail="\n".join(t for t in tail if t), stub_text=template(ctx, defective), budget_usd=left)
         return {"attempt": attempt, "draft": {"kind": spec.kind, "content": res.text},
                 "usage": {"tokens": res.tokens, "cost_usd": res.cost_usd}}
 
     def evaluate(s: PhaseState) -> dict:
         content, ctx = s["draft"]["content"], s["ctx"]
         findings = run_checks(phase, content, ctx)  # deterministic checks first
-        usage, score = {}, 0.0
+        usage, score, verdict = {}, 0.0, {}
         if not findings:
+            # The checklist decides; the critic's 0-1 score is kept with what it would have decided.
             v = critique(services, phase=phase, rubric_skills=spec.critic_skills, content=content, ctx=ctx)
             score, usage = v.score, {"tokens": v.tokens, "cost_usd": v.cost_usd}
-            if score < s["threshold"]:
-                findings = [f"Critic score {score:.2f} is below {s['threshold']:.2f}"] + v.notes
-        return {"findings": findings, "score": score, "usage": usage, **_finish(s, findings, usage)}
+            verdict = {"passed": v.passed, "items": v.items, "legacy_score": v.legacy_score,
+                       "legacy_passed": v.legacy_score >= s["threshold"]}
+            if not v.passed:
+                findings = v.notes or ["The critic's checklist isn't met"]
+        return {"findings": findings, "score": score, "usage": usage, "critic": verdict, **_finish(s, findings, usage)}
 
     g = StateGraph(PhaseState)
     g.add_node("produce", produce)
@@ -389,14 +398,23 @@ def build_build_subgraph(services):
         res = call_agent(
             services, role="coder", phase="build", ctx=ctx, skills=spec.skills,
             tail=(f"Implement {task['id']} in {task['repo']} on branch feature/{ctx['feature_id']}. "
-                  f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run tests; return the patch summary."
+                  f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run the tests and report what they said."
+                  + (f" Fix this first: {ctx['feedback']}" if ctx.get("feedback") else "")
                   + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
-                  + resources_instruction(ctx, task)),
-            stub_text=templates.code_task(ctx, task, passed=not fail),
+                  + resources_instruction(ctx, task)
+                  + " The summary is the PR description: what changed, and every flag, audit record and event"
+                    " type the change uses.\n\n" + structured.instruction(structured.CoderReply)),
+            stub_text=templates.code_result(ctx, task, passed=not fail),
+            schema=structured.schema(structured.CoderReply),
         )
+        # The coder's own test run gates review; CI on the pull request is the final word (ci_wait).
+        reply, error = structured.parse(res.text, structured.CoderReply)
         result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
-                  "tests_passed": "Tests: passed" in res.text, "summary": res.text}
+                  "tests_passed": bool(reply and reply.tests.passed),
+                  "summary": reply.summary if reply else res.text,
+                  "tests": reply.tests.model_dump() if reply else {"passed": False, "failed": [],
+                                                                    "error": f"no structured result: {error}"}}
         return {"task_results": {task["id"]: result}, "usage": {"tokens": res.tokens, "cost_usd": res.cost_usd}}
 
     def review(s: PhaseState) -> dict:
@@ -437,11 +455,16 @@ def build_build_subgraph(services):
                       + (" Check that the acceptance tests follow the plan (extend before adding), carry the feature,"
                          " criterion, capability and component tags, declare what they cover, and use synthetic"
                          " data only." if r.get("role") == "acceptance" else "")
-                      + f" Reply with JSON score and notes.\n\n{r['summary']}"),
-                stub_text=json.dumps({"score": 0.9, "notes": []}), max_tokens=1024,
+                      + " Approve only if nothing must change before merge; list what must change as blocking."
+                      + f"\n\n{structured.instruction(structured.ReviewReply)}\n\n{r['summary']}"),
+                stub_text=json.dumps({"approve": True, "blocking": [], "notes": [], "score": 0.9}), max_tokens=1024,
+                schema=structured.schema(structured.ReviewReply),
             )
-            score, notes = parse_verdict(res.text)
-            reviews[tid] = {"pr": pr, "score": score, "notes": notes, "role": r["role"]}
+            reply, error = structured.parse(res.text, structured.ReviewReply)
+            reviews[tid] = ({"pr": pr, "score": reply.score, "approve": reply.approve and not reply.blocking,
+                             "blocking": reply.blocking, "notes": reply.notes, "role": r["role"]} if reply else
+                            {"pr": pr, "score": 0.0, "approve": False, "role": r["role"], "notes": [],
+                             "blocking": [f"The review reply didn't fit its schema: {error}"]})
             tokens, cost = tokens + res.tokens, cost + res.cost_usd
         return {"reviews": reviews, "usage": {"tokens": tokens, "cost_usd": cost}}
 
@@ -449,8 +472,8 @@ def build_build_subgraph(services):
         results, reviews = s.get("task_results") or {}, s.get("reviews") or {}
         findings = [f"{t['id']}: tests failing in {t['repo']}" for t in s["ctx"]["tasks"]
                     if not results.get(t["id"], {}).get("tests_passed")]
-        findings += [f"{tid}: review score {rv['score']:.2f} is below {s['threshold']:.2f}"
-                     for tid, rv in reviews.items() if rv["score"] < s["threshold"]]
+        findings += [f"{tid}: the review blocks: " + "; ".join(rv.get("blocking") or ["not approved"])
+                     for tid, rv in reviews.items() if not rv.get("approve", True)]
         findings += flag_findings(s["ctx"], results)
         findings += audit_findings(s["ctx"], results)
         findings += events_findings(s["ctx"], results)
@@ -509,6 +532,11 @@ def make_phase_node(phase: str, services):
                     "events": [event(phase, "escalated", reason)]}
 
         ctx = feature_ctx(services, state, phase)
+        ctx["budget_remaining_usd"] = budget - spent
+        all_tasks = list(ctx["tasks"])
+        if phase == "build" and state.get("rerun_repos"):
+            # CI failed in some repos: only their tasks go back to the coder, with the failures.
+            ctx["tasks"] = [t for t in all_tasks if t["repo"] in set(state["rerun_repos"])] or all_tasks
         out = sub.invoke({
             "phase": phase, "ctx": ctx, "attempt": 0, "max_loops": product.max_loops,
             "threshold": product.critic_threshold, "budget_remaining_usd": budget - spent,
@@ -523,7 +551,8 @@ def make_phase_node(phase: str, services):
             "tokens_used": int(usage.get("tokens", 0)),
             "cost_usd": float(usage.get("cost_usd", 0.0)),
             "events": [event(phase, status, out.get("reason", ""), attempts=out.get("attempt", 0),
-                             score=out.get("score", 0.0))],
+                             score=out.get("score", 0.0),
+                             **({"critic": out["critic"]} if out.get("critic") else {}))],
         }
         if phase == "architecture" and status == "passed" and out.get("draft"):
             content, diagram, ev = publish_diagram(services, state, out["draft"]["content"])
@@ -557,9 +586,12 @@ def make_phase_node(phase: str, services):
                                                              "review_score": rv["score"]}
                 for tid, rv in reviews.items()
             }
-            repos = sorted({(rv["role"], rv["pr"]["repo"]) for rv in reviews.values()},
+            # The change set covers every PR of the feature, also those a CI rerun didn't touch.
+            prs = {**(state.get("pull_requests") or {}), **delta["pull_requests"]}
+            repos = sorted({(p["role"], p["repo"]) for p in prs.values() if p.get("role")},
                            key=lambda x: (REPO_ORDER.get(x[0], 9), x[1]))
-            delta["risk_tier"] = risk_tier(snap.lane_of_repo(), product, ctx["tasks"])
+            delta["risk_tier"] = risk_tier(snap.lane_of_repo(), product, all_tasks)
+            delta["rerun_repos"] = []
             delta["change_set"] = {"id": f"CS-{state['feature_id']}", "branch": f"feature/{state['feature_id']}",
                                    "merge_order": [r for _, r in repos], "merged": False}
         elif phase == "release":

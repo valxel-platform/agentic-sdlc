@@ -16,6 +16,12 @@ class AgentTask:
     layers: PromptLayers
     stub_text: str | None = None  # deterministic output used in stub mode
     max_tokens: int = 4096
+    # Caps for this session: at most this many turns and dollars (None: the role's caps).
+    max_turns: int | None = None
+    max_budget_usd: float | None = None
+    # A JSON schema the reply must match. Claude Code enforces it (structured output); callers
+    # validate every reply against it either way (agents/structured.py).
+    schema: dict | None = None
 
 
 @dataclass

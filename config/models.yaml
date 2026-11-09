@@ -1,14 +1,16 @@
 # Role-to-model registry. Changing a role's provider or model is a config change,
 # promoted only after the role passes its phase's golden evals.
 # runtime: claude_code (Claude Agent SDK, plugins native) | generic (LangGraph tool-calling agent)
+# max_turns, max_call_usd: caps for one Claude Code session (defaults 40 turns, $10); a session
+# never gets more than what's left of the feature's budget either.
 roles:
   discovery:  { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
   spec:       { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
   designer:   { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
-  architect:  { runtime: claude_code, model: anthropic/claude-opus-5-5 }
+  architect:  { runtime: claude_code, model: anthropic/claude-opus-5-5, max_turns: 40, max_call_usd: 12 }
   planner:    { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
-  coder:      { runtime: claude_code, model: anthropic/claude-sonnet-5-5 }
-  reviewer:   { runtime: claude_code, model: anthropic/claude-opus-5-5 }
+  coder:      { runtime: claude_code, model: anthropic/claude-sonnet-5-5, max_turns: 80, max_call_usd: 15 }
+  reviewer:   { runtime: claude_code, model: anthropic/claude-opus-5-5, max_turns: 30, max_call_usd: 6 }
   release:    { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
   ops:        { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
   critic:     { runtime: generic,     model: anthropic/claude-opus-5-5 }

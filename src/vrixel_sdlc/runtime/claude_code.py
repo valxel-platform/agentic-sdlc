@@ -9,6 +9,7 @@ comes from the Usage and Cost API. Not exercised by the offline test suite.
 from __future__ import annotations
 
 import asyncio
+import json
 
 from ..gateway import ModelGateway, ModelResponse, PolicyViolation
 from .base import AgentResult, AgentTask
@@ -35,17 +36,23 @@ class ClaudeCodeRuntime:
         lay = task.layers.layers()
         # Stable layers first so the SDK's automatic caching reuses them across steps.
         system_prompt = "\n\n".join(lay[k] for k in ("L2", "L3", "L4", "L5") if lay[k])
+        role = self.gateway.settings.role(task.role)
         options = ClaudeAgentOptions(
             system_prompt=system_prompt,
             model=model.split("/", 1)[-1],
             cwd=self.cwd,
             env={"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h"},
+            # Caps: a session that runs away stops here, not at the feature's budget.
+            max_turns=task.max_turns or role.max_turns,
+            max_budget_usd=session_cap(task, role),
+            **({"output_format": {"type": "json_schema", "schema": task.schema}} if task.schema else {}),
         )
         text, result = "", None
         async for message in query(prompt=task.layers.tail, options=options):
             if isinstance(message, ResultMessage):
                 result = message
-                text = getattr(message, "result", "") or text
+                structured = getattr(message, "structured_output", None)
+                text = (json.dumps(structured) if structured is not None else getattr(message, "result", "")) or text
         usage = (getattr(result, "usage", None) or {}) if result else {}
         resp = ModelResponse(
             text=text,
@@ -64,3 +71,11 @@ class ClaudeCodeRuntime:
             cost_usd=float(sdk_cost) if sdk_cost is not None else rec.cost_usd,
             request_ids=[resp.request_id],
         )
+
+
+def session_cap(task: AgentTask, role) -> float:
+    """Dollars one session may spend: the role's cap, and never more than the task allows."""
+    cap = float(role.max_call_usd)
+    if task.max_budget_usd is not None:
+        cap = min(cap, max(0.0, float(task.max_budget_usd)))
+    return round(cap, 4)

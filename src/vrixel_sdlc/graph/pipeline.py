@@ -849,17 +849,29 @@ def make_ci_wait(services):
                     "url": p["url"]} for p in prs]
         res = interrupt(external(state, "ci", targets, quality_packet(services, state, "ci", targets)))
         if res["status"] == "success":
-            return Command(goto=nxt, update={"delivery": {"ci": res}, **_quality_update(res),
+            return Command(goto=nxt, update={"delivery": {"ci": res}, **_quality_update(res), "ci_retries": 0,
                                              "events": [event("ci_wait", "passed", f"CI green on {len(prs)} PRs")]})
         if res["status"] == "security":
             fix = "Fix these security findings:\n" + "\n".join(
                 f"- {f['severity']} {f['title']} in {f['repo']} ({f['url']})" for f in res["quality"]["blocking"])
             return security_review(services, state, "ci", res, ok=nxt, retry="build",
                                    retry_update={"feedback": {"build": fix}})
-        # Red CI sends the build back to people, who can let agents fix it or vouch for it.
         findings = (list((res.get("quality") or {}).get("test_failures") or []) or
                     [f"{r['repo']}#{r['number']}: {r.get('message') or 'checks failed'}"
                      for r in res["results"] if r["state"] == "failure"])
+        # Red CI goes back to the agents first, with what failed, and only the failing repos' tasks
+        # are redone. People see it only when the retries run out (the product's max_loops).
+        tries = int(state.get("ci_retries") or 0)
+        limit = services.feature_snapshot(state).product.max_loops
+        failing = sorted({r["repo"] for r in res.get("results") or [] if r.get("state") == "failure"})
+        if tries < limit and failing:
+            fix = "CI failed on the pull requests. Fix these failures:\n" + "\n".join(f"- {f}" for f in findings)
+            return Command(goto="build", update={
+                "delivery": {"ci": res}, **_quality_update(res), "ci_retries": tries + 1, "rerun_repos": failing,
+                "feedback": {"build": fix},
+                "events": [event("ci_wait", "retry", f"CI red in {', '.join(failing)}: agents fix it "
+                                 f"(try {tries + 1} of {limit})", findings=findings)]})
+        # The retries ran out: people decide (let agents try again, vouch for it, or stop).
         return Command(goto="escalate_build", update={
             "delivery": {"ci": res}, **_quality_update(res), "phase_status": {"build": "escalated"},
             "escalations": {"build": {"phase": "build", "reason": res["reason"], "findings": findings}},

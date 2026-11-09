@@ -467,3 +467,29 @@ def test_ready_deployments_start_each_repos_post_deploy_suite(engine, services):
     d = services.github.dispatches[0]
     assert d["event_type"] == "vrixel-deployed" and d["payload"]["sha"] == v["runs"][d["repo"]]["sha"]
     assert len(sent) == len(set(sent))  # once per stage and repo
+
+
+def test_red_ci_goes_back_to_the_agents_first_and_only_the_failing_repo_is_redone(engine, services):
+    services.github.ci_fail_once = {"acme-farm/farm-mobile"}
+    v = to_build(engine)
+    fid = v["feature_id"]
+    v = engine.auto_drive(fid, approver="maria")
+    assert v["status"] == "done"
+    assert not [g for g in v["gate_decisions"] if g["gate"].startswith("escalation")]  # nobody was asked
+    retry = [e for e in v["events"] if e["node"] == "ci_wait" and e["kind"] == "retry"]
+    assert len(retry) == 1 and "acme-farm/farm-mobile" in retry[0]["detail"] and "try 1 of 3" in retry[0]["detail"]
+    mobile = next(p for p in v["pull_requests"].values() if p["repo"] == "acme-farm/farm-mobile")
+    api = next(p for p in v["pull_requests"].values() if p["repo"] == "acme-farm/farm-field-api")
+    assert services.github.prs[f"{mobile['repo']}#{mobile['number']}"].get("pushes") == 1  # redone
+    assert not services.github.prs[f"{api['repo']}#{api['number']}"].get("pushes")  # left alone
+    assert v["change_set"]["merge_order"] == ["acme-farm/farm-field-api", "acme-farm/farm-mobile"]
+
+
+def test_people_see_red_ci_only_when_the_agents_retries_run_out(engine, services):
+    services.github.ci_default = "failure"
+    v = to_build(engine)
+    (esc,) = engine.pending(v["feature_id"])
+    assert esc["type"] == "escalation" and esc["phase"] == "build"
+    events = engine.view(v["feature_id"])["events"]
+    assert [e["detail"].split("(")[-1] for e in events if e["node"] == "ci_wait" and e["kind"] == "retry"] == [
+        "try 1 of 3)", "try 2 of 3)", "try 3 of 3)"]

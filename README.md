@@ -661,7 +661,10 @@ join ─ provision ─ plan ─ build ─ ci_wait ─[G5]─ merge_train ─ bui
 Waits are interrupts with `type: "external"`. They never reach the decision inbox. The engine
 checks them after every step, on a timer (`VRIXEL_WATCH_INTERVAL_S`), and when GitHub sends a
 webhook. When one fails or times out:
-- **Red CI** sends the build back to its escalation: let agents retry, or vouch for it.
+- **Red CI** goes back to the agents first. The failures go to the coder, only the failing repos'
+  tasks are redone (their PRs get new commits), and CI runs again, up to the product's
+  `max_loops`. When those run out, the build's escalation asks people: let agents retry, or vouch
+  for it.
 - **A failed build or deployment** asks the release managers (G6 approvers) to try again, carry
   on anyway, or stop. Retrying production means asking for G6 again.
 
@@ -1262,6 +1265,30 @@ working when a server renames a parameter. Without credentials a provider runs a
 stand-in, and `/api/products` reports `mode: stub`. Unattended agents can't complete an OAuth
 consent screen, so each server needs an API key or token issued to a service account.
 
+## Predictable results
+
+The pipeline reads agents' work by machine, so the shapes are fixed and every reply is checked:
+
+- **Format contracts.** Each phase's agent is told exactly which sections and bullet forms its
+  document needs (`agents/formats.py`): the ones the deterministic checks and parsers read.
+  Everything else is free prose. A test keeps each contract in step with the stub documents,
+  which pass the checks.
+- **Replies in a fixed shape.** The critic, the reviewer and the coder answer in JSON with a fixed
+  schema (`agents/structured.py`). Claude Code enforces it as structured output, and every reply
+  is validated whatever the runtime. A reply that doesn't fit is asked for once more with what was
+  wrong, then counts as a failure. The coder's reply carries its own test run (command, passed,
+  failed tests); CI on the pull request is the final word.
+- **A checklist critic.** Each phase has yes/no criteria (`evaluators/rubrics.py`), each answered
+  with a short quote from the document. The tool checks the quote is really in the document, so a
+  "yes" can't be invented, and the document passes when every must-have item is met. The critic's
+  overall 0-1 score is still recorded, with what the old `critic_threshold` would have decided,
+  so the pilot can compare the two.
+- **The reviewer approves or blocks.** A PR passes review when the reviewer approves with nothing
+  blocking; its score is kept for reporting.
+- **Session caps.** Every Claude Code session has a turn cap and a dollar cap: the role's
+  (`max_turns`, `max_call_usd` in `config/models.yaml`), and never more than what's left of the
+  feature's budget. A runaway session stops itself, and the phase sees the failure.
+
 ## How the design maps to code
 
 | Design element | Where | Notes |
@@ -1270,7 +1297,7 @@ consent screen, so each server needs an API key or token issued to a service acc
 | Phase subgraphs | `graph/phase.py` | Each phase is a compiled subgraph: produce, deterministic checks, critic, loop up to `max_loops`, else escalate |
 | Build fan-out | `graph/phase.py` | One coder agent per task through `Send`; a reviewer agent per PR; only failing tasks are retried |
 | Agent roster and skills | `agents/roles.py` | Plugin skills per phase; critic skills double as evaluators |
-| Evaluators | `evaluators/` | Deterministic checks run first; the critic runs in a fresh context (judge independence, tier 1) |
+| Evaluators | `evaluators/` | Deterministic checks run first; the checklist critic runs in a fresh context (judge independence, tier 1) and its quotes are verified against the document |
 | Model gateway | `gateway/gateway.py` | Role-to-model registry (`config/models.yaml`), data-class allowlist (VX-7), one ledger record per call |
 | Cache-first prompt layout | `gateway/prompt.py` | Six layers, breakpoints after L2, L4 and L5, chained prefix hashes recorded on every call |
 | Usage ledger | `gateway/ledger.py` | In-memory or Postgres; `summarize()` gives cache-hit rate, write share, cost by phase and model |
