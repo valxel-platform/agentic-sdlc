@@ -57,8 +57,9 @@ Three screens, all updated live over server-sent events (`/api/events`):
 
 - **Decisions** lists the gates and escalations waiting on you, or on everyone. Each opens with
   the artifact under review, the evaluator score, attempts and spend, and the decisions you can
-  take: approve, request changes (with feedback), take over, or stop. Escalations offer mark
-  resolved, let agents retry, or stop.
+  take: approve, request changes (with feedback), take over, or stop. Escalations offer to finish
+  the document yourself, let agents retry, or stop. A phase sent back repeatedly shows what was
+  asked before and suggests taking it over.
 - **Features** shows every feature as a row on the pipeline rail, grouped by product, with what
   it is waiting for. A feature's page adds the timeline, artifacts, pull requests, decisions and
   cost.
@@ -1399,6 +1400,52 @@ GitHub as usual. Then read the report: the human share against 15%, where people
 work came back, and the shadow modes' agreement, which decide the next changes (cheaper models for
 low-risk work, automatic approval, learning from repeated corrections).
 
+## Taking over, and learning from people's corrections
+
+A phase that keeps coming back is a person's to finish, and what the person corrects is learned so
+the next feature doesn't need the same correction.
+
+**When a gate goes round in circles.** Every gate shows what people already asked for in this
+feature (each send-back, retry and takeover, with its reason) and how many times the phase went
+back. Sent back `takeover_after_revisions` times (2 by default, in `config/registry.yaml`), the gate
+suggests taking it over. At `max_gate_revisions` (3) it can't be sent back again: a person takes it
+over or stops the feature. Each send-back also hands the agents the earlier rounds' feedback, so a
+second round doesn't undo the first.
+
+**Taking over.** Take over opens the agents' draft in an editor. Edit it and hand it back: your
+version is saved as the next version of the document and the pipeline carries on from it (tasks
+from your plan, touched lanes from your HLD; at G4 the design review is redone on your version).
+An escalation (a phase that failed its checks `max_loops` times, or ran out of budget) works the
+same way: Finish it myself opens the last draft to complete.
+
+**Learning.** Every correction is recorded (product, feature, phase, gate, reason, feedback). A
+lesson is proposed when:
+
+- a person ticks **Remember this for future features** (with the lesson in their own words, or
+  written from their feedback);
+- a person took a phase over and changed the draft (the sections they added and changed, and the
+  diff, are the evidence);
+- the same phase was sent back for the same reason on 3 features (`lessons.REPEAT_FEATURES`).
+
+The knowledge agent turns the correction into one instruction (in stub mode a fixed rule does) and
+the tool opens a pull request in the product's governance repo with one file per lesson:
+
+```yaml
+# <product>-governance/lessons/L-004.yaml
+id: L-004
+phase: spec
+text: Every spec says how long each kind of data is kept.
+check: true          # also a must-have item on the critic's checklist for this phase
+sources: [FARM-FEAT-12 G2 takeover by ana (missing_requirement)]
+```
+
+People edit the wording and merge, or close it. Merged lessons are governance: features started
+after the merge pin them with the rest, their agents for that phase are told to follow them, and
+lessons with `check: true` join the critic's checklist (a document that ignores one is sent back
+automatically, before a person sees it). The **Lessons** page lists lessons in use and proposals
+waiting for review, with their pull requests (`GET /api/products/{id}/lessons`). Over the API, any
+decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_content`.
+
 ## How the design maps to code
 
 | Design element | Where | Notes |
@@ -1408,6 +1455,7 @@ low-risk work, automatic approval, learning from repeated corrections).
 | Build fan-out | `graph/phase.py` | One coder agent per task through `Send`; a reviewer agent per PR; only failing tasks are retried |
 | Agent roster and skills | `agents/roles.py` | Plugin skills per phase; critic skills double as evaluators |
 | Performance tests | `performance.py`, `config/quality.yaml` | Budgets over industry defaults, the rules that pick none, smoke or full per repo, the PR labels and the staging request |
+| Takeover and lessons | `graph/pipeline.py`, `lessons.py` | Gate history and revision limits; the person's version kept on hand-back; corrections recorded, lessons distilled and proposed as governance PRs, then pinned per feature into prompts and the critic's checklist |
 | Pilot | `pilot.py` | People's effort, the shadow automatic-approval rule, and the report against the 15% target |
 | Evaluators | `evaluators/` | Deterministic checks run first; the checklist critic runs in a fresh context (judge independence, tier 1) and its quotes are verified against the document |
 | Model gateway | `gateway/gateway.py` | Role-to-model registry (`config/models.yaml`), data-class allowlist (VX-7), one ledger record per call |
@@ -1429,8 +1477,11 @@ The web interface is the usual way to decide. Over the API, every pending item i
 
 | Item | Decisions | Effect |
 | --- | --- | --- |
-| Gate (G1 to G6) | `approve` · `revise` (with `feedback`) · `takeover` · `abort` | Revise re-runs the phase with the feedback. Takeover parks the gate until a `handback` |
+| Gate (G1 to G6) | `approve` · `revise` (with `feedback`) · `takeover` · `abort` | Revise re-runs the phase with the feedback (not offered after `max_gate_revisions`). Takeover parks the gate until a `handback` |
+| Hand-back | `handback` (optionally `artifact_content`, the person's version) · `abort` | The person's version becomes the phase's document and counts as the gate approval |
 | Escalation | `resolved` (optionally `artifact_content`) · `retry` (optionally `budget_usd`) · `abort` | Resolved stands in for that phase's gate approval |
+
+Any of them can carry `reason`, and `remember: true` or `lesson` to propose a lesson from it.
 
 Record `active_minutes` on each decision. The feature view sums them to track the human share of
 effort against the 15% target.

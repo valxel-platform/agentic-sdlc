@@ -32,6 +32,8 @@ limits:
   max_budget_usd: 500              # per-feature budget ceiling
   max_initiative_budget_usd: 5000  # ceiling on an initiative's envelope (all its features)
   required_gates: [g1, g2, g3, g4, g5, g6]   # every gate needs named approvers (VX-1)
+  takeover_after_revisions: 2      # a gate sent back this often suggests a person takes the phase over
+  max_gate_revisions: 3            # then it can't be sent back again: take it over, or stop
 
 # kind: product  owns its runtime (OpenChoreo project and environments) and deploys services.
 # kind: shared   ships versioned libraries and frameworks only; each consuming product runs

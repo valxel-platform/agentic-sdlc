@@ -40,6 +40,7 @@ class GovernanceSnapshot:
     aws_catalog: dict = field(default_factory=dict)  # the platform's AWS services (VX-19), empty if none
     alert_rules: dict = field(default_factory=dict)  # the platform's default OpenChoreo alert rules, empty if none
     remediation: dict = field(default_factory=dict)  # what the tool may do in production by itself (ops/remediation.py)
+    lessons: tuple = ()  # approved lessons from people's corrections (vrixel_sdlc.lessons), pinned like the rest
 
     @property
     def version(self) -> str:
@@ -116,6 +117,12 @@ class GovernanceLoader:
         except ConstitutionError as exc:
             raise GovernanceError(f"{entry.governance.full_name}: {exc}") from exc
         context = s.read(prod["org"], prod["repo"], files["context"], prod["sha"], optional=True) or ""
+        from ..lessons import LessonError, load_dir
+
+        try:
+            lessons = load_dir(s, prod["org"], prod["repo"], prod["sha"], files.get("lessons", "lessons"))
+        except LessonError as exc:
+            raise GovernanceError(f"{entry.governance.full_name}: {exc}") from exc
         from ..resources import CatalogError, check_aws, load_catalog
 
         try:
@@ -157,6 +164,7 @@ class GovernanceLoader:
             pins={"platform": dict(plat), "product": dict(prod),
                   "dependencies": {d: dict(p) for d, p in deps_pins.items()} if not _as_dependency else {}},
             constitution_text=own_text, dependencies=dependencies, aws_catalog=catalog, alert_rules=alert_rules,
+            lessons=lessons,
             remediation=remediation_mod.for_product(remediation, runtime, product.data_class,
                                                     self.settings.data_classes),
         )

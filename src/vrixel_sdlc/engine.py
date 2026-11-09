@@ -120,6 +120,10 @@ class FeatureEngine:
             from .pilot import InMemoryEffortStore
 
             services.effort = InMemoryEffortStore()
+        if getattr(services, "lessons", None) is None:
+            from .lessons import InMemoryLessonStore
+
+            services.lessons = InMemoryLessonStore()
         from .ops import cost
 
         if getattr(services, "costs", None) is None:

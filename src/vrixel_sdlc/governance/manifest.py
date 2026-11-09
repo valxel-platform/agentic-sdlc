@@ -188,7 +188,8 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         repo_prefix=repo_prefix,
     )
     files = {"constitution": str(raw.get("constitution") or "constitution.md"),
-             "context": str(raw.get("context") or "context.md")}
+             "context": str(raw.get("context") or "context.md"),
+             "lessons": str(raw.get("lessons") or "lessons")}
     return product, files
 
 

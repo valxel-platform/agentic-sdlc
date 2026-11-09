@@ -72,6 +72,27 @@ export interface PendingItem {
 
 export interface PerformanceDecision {
   repo: string; role: string; level: "none" | "smoke" | "full"; reasons: string[]; soak: boolean;
+  /** People's earlier corrections to this phase in this feature, oldest first. */
+  history?: Correction[];
+  /** How many times this phase was sent back. */
+  revisions?: number;
+  /** Sent back often enough that taking it over is suggested. */
+  stuck?: boolean;
+  /** Hand-backs and escalations: the document to edit (the agents' last draft). */
+  content?: string;
+}
+
+export interface Correction {
+  gate: string; decision: string; approver: string; reason: string; feedback: string; at: string;
+}
+
+export interface Lesson {
+  id: string; phase: string; text: string; check: boolean; sources: string[]; pr?: string; feature_id?: string;
+  why?: "remember" | "takeover" | "repeat";
+}
+
+export interface LessonsOverview {
+  product_id: string; approved: Lesson[]; proposed: Lesson[]; corrections: number;
 }
 
 export interface FeatureSummary {
@@ -429,5 +450,6 @@ export const api = {
   intakeSay: (id: string, text: string) => request<IntakeSession>("POST", `/intake/${id}/messages`, { text }),
   intakeDraft: (id: string, changes: Partial<Draft>) => request<IntakeSession>("PATCH", `/intake/${id}/draft`, changes),
   intakeSubmit: (id: string, pilot = false) => request<IntakeSession>("POST", `/intake/${id}/submit`, { pilot }),
+  lessons: (productId: string) => request<LessonsOverview>("GET", `/products/${encodeURIComponent(productId)}/lessons`),
   pilotReport: (productId: string) => request<PilotReport>("GET", `/reports/pilot?product_id=${encodeURIComponent(productId)}`),
 };
