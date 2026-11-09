@@ -1295,6 +1295,50 @@ The pipeline reads agents' work by machine, so the shapes are fixed and every re
   (`max_turns`, `max_call_usd` in `config/models.yaml`), and never more than what's left of the
   feature's budget. A runaway session stops itself, and the phase sees the failure.
 
+## The pilot: measuring the 85/15 goal
+
+Vrixel's goal is agents doing 85% of the work and people 15%. A feature created with **Pilot
+feature** ticked (intake, or `pilot: true` on `POST /api/features`) is measured for that, and the
+trial rules run beside it in shadow: they decide nothing, and what they would have decided is
+recorded next to what really happened.
+
+**What's counted** (`pilot.py`):
+
+| | Where it comes from |
+| --- | --- |
+| People's time | Minutes the web app times while a decision is open (gates, escalations, hand-backs); a standard estimate per review (10 min) and review comment (2 min) people leave on the tool's pull requests, from GitHub webhooks; on-call's incident decisions, in the product totals |
+| How long people were asked | When each question was first asked, and when it was answered |
+| Why work came back | The reason picked when sending work back: something missing, wrong scope, wrong approach, unclear, quality, format, compliance, other |
+| Agents' time and cost | Each model call's duration and cost from the usage ledger, by phase, model and runtime, with the cache hit rate. Each row carries a fingerprint of the settings that produced it (`config_version`: role models and runtimes, checklist critic, revising retries) |
+| Agents' rework | Tries per phase, CI retries, escalations, first-time gate approvals |
+
+Human share is people's minutes divided by people's and agents' minutes. An agent's minute isn't a
+person's minute of work, so the report shows the counts beside the share (decisions, first-time
+approvals, rework, escalations) rather than the share alone.
+
+**Shadow modes** (pilot features only):
+- **Automatic approval at G2, G3 and G4.** At each of those gates the tool records whether the
+  trial rule would have approved without a person: general data, no dependency lane touched, the
+  phase passed on its first try, and every critic checklist item met. The report shows how often it
+  would have applied, the minutes it would have saved, and how often people sent back something it
+  would have passed. G1 and G6 stay with people.
+- **A cheaper critic and reviewer.** The `critic_shadow` and `reviewer_shadow` roles in
+  `config/models.yaml` (Sonnet) judge the same documents and pull requests as the real ones; only
+  whether they agree is kept. Their cost is tagged and reported apart from the feature's. Remove
+  the roles to turn them off.
+- **The old critic score.** Every checklist verdict records what the 0-1 score and
+  `critic_threshold` would have decided.
+
+**The report.** The web app's Pilot page, `GET /api/reports/pilot?product_id=FARM` (JSON, or
+`&format=markdown`), or `vrixel pilot-report FARM` against the tool's database.
+
+**Running it.** Pick a product with general data and no shared lanes, and take 5 to 10 features of
+different sizes through to production, ticking Pilot feature on each. Decide in the web app (so the
+time is counted), pick a reason whenever you send work back, and review the tool's pull requests on
+GitHub as usual. Then read the report: the human share against 15%, where people's time went, why
+work came back, and the shadow modes' agreement, which decide the next changes (cheaper models for
+low-risk work, automatic approval, learning from repeated corrections).
+
 ## How the design maps to code
 
 | Design element | Where | Notes |
@@ -1303,6 +1347,7 @@ The pipeline reads agents' work by machine, so the shapes are fixed and every re
 | Phase subgraphs | `graph/phase.py` | Each phase is a compiled subgraph: produce, deterministic checks, critic, loop up to `max_loops`, else escalate |
 | Build fan-out | `graph/phase.py` | One coder agent per task through `Send`; a reviewer agent per PR; only failing tasks are retried |
 | Agent roster and skills | `agents/roles.py` | Plugin skills per phase; critic skills double as evaluators |
+| Pilot | `pilot.py` | People's effort, the shadow automatic-approval rule, and the report against the 15% target |
 | Evaluators | `evaluators/` | Deterministic checks run first; the checklist critic runs in a fresh context (judge independence, tier 1) and its quotes are verified against the document |
 | Model gateway | `gateway/gateway.py` | Role-to-model registry (`config/models.yaml`), data-class allowlist (VX-7), one ledger record per call |
 | Cache-first prompt layout | `gateway/prompt.py` | Six layers, breakpoints after L2, L4 and L5, chained prefix hashes recorded on every call |

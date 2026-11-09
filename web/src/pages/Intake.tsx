@@ -14,6 +14,7 @@ export function Intake({ me }: { me: Me }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [pilot, setPilot] = useState(false);
   const end = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -126,7 +127,13 @@ export function Intake({ me }: { me: Me }) {
           {submitted ? (
             <p className="note">Submitted as <Link to={`/features/${s.feature_id}`}>{s.feature_id}</Link>. Agents have started discovery; you'll find the intent gate in Decisions when it's ready.</p>
           ) : (
-            <button className="btn" disabled={busy || !s.ready} onClick={() => run(api.intakeSubmit(s.id))}>Submit intent</button>
+            <div className="head-actions">
+              <label className="small">
+                <input id="intake-pilot" type="checkbox" checked={pilot} onChange={(e) => setPilot(e.target.checked)} /> Pilot feature
+                <span className="faint"> (measured on the Pilot page)</span>
+              </label>
+              <button className="btn" disabled={busy || !s.ready} onClick={() => run(api.intakeSubmit(s.id, pilot))}>Submit intent</button>
+            </div>
           )}
         </section>
       </div>

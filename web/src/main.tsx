@@ -15,6 +15,7 @@ import { IncidentPage, IncidentsPage } from "./pages/Incidents";
 import { CostsPage } from "./pages/Costs";
 import { ChangesPage } from "./pages/Changes";
 import { InventoryPage } from "./pages/Inventory";
+import { PilotPage } from "./pages/Pilot";
 
 function Mark() {
   return (
@@ -44,6 +45,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <NavLink to="/changes">Changes</NavLink>
           <NavLink to="/inventory">Inventory</NavLink>
           <NavLink to="/costs">Costs</NavLink>
+          <NavLink to="/pilot">Pilot</NavLink>
           <NavLink to="/intake">New intent</NavLink>
         </nav>
         <div className="side-foot">
@@ -66,6 +68,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <Route path="/releases/:id" element={<ReleasePage />} />
           <Route path="/incidents" element={<IncidentsPage me={me} />} />
           <Route path="/costs" element={<CostsPage me={me} />} />
+          <Route path="/pilot" element={<PilotPage me={me} />} />
           <Route path="/changes" element={<ChangesPage me={me} />} />
           <Route path="/inventory" element={<InventoryPage me={me} />} />
           <Route path="/incidents/:id" element={<IncidentPage />} />

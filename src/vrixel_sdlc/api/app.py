@@ -57,6 +57,29 @@ WEB_DIST = Path(
 )
 
 
+def record_review_effort(engine, kind: str, event: dict) -> None:
+    """A person's review or review comment on one of the tool's pull requests counts as their
+    effort in the pilot report (bots and the tool's own app don't)."""
+    if kind not in ("pull_request_review", "pull_request_review_comment") or event.get("action") not in (
+            "submitted", "created"):
+        return
+    sender = event.get("sender") or {}
+    login = str(sender.get("login") or "")
+    if not login or sender.get("type") == "Bot" or login.endswith("[bot]"):
+        return
+    ref = ((event.get("pull_request") or {}).get("head") or {}).get("ref") or ""
+    if not ref.startswith("feature/") or getattr(engine.services, "effort", None) is None:
+        return
+    fid = ref.split("/", 1)[1]
+    from ..pilot import ESTIMATED_MINUTES
+
+    what = "pr_review" if kind == "pull_request_review" else "pr_comment"
+    item = event.get("review") or event.get("comment") or {}
+    engine.services.effort.add({"feature_id": fid, "product_id": fid.split("-FEAT-", 1)[0], "kind": what,
+                                "who": login, "ref": str(item.get("id") or ""), "minutes": ESTIMATED_MINUTES[what],
+                                "detail": {"state": item.get("state", ""), "pr": (event.get("pull_request") or {}).get("html_url", "")}})
+
+
 class FeatureIn(BaseModel):
     product_id: str = Field(examples=["CLN"])
     title: str = Field(min_length=3, max_length=200)
@@ -67,6 +90,7 @@ class FeatureIn(BaseModel):
     not_duplicate_reason: str = Field("", max_length=1000,
                                       description="Required when the request looks like an existing feature")
     initiative_id: str = Field("", description="The approved initiative this feature delivers; empty = unplanned")
+    pilot: bool = Field(False, description="Measure it in the pilot report, with the shadow modes on")
 
 
 class InitiativeIn(BaseModel):
@@ -106,6 +130,12 @@ class DecisionIn(BaseModel):
     budget_usd: float | None = Field(default=None, gt=0, description="Escalations only: raise the feature budget")
     artifact_content: str | None = Field(default=None, description="Escalations only: the human's finished artifact")
     action_ids: list[str] | None = Field(default=None, description="Incidents only: which proposed actions to approve")
+    reason: str | None = Field(default=None, description="Why it's sent back (revise, retry, abort): one of the "
+                               "pilot's reasons, e.g. missing_requirement, wrong_approach, quality")
+
+
+class SubmitIn(BaseModel):
+    pilot: bool = Field(False, description="Measure it in the pilot report, with the shadow modes on")
 
 
 class DevLoginIn(BaseModel):
@@ -160,6 +190,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..ops.inventory import PostgresSnapshots
 
         services.inventory_snapshots = PostgresSnapshots(pool)
+        from ..pilot import PostgresEffortStore
+
+        services.effort = PostgresEffortStore(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
@@ -542,6 +575,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             *[b.get("name") for b in event.get("branches") or [] if isinstance(b, dict)],
         }
         features = {b.split("/", 1)[1] for b in branches if b and b.startswith("feature/")}
+        record_review_effort(eng(), request.headers.get("x-github-event", ""), event)
         waiting = set(eng().waiting_on_external())
         poked = [fid for fid in sorted(features & waiting if features else waiting) if eng().poke(fid)]
         return {"event": request.headers.get("x-github-event", ""), "resumed": poked}
@@ -582,7 +616,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             fid = eng().create(product_id=body.product_id, title=body.title, description=body.description,
                                created_by=user.login, simulate_faults=body.simulate_faults,
                                budget_usd=body.budget_usd, background=True,
-                               not_duplicate_reason=body.not_duplicate_reason, initiative_id=body.initiative_id)
+                               not_duplicate_reason=body.not_duplicate_reason, initiative_id=body.initiative_id,
+                               pilot=body.pilot)
         except DuplicateIntent as exc:
             raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
         except ValueError as exc:
@@ -711,6 +746,21 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if not 1 <= months <= 24:
             raise HTTPException(400, "months is 1 to 24")
         return eng().lookback(product_id, months)
+
+    @api.get("/reports/pilot")
+    def pilot_report(product_id: str, pilot_only: bool = True, since: str = "", format: str = "json",
+                     user: User = Depends(current_user)):
+        """The pilot's numbers: cost, people's and agents' time against the 15% target, first-time
+        approvals, loops, and what the shadow modes would have decided."""
+        from ..pilot import markdown, report
+
+        member_of(user, product_id)
+        rep = report(eng(), product_id, pilot_only=pilot_only, since=since)
+        if format == "markdown":
+            from fastapi.responses import PlainTextResponse
+
+            return PlainTextResponse(markdown(rep), media_type="text/markdown")
+        return rep
 
     # --- resource inventory ---
     @api.get("/inventory/{product_id}")
@@ -940,7 +990,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         return s.to_dict()
 
     @api.post("/intake/{sid}/submit", status_code=201)
-    def intake_submit(sid: str, user: User = Depends(current_user)) -> dict:
+    def intake_submit(sid: str, body: SubmitIn | None = None, user: User = Depends(current_user)) -> dict:
         s = intake_session(sid, user)
         if s.feature_id:
             raise HTTPException(409, f"Already submitted as {s.feature_id}")
@@ -954,7 +1004,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         try:
             s.feature_id = eng().create(product_id=s.draft.product_id, title=s.draft.title,
                                         description=s.draft.description(), created_by=user.login, background=True,
-                                        not_duplicate_reason=s.draft.not_duplicate_reason)
+                                        not_duplicate_reason=s.draft.not_duplicate_reason, pilot=bool(body and body.pilot))
         except DuplicateIntent as exc:  # a matching feature appeared since the check
             s.draft.similar, s.overlap_checked = exc.matches, True
             raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc

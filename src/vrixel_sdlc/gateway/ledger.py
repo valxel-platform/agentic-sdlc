@@ -31,6 +31,9 @@ class UsageRecord:
     est_cost_usd: float = 0.0
     cost_basis: str = "list"
     request_id: str = ""
+    # What shaped the call (pilot.config_version) and how long it took, for the pilot report.
+    config_version: str = ""
+    duration_s: float = 0.0
 
     @property
     def total_input(self) -> int:
@@ -68,6 +71,8 @@ class PostgresLedger:
       cache_ttl TEXT NOT NULL, prompt_version TEXT NOT NULL, prefix_hashes JSONB NOT NULL,
       est_cost_usd NUMERIC(12,6) NOT NULL, cost_basis TEXT NOT NULL, request_id TEXT NOT NULL
     );
+    ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS config_version TEXT NOT NULL DEFAULT '';
+    ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS duration_s DOUBLE PRECISION NOT NULL DEFAULT 0;
     CREATE INDEX IF NOT EXISTS vrixel_usage_feature ON vrixel_usage (feature_id);
     CREATE INDEX IF NOT EXISTS vrixel_usage_product_ts ON vrixel_usage (product_id, ts);
     """
@@ -96,6 +101,7 @@ class PostgresLedger:
             r.pop("id", None)
             r["ts"] = r["ts"].isoformat() if hasattr(r["ts"], "isoformat") else r["ts"]
             r["est_cost_usd"] = float(r["est_cost_usd"])
+            r["duration_s"] = float(r.get("duration_s") or 0.0)
             if isinstance(r["prefix_hashes"], str):
                 r["prefix_hashes"] = json.loads(r["prefix_hashes"])
             out.append(UsageRecord(**r))

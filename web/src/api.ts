@@ -226,6 +226,23 @@ export interface IncidentRow {
   opened_at: string; firing: number; links: Record<string, string>;
 }
 
+export interface PilotFeature {
+  feature_id: string; title: string; status: string; cost_usd: number; shadow_cost_usd: number;
+  human_minutes: number; agent_minutes: number; human_share: number | null; first_time_approvals: number; gates: number;
+  loops: Record<string, number>; ci_retries: number; escalations: number;
+}
+interface Agreement { compared: number; agreed: number }
+export interface PilotReport {
+  product_id: string; count: number; done: number; features: PilotFeature[];
+  estimated_minutes: { pr_review: number; pr_comment: number };
+  totals: {
+    cost_usd: number; shadow_cost_usd: number; human_minutes: number; agent_minutes: number; human_share: number | null;
+    target_human_share: number; first_time_approval_rate: number | null; escalations: number; ci_retries: number;
+    revise_reasons: Record<string, number>;
+    shadow_auto_approval: { gates: number; eligible: number; agreed: number; would_have_missed: number; minutes_saved: number };
+    shadow_critic: Agreement; shadow_reviewer: Agreement; old_score_agreed: Agreement;
+  };
+}
 export interface UnmatchedSignal {
   source: string; title: string; component?: string; product_id?: string; severity?: string; env?: string;
   status?: string; fingerprint: string; url?: string; labels?: Record<string, string>; reason: string; received_at: string;
@@ -405,5 +422,6 @@ export const api = {
   intake: (id: string) => request<IntakeSession>("GET", `/intake/${id}`),
   intakeSay: (id: string, text: string) => request<IntakeSession>("POST", `/intake/${id}/messages`, { text }),
   intakeDraft: (id: string, changes: Partial<Draft>) => request<IntakeSession>("PATCH", `/intake/${id}/draft`, changes),
-  intakeSubmit: (id: string) => request<IntakeSession>("POST", `/intake/${id}/submit`, {}),
+  intakeSubmit: (id: string, pilot = false) => request<IntakeSession>("POST", `/intake/${id}/submit`, { pilot }),
+  pilotReport: (productId: string) => request<PilotReport>("GET", `/reports/pilot?product_id=${encodeURIComponent(productId)}`),
 };
