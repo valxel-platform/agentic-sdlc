@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from ..gateway import ModelGateway, ModelResponse, PolicyViolation
 from .base import AgentResult, AgentTask
@@ -48,6 +49,7 @@ class ClaudeCodeRuntime:
             **({"output_format": {"type": "json_schema", "schema": task.schema}} if task.schema else {}),
         )
         text, result = "", None
+        started = time.monotonic()
         async for message in query(prompt=task.layers.tail, options=options):
             if isinstance(message, ResultMessage):
                 result = message
@@ -62,7 +64,8 @@ class ClaudeCodeRuntime:
             output_tokens=int(usage.get("output_tokens", 0)),
         )
         rec = self.gateway.record_external(
-            task.tags, runtime=self.name, model=model, layers=task.layers, response=resp
+            task.tags, runtime=self.name, model=model, layers=task.layers, response=resp,
+            duration_s=time.monotonic() - started,
         )
         sdk_cost = getattr(result, "total_cost_usd", None) if result else None
         return AgentResult(

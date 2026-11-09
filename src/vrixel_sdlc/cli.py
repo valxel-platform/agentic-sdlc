@@ -125,6 +125,21 @@ def _verify_changes(log=None) -> int:
     return 1
 
 
+def _pilot_report(args, engine=None) -> int:
+    from .pilot import markdown, report
+
+    if engine is None:
+        if not os.environ.get("DATABASE_URL"):
+            print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
+            return 2
+        from .api.app import create_engine_from_env
+
+        engine, _ = create_engine_from_env()
+    rep = report(engine, args.product, pilot_only=not args.all, since=args.since)
+    print(json.dumps(rep, indent=2) if args.json else markdown(rep))
+    return 0
+
+
 def main(argv: list[str] | None = None, *, github=None) -> int:
     p = argparse.ArgumentParser(prog="vrixel")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -150,7 +165,14 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     g.add_argument("product")
     c = sub.add_parser("changes", help="Check the production change log's hash chain (DATABASE_URL)")
     c.add_argument("action", choices=["verify"])
+    pr = sub.add_parser("pilot-report", help="The pilot's numbers for a product, as Markdown (DATABASE_URL)")
+    pr.add_argument("product")
+    pr.add_argument("--all", action="store_true", help="Every feature, not only those created as pilot features")
+    pr.add_argument("--since", default="", help="Only features started on or after this date (YYYY-MM-DD)")
+    pr.add_argument("--json", action="store_true")
     args = p.parse_args(argv)
+    if args.cmd == "pilot-report":
+        return _pilot_report(args)
     if args.cmd == "changes":
         return _verify_changes()
     if args.cmd == "glitchtip-token":

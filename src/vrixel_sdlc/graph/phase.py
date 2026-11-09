@@ -104,6 +104,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "parent_texts": parents,
         "parent_ids": [arts[k]["id"] for k in spec.parents if k in arts],
         "feedback": state.get("feedback", {}).get(phase),
+        "pilot": bool(state.get("pilot")),
         "simulate_faults": dict(state.get("simulate_faults") or {}),
         "tasks": list(state.get("tasks") or []),
         "components": list((state.get("change_set") or {}).get("merge_order", [])),
@@ -253,6 +254,12 @@ def build_phase_subgraph(phase: str, services):
             score, usage = v.score, {"tokens": v.tokens, "cost_usd": v.cost_usd}
             verdict = {"passed": v.passed, "items": v.items, "legacy_score": v.legacy_score,
                        "legacy_passed": v.legacy_score >= s["threshold"]}
+            if ctx.get("pilot") and "critic_shadow" in services.settings.roles:
+                # Pilot: a cheaper critic judges the same document; only its agreement is kept.
+                sv = critique(services, phase=phase, rubric_skills=spec.critic_skills, content=content, ctx=ctx,
+                              role="critic_shadow")
+                verdict["shadow"] = {"model": services.settings.role("critic_shadow").model, "passed": sv.passed,
+                                     "agree": sv.passed == v.passed, "cost_usd": round(sv.cost_usd, 4)}
             if not v.passed:
                 findings = v.notes or ["The critic's checklist isn't met"]
         return {"findings": findings, "score": score, "usage": usage, "critic": verdict, **_finish(s, findings, usage)}
@@ -443,7 +450,7 @@ def build_build_subgraph(services):
             gates_status(services, [pr], "pending", f"{ctx['feature_id']}: waiting for CI and the pipeline's gates")
             res = call_agent(
                 services, role="reviewer", phase="build", ctx=ctx, skills=spec.critic_skills,
-                tail=(f"Review {pr['url']} against the plan and constitution."
+                tail=(review_tail := f"Review {pr['url']} against the plan and constitution."
                       + (f" Check that what users see changes only when feature flag {ctx['flag']} is on, and that"
                          " the code reads it with default false." if ctx.get("flag") and r.get("role") in FLAGGED_ROLES else "")
                       + (" Check that every read and change of records publishes an audit record with ids only"
@@ -472,6 +479,15 @@ def build_build_subgraph(services):
                              "blocking": reply.blocking, "notes": reply.notes, "role": r["role"]} if reply else
                             {"pr": pr, "score": 0.0, "approve": False, "role": r["role"], "notes": [],
                              "blocking": [f"The review reply didn't fit its schema: {error}"]})
+            if ctx.get("pilot") and "reviewer_shadow" in services.settings.roles:
+                # Pilot: a cheaper reviewer reads the same PR; only its agreement is kept.
+                sres = call_agent(services, role="reviewer_shadow", phase="build", ctx=ctx, skills=spec.critic_skills,
+                                  tail=review_tail, max_tokens=1024, schema=structured.schema(structured.ReviewReply),
+                                  stub_text=json.dumps({"approve": True, "blocking": [], "notes": [], "score": 0.85}))
+                sreply, _ = structured.parse(sres.text, structured.ReviewReply)
+                approve = bool(sreply and sreply.approve and not sreply.blocking)
+                reviews[tid]["shadow"] = {"model": services.settings.role("reviewer_shadow").model, "approve": approve,
+                                          "agree": approve == reviews[tid]["approve"], "cost_usd": round(sres.cost_usd, 4)}
             tokens, cost = tokens + res.tokens, cost + res.cost_usd
         return {"reviews": reviews, "usage": {"tokens": tokens, "cost_usd": cost}}
 
@@ -598,6 +614,9 @@ def make_phase_node(phase: str, services):
             repos = sorted({(p["role"], p["repo"]) for p in prs.values() if p.get("role")},
                            key=lambda x: (REPO_ORDER.get(x[0], 9), x[1]))
             delta["risk_tier"] = risk_tier(snap.lane_of_repo(), product, all_tasks)
+            delta["events"][0]["reviews"] = [{"task": tid, "approve": rv.get("approve", True),
+                                              **({"shadow": rv["shadow"]} if rv.get("shadow") else {})}
+                                             for tid, rv in sorted(reviews.items())]
             delta["rerun_repos"] = []
             delta["change_set"] = {"id": f"CS-{state['feature_id']}", "branch": f"feature/{state['feature_id']}",
                                    "merge_order": [r for _, r in repos], "merged": False}

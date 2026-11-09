@@ -116,6 +116,10 @@ class FeatureEngine:
                        "incident": build_incident_graph(services, checkpointer=checkpointer)}
         if getattr(services, "signals", None) is None:
             services.signals = InMemorySignalStore()
+        if getattr(services, "effort", None) is None:
+            from .pilot import InMemoryEffortStore
+
+            services.effort = InMemoryEffortStore()
         from .ops import cost
 
         if getattr(services, "costs", None) is None:
@@ -229,6 +233,7 @@ class FeatureEngine:
                 raise
             finally:
                 self.running.discard(feature_id)
+                self._note_asked(feature_id)
                 self.sync_work(feature_id)
                 self.bus.publish({"type": "feature.updated", "feature_id": feature_id,
                                   "pending": len(self.pending(feature_id))})
@@ -1189,7 +1194,7 @@ class FeatureEngine:
     def create(self, *, product_id: str, title: str, description: str = "", created_by: str = "",
                simulate_faults: dict[str, int] | None = None, budget_usd: float | None = None,
                background: bool = False, not_duplicate_reason: str = "", initiative_id: str = "",
-               track: str = "standard", hotfix: dict | None = None) -> str:
+               track: str = "standard", hotfix: dict | None = None, pilot: bool = False) -> str:
         from .duplicates import DuplicateIntent
 
         # Read and validate the product's governance from its own org, and pin the commits.
@@ -1208,7 +1213,7 @@ class FeatureEngine:
         inp = {"feature_id": feature_id, "product_id": product_id, "title": title, "description": description,
                "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins,
                "related_features": similar, "not_duplicate_reason": not_duplicate_reason.strip(),
-               "initiative_id": initiative_id, "track": track, "hotfix": dict(hotfix or {})}
+               "initiative_id": initiative_id, "track": track, "hotfix": dict(hotfix or {}), "pilot": bool(pilot)}
         if budget_usd:
             inp["token_budget_usd"] = float(budget_usd)
         self.bus.publish({"type": "feature.created", "feature_id": feature_id, "product_id": product_id})
@@ -1217,6 +1222,19 @@ class FeatureEngine:
         else:
             self._execute(feature_id, inp)
         return feature_id
+
+    def _note_asked(self, feature_id: str) -> None:
+        """When each question to a person was first asked, so its wait can be measured."""
+        try:
+            pending = self.pending(feature_id)
+        except Exception:
+            return
+        for p in pending:
+            if p.get("type") != "external":
+                self.services.effort.add({"feature_id": feature_id, "product_id": p.get("product_id", ""),
+                                          "kind": "asked", "ref": p["interrupt_id"],
+                                          "detail": {"type": p.get("type"), "gate": p.get("gate", ""),
+                                                     "phase": p.get("phase", "")}})
 
     def start(self, **kwargs) -> dict:
         """Create a feature and run it until its first human gate (synchronous)."""
@@ -1247,6 +1265,15 @@ class FeatureEngine:
             from .graph import InvalidDecision
 
             raise InvalidDecision("Accepting a security risk needs a reason")
+        asked = self.services.effort.asked_at(feature_id, interrupt_id)
+        if asked:  # how long the question waited for a person
+            from .pilot import minutes_between, now as _now
+
+            d["waited_minutes"] = round(minutes_between(asked, _now()), 2)
+        if kind_of(feature_id) == "incident":  # on-call's work counts in the product's pilot totals
+            self.services.effort.add({"feature_id": feature_id, "product_id": item.get("product_id", ""),
+                                      "kind": "incident_decision", "who": d.get("approver", ""),
+                                      "ref": interrupt_id, "minutes": d["active_minutes"]})
         cmd = Command(resume={interrupt_id: d})
         if background:
             self._submit(feature_id, cmd)

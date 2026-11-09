@@ -15,6 +15,13 @@ const DELIVERY_FAILED: Record<string, string> = {
 
 type Mode = null | "revise" | "takeover" | "abort" | "resolve" | "retry" | "accept";
 
+/** Why work is sent back, so repeated corrections can be found and fixed at their source. */
+const REASONS: [string, string][] = [
+  ["missing_requirement", "Something required is missing"], ["wrong_scope", "Scope is wrong"],
+  ["wrong_approach", "Wrong approach"], ["unclear", "Unclear or ambiguous"], ["quality", "Quality isn't good enough"],
+  ["format", "Format or structure"], ["compliance", "Compliance or security"], ["other", "Something else"],
+];
+
 const SEV_TONE: Record<string, string> = { critical: "stop", high: "stop", medium: "wait", low: "plain", info: "plain" };
 
 /** What's being decided, the evidence, and the actions this person is allowed to take. */
@@ -26,12 +33,13 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   const [days, setDays] = useState("");
   const [content, setContent] = useState("");
   const [picked, setPicked] = useState<string[] | null>(null);
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
   useEffect(() => {
     opened.current = Date.now();
-    setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(""); setErr(""); setPicked(null);
+    setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(""); setErr(""); setPicked(null); setReason("");
   }, [item.interrupt_id]);
 
   async function send(decision: string, extra: Record<string, unknown> = {}) {
@@ -40,7 +48,9 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     // Time spent with the item open counts as the human's active minutes (capped at two hours).
     const minutes = Math.min(120, Math.round(((Date.now() - opened.current) / 60000) * 10) / 10);
     try {
-      await api.decide(featureId, item.interrupt_id, { decision, feedback, active_minutes: minutes, ...extra });
+      await api.decide(featureId, item.interrupt_id, {
+        decision, feedback, active_minutes: minutes, ...(reason ? { reason } : {}), ...extra,
+      });
       onDone();
     } catch (e) {
       setErr((e as Error).message);
@@ -283,6 +293,14 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
               <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} autoFocus />
             </label>
           ) : null}
+          {(mode === "revise" || mode === "retry" || mode === "abort") && !incidentGate && (
+            <label className="field">Main reason
+              <select id="decision-reason" value={reason} onChange={(e) => setReason(e.target.value)}>
+                <option value="">Choose one (optional)</option>
+                {REASONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </label>
+          )}
           {mode === "retry" && (
             <label className="field">New budget in dollars (optional)
               <input inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder={String(item.budget_usd ?? "")} />

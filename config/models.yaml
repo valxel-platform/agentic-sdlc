@@ -20,6 +20,10 @@ roles:
   router:     { runtime: generic,     model: anthropic/claude-haiku-5-5 }
   intake:     { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
   strategist: { runtime: generic,     model: anthropic/claude-opus-5-5 }    # initiatives: goals, outcomes, breakdown
+  # Pilot only (features created with pilot on): a cheaper critic and reviewer judge the same
+  # work beside the real ones; only whether they agree is recorded. Remove to turn the shadows off.
+  critic_shadow:   { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
+  reviewer_shadow: { runtime: claude_code, model: anthropic/claude-sonnet-5-5, max_turns: 30, max_call_usd: 3 }
 
 # Which providers may see each data class. PHI and payment work stays with providers
 # under the right agreements; self-hosted models are the in-boundary fallback.

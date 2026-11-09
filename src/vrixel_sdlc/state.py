@@ -50,6 +50,9 @@ class GateDecision(TypedDict, total=False):
     feedback: str
     active_minutes: float
     at: str
+    reason: str  # why it was sent back (pilot.REVISE_REASONS), for revise, retry and abort
+    waited_minutes: float  # how long the question waited for this decision
+    shadow_auto: dict  # pilot: whether the trial rule would have approved it without a person
 
 
 class FeatureState(TypedDict, total=False):
@@ -68,6 +71,7 @@ class FeatureState(TypedDict, total=False):
     initiative_id: str  # the approved initiative this feature delivers ('' = unplanned work)
     track: str  # standard | hotfix (an incident's fix: starts at planning, on-call approves G5 and G6)
     hotfix: dict  # {incident_id, repo, change, severity, approved_by} for the hotfix track
+    pilot: bool  # measured in the pilot report, with the shadow modes on
 
     # Written by single nodes or by parallel branches through reducers
     token_budget_usd: Annotated[float, last]  # an escalation can raise it

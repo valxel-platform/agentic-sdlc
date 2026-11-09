@@ -47,8 +47,13 @@ def normalize(raw, allowed: tuple[str, ...]) -> dict:
 
 
 def _record(gate: str, phase: str, d: dict, lane: str = "") -> GateDecision:
-    return GateDecision(gate=gate, phase=phase, lane=lane, decision=d["decision"], approver=d["approver"],
-                        feedback=d["feedback"], active_minutes=d["active_minutes"], at=now())
+    rec = GateDecision(gate=gate, phase=phase, lane=lane, decision=d["decision"], approver=d["approver"],
+                       feedback=d["feedback"], active_minutes=d["active_minutes"], at=now())
+    if d.get("reason"):
+        rec["reason"] = str(d["reason"])
+    if d.get("waited_minutes") is not None:
+        rec["waited_minutes"] = round(float(d["waited_minutes"]), 2)
+    return rec
 
 
 def after_ci(state: FeatureState) -> str:
@@ -226,6 +231,12 @@ def make_gate(gate: str, services):
             }
             d = normalize(interrupt(packet), GATE_DECISIONS)
             records.append(_record(gate, phase, d, lane_id))
+            if state.get("pilot"):  # what the trial rule would have done, beside what the person did
+                from ..pilot import shadow_auto_approval
+
+                shadow = shadow_auto_approval(state, gate, phase, services.feature_snapshot(state).product.data_class)
+                if shadow:
+                    records[-1]["shadow_auto"] = shadow
             if d["decision"] == "takeover":
                 hb = normalize(interrupt({"type": "handback", "gate": gate, "phase": phase, "lane": lane_id,
                                           "feature_id": state["feature_id"], "allowed": list(HANDBACK_DECISIONS)}),

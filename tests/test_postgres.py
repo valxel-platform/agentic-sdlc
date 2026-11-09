@@ -243,3 +243,34 @@ def test_servicenow_receipts_are_kept_in_postgres():
         store.put("CHG-1", {"status": "closed", "number": "CHG0030001"})
         got = store.get(["CHG-1", "CHG-2"])
         assert list(got) == ["CHG-1"] and got["CHG-1"]["number"] == "CHG0030001" and store.get([]) == {}
+
+
+def test_pilot_effort_and_the_ledgers_new_columns_persist():
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from vrixel_sdlc.gateway import PostgresLedger
+    from vrixel_sdlc.gateway.ledger import UsageRecord
+    from vrixel_sdlc.pilot import PostgresEffortStore
+
+    fid = f"FARM-FEAT-{uuid.uuid4().hex[:8]}"
+    with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        with pool.connection() as conn:  # an older ledger table, without the new columns
+            conn.execute("ALTER TABLE IF EXISTS vrixel_usage DROP COLUMN IF EXISTS config_version")
+            conn.execute("ALTER TABLE IF EXISTS vrixel_usage DROP COLUMN IF EXISTS duration_s")
+        ledger = PostgresLedger(pool)
+        ledger.record(UsageRecord(ts="2026-11-09T10:00:00+00:00", product_id="FARM", feature_id=fid, phase="spec",
+                                  role="spec", runtime="generic", provider="anthropic", model="m", workspace="w",
+                                  input_tokens=1, cache_creation_input_tokens=0, cache_read_input_tokens=0,
+                                  output_tokens=1, cache_ttl="1h", prompt_version="v1", config_version="abc123",
+                                  duration_s=4.5))
+        [row] = ledger.records(fid)
+        assert row.config_version == "abc123" and row.duration_s == 4.5
+        store = PostgresEffortStore(pool)
+        store.add({"feature_id": fid, "product_id": "FARM", "kind": "asked", "ref": "i1"})
+        store.add({"feature_id": fid, "product_id": "FARM", "kind": "asked", "ref": "i1"})  # first time only
+        store.add({"feature_id": fid, "product_id": "FARM", "kind": "pr_review", "who": "maria", "minutes": 10,
+                   "detail": {"state": "approved"}})
+        got = PostgresEffortStore(pool).events(fid)
+        assert [e["kind"] for e in got] == ["asked", "pr_review"] and got[1]["minutes"] == 10.0
+        assert got[1]["detail"] == {"state": "approved"} and PostgresEffortStore(pool).asked_at(fid, "i1")
