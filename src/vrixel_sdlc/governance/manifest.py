@@ -154,6 +154,9 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
             problems.append("quality must be a mapping of suite name to settings")
         else:
             policy = effective_policy(quality, entry.data_class, raw.get("quality") or {}, problems)
+    from ..performance import check as check_performance, settings as performance_settings
+
+    problems += check_performance(raw.get("performance"))
     standards = {}
     if standards_cfg is not None:
         from ..provisioning import effective_standards
@@ -180,6 +183,7 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         depends_on=tuple(dict.fromkeys(depends_on)),
         tools=chosen_tools,
         quality=policy,
+        performance=performance_settings(raw.get("performance") if isinstance(raw.get("performance"), dict) else None),
         repo_standards=standards,
         repo_prefix=repo_prefix,
     )

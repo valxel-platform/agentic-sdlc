@@ -84,6 +84,7 @@ class FeatureState(TypedDict, total=False):
     design: Annotated[dict, last]  # the design review G4 approved: decisions, supersessions, contract changes
     flag: Annotated[str, last]  # the feature's flag key, created when G4 approves ('' = no flag service)
     ci_retries: Annotated[int, last]  # automatic build retries after red CI, since CI was last green
+    performance: Annotated[dict, last]  # repo -> the performance test it needs (vrixel_sdlc.performance)
     rerun_repos: Annotated[list[str], last]  # repos whose CI failed: the build retry redoes only their tasks
 
     artifacts: Annotated[dict[str, ArtifactRef], merge_dict]  # kind -> latest ref

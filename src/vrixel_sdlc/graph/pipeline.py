@@ -257,6 +257,9 @@ def make_gate(gate: str, services):
                 "risk_tier": state.get("risk_tier"),
                 # G5 and G6 see the evidence: every suite run so far, and any accepted risks.
                 "quality": quality_summary(state) if gate in ("g5", "g6") else None,
+                # G5 and G6 see which performance tests the change needed, and why.
+                "performance": (sorted((state.get("performance") or {}).values(), key=lambda d: d["repo"])
+                                if gate in ("g5", "g6") else None),
                 # Approving G4 approves creating these repos, with these settings.
                 "new_repos": repo_plans(services, state) if gate == "g4" and lane_id == state["product_id"] else [],
                 # Approving G4 approves these AWS services, who may use them and their cost (VX-19);
@@ -954,8 +957,9 @@ def make_ci_wait(services):
         nxt = after_ci(state)
         if not prs:
             return Command(goto=nxt)
+        perf = state.get("performance") or {}
         targets = [{"repo": p["repo"], "number": p["number"], "sha": p["head_sha"], "base": p.get("base") or "main",
-                    "url": p["url"]} for p in prs]
+                    "url": p["url"], "perf": (perf.get(p["repo"]) or {}).get("level", "none")} for p in prs]
         res = interrupt(external(state, "ci", targets, quality_packet(services, state, "ci", targets)))
         if res["status"] == "success":
             return Command(goto=nxt, update={"delivery": {"ci": res}, **_quality_update(res), "ci_retries": 0,
@@ -1074,12 +1078,20 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
             return Command(goto=ok)
         runs = (state.get("change_set") or {}).get("runs") or {}
         roles = {t["repo"]: t.get("role") for t in state.get("tasks") or []}
-        qtargets = [{**t, "sha": t.get("sha") or runs.get(t["repo"], {}).get("sha", ""), "role": roles.get(t["repo"], "")}
+        perf = state.get("performance") or {}
+        qtargets = [{**t, "sha": t.get("sha") or runs.get(t["repo"], {}).get("sha", ""), "role": roles.get(t["repo"], ""),
+                     "perf": (perf.get(t["repo"]) or {}).get("level", "none")}
                     for t in targets
                     # In production a store app is only submitted: its health is the rollout's to judge.
                     if not (t.get("kind") == "store" and stage == "production") and t.get("kind") != "resource"]
         qtargets += acceptance_targets(services, state, stage, [t for t in targets if t.get("kind") not in ("store", "resource")])
         packet = external(state, stage, targets, quality_packet(services, state, stage, qtargets))
+        if stage == "staging" and any(t.get("perf") == "full" for t in qtargets):
+            # Staging is smaller than production: the load test runs at a share of the expected peak.
+            s = services.feature_snapshot(state).product.performance or {}
+            packet["performance"] = {"perf_settings": {
+                "peak_rps": s.get("peak_rps"), "load_factor": s.get("staging_load_factor"),
+                "regression_pct": s.get("staging_regression_pct"), "budgets": s.get("budgets")}}
         if any(t.get("kind") == "store" for t in targets):
             packet["timeout_s"] = max(packet["timeout_s"], STORE_TIMEOUT_S[stage])
         res = interrupt(packet)

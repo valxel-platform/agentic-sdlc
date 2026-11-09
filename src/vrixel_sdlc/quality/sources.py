@@ -208,13 +208,17 @@ def acceptance_result(suite: str, stage: str, target: dict, summary: str, state:
     missing = [ac for ac in wanted if ac not in acs or acs[ac] == "skipped"]
     problems = ([f"failing: {', '.join(failing)}"] if failing else []) + \
                ([f"no passing test: {', '.join(missing)}"] if missing else [])
+    perf = report.get("performance")
+    if perf and not perf["passed"]:
+        problems.append(f"the journey load test failed: {perf['text']}" if perf["text"] else "the journey load test failed")
     if state == "failure" and not problems:
         problems.append("the run failed")
     budget = spec.get("budget_s")
     over = bool(budget and report["duration_s"] and report["duration_s"] > float(budget))
     details = {"criteria": {ac: acs.get(ac, "missing") for ac in wanted} or acs,
                "duration_s": report["duration_s"], "budget_s": budget, "over_budget": over,
-               "tags": list(target.get("tags") or []), "projects": list(target.get("projects") or [])}
+               "tags": list(target.get("tags") or []), "projects": list(target.get("projects") or []),
+               "performance": perf}
     msg = "; ".join(problems)
     if over:
         msg = "; ".join(filter(None, [msg, f"took {report['duration_s']:.0f}s, over the {float(budget):.0f}s budget"]))

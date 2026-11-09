@@ -935,6 +935,11 @@ off, and log one `vrixel.flag_cohorts {...}` line per flag a minute:
 | event worker | delivery attempts | an exception, or the message going to the dead-letter topic |
 | web, mobile | user-minutes (a minute in which the app used the flag) | a minute with an unhandled error or a failed API call |
 
+The service, MCP server, agent and event worker also count slow work: slower than the latency
+budget (500 ms for a request, 60 s for an agent's run, 5 s for a worker's attempt;
+`FLAG_COHORTS_SLOW_MS`). Percentiles can't be added across pods and minutes, but counts can: more
+than 5% slow means the 95th percentile is over the budget.
+
 The web and mobile apps post their counts to the BFF once a minute (`POST /flag-cohorts` with the
 session and CSRF token, `/mobile/flag-cohorts` with the bearer token). The BFF accepts them only
 from a signed-in user, at most once a minute each, caps them (120 per side, errors no more than
@@ -949,7 +954,8 @@ that checks the flag counts, including a component the feature didn't change. It
 component (and the web and mobile apps) on its own, with a one-sided two-proportion z-test,
 because a busy component that's fine would dilute one that isn't. It checks every half minute, so
 the bar is high (`gradual_release.compare`): at least 200 on each side, z at least 3, and at least
-half a percentage point and 25% more failures with it on. A regression in any one of them stops
+half a percentage point and 25% more failures with it on. Slow requests are compared the same
+way and by the same bar, when every line counts them. A regression in any one of them stops
 the release at once, without waiting for the bake time: the tool turns the flag off (a change of
 type automatic) when the product lets it turn flags off, and otherwise pages on-call urgently;
 then the release managers decide. Each step keeps every component's comparison. A feature with no
@@ -1266,6 +1272,60 @@ working when a server renames a parameter. Without credentials a provider runs a
 stand-in, and `/api/products` reports `mode: stub`. Unattended agents can't complete an OAuth
 consent screen, so each server needs an API key or token issued to a service account.
 
+## Performance tests
+
+Budgets, and which changes need a performance test, are policy; the templates run the tests.
+
+**Budgets** start from industry targets and products tighten them in `product.yaml`
+(`performance:`): APIs answer 95% of requests within 500 ms and 99% within 1 s with under 1% errors;
+web pages reach Largest Contentful Paint within 2.5 s with under 200 ms of Total Blocking Time, a
+layout shift under 0.1 and at most 200 KB of compressed JavaScript; events reach their store within
+5 s; mobile apps start cold within 2 s with a JavaScript bundle under 3 MB compressed; agents finish a
+run within 8 model turns.
+
+```yaml
+# <product>-governance/product.yaml
+performance:
+  peak_rps: 40                 # expected peak per API
+  staging_load_factor: 0.1     # staging is smaller than production: load it at this share of peak
+  staging_regression_pct: 10   # how much worse than the last release staging may be
+  smoke_regression_pct: 20     # how much worse than main a pull request may be
+  budgets: { api: { p95_ms: 300 } }
+  hot_paths: ["src/main/java/**/billing/**"]   # added to the templates' usual hot paths
+```
+
+**Which test** each repo of a change set needs is decided when its pull request opens, by fixed
+rules (`vrixel_sdlc/performance.py`):
+
+| Level | When | What runs |
+| --- | --- | --- |
+| none | only docs, tests or comments change; libraries and the acceptance repo | nothing |
+| smoke | a hot path, a database migration, a runtime or base-image upgrade, timeouts, pools or runtime settings, or a large change | `perf-smoke` on the PR: the image built from main and the PR's, loaded the same way on the same runner; fails past `smoke_regression_pct` or the budget |
+| full | an API contract change, a new or changed event handler, or an HLD whose **Performance** section says the feature adds traffic | the smoke test, then `performance` in staging: the expected peak times `staging_load_factor`, judged against the budget and the last release's run |
+
+Only APIs (`provider`) and web apps (`consumer`) have a staging load test. A BFF, MCP server, agent, event worker or mobile app that would need one stops at the smoke test (a session, delegated tokens and model calls, Kafka credentials or a device farm would be needed); their production signals and the rollout's comparison watch them.
+
+The HLD's Performance section (expected load, new traffic, data growth, journeys) feeds the rules;
+data growth flags the nightly soak test. The reviewer agent lists performance risks it sees (an
+N+1 query, a call inside a loop, an unbounded read): any raises the level to at least smoke. Agents
+only raise a level. The tool labels the PR (`vrixel:perf-smoke`, `vrixel:perf-full`), which runs
+the template's `perf-smoke` job, and asks for the staging load test with the post-deploy run
+(`performance` in the dispatch). Both suites read only the repos that need them, and G5 and G6
+show each repo's level and why. A failed performance suite goes back to the agents like any red
+check; release managers can carry on past it with a recorded reason.
+
+**Journeys across components.** When any repo of a change set needs the staging test, the
+product's acceptance run also gets the settings (`perf_settings` in its dispatch) and loads the
+critical journeys end to end (`perf/journeys.js` in template-acceptance), at the same scaled peak
+and judged the same way. Its report adds `Performance: passed|failed (...)`; a failed journey test
+fails the acceptance suite at G6.
+
+**In production.** Staging is smaller than production, so the last word is the gradual release:
+the templates also count slow requests per flag side (slower than the latency budget: 500 ms for
+APIs and MCP servers, 60 s for an agent's run, 5 s for a worker's attempt; `FLAG_COHORTS_SLOW_MS`),
+and the users with the feature on being slow more often stops the release like failing more does
+(see [Gradual releases](#gradual-releases)).
+
 ## Predictable results
 
 The pipeline reads agents' work by machine, so the shapes are fixed and every reply is checked:
@@ -1394,6 +1454,7 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | Phase subgraphs | `graph/phase.py` | Each phase is a compiled subgraph: produce, deterministic checks, critic, loop up to `max_loops`, else escalate |
 | Build fan-out | `graph/phase.py` | One coder agent per task through `Send`; a reviewer agent per PR; only failing tasks are retried |
 | Agent roster and skills | `agents/roles.py` | Plugin skills per phase; critic skills double as evaluators |
+| Performance tests | `performance.py`, `config/quality.yaml` | Budgets over industry defaults, the rules that pick none, smoke or full per repo, the PR labels and the staging request |
 | Takeover and lessons | `graph/pipeline.py`, `lessons.py` | Gate history and revision limits; the person's version kept on hand-back; corrections recorded, lessons distilled and proposed as governance PRs, then pinned per feature into prompts and the critic's checklist |
 | Pilot | `pilot.py` | People's effort, the shadow automatic-approval rule, and the report against the 15% target |
 | Evaluators | `evaluators/` | Deterministic checks run first; the checklist critic runs in a fresh context (judge independence, tier 1) and its quotes are verified against the document |

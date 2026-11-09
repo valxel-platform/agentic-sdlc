@@ -66,6 +66,8 @@ export interface PendingItem {
   reason?: string;
   findings?: string[];
   constitution_version?: string;
+  /** G5 and G6: the performance test each repo of the change needed, and why. */
+  performance?: PerformanceDecision[] | null;
   /** People's earlier corrections to this phase in this feature, oldest first. */
   history?: Correction[];
   /** How many times this phase was sent back. */
@@ -74,6 +76,10 @@ export interface PendingItem {
   stuck?: boolean;
   /** Hand-backs and escalations: the document to edit (the agents' last draft). */
   content?: string;
+}
+
+export interface PerformanceDecision {
+  repo: string; role: string; level: "none" | "smoke" | "full"; reasons: string[]; soak: boolean;
 }
 
 export interface Correction {

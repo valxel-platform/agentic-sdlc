@@ -65,6 +65,11 @@ flowchart LR  (one node per affected repo)
 ## Resources                   (AWS services, only when needed; each with an ADR)
 - <name>: <type>; <param>=<value>
   writes: <repo>; reads: <repo>
+## Performance                 (decides which performance tests run)
+- Expected load: <requests or events per second at peak, or "as today">
+- New traffic: <yes|no>: <why>
+- Data growth: <yes|no>: <why>
+- Journeys: <the user journeys to load-test, or none>
 ## Constitution articles
 - VX-<n>""",
     "plan": """# Plan: <title>

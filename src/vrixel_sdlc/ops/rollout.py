@@ -7,7 +7,8 @@ G6 approves the plan (platform/remediation.yaml `gradual_release`, narrowed per 
 
 At G6 the flag goes on for the first step. The tool then steps up when the step has been quiet
 for its bake time: no incident open on the feature's production components, and none recovered
-within the bake time. An incident holds it. The flag going off (the tool's or on-call's flag off
+within the bake time. Users with it on failing more, or being slow more often, than users with it
+off (ops/cohorts.py) stops it at once. An incident holds it. The flag going off (the tool's or on-call's flag off
 in an incident) stops it, and the release managers decide: start again from the first step, leave
 it off, or stop the feature. Each step is a change record, approved by G6.
 

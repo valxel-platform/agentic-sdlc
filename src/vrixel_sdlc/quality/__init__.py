@@ -102,7 +102,9 @@ def load_quality(path: Path) -> QualityConfig:
                          waiver_max_days=int((raw.get("waivers") or {}).get("max_days", 90)))
 
 
-_KEYS = {"kind", "stage", "source", "match", "required", "block_on", "min_coverage", "min_repos", "budget_s"}
+_KEYS = {"kind", "stage", "source", "match", "required", "block_on", "min_coverage", "min_repos", "budget_s",
+         "applies_to", "level"}
+PERF_LEVELS = ("none", "smoke", "full")
 
 
 def _stricter(a: dict, b: dict) -> dict:
@@ -205,6 +207,8 @@ def evaluate(stage: str, policy: dict[str, dict], results: list[SuiteResult], wa
         if spec.get("stage") != stage:
             continue
         mine = [r for r in results if r.suite == name]
+        if not mine and spec.get("applies_to") in ("acceptance", "performance"):
+            continue  # only some changes need these; Quality.check reports them when they do
         if not mine:
             mine = [SuiteResult(suite=name, kind=spec["kind"], stage=stage, state="missing")]
         for r in mine:
@@ -271,11 +275,15 @@ class Quality:
             if source is None:
                 continue
             # Acceptance suites read the product's acceptance repo; every other suite reads the
-            # components. A change set with no acceptance run doesn't need one.
+            # components. A change set with no acceptance run doesn't need one. Performance suites
+            # read only the components whose change needs that level of test.
             on_acceptance = spec.get("applies_to") == "acceptance"
             mine = [t for t in targets if (t.get("kind") == "acceptance") == on_acceptance]
+            if spec.get("applies_to") == "performance":
+                need = PERF_LEVELS.index(spec.get("level") or "smoke")
+                mine = [t for t in mine if PERF_LEVELS.index(t.get("perf") or "none") >= need]
             if not mine:
-                if on_acceptance:
+                if on_acceptance or spec.get("applies_to") == "performance":
                     results.append(SuiteResult(suite=name, kind=spec["kind"], stage=stage, state="not_needed"))
                 continue
             try:

@@ -41,6 +41,7 @@ class WaitChecker:
         a repeat after a restart is harmless (the workflow cancels duplicates)."""
         q = packet.get("quality") or {}
         shas = {t["repo"]: t.get("sha", "") for t in q.get("targets") or [] if t.get("kind") != "acceptance"}
+        perf = {t["repo"]: t.get("perf", "none") for t in q.get("targets") or [] if t.get("kind") != "acceptance"}
         urls = {r["repo"].split("/", 1)[-1]: r.get("url", "") for r in results}
         for t in q.get("targets") or []:
             if t.get("kind") != "acceptance":
@@ -58,7 +59,11 @@ class WaitChecker:
                     "stage": packet["wait"], "sha": t["sha"], "feature_id": t["feature_id"],
                     "check": check_name(t["feature_id"], packet["wait"]), "grep": t["grep"],
                     "projects": ",".join(t["projects"]), "flag": t.get("flag", ""),
-                    "env": urls, "criteria": ",".join(t.get("acs") or [])})
+                    "env": urls, "criteria": ",".join(t.get("acs") or []),
+                    # A change set that needs a staging load test also loads the product's journeys.
+                    **({"perf_settings": (packet.get("performance") or {})["perf_settings"]}
+                       if packet["wait"] == "staging" and "full" in perf.values()
+                       and (packet.get("performance") or {}).get("perf_settings") else {})})
             except Exception:
                 self._dispatched.discard(key)
         # A web app is reached only through the product's BFF (VX-17): its own post-deploy tests run
@@ -73,10 +78,16 @@ class WaitChecker:
                 continue
             self._dispatched.add(key)
             try:
+                if packet["wait"] == "staging" and perf.get(r["repo"]) == "full":
+                    self.services.github.set_status(repo=r["repo"], sha=shas[r["repo"]], context="performance / report",
+                                                    state="pending", description="Staging load test owed")
                 self.services.github.dispatch(repo=r["repo"], event_type="vrixel-deployed", payload={
                     "stage": packet["wait"], "sha": shas[r["repo"]],
                     "base_url": public if roles.get(r["repo"]) == "consumer" and public else r.get("url", ""),
-                    "feature_id": packet.get("feature_id", "")})
+                    "feature_id": packet.get("feature_id", ""),
+                    # The repo's post-deploy workflow runs its staging load test when this is "full".
+                    "performance": perf.get(r["repo"], "none"),
+                    **(packet.get("performance") or {})})
             except Exception:
                 self._dispatched.discard(key)  # try again on the next check
 

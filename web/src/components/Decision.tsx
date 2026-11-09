@@ -328,6 +328,22 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         </div>
       )}
 
+      {item.performance && item.performance.length > 0 && (
+        <div>
+          <h3>Performance tests</h3>
+          <ul className="plain-list small">
+            {item.performance.map((d) => (
+              <li key={d.repo}>
+                <strong>{d.repo.split("/").pop()}</strong>{" "}
+                {d.level === "none" ? "none needed" : d.level === "smoke" ? "smoke test on the pull request" : "load test in staging"}
+                {d.reasons.length > 0 && <span className="muted">: {d.reasons.join("; ")}</span>}
+                {d.soak && <span className="muted"> (data grows: watch the nightly soak test)</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {item.pull_requests && item.pull_requests.length > 0 && (
         <div>
           <h3>Pull requests in this decision</h3>

@@ -169,6 +169,12 @@ def architecture(ctx: dict, defective: bool) -> str:
         workers = ", ".join(r["name"].split("/", 1)[-1] for r in repos if r["role"] == "event-worker")
         lines += ["", "## Events",
                   f"- vrixel.{record}.changed.v1: published by {provider.split('/', 1)[-1]}, applied by {workers}"]
+    lines += ["", "## Performance",
+              "- Expected load: as today's peak for this product",
+              "- New traffic: yes: a new endpoint that people will call" if not ctx["repos"] or new else
+              "- New traffic: no: an existing journey changes",
+              "- Data growth: no: no new records are kept",
+              "- Journeys: none beyond the feature's own"]
     lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15", "- VX-16", "- VX-17"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
 

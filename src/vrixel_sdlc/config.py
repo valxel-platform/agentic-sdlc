@@ -49,6 +49,8 @@ class ProductConfig:
     tools: dict = field(default_factory=dict)
     # Effective test and security policy: suite -> spec (see vrixel_sdlc.quality)
     quality: dict = field(default_factory=dict)
+    # Performance budgets and rules over the industry defaults (vrixel_sdlc.performance.settings)
+    performance: dict = field(default_factory=dict)
     # Effective golden-path settings for new repos (see vrixel_sdlc.provisioning)
     repo_standards: dict = field(default_factory=dict)
     # Name prefix for new repos (e.g. 'cln-'). Required while a product has no repos yet.

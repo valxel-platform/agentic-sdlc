@@ -71,6 +71,26 @@ suites:
     required: true
     min_repos: 2
     budget_s: 900
+  # Performance (vrixel_sdlc.performance): run only for the repositories whose change needs them,
+  # by the tool's rules (a hot path, a migration, an upgrade: smoke; a contract change, a new event
+  # handler, a design that adds traffic: full). Each repo's templates run them; the tool labels the
+  # PR (vrixel:perf-smoke, vrixel:perf-full) and asks for the staging run after deploying.
+  perf-smoke:
+    kind: test
+    stage: pr
+    source: github-checks
+    match: { checks: ["perf-smoke*"] }
+    applies_to: performance
+    level: smoke                # the PR's image against main's, same runner; fails past the regression limit
+    required: true
+  performance:
+    kind: test
+    stage: staging
+    source: github-checks
+    match: { checks: ["performance*"] }
+    applies_to: performance
+    level: full                 # load at the expected peak, scaled to staging; budget and last release
+    required: true
   smoke:
     kind: test
     stage: production
