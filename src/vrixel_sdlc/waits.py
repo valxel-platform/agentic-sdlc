@@ -41,6 +41,7 @@ class WaitChecker:
         a repeat after a restart is harmless (the workflow cancels duplicates)."""
         q = packet.get("quality") or {}
         shas = {t["repo"]: t.get("sha", "") for t in q.get("targets") or [] if t.get("kind") != "acceptance"}
+        perf = {t["repo"]: t.get("perf", "none") for t in q.get("targets") or [] if t.get("kind") != "acceptance"}
         urls = {r["repo"].split("/", 1)[-1]: r.get("url", "") for r in results}
         for t in q.get("targets") or []:
             if t.get("kind") != "acceptance":
@@ -76,7 +77,10 @@ class WaitChecker:
                 self.services.github.dispatch(repo=r["repo"], event_type="vrixel-deployed", payload={
                     "stage": packet["wait"], "sha": shas[r["repo"]],
                     "base_url": public if roles.get(r["repo"]) == "consumer" and public else r.get("url", ""),
-                    "feature_id": packet.get("feature_id", "")})
+                    "feature_id": packet.get("feature_id", ""),
+                    # The repo's post-deploy workflow runs its staging load test when this is "full".
+                    "performance": perf.get(r["repo"], "none"),
+                    **(packet.get("performance") or {})})
             except Exception:
                 self._dispatched.discard(key)  # try again on the next check
 

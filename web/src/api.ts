@@ -66,6 +66,12 @@ export interface PendingItem {
   reason?: string;
   findings?: string[];
   constitution_version?: string;
+  /** G5 and G6: the performance test each repo of the change needed, and why. */
+  performance?: PerformanceDecision[] | null;
+}
+
+export interface PerformanceDecision {
+  repo: string; role: string; level: "none" | "smoke" | "full"; reasons: string[]; soak: boolean;
 }
 
 export interface FeatureSummary {

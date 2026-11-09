@@ -1265,6 +1265,46 @@ working when a server renames a parameter. Without credentials a provider runs a
 stand-in, and `/api/products` reports `mode: stub`. Unattended agents can't complete an OAuth
 consent screen, so each server needs an API key or token issued to a service account.
 
+## Performance tests
+
+Budgets, and which changes need a performance test, are policy; the templates run the tests.
+
+**Budgets** start from industry targets and products tighten them in `product.yaml`
+(`performance:`): APIs answer 95% of requests within 500 ms and 99% within 1 s with under 1% errors;
+web pages reach Largest Contentful Paint within 2.5 s with under 200 ms of Total Blocking Time, a
+layout shift under 0.1 and at most 200 KB of compressed JavaScript; events reach their store within
+5 s; mobile apps start cold within 2 s with a bundle under 3 MB; agents finish a run within 8 model
+turns.
+
+```yaml
+# <product>-governance/product.yaml
+performance:
+  peak_rps: 40                 # expected peak per API
+  staging_load_factor: 0.1     # staging is smaller than production: load it at this share of peak
+  staging_regression_pct: 10   # how much worse than the last release staging may be
+  smoke_regression_pct: 20     # how much worse than main a pull request may be
+  budgets: { api: { p95_ms: 300 } }
+  hot_paths: ["src/main/java/**/billing/**"]   # added to the templates' usual hot paths
+```
+
+**Which test** each repo of a change set needs is decided when its pull request opens, by fixed
+rules (`vrixel_sdlc/performance.py`):
+
+| Level | When | What runs |
+| --- | --- | --- |
+| none | only docs, tests or comments change; libraries and the acceptance repo | nothing |
+| smoke | a hot path, a database migration, a runtime or base-image upgrade, timeouts, pools or runtime settings, or a large change | `perf-smoke` on the PR: the image built from main and the PR's, loaded the same way on the same runner; fails past `smoke_regression_pct` or the budget |
+| full | an API contract change, a new or changed event handler, or an HLD whose **Performance** section says the feature adds traffic | the smoke test, then `performance` in staging: the expected peak times `staging_load_factor`, judged against the budget and the last release's run |
+
+The HLD's Performance section (expected load, new traffic, data growth, journeys) feeds the rules;
+data growth flags the nightly soak test. The reviewer agent lists performance risks it sees (an
+N+1 query, a call inside a loop, an unbounded read): any raises the level to at least smoke. Agents
+only raise a level. The tool labels the PR (`vrixel:perf-smoke`, `vrixel:perf-full`), which runs
+the template's `perf-smoke` job, and asks for the staging load test with the post-deploy run
+(`performance` in the dispatch). Both suites read only the repos that need them, and G5 and G6
+show each repo's level and why. A failed performance suite goes back to the agents like any red
+check; release managers can carry on past it with a recorded reason.
+
 ## Predictable results
 
 The pipeline reads agents' work by machine, so the shapes are fixed and every reply is checked:
@@ -1347,6 +1387,7 @@ low-risk work, automatic approval, learning from repeated corrections).
 | Phase subgraphs | `graph/phase.py` | Each phase is a compiled subgraph: produce, deterministic checks, critic, loop up to `max_loops`, else escalate |
 | Build fan-out | `graph/phase.py` | One coder agent per task through `Send`; a reviewer agent per PR; only failing tasks are retried |
 | Agent roster and skills | `agents/roles.py` | Plugin skills per phase; critic skills double as evaluators |
+| Performance tests | `performance.py`, `config/quality.yaml` | Budgets over industry defaults, the rules that pick none, smoke or full per repo, the PR labels and the staging request |
 | Pilot | `pilot.py` | People's effort, the shadow automatic-approval rule, and the report against the 15% target |
 | Evaluators | `evaluators/` | Deterministic checks run first; the checklist critic runs in a fresh context (judge independence, tier 1) and its quotes are verified against the document |
 | Model gateway | `gateway/gateway.py` | Role-to-model registry (`config/models.yaml`), data-class allowlist (VX-7), one ledger record per call |

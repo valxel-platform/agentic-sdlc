@@ -18,6 +18,7 @@ from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers
 from ..agents.parse import merge_sections, parse_affected_repos, parse_tasks
+from .. import performance
 from ..config import ProductConfig
 from ..provisioning import naming_policy
 from ..evaluators import critique, run_checks
@@ -128,6 +129,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "aws_existing": _aws_existing(services, snap) if phase == "architecture" else [],
         # The approved design, for the coder's resource bindings.
         "hld_text": services.artifacts.load(arts["HLD"]) if phase == "build" and "HLD" in arts else "",
+        # The product's performance budgets and rules (vrixel_sdlc.performance).
+        "performance": dict(product.performance or {}),
     }
 
 
@@ -425,6 +428,8 @@ def build_build_subgraph(services):
         # The coder's own test run gates review; CI on the pull request is the final word (ci_wait).
         reply, error = structured.parse(res.text, structured.CoderReply)
         result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
+                  # What the coder says it changed decides the performance test; the plan's list otherwise.
+                  "files": list(reply.files) if reply and reply.files else list(task.get("files") or []),
                   "tests_passed": bool(reply and reply.tests.passed),
                   "summary": reply.summary if reply else res.text,
                   "tests": reply.tests.model_dump() if reply else {"passed": False, "failed": [],
@@ -442,10 +447,14 @@ def build_build_subgraph(services):
                 repo=r["repo"], branch=r["branch"], path=f".vrixel/changes/{ctx['feature_id']}/{tid}.md",
                 content=f"# {ctx['feature_id']} {tid}: {ctx['title']}\n\n{r['summary']}",
                 message=f"{ctx['feature_id']} {tid}: change note")
+            # The performance test this change needs (fixed rules); its label runs the PR's smoke test.
+            perf = performance.decide(r["repo"], r.get("role", ""), r["files"], hld=ctx.get("hld_text", ""),
+                                      perf=ctx.get("performance"))
+            labels = [f"change-set:CS-{ctx['feature_id']}", f"product:{ctx['product_id']}"]
             pr = services.github.open_pr(
                 repo=r["repo"], branch=r["branch"], title=f"{ctx['feature_id']} {tid}: {ctx['title']}",
                 body=r["summary"], files=r["files"],
-                labels=[f"change-set:CS-{ctx['feature_id']}", f"product:{ctx['product_id']}"],
+                labels=labels + ([performance.label(perf.level)] if performance.label(perf.level) else []),
             )
             gates_status(services, [pr], "pending", f"{ctx['feature_id']}: waiting for CI and the pipeline's gates")
             res = call_agent(
@@ -469,15 +478,26 @@ def build_build_subgraph(services):
                       + (" Check that the acceptance tests follow the plan (extend before adding), carry the feature,"
                          " criterion, capability and component tags, declare what they cover, and use synthetic"
                          " data only." if r.get("role") == "acceptance" else "")
+                      + " List performance risks the change brings (an N+1 query, a call inside a loop, an"
+                        " unbounded read, a blocking call on a hot path) under performance."
                       + " Approve only if nothing must change before merge; list what must change as blocking."
                       + f"\n\n{structured.instruction(structured.ReviewReply)}\n\n{r['summary']}"),
                 stub_text=json.dumps({"approve": True, "blocking": [], "notes": [], "score": 0.9}), max_tokens=1024,
                 schema=structured.schema(structured.ReviewReply),
             )
             reply, error = structured.parse(res.text, structured.ReviewReply)
+            if reply and reply.performance:  # the reviewer can only raise the level
+                before = perf.level
+                perf = performance.decide(r["repo"], r.get("role", ""), r["files"], hld=ctx.get("hld_text", ""),
+                                          perf=ctx.get("performance"), concerns=reply.performance)
+                if perf.level != before and performance.label(perf.level):
+                    pr = services.github.open_pr(
+                        repo=r["repo"], branch=r["branch"], title=f"{ctx['feature_id']} {tid}: {ctx['title']}",
+                        body=r["summary"], files=r["files"], labels=labels + [performance.label(perf.level)])
             reviews[tid] = ({"pr": pr, "score": reply.score, "approve": reply.approve and not reply.blocking,
-                             "blocking": reply.blocking, "notes": reply.notes, "role": r["role"]} if reply else
-                            {"pr": pr, "score": 0.0, "approve": False, "role": r["role"], "notes": [],
+                             "blocking": reply.blocking, "notes": reply.notes, "role": r["role"],
+                             "performance": perf.as_dict()} if reply else
+                            {"pr": pr, "score": 0.0, "approve": False, "role": r["role"], "notes": [], "performance": perf.as_dict(),
                              "blocking": [f"The review reply didn't fit its schema: {error}"]})
             if ctx.get("pilot") and "reviewer_shadow" in services.settings.roles:
                 # Pilot: a cheaper reviewer reads the same PR; only its agreement is kept.
@@ -614,6 +634,19 @@ def make_phase_node(phase: str, services):
             repos = sorted({(p["role"], p["repo"]) for p in prs.values() if p.get("role")},
                            key=lambda x: (REPO_ORDER.get(x[0], 9), x[1]))
             delta["risk_tier"] = risk_tier(snap.lane_of_repo(), product, all_tasks)
+            # The performance test each repo needs: the highest level any of its tasks needs.
+            perf = dict(state.get("performance") or {})
+            for rv in reviews.values():
+                d = rv.get("performance")
+                if d and performance.LEVELS.index(d["level"]) >= performance.LEVELS.index(
+                        (perf.get(d["repo"]) or {}).get("level", "none")):
+                    old = perf.get(d["repo"]) or {}
+                    perf[d["repo"]] = {**d, "reasons": list(dict.fromkeys((old.get("reasons") or []) + d["reasons"])),
+                                       "soak": bool(old.get("soak") or d.get("soak"))}
+            delta["performance"] = perf
+            needed = [d for d in perf.values() if d["level"] != "none"]
+            delta["events"].append(event("build", "performance_plan", performance.summary(perf),
+                                         tests=[{"repo": d["repo"], "level": d["level"]} for d in needed]))
             delta["events"][0]["reviews"] = [{"task": tid, "approve": rv.get("approve", True),
                                               **({"shadow": rv["shadow"]} if rv.get("shadow") else {})}
                                              for tid, rv in sorted(reviews.items())]

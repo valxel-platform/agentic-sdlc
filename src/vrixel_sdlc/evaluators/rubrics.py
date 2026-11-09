@@ -40,6 +40,8 @@ RUBRICS: dict[str, tuple[Item, ...]] = {
         Item("data", "Says how the product's data class is protected in the new flow"),
         Item("adrs", "Each ADR states the decision, the alternatives considered and the consequences"),
         Item("failure", "Describes what happens when a new dependency is slow or down", must=False),
+        Item("performance", "States the expected load and whether the feature adds traffic or data volume",
+             must=False),
     ),
     "plan": (
         Item("small", "Each task changes one repo and is small enough for one pull request"),

@@ -163,6 +163,7 @@ class StubGitHub:
                 if pr["repo"] == repo and pr["branch"] == branch and pr["state"] == "open":
                     # The agent pushed again (a retry): the head moves, and CI runs on the new commit.
                     pr["pushes"] = pr.get("pushes", 0) + 1
+                    pr["labels"] = list(dict.fromkeys(list(pr.get("labels") or []) + list(labels)))  # labels add up, as on GitHub
                     pr.update(title=title, body=body, head_sha=hashlib.sha1(
                         f"{repo}#{pr['number']}:{body}:{pr['pushes']}".encode()).hexdigest())
                     return {k: v for k, v in pr.items() if k != "pushes"}
