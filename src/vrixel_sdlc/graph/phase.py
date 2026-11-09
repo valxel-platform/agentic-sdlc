@@ -394,6 +394,16 @@ def flag_findings(ctx: dict, results: dict) -> list[str]:
             + ", ".join(sorted({r['repo'] for r in runtime}))]
 
 
+def perf_pending(services, pr: dict, level: str) -> None:
+    """Open the PR's perf-smoke status as pending, so the gate waits for the template's job (it runs
+    on the label) instead of finding nothing; the job sets the result."""
+    try:
+        services.github.set_status(repo=pr["repo"], sha=pr["head_sha"], context="perf-smoke / report", state="pending",
+                                   description=f"Performance smoke test owed ({level})")
+    except Exception:  # best effort: the suite reports missing, and the agents are asked to run it
+        pass
+
+
 def build_build_subgraph(services):
     """Build fans out one coder agent per task (Send), then a reviewer agent per PR."""
     spec = PHASE_SPECS["build"]
@@ -457,6 +467,8 @@ def build_build_subgraph(services):
                 labels=labels + ([performance.label(perf.level)] if performance.label(perf.level) else []),
             )
             gates_status(services, [pr], "pending", f"{ctx['feature_id']}: waiting for CI and the pipeline's gates")
+            if perf.level != "none":  # the smoke test is owed: pending until the template's job reports
+                perf_pending(services, pr, perf.level)
             res = call_agent(
                 services, role="reviewer", phase="build", ctx=ctx, skills=spec.critic_skills,
                 tail=(review_tail := f"Review {pr['url']} against the plan and constitution."
@@ -494,6 +506,7 @@ def build_build_subgraph(services):
                     pr = services.github.open_pr(
                         repo=r["repo"], branch=r["branch"], title=f"{ctx['feature_id']} {tid}: {ctx['title']}",
                         body=r["summary"], files=r["files"], labels=labels + [performance.label(perf.level)])
+                    perf_pending(services, pr, perf.level)
             reviews[tid] = ({"pr": pr, "score": reply.score, "approve": reply.approve and not reply.blocking,
                              "blocking": reply.blocking, "notes": reply.notes, "role": r["role"],
                              "performance": perf.as_dict()} if reply else

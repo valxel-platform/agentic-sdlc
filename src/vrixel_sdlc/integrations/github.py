@@ -148,6 +148,9 @@ class StubGitHub:
         self.fail_steps: set[str] = set()  # tests: provisioning calls that should fail
         self.ci_fail_once: set[str] = set()  # tests: repos whose first PR commit fails CI
         self.dispatches: list[dict] = []
+        # Performance tests the tool asks for: the template's job reports this result.
+        self.perf_contexts = ("perf-smoke / report", "performance / report")
+        self.perf_result = "success"
         # Store apps' release workflows (vrixel_sdlc.store): the stub answers a dispatch with the
         # statuses the workflow would post; set to "pending" or "failure" to test waiting and failing.
         self.release_result = "success"
@@ -202,12 +205,21 @@ class StubGitHub:
                 latest[st["context"]] = {"name": st["context"], "state": st["state"], "url": st.get("url", ""),
                                          "summary": st.get("description", "")}
         out += latest.values()
+        # Rolled up like GitHub's: a failing or pending status counts, not only the CI run.
+        if any(c["state"] == "failure" for c in out):
+            state = "failure"
+        elif any(c["state"] == "pending" for c in out):
+            state = "pending"
         return {"state": state, "checks": out}
 
     def set_status(self, *, repo, sha, context, state, description, url="") -> None:
         with self._lock:
             self.statuses.append({"repo": repo, "sha": sha, "context": context, "state": state,
                                   "description": description, "url": url})
+            if state == "pending" and context in self.perf_contexts:
+                # The template's performance job answers the status the tool opened (perf_result).
+                self.statuses.append({"repo": repo, "sha": sha, "context": context, "state": self.perf_result,
+                                      "description": "p95 120 ms (budget 500, main 115, +4%), errors 0.0%", "url": ""})
 
     def code_scanning_alerts(self, *, repo, pr=None, ref=None):
         return list(self.code_alerts.get(repo, []))

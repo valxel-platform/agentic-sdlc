@@ -148,3 +148,14 @@ def test_a_product_with_bad_performance_settings_is_refused(tmp_path):
                       governance_root=gov)
     with pytest.raises(GovernanceError, match="p95_ms must be a positive number"):
         build_services(s).snapshot("FARM")
+
+
+def test_a_failed_smoke_test_goes_back_to_the_agents(engine, services):
+    services.github.perf_result = "failure"
+    fid = engine.start(product_id="FARM", title="Farmer login", description="Add auth for farmer accounts")["feature_id"]
+    for gate in ("g1", "g2", "g3", "g4"):
+        approve(engine, fid, gate)
+    owed = [s for s in services.github.statuses if s["context"] == "perf-smoke / report"]
+    assert owed and owed[0]["state"] == "pending"
+    retries = [e for e in engine.view(fid)["events"] if e["node"] == "ci_wait" and e["kind"] == "retry"]
+    assert retries and "perf-smoke / report" in " ".join(retries[0].get("findings") or [retries[0]["detail"]])

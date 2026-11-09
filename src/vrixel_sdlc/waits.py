@@ -74,6 +74,9 @@ class WaitChecker:
                 continue
             self._dispatched.add(key)
             try:
+                if packet["wait"] == "staging" and perf.get(r["repo"]) == "full":
+                    self.services.github.set_status(repo=r["repo"], sha=shas[r["repo"]], context="performance / report",
+                                                    state="pending", description="Staging load test owed")
                 self.services.github.dispatch(repo=r["repo"], event_type="vrixel-deployed", payload={
                     "stage": packet["wait"], "sha": shas[r["repo"]],
                     "base_url": public if roles.get(r["repo"]) == "consumer" and public else r.get("url", ""),
