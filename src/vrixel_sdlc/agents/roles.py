@@ -75,3 +75,17 @@ GATE_APPROVE_TARGET: dict[str, str | list[str]] = {
 }
 NEXT_AFTER_PHASE = {"discovery": "g1", "spec": "g2", "design": "g3", "architecture": "g4",
                     "plan": "build", "release": "g6", "operate": "finalize"}
+
+# Skills agents are given outside the phases above (incidents, roadmaps, release notes).
+EXTRA_SKILLS: tuple[str, ...] = (
+    "engineering:incident-response", "engineering:debug", "engineering:documentation",
+    "engineering:deploy-checklist", "product-management:roadmap-update", "product-management:write-spec",
+)
+
+
+def used_skills() -> set[str]:
+    """Every plugin skill an agent may be given; live mode refuses to start if one is missing."""
+    names = set(EXTRA_SKILLS)
+    for spec in PHASE_SPECS.values():
+        names |= set(spec.skills) | set(spec.critic_skills)
+    return names

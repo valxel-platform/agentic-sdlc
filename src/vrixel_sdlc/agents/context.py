@@ -29,15 +29,31 @@ _ROLE_TOOLS = {
 }
 
 
+def skill_path(name: str, base: str | None = None) -> Path | None:
+    """Where `<plugin>:<skill>` lives under VRIXEL_SKILLS_DIR: the plugin's skills/<skill>/SKILL.md,
+    or, for a command-style skill, its commands/<skill>.md. None when it is not installed."""
+    plugin, _, skill = name.partition(":")
+    base = base if base is not None else os.environ.get("VRIXEL_SKILLS_DIR")
+    if not base or not plugin or not skill:
+        return None
+    for path in (Path(base) / plugin / "skills" / skill / "SKILL.md", Path(base) / plugin / "commands" / f"{skill}.md"):
+        if path.is_file():
+            return path
+    return None
+
+
+def missing_skills(names, base: str | None = None) -> list[str]:
+    return sorted(n for n in names if skill_path(n, base) is None)
+
+
 @lru_cache(maxsize=256)
 def load_skill(name: str) -> str:
-    """Load <VRIXEL_SKILLS_DIR>/<plugin>/skills/<skill>/SKILL.md, or a stable placeholder."""
-    plugin, _, skill = name.partition(":")
-    base = os.environ.get("VRIXEL_SKILLS_DIR")
-    if base:
-        path = Path(base) / plugin / "skills" / skill / "SKILL.md"
-        if path.is_file():
-            return path.read_text(encoding="utf-8")
+    """The skill's instructions from VRIXEL_SKILLS_DIR, or a stable placeholder (stub mode; live
+    mode refuses to start while a skill is missing, see services.check_skills)."""
+    path = skill_path(name)
+    if path:
+        return path.read_text(encoding="utf-8")
+    plugin = name.partition(":")[0]
     return (
         f"# Skill {name}\n"
         f"Placeholder. Install the {plugin} plugin and set VRIXEL_SKILLS_DIR to load the real SKILL.md.\n"

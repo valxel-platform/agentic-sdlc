@@ -2,3 +2,7 @@ Vrixel SDLC
 Copyright 2026 Vrixel
 
 This product includes software developed by Vrixel (https://github.com/vrixel-tools).
+
+The container image includes Anthropic's knowledge-work-plugins (Product Management, Engineering
+and Design), https://github.com/anthropics/knowledge-work-plugins, licensed under the Apache
+License 2.0; its license is at /opt/vrixel/plugins/LICENSE.knowledge-work-plugins in the image.
