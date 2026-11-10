@@ -125,7 +125,19 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         if own_remediation is not None and not isinstance(own_remediation, dict):
             problems.append("runtime.remediation must be a mapping: {autonomous: true | false | [actions]}")
             own_remediation = None
+        change_sets = runtime.get("change_sets")
+        if change_sets is not None:
+            ok = (isinstance(change_sets, dict) and set(change_sets) <= {"enabled", "required", "max_open", "ttl_hours"}
+                  and all(isinstance(change_sets.get(k, False), bool) for k in ("enabled", "required"))
+                  and all(isinstance(change_sets.get(k, 1), int) and change_sets.get(k, 1) >= 1
+                          for k in ("max_open", "ttl_hours")))
+            if not ok:
+                problems.append("runtime.change_sets must be a mapping: {enabled: bool, required: bool, "
+                                "max_open: n >= 1, ttl_hours: n >= 1}")
+                change_sets = None
         runtime = {"openchoreo_project": str(runtime["openchoreo_project"]), "pipeline": pipeline,
+                   # Each change set's own environment before merge (vrixel_sdlc.changeset_env).
+                   "change_sets": dict(change_sets) if change_sets else None,
                    # What the tool may do here by itself, narrowing platform/remediation.yaml.
                    "remediation": dict(own_remediation) if own_remediation else None,
                    # Where the product's error reports go (checked against platform/error-tracking.yaml).

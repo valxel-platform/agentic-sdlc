@@ -961,6 +961,14 @@ def env_for(stage: str, pipeline: tuple[str, ...]) -> str | None:
 def make_merge_train(services):
     def merge_train(state: FeatureState) -> dict:
         cs = dict(state.get("change_set") or {})
+        teardown_events = []
+        env = cs.get("env") or {}
+        if env.get("name") and not env.get("deleted"):  # the change set worked together: its environment goes
+            from .. import changeset_env
+
+            problems = changeset_env.teardown(services, env)
+            cs["env"] = {**env, "deleted": True}
+            teardown_events.append(event("merge_train", "change_set_env_deleted", env["name"], problems=problems))
         risk = state.get("risk_tier", "low")
         lanes = services.feature_snapshot(state).lane_of_repo()
         g5 = [g for g in state.get("gate_decisions", []) if g["gate"] == "g5" and g["decision"] in ("approve", "handback")]
@@ -1008,7 +1016,7 @@ def make_merge_train(services):
                               "run_id": run["run_id"], "url": run.get("url", "")}
         cs |= {"merged": True, "published": published, "packages": packages, "runs": runs}
         return {"pull_requests": merged, "change_set": cs,
-                "events": [event("merge_train", "merged", f"{len(merged)} PRs by {actor}",
+                "events": teardown_events + [event("merge_train", "merged", f"{len(merged)} PRs by {actor}",
                                  order=cs.get("merge_order", []), published=published,
                                  versions={r: p["tag"] for r, p in packages.items()})]}
 
@@ -1026,11 +1034,11 @@ def external(state: FeatureState, wait: str, targets: list[dict], quality: dict 
 
 def quality_packet(services, state: FeatureState, wait: str, targets: list[dict]) -> dict | None:
     """The product's suites for this stage, travelling with the wait so the checker needs no state."""
-    from ..quality import WAIT_STAGE
+    from ..quality import POLICY_STAGE, WAIT_STAGE
 
     stage = WAIT_STAGE[wait]
     policy = services.feature_snapshot(state).product.quality or {}
-    mine = {k: v for k, v in policy.items() if v.get("stage") == stage}
+    mine = {k: v for k, v in policy.items() if v.get("stage") == POLICY_STAGE.get(stage, stage)}
     if not mine or not targets:
         return None
     return {"stage": stage, "policy": mine, "targets": targets, "waivers": list(state.get("waivers") or [])}
@@ -1105,7 +1113,7 @@ def failure_lines(res: dict) -> list[str]:
     return list(dict.fromkeys(lines)) or [res.get("reason", "it failed")]
 
 
-PRE_PRODUCTION = ("build", "dev", "staging")
+PRE_PRODUCTION = ("build", "change_set", "dev", "staging")
 
 
 def fix_or_ask(services, state: FeatureState, wait: str, res: dict, people, extra: dict | None = None) -> Command:
@@ -1120,10 +1128,11 @@ def fix_or_ask(services, state: FeatureState, wait: str, res: dict, people, extr
         return people()
     n = tries + 1
     lines = failure_lines(res)
-    what = {"build": "The OpenChoreo build failed", "dev": "Dev failed", "staging": "Staging failed"}[wait]
+    what = {"build": "The OpenChoreo build failed", "change_set": "The change set's environment failed",
+            "dev": "Dev failed", "staging": "Staging failed"}[wait]
     update = {**(extra or {}), "delivery": {wait: res}, **_quality_update(res), "fix_retries": n,
               "rerun_repos": failing, "ci_retries": 0,
-              "feedback": {"build": f"{what} after the change merged. Fix these failures:\n"
+              "feedback": {"build": f"{what} {'after the change merged' if (state.get('change_set') or {}).get('merged') else 'with the pull requests together, before merging'}. Fix these failures:\n"
                                     + "\n".join(f"- {x}" for x in lines)},
               "events": [event(f"{wait}_wait", "auto_fix", f"{what} in {', '.join(failing)}: agents fix it "
                                f"(try {n} of {limit})", findings=lines)]}
@@ -1180,7 +1189,7 @@ def make_ci_wait(services):
     def ci_wait(state: FeatureState) -> Command:
         prs = [pr for pr in (state.get("pull_requests") or {}).values()
                if pr.get("state") != "merged" and pr.get("head_sha")]
-        nxt = after_ci(state)
+        nxt = after_green_ci(services, state)
         if not prs:
             return Command(goto=nxt)
         perf = state.get("performance") or {}
@@ -1226,7 +1235,163 @@ def make_ci_wait(services):
             "escalations": {"build": {"phase": "build", "reason": res["reason"], "findings": findings}},
             "events": [event("ci_wait", "failed", res["reason"])]})
 
-    return ci_wait, ("g5", "merge_train", "escalate_build", "build", END)
+    return ci_wait, ("cs_env", "g5", "merge_train", "escalate_build", "build", END)
+
+
+def after_green_ci(services, state: FeatureState) -> str:
+    """Green CI goes to the change set's own environment first, when the product runs one."""
+    from .. import changeset_env
+
+    snap = services.feature_snapshot(state)
+    cfg = changeset_env.config(snap.product.runtime)
+    if snap.product.kind != "product" or not snap.product.runtime or not cfg["enabled"]:
+        return after_ci(state)
+    if not changeset_env.components(state, snap.lane_of_repo()):
+        return after_ci(state)
+    return "cs_env"
+
+
+def make_cs_env(services):
+    """Create the change set's environment (once) and build each runtime repo's pull request head."""
+
+    def cs_env(state: FeatureState) -> Command:
+        from .. import changeset_env
+
+        snap = services.feature_snapshot(state)
+        cfg = changeset_env.config(snap.product.runtime)
+        targets = changeset_env.components(state, snap.lane_of_repo())
+        cs = dict(state.get("change_set") or {})
+        env = dict(cs.get("env") or {})
+        name = env.get("name") or changeset_env.name_for(state["feature_id"])
+        namespaces = sorted({t["namespace"] for t in targets}, key=str)
+        try:
+            if not env.get("name"):
+                if changeset_env.open_count(services, namespaces) >= cfg["max_open"]:
+                    raise RuntimeError(f"{cfg['max_open']} change-set environments are already open "
+                                       "(runtime.change_sets.max_open)")
+                for ns in namespaces:
+                    services.openchoreo.create_environment(
+                        name=name, like=targets[0]["like"], project=targets[0]["project"], namespace=ns,
+                        labels={"vrixel.io/feature": state["feature_id"]})
+            runs = {}
+            for t in targets:
+                run = services.openchoreo.run_workflow(component=t["component"], ref=t["sha"], kind="change_set",
+                                                       project=t["project"], namespace=t["namespace"])
+                runs[t["repo"]] = {**t, "run_id": run["run_id"], "url": run.get("url", ""), "state": "running"}
+        except Exception as exc:
+            reason = f"Couldn't set up the change set's environment: {type(exc).__name__}: {exc}"
+            if not cfg["required"]:  # optional: say so and carry on as before
+                return Command(goto=after_ci(state), update={"events": [event("cs_env", "skipped", reason)]})
+            res = {"status": "failure", "wait": "change_set", "results": [], "reason": reason, "at": now()}
+            return _people_said(state, "change_set", res, ok=after_ci(state), retry="cs_env")
+        cs["env"] = {**env, "name": name, "namespaces": namespaces, "runs": runs, "deployed": env.get("deployed") or {},
+                     "created": env.get("created") or now(), "deleted": False}
+        return Command(goto="cs_build_wait", update={"change_set": cs, "events": [
+            event("cs_env", "building", f"{name}: {len(runs)} pull request heads", env=name)]})
+
+    return cs_env, ("cs_build_wait", "g5", "merge_train", "cs_env", END)
+
+
+def make_cs_build_wait(services):
+    def cs_build_wait(state: FeatureState) -> Command:
+        cs = dict(state.get("change_set") or {})
+        env = dict(cs.get("env") or {})
+        runs = env.get("runs") or {}
+        todo = [r for r in runs.values() if r.get("state") != "success"]
+        if not todo:
+            return Command(goto="cs_deploy")
+        res = interrupt(external(state, "build", todo))
+        env["runs"] = {**runs, **{r["repo"]: {**runs[r["repo"]], "state": r["state"]} for r in res["results"]}}
+        cs["env"] = env
+        if res["status"] == "success":
+            return Command(goto="cs_deploy", update={"change_set": cs, "events": [
+                event("cs_build_wait", "passed", f"{len(todo)} pull request heads built for {env['name']}")]})
+        return fix_or_ask(services, state, "build", res, lambda: _people_said(
+            state, "build", res, ok="cs_deploy", retry="cs_env", extra={"change_set": cs}), extra={"change_set": cs})
+
+    return cs_build_wait, ("cs_deploy", "cs_env", "cs_build_wait", "build", END)
+
+
+def make_cs_deploy(services):
+    """Bind the feature's managed services and each build to the change set's environment."""
+
+    def cs_deploy(state: FeatureState) -> Command:
+        cs = dict(state.get("change_set") or {})
+        env = dict(cs.get("env") or {})
+        name, deployed, failures = env["name"], dict(env.get("deployed") or {}), []
+        for spec in state.get("resources") or []:
+            spec = spec.get("spec") or spec
+            try:
+                services.openchoreo.apply_resource(name=spec["name"], type=spec["type"], parameters=spec["parameters"],
+                                                   project=spec["project"], namespace=spec.get("namespace"))
+                # The smallest size, never retained: test data goes with the environment.
+                services.openchoreo.bind_resource(name=spec["name"], env=name, size="small", actor="agent:change-set",
+                                                  actor_type="agent", project=spec["project"],
+                                                  namespace=spec.get("namespace"), pipeline=(name, "production"))
+                deployed[f"resource:{spec['name']}"] = {"repo": f"resource:{spec['name']}", "kind": "resource",
+                                                        "component": spec["name"], "project": spec["project"],
+                                                        "namespace": spec.get("namespace"), "env": name}
+            except Exception as exc:
+                failures.append({"repo": f"resource:{spec['name']}", "component": spec["name"], "state": "failure",
+                                 "message": f"{type(exc).__name__}: {exc}"})
+        for repo, run in (env.get("runs") or {}).items():
+            try:
+                rec = services.openchoreo.bind_latest(component=run["component"], env=name, actor="agent:change-set",
+                                                      project=run["project"], namespace=run["namespace"])
+                deployed[repo] = {"repo": repo, "component": run["component"], "project": run["project"],
+                                  "namespace": run["namespace"], "env": name, "sha": run["sha"],
+                                  "role": run.get("role", ""), "release": rec.get("release", "")}
+            except Exception as exc:
+                failures.append({"repo": repo, "component": run["component"], "state": "failure",
+                                 "message": f"{type(exc).__name__}: {exc}"})
+        env["deployed"] = deployed
+        cs["env"] = env
+        if failures:
+            res = {"status": "failure", "wait": "change_set", "results": failures, "at": now(),
+                   "reason": f"Couldn't deploy to {name}: " + "; ".join(f["message"] for f in failures)}
+            return _people_said(state, "change_set", res, ok=after_ci(state), retry="cs_deploy",
+                                extra={"change_set": cs})
+        return Command(goto="cs_wait", update={"change_set": cs, "events": [
+            event("cs_deploy", "deployed", f"{name}: {', '.join(sorted(deployed))}", env=name)]})
+
+    return cs_deploy, ("cs_wait", "g5", "merge_train", "cs_deploy", END)
+
+
+def make_cs_wait(services):
+    """Wait until the change set runs in its environment, then run the dev-stage suites and the
+    feature's acceptance tests there. Passed: on to G5 or the merge; failed: back to the agents."""
+
+    def cs_wait(state: FeatureState) -> Command:
+        from .. import changeset_env
+
+        env = (state.get("change_set") or {}).get("env") or {}
+        deployed = list((env.get("deployed") or {}).values())
+        targets = [{"repo": d["repo"], "component": d["component"], "project": d.get("project"),
+                    "namespace": d.get("namespace"), "env": d["env"],
+                    **({"kind": "resource"} if d.get("kind") == "resource" else {})} for d in deployed]
+        nxt = after_ci(state)
+        if not targets:
+            return Command(goto=nxt)
+        perf = state.get("performance") or {}
+        qtargets = [{**t, "sha": d.get("sha", ""), "role": d.get("role", ""), "perf": (perf.get(t["repo"]) or {}).get("level", "none")}
+                    for t, d in zip(targets, deployed) if t.get("kind") != "resource"]
+        acc = changeset_env.acceptance_head(state)
+        if acc:
+            qtargets += acceptance_targets(services, {**state, "change_set": {**(state.get("change_set") or {}),
+                                                                              "acceptance": acc}},
+                                           "change_set", [t for t in targets if t.get("kind") != "resource"])
+        res = interrupt(external(state, "change_set", targets, quality_packet(services, state, "change_set", qtargets)))
+        if res["status"] == "security":
+            return fix_or_ask(services, state, "change_set", res, lambda: security_review(
+                services, state, "change_set", res, ok=nxt, retry="cs_wait"))
+        if res["status"] == "success":
+            return Command(goto=nxt, update={"delivery": {"change_set": res}, **_quality_update(res),
+                                             "events": [event("cs_wait", "passed",
+                                                              f"the change set works together in {env['name']}")]})
+        return fix_or_ask(services, state, "change_set", res, lambda: _people_said(
+            state, "change_set", res, ok=nxt, retry="cs_deploy"))
+
+    return cs_wait, ("g5", "merge_train", "cs_wait", "cs_deploy", "build", END)
 
 
 def make_build_wait(services):
@@ -1506,7 +1671,7 @@ def acceptance_targets(services, state: FeatureState, stage: str, deployed: list
     from ..agents.parse import parse_acs
 
     acc = (state.get("change_set") or {}).get("acceptance")
-    if not acc or not acc.get("sha") or stage not in ("dev", "staging"):
+    if not acc or not acc.get("sha") or stage not in ("change_set", "dev", "staging"):
         return []
     repos = [{"name": t["repo"], "role": t.get("role")} for t in state.get("tasks") or []]
     arts = state.get("artifacts") or {}
@@ -1547,6 +1712,10 @@ def build_pipeline(services, checkpointer=None):
     g.add_node("ci_wait", node, destinations=dest)
     node, dest = make_build_wait(services)
     g.add_node("build_wait", node, destinations=dest)
+    for name, make in (("cs_env", make_cs_env), ("cs_build_wait", make_cs_build_wait), ("cs_deploy", make_cs_deploy),
+                       ("cs_wait", make_cs_wait)):
+        node, dest = make(services)
+        g.add_node(name, node, destinations=dest)
     for stage, after in (("dev", "deploy_staging"), ("staging", "release")):
         node, dest = make_deploy(stage, services, after)
         g.add_node(f"deploy_{stage}", node, destinations=dest)

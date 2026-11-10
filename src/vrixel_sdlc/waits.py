@@ -6,6 +6,7 @@ and when a GitHub webhook says something changed.
   wait       target fields                       done when
   ci         repo, number, sha                   every check on the PR head is green
   build      component, run_id, project, ...     the OpenChoreo WorkflowRun succeeded
+  change_set component, env, project, ...        the change set's own environment is ready (changeset_env.py)
   dev        component, env, project, ...        the ReleaseBinding in that env is ready
   staging    (same)
   production (same)
@@ -17,10 +18,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-LABELS = {"ci": "CI checks", "build": "OpenChoreo builds", "dev": "Deploy to dev",
+LABELS = {"ci": "CI checks", "build": "OpenChoreo builds", "change_set": "Change set's own environment", "dev": "Deploy to dev",
           "staging": "Deploy to staging", "production": "Deploy to production", "rollout": "Staged rollout"}
 # Store builds and Maestro runs take longer than a deployment; a rollout step waits on a day of vitals.
-TIMEOUT_S = {"ci": 3 * 3600, "build": 3600, "dev": 1800, "staging": 1800, "production": 1800,
+TIMEOUT_S = {"ci": 3 * 3600, "build": 3600, "change_set": 1800, "dev": 1800, "staging": 1800, "production": 1800,
              "rollout": 96 * 3600}
 STORE_TIMEOUT_S = {"dev": 3 * 3600, "staging": 4 * 3600, "production": 4 * 3600}
 
@@ -195,7 +196,7 @@ class WaitChecker:
                         "reason": f"{LABELS.get(wait, wait)} still not done after {int(limit // 60)} minutes"}
             return None
         base = {"wait": wait, "results": results, "at": now()}
-        if wait in ("dev", "staging", "production"):
+        if wait in ("change_set", "dev", "staging", "production"):
             self._start_post_deploy(packet, results)
         return self._quality(packet, base)
 

@@ -672,15 +672,17 @@ From build to production, the pipeline works in the product's own GitHub org and
 project, and pauses on CI, builds and deployments the way it pauses on people:
 
 ```
-join ─ provision ─ plan ─ build ─ ci_wait ─[G5]─ merge_train ─ build_wait ─ deploy_dev ─ dev_wait ─ deploy_staging ─ staging_wait
-      ─ release ─ G6 (binds production for the approver) ─ production_wait ─ operate
+join ─ provision ─ plan ─ build ─ ci_wait ─ cs_env ─ cs_build_wait ─ cs_deploy ─ cs_wait ─[G5]─ merge_train ─ build_wait
+      ─ deploy_dev ─ dev_wait ─ deploy_staging ─ staging_wait ─ release ─ G6 (binds production for the approver)
+      ─ production_wait ─ operate
 ```
 
 | Step | GitHub | OpenChoreo |
 | --- | --- | --- |
 | Build | A change note per task (`.vrixel/changes/<feature>/<task>.md`) on `feature/<id>`; one PR per repo, found again by branch on retries; posts `vrixel/gates` pending on each PR | |
 | ci_wait | Waits until every check run and status on each PR head is green (except the tool's own `vrixel/` and `openchoreo/` statuses) | |
-| merge_train | Posts `vrixel/gates` success (naming the gates approved), then merges exactly the commit the gates saw, in dependency order (libraries, providers, consumers); branch protection still applies. An abort posts `vrixel/gates` failure | Triggers a WorkflowRun on each merge commit; shared-lane repos publish packages instead |
+| cs_env … cs_wait | Asks each repo to run its dev-stage suites, and the acceptance repo its tests, against the PR heads | Creates `cs-<feature>` on the dev data plane, builds each PR head, binds the builds and the feature's managed services there, waits until ready |
+| merge_train | Deletes the change set's environment. Posts `vrixel/gates` success (naming the gates approved), then merges exactly the commit the gates saw, in dependency order (libraries, providers, consumers); branch protection still applies. An abort posts `vrixel/gates` failure | Triggers a WorkflowRun on each merge commit; shared-lane repos publish packages instead |
 | build_wait | Posts `openchoreo/build` on the merge commit | Waits for the WorkflowRuns |
 | deploy and wait | Posts `openchoreo/dev`, `openchoreo/staging`, `openchoreo/production` | Binds the latest release to the first environment, then promotes the same release; waits until each ReleaseBinding is ready |
 
@@ -697,6 +699,53 @@ webhook. When one fails or times out:
   is to blame: try again, carry on anyway, or stop. A deployment the platform refuses goes straight
   to them. Production is never fixed this way: retrying it means asking for G6 again.
 
+### Testing the change set together before merging
+
+A change set often spans repos: an API, the web app that calls it, a worker, the acceptance tests.
+CI tests each pull request on its own; only an environment running all of them shows whether they
+work together. So after CI passes, and before G5 or the merge, the pipeline gives the change set its
+own environment (`vrixel_sdlc/changeset_env.py`):
+
+1. **Create** `cs-<feature id>` (for example `cs-farm-feat-12`) on the data plane of the product's
+   first environment, labelled `vrixel.io/change-set`. It is outside the deployment pipeline and is
+   never promoted from.
+2. **Build** each runtime repo's pull request head in OpenChoreo. Libraries, acceptance tests and
+   store apps aren't built here.
+3. **Deploy** those builds there, with the feature's managed services at their smallest size and
+   empty (test data only, never retained).
+4. **Test** with the product's dev-stage suites (integration and the like) and the feature's
+   acceptance tests from the acceptance repo's pull request, as check runs named
+   `acceptance / <feature> / change_set`.
+
+When it passes, the change set goes on to G5 or the merge train, which deletes the environment.
+When it fails, it goes back to the agents like red CI: the failing repos' tasks are redone on their
+pull requests, CI runs again, and the environment is rebuilt from the new heads. Main only receives
+a change set that worked as a whole, so fixes after merge become rare. Dev, staging and production
+still get the merged commits through the pipeline, and run their own suites again.
+
+```yaml
+runtime:
+  change_sets:
+    enabled: true      # default true for products with a runtime
+    required: false    # true: people decide when the environment can't be created
+    max_open: 5        # change-set environments a product may have at once
+    ttl_hours: 48      # deleted after this even if the feature is still open
+```
+
+If the environment can't be created (OpenChoreo refuses, or `max_open` are already open), the
+change set merges as before and the feature says so, unless `required` is set; then the release
+managers decide. Every 15 minutes the watcher deletes change-set environments whose feature has
+finished or stopped, or that outlived `ttl_hours`.
+
+**Before relying on it, check in a sandbox** that your OpenChoreo version lets the service client
+create and delete Environments and bind a release to an environment outside the project's
+deployment pipeline, and that deleting an environment removes its bindings. The adapter uses the
+MCP tools `create_environment`, `get_environment`, `list_environments`, `delete_environment` and
+`delete_release_binding`. The platform side (namespace, ingress and DNS per environment, its
+share of the dev data plane, secrets for test-only managed services) belongs in the platform
+foundation, so an environment is ready the moment OpenChoreo creates it. Each open change set costs
+a small copy of dev while it is open; `max_open` and `ttl_hours` cap that.
+
 ### Fixing failures before production
 
 Before production the pipeline fixes its own failures; people step in only when it can't. Whatever
@@ -708,7 +757,8 @@ new commits; after merge the fix goes on a branch of its own (`feature/<id>-fix-
 through CI, G5 when the change is risky, the merge, the build, dev and staging again.
 
 Each feature gets the product's `max_loops` tries before merge (CI and security findings) and as
-many again after it (build, dev and staging), counted afresh once staging passes. When they run out,
+many again for the environments (the change set's own, its builds, dev and staging), counted afresh once
+staging passes. When they run out,
 or the failure is outside what the feature changed (a managed service, the platform), people decide:
 the build's escalation before merge, the release managers or security approvers after it. Every try
 is an `auto_fix` event with the failures, so the decision shows what the agents already tried.
@@ -732,7 +782,8 @@ runtime:
    (write), checks (read). Subscribe it to check runs, check suites, statuses and pull requests,
    with the webhook URL `<VRIXEL_PUBLIC_URL>/api/webhooks/github` and `VRIXEL_GITHUB_WEBHOOK_SECRET`.
 2. In OpenChoreo, give the confidential service client (`service_mcp_client` by default) a role
-   that can trigger workflow runs and manage release bindings in each product's project. Set
+   that can trigger workflow runs, manage release bindings and create, list and delete
+   environments in each product's project. Set
    `VRIXEL_OPENCHOREO_MCP_URL` (`<api host>/mcp`), `VRIXEL_OPENCHOREO_TOKEN_URL` and
    `VRIXEL_OPENCHOREO_CLIENT_SECRET`.
 3. Create each product's OpenChoreo project, components and deployment pipeline to match
@@ -1768,8 +1819,7 @@ effect once the other is also decided. An earlier approval of the other gate sti
 | Phase templates | Real agent output in live mode; keep the section structure the checks read | `agents/templates.py` |
 | Build tasks | Coder agents in sandboxed containers with a checkout of one repo each | `runtime/claude_code.py` |
 
-Open items carried over from the design: per-change-set integration environments. Have
-compliance counsel review the regulatory constitution articles.
+Have compliance counsel review the regulatory constitution articles.
 
 ## Layout
 

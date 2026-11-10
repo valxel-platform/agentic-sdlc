@@ -5,14 +5,15 @@ export const PHASES: Record<string, string> = {
 };
 
 const FAILED: Record<string, string> = {
-  build: "OpenChoreo build", dev: "Dev deploy", staging: "Staging deploy", production: "Production deploy",
+  build: "OpenChoreo build", change_set: "Change set's own environment", dev: "Dev deploy", staging: "Staging deploy", production: "Production deploy",
   rollout: "Store rollout health check",
 };
 
 export const WAITS: Record<string, string> = {
   release_ready: "Waiting for its features", release_train: "Waiting for its release train",
   incident_recovery: "Waiting for alerts to resolve",
-  ci: "Waiting for CI", build: "Building in OpenChoreo", dev: "Deploying to dev",
+  ci: "Waiting for CI", build: "Building in OpenChoreo", change_set: "Testing the change set together before merging",
+  dev: "Deploying to dev",
   staging: "Deploying to staging", production: "Deploying to production",
   rollout: "Rolling out in the stores",
 };

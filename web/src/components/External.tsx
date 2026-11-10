@@ -83,7 +83,7 @@ export function WorkItems({ featureId, work, canSync, onSynced }: {
 }
 
 const STAGES: [string, string][] = [
-  ["ci", "CI checks"], ["build", "OpenChoreo build"], ["dev", "Dev"], ["staging", "Staging"], ["production", "Production"],
+  ["ci", "CI checks"], ["build", "OpenChoreo build"], ["change_set", "Change set's environment"], ["dev", "Dev"], ["staging", "Staging"], ["production", "Production"],
   ["rollout", "Store rollout"],
 ];
 const RESULT: Record<string, [string, string]> = {

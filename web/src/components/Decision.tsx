@@ -9,7 +9,8 @@ import { AlarmsFiring, AwsResourcesTable } from "./AwsResources";
 import { DesignReviewPanel, RepoPlans, SimilarList } from "./External";
 
 const DELIVERY_FAILED: Record<string, string> = {
-  build: "The OpenChoreo build failed", dev: "The dev deployment failed", staging: "The staging deployment failed",
+  build: "The OpenChoreo build failed", change_set: "The change set failed in its own environment",
+  dev: "The dev deployment failed", staging: "The staging deployment failed",
   production: "The production deployment failed",
 };
 
@@ -178,7 +179,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   // Whether the person changed the document they were given (only then is it sent).
   const edited = content.trim() !== "" && content.trim() !== (item.content ?? "").trim();
   const learnable = !roadmapGate && !delivery && !security;
-  const retryLabel = { build: "Rebuild", dev: "Deploy again", staging: "Deploy again", production: "Ask for G6 again" }[item.wait ?? ""] ?? "Try again";
+  const retryLabel = { build: "Rebuild", change_set: "Try the environment again", dev: "Deploy again", staging: "Deploy again", production: "Ask for G6 again" }[item.wait ?? ""] ?? "Try again";
 
   return (
     <section className="panel decision" aria-labelledby="decision-q">

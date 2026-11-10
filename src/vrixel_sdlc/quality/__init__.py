@@ -26,7 +26,9 @@ import yaml
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 STAGES = ("pr", "build", "dev", "staging", "production")
-WAIT_STAGE = {"ci": "pr", "build": "build", "dev": "dev", "staging": "staging", "production": "production"}
+# The change set's own environment runs the dev-stage suites (and acceptance) before anything merges.
+POLICY_STAGE = {"change_set": "dev"}
+WAIT_STAGE = {"ci": "pr", "build": "build", "change_set": "change_set", "dev": "dev", "staging": "staging", "production": "production"}
 
 
 def sev_rank(sev: str | None) -> int:
@@ -204,7 +206,7 @@ def evaluate(stage: str, policy: dict[str, dict], results: list[SuiteResult], wa
     waived = active_waivers(waivers)
     suites, test_failures, blocking, pending = [], [], [], []
     for name, spec in sorted(policy.items()):
-        if spec.get("stage") != stage:
+        if spec.get("stage") != POLICY_STAGE.get(stage, stage):
             continue
         mine = [r for r in results if r.suite == name]
         if not mine and spec.get("applies_to") in ("acceptance", "performance"):
@@ -269,7 +271,7 @@ class Quality:
     def check(self, stage: str, policy: dict[str, dict], targets: list[dict], waivers: list[dict]) -> dict:
         results: list[SuiteResult] = []
         for name, spec in policy.items():
-            if spec.get("stage") != stage:
+            if spec.get("stage") != POLICY_STAGE.get(stage, stage):
                 continue
             source = self.sources.get(spec["source"]) or self.sources.get("stub")
             if source is None:
