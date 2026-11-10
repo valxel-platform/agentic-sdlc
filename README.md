@@ -1753,11 +1753,20 @@ effect once the other is also decided. An earlier approval of the other gate sti
   and use the plugins' subagents, hooks and MCP servers. Keep the appended layers under about
   120 KB: the SDK passes them as one process argument, and the runtime warns before the limit.
 
+- **strict**: set `VRIXEL_STRICT=1` in production. The switches above are independent, and some
+  fall back quietly: a Jira, OpenProject or Lucid server without credentials runs as an offline
+  stand-in, a product's flags run in memory, no `DATABASE_URL` keeps everything in memory. Strict
+  mode refuses to start while any of them would, and lists each one: `VRIXEL_MODE`,
+  `VRIXEL_DELIVERY`, `VRIXEL_AUTH` and `VRIXEL_GOVERNANCE_SOURCE` not live, no database, and per
+  product a diagram or tracker without credentials, Flipt without its token, or ServiceNow without
+  `VRIXEL_SERVICENOW_AUTH_<ID>`. Stand-ins with no live version yet (the package registry for shared
+  lanes) are logged as warnings. `/api/healthz` reports `strict` (`vrixel_sdlc/strict.py`).
+
 ## Replacing the stubs
 
 | Stub | Replace with | Interface |
 | --- | --- | --- |
-| `InMemoryCatalog` | The Backstage catalog in the OpenChoreo portal | `integrations/catalog.py` |
+| `InMemoryCatalog` (no `DATABASE_URL` only) | `PostgresCatalog` with a database; a mirror to the Backstage catalog in the OpenChoreo portal is still open | `integrations/catalog.py` |
 | `StubFlags` (stub delivery only) | Each product's Flipt (`tools.flags` in product.yaml) | `integrations/flags.py` |
 | Phase templates | Real agent output in live mode; keep the section structure the checks read | `agents/templates.py` |
 | Build tasks | Coder agents in sandboxed containers with a checkout of one repo each | `runtime/claude_code.py` |
