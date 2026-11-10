@@ -7,8 +7,7 @@ credentials runs as a stand-in, a product's flags run in memory, a missing datab
 everything in memory. Strict mode turns each of those into a startup error, so a typo in a
 token can't make G6 reconcile the matrix against a fake tracker.
 
-`stand_ins` returns what blocks; `known_gaps` returns stand-ins that have no live version yet and
-only warn (see "Replacing the stubs" in the README)."""
+`stand_ins` returns what blocks; `known_gaps` returns what runs but can't be checked, and only warns."""
 
 from __future__ import annotations
 
@@ -66,14 +65,19 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
 
 
 def known_gaps(services) -> list[str]:
-    """Stand-ins with no live version yet: strict mode warns about these and starts anyway."""
-    from .integrations.packages import StubPackageRegistry
-
+    """What runs, but can't be checked: strict mode warns about these and starts anyway."""
     out = []
-    shared = sorted(pid for pid, e in services.settings.registry.items() if e.kind == "shared")
-    if shared and isinstance(services.packages, StubPackageRegistry):
-        out.append(f"shared lanes {', '.join(shared)} record release channels in memory: "
-                   "there is no live package registry yet")
+    for pid, entry in sorted(services.settings.registry.items()):
+        if entry.kind != "shared":
+            continue
+        try:
+            repos = services.snapshot(pid).product.repos
+        except Exception:
+            continue
+        unchecked = [r.name for r in repos if r.role == "library" and not r.package]
+        if unchecked:
+            out.append(f"{pid}: {', '.join(unchecked)} declare no package, so G6 can't check that a release "
+                       "candidate was published to GitHub Packages")
     return out
 
 

@@ -66,7 +66,16 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
             problems.append(f"repo {name} is outside the product's organization {org}")
         if role not in _ROLES:
             problems.append(f"repo {name} has role {role!r}; expected one of {sorted(_ROLES)}")
-        repos.append(RepoSpec(name=str(name), role=str(role)))
+        package = (r or {}).get("package")
+        if package is not None:
+            from ..integrations.packages import PACKAGE_TYPES
+
+            if not isinstance(package, dict) or package.get("type") not in PACKAGE_TYPES or not package.get("name"):
+                problems.append(f"repo {name}: package needs a type ({', '.join(PACKAGE_TYPES)}) and a name")
+                package = None
+            else:
+                package = {"type": str(package["type"]), "name": str(package["name"])}
+        repos.append(RepoSpec(name=str(name), role=str(role), package=package))
     # A new product may start with no repos: its first feature's HLD proposes them, G4 approves
     # them and the provision step creates them. It then needs the prefix new repo names start with.
     repo_prefix = str(raw.get("repo_prefix") or "")

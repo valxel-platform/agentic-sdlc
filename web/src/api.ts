@@ -27,6 +27,10 @@ export interface PendingItem {
   aws_resources?: AwsResources | null;
   // At G6: the traceability matrix. When it blocks, approving needs an override and its reason.
   traceability?: ReleaseTraceability | null;
+  // At a shared lane's G6: each release candidate, and whether its workflow published it.
+  packages?: ReleaseCandidate[] | null;
+  // Why the last decision was refused (asked again).
+  refused?: string;
   // At G6: CloudWatch alarms firing before production on what the feature touches.
   alarms_firing?: { env: string; resource: string; alarm: string; severity: string; says: string;
                     since: string; url: string; title: string }[];
@@ -521,3 +525,11 @@ export const api = {
   lessons: (productId: string) => request<LessonsOverview>("GET", `/products/${encodeURIComponent(productId)}/lessons`),
   pilotReport: (productId: string) => request<PilotReport>("GET", `/reports/pilot?product_id=${encodeURIComponent(productId)}`),
 };
+
+export interface ReleaseCandidate {
+  repo: string;
+  version: string;
+  rc: string;
+  status: "published" | "missing" | "unknown";
+  package: { type: string; name: string } | null;
+}

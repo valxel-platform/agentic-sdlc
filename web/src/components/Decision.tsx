@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type PendingItem, type ReleaseTraceability } from "../api";
+import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type PendingItem, type ReleaseCandidate, type ReleaseTraceability } from "../api";
 import Markdown from "react-markdown";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
@@ -95,6 +95,22 @@ function ReleaseTrace({ t }: { t: ReleaseTraceability }) {
         </>
       )}
       {t.drift_error && <p className="small muted">The work tracker couldn't be checked: {t.drift_error}</p>}
+    </div>
+  );
+}
+
+/** G6 for a shared lane: approving tags each release candidate's commit as the stable version. */
+function ReleaseCandidates({ items }: { items: ReleaseCandidate[] }) {
+  const said = { published: "published", missing: "not in GitHub Packages yet", unknown: "not checked" };
+  return (
+    <div role={items.some((p) => p.status === "missing") ? "alert" : "status"}>
+      <h3>Packages</h3>
+      <p className="small">Approving tags the same commit as the stable version, and the release workflow publishes it.</p>
+      <ul className="plain-list small">
+        {items.map((p) => (
+          <li key={p.repo}>{p.repo}: {p.rc} becomes v{p.version} ({said[p.status]}{p.package ? `, ${p.package.type} ${p.package.name}` : ""})</li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -368,7 +384,11 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
 
       {item.design_review && <DesignReviewPanel review={item.design_review} />}
 
+      {item.refused && <p role="alert" className="small">{item.refused}</p>}
+
       {item.traceability && <ReleaseTrace t={item.traceability} />}
+
+      {item.packages && item.packages.length > 0 && <ReleaseCandidates items={item.packages} />}
 
       {item.alarms_firing && item.alarms_firing.length > 0 && (
         <div role="status">

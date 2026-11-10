@@ -161,6 +161,16 @@ dependency's code:
   change set touching shared code is regulated and goes through G5.
 - **Release.**
   - *Shared repos* publish a release candidate on merge, and G6 marks it stable. Nothing deploys.
+    Git tags drive it, so every language works the same way. At the merge the tool tags the
+    merge commit `v1.5.0-rc.1`, and the repo's release workflow publishes `1.5.0-rc.1` to GitHub
+    Packages (Maven, npm, NuGet, RubyGems, or ghcr.io for images and Helm charts). At G6 it tags
+    the same commit `v1.5.0` and the workflow publishes the stable version. The version follows
+    the repo's latest stable tag: minor by default, patch for a hotfix, major when the HLD marks
+    the repo's contract change as breaking. The tool never builds or uploads a package and holds
+    no registry credentials; the workflow publishes with its own `GITHUB_TOKEN`. A library that
+    declares its package (`package: {type: maven, name: com.acme.shared.security}` on the repo in
+    `product.yaml`) is checked at G6: the lane can't approve while its release candidate isn't
+    in GitHub Packages (`integrations/packages.py`).
   - *Product repos* build in the product's own OpenChoreo project, and G6 promotes them to
     production there.
 
@@ -1745,20 +1755,20 @@ effect once the other is also decided. An earlier approval of the other gate sti
   mode refuses to start while any of them would, and lists each one: `VRIXEL_MODE`,
   `VRIXEL_DELIVERY`, `VRIXEL_AUTH` and `VRIXEL_GOVERNANCE_SOURCE` not live, no database, and per
   product a diagram or tracker without credentials, Flipt without its token, or ServiceNow without
-  `VRIXEL_SERVICENOW_AUTH_<ID>`. Stand-ins with no live version yet (the package registry for shared
-  lanes) are logged as warnings. `/api/healthz` reports `strict` (`vrixel_sdlc/strict.py`).
+  `VRIXEL_SERVICENOW_AUTH_<ID>`. What runs but can't be checked (a shared library that declares no
+  package) is logged as a warning. `/api/healthz` reports `strict` (`vrixel_sdlc/strict.py`).
 
 ## Replacing the stubs
 
 | Stub | Replace with | Interface |
 | --- | --- | --- |
 | `InMemoryCatalog` (no `DATABASE_URL` only) | `PostgresCatalog` with a database; a mirror to the Backstage catalog in the OpenChoreo portal is still open | `integrations/catalog.py` |
+| `StubPackageRegistry` (stub delivery only) | Release tags on GitHub; packages checked in GitHub Packages | `integrations/packages.py` |
 | `StubFlags` (stub delivery only) | Each product's Flipt (`tools.flags` in product.yaml) | `integrations/flags.py` |
 | Phase templates | Real agent output in live mode; keep the section structure the checks read | `agents/templates.py` |
 | Build tasks | Coder agents in sandboxed containers with a checkout of one repo each | `runtime/claude_code.py` |
 
-Open items carried over from the design: per-change-set integration environments, and a
-package registry for shared-lane releases (`PackageRegistry` is still a stub). Have
+Open items carried over from the design: per-change-set integration environments. Have
 compliance counsel review the regulatory constitution articles.
 
 ## Layout
