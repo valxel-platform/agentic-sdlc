@@ -1,6 +1,6 @@
 # Role-to-model registry. Changing a role's provider or model is a config change,
 # promoted only after the role passes its phase's golden evals.
-# runtime: claude_code (Claude Agent SDK, plugins native) | generic (LangGraph tool-calling agent)
+# runtime: claude_code (Claude Agent SDK, plugins native) | generic (one gateway call per task, any provider; text only)
 # max_turns, max_call_usd: caps for one Claude Code session (defaults 40 turns, $10); a session
 # never gets more than what's left of the feature's budget either.
 roles:

@@ -1602,6 +1602,15 @@ effect once the other is also decided. An earlier approval of the other gate sti
   (`<plugin>/skills/<skill>/SKILL.md`) to load the real skills. Live mode is not covered by the
   offline tests. Run it against a sandbox product first.
 
+  A Claude Code session starts from Claude Code's own system prompt (the `claude_code` preset:
+  tool use, safety) with the layers L2-L5 appended: the phase's skills in full, the
+  constitution, the product and the feature. It reads settings from the repository only
+  (`setting_sources=["project"]`: the checkout's CLAUDE.md and `.claude/skills/`, nothing from
+  the container's home), and loads every plugin in `VRIXEL_SKILLS_DIR`, so the agent can also
+  pull in a skill the phase didn't list (it sees only names and descriptions until it uses one)
+  and use the plugins' subagents, hooks and MCP servers. Keep the appended layers under about
+  120 KB: the SDK passes them as one process argument, and the runtime warns before the limit.
+
 ## Replacing the stubs
 
 | Stub | Replace with | Interface |
