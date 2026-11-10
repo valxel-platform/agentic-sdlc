@@ -70,6 +70,7 @@ class FeatureState(TypedDict, total=False):
     not_duplicate_reason: str  # why the creator says it isn't a duplicate, when it looked like one
     initiative_id: str  # the approved initiative this feature delivers ('' = unplanned work)
     track: str  # standard | hotfix (an incident's fix: starts at planning, on-call approves G5 and G6)
+    profile: str  # feature | bugfix | express: which phases and gates the work goes through (vrixel_sdlc.profiles)
     hotfix: dict  # {incident_id, repo, change, severity, approved_by} for the hotfix track
     pilot: bool  # measured in the pilot report, with the shadow modes on
 
@@ -88,6 +89,7 @@ class FeatureState(TypedDict, total=False):
     rerun_repos: Annotated[list[str], last]  # repos whose CI failed: the build retry redoes only their tasks
 
     artifacts: Annotated[dict[str, ArtifactRef], merge_dict]  # kind -> latest ref
+    diaries: Annotated[dict[str, list[dict]], merge_dict]  # phase -> the agents' notes for the gate (vrixel_sdlc.diary)
     trace_links: Annotated[list[list[str]], operator.add]  # [parent_id, child_id]
     phase_status: Annotated[dict[str, str], merge_dict]  # passed | escalated | resolved
     scores: Annotated[dict[str, float], merge_dict]

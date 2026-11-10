@@ -68,6 +68,8 @@ def spec(ctx: dict, defective: bool) -> str:
         "", "## Acceptance criteria", *acs,
         "", "## Constitution articles", "- VX-5", f"- {product_article}",
     ]
+    if not defective:
+        lines += ["", "## Agent notes", "- Assumed: the people who use this already sign in to the product"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
 
 
@@ -176,6 +178,9 @@ def architecture(ctx: dict, defective: bool) -> str:
               "- Data growth: no: no new records are kept",
               "- Journeys: none beyond the feature's own"]
     lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15", "- VX-16", "- VX-17"]
+    lines += ["", "## Agent notes", "- Traded off: extend the existing components rather than add a service,"
+              " so there are fewer parts to run", "- Open: whether this change needs a feature flag beyond"
+              " the one the pipeline creates"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
 
 
@@ -293,6 +298,7 @@ def plan(ctx: dict, defective: bool) -> str:
     ]
     if acc:
         lines += ["", "## Acceptance tests", *_acceptance_lines(ctx, repos, acs, slug)]
+    lines += ["", "## Agent notes", "- Assumed: each repo's existing tests keep running in CI as they do today"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
 
 
@@ -361,7 +367,8 @@ def code_result(ctx: dict, task: dict, passed: bool) -> str:
     """The coder's structured reply in stub mode (agents/structured.py CoderReply)."""
     return json.dumps({"summary": code_task(ctx, task, passed), "files": list(task["files"]),
                        "tests": {"command": "the repo's test command", "passed": passed,
-                                 "failed": [] if passed else [f"test_{_slug(task['id'])}"]}})
+                                 "failed": [] if passed else [f"test_{_slug(task['id'])}"]},
+                       "notes": [f"Assumed: {task['repo']}'s public API stays compatible for its other callers"]})
 
 
 def release(ctx: dict, defective: bool) -> str:

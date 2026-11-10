@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type Draft, type IntakeSession, type Me } from "../api";
+import { api, PROFILE_HELP, PROFILE_LABEL, type Draft, type IntakeSession, type Me, type Profile } from "../api";
 import { SimilarList } from "../components/External";
 
 const FIELD_LABEL: Record<string, string> = {
@@ -15,6 +15,8 @@ export function Intake({ me }: { me: Me }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [pilot, setPilot] = useState(false);
+  const [profile, setProfile] = useState<Profile | "">("");
+  const [profiles, setProfiles] = useState<Record<string, { allowed: Profile[]; dflt: Profile }>>({});
   const end = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -26,6 +28,10 @@ export function Intake({ me }: { me: Me }) {
     }
   }, [sid, me.lanes.length, nav]);
   useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [s?.messages.length]);
+  useEffect(() => {
+    api.products().then((ps) => setProfiles(Object.fromEntries(Object.entries(ps).map(([id, p]) =>
+      [id, { allowed: p.profiles ?? ["feature"], dflt: p.default_profile ?? "feature" }])))).catch(() => undefined);
+  }, []);
 
   async function run(p: Promise<IntakeSession>) {
     setBusy(true);
@@ -125,14 +131,23 @@ export function Intake({ me }: { me: Me }) {
           )}
           {err && <p className="error-note" role="alert">{err}</p>}
           {submitted ? (
-            <p className="note">Submitted as <Link to={`/features/${s.feature_id}`}>{s.feature_id}</Link>. Agents have started discovery; you'll find the intent gate in Decisions when it's ready.</p>
+            <p className="note">Submitted as <Link to={`/features/${s.feature_id}`}>{s.feature_id}</Link>. Agents have started on it; you'll find its first gate in Decisions when it's ready.</p>
           ) : (
             <div className="head-actions">
+              {s.draft.product_id && (profiles[s.draft.product_id]?.allowed.length ?? 0) > 1 && (
+                <label className="field small">Workflow
+                  <select value={profile || profiles[s.draft.product_id].dflt}
+                    onChange={(e) => setProfile(e.target.value as Profile)}>
+                    {profiles[s.draft.product_id].allowed.map((p) => <option key={p} value={p}>{PROFILE_LABEL[p]}</option>)}
+                  </select>
+                  <span className="faint">{PROFILE_HELP[(profile || profiles[s.draft.product_id].dflt) as Profile]}</span>
+                </label>
+              )}
               <label className="small">
                 <input id="intake-pilot" type="checkbox" checked={pilot} onChange={(e) => setPilot(e.target.checked)} /> Pilot feature
                 <span className="faint"> (measured on the Pilot page)</span>
               </label>
-              <button className="btn" disabled={busy || !s.ready} onClick={() => run(api.intakeSubmit(s.id, pilot))}>Submit intent</button>
+              <button className="btn" disabled={busy || !s.ready} onClick={() => run(api.intakeSubmit(s.id, pilot, profile))}>Submit intent</button>
             </div>
           )}
         </section>

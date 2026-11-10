@@ -90,8 +90,23 @@ HttpOnly session cookie and discards the GitHub token.
 
 The API records the signed-in login as the approver; a request body cannot override it.
 
-Run one replica. Live updates and intake drafts are held in process. Pipeline state is durable in
-Postgres, so a restart loses only open intake chats.
+Run as many replicas as you like behind one load balancer, all on the same Postgres
+(`src/vrixel_sdlc/cluster.py`). Nothing routes a person back to the same replica:
+
+- **One run per feature.** The replica that moves a feature, incident, release or initiative on
+  holds its Postgres advisory lock while it runs. Another replica asked to move it on at the same
+  time answers that it is still running, and every replica shows it as running. A replica that
+  dies lets go with its connection; one that loses its lock connection stops before the next step,
+  and the work carries on from the last checkpoint.
+- **One watcher.** Every replica starts the watcher; only the one holding its lock polls CI and
+  OpenChoreo and runs the daily inventory and hourly cost review. If it goes, another takes over on
+  its next tick.
+- **Asked once.** Post-deploy, acceptance and rollout runs the tool asks GitHub for are claimed in
+  a table first, so two replicas never both ask.
+- **Shared.** Live updates go through Postgres NOTIFY to every replica's browsers; intake chats,
+  a thread's last error and its tracker sync error are in tables.
+
+Without a database (development) everything is in memory: run one process.
 
 ## Organizations and product governance
 
@@ -1400,6 +1415,66 @@ GitHub as usual. Then read the report: the human share against 15%, where people
 work came back, and the shadow modes' agreement, which decide the next changes (cheaper models for
 low-risk work, automatic approval, learning from repeated corrections).
 
+## Workflow profiles: feature, bug fix, express
+
+Not every change needs discovery and a UX design. Whoever starts the work picks a profile (the New
+intent page asks when the product allows more than one); the gates that matter stay whatever the
+profile (`vrixel_sdlc/profiles.py`):
+
+| Profile | Runs | Gates people decide |
+| --- | --- | --- |
+| Feature | every phase | G1 to G6 (G5 for risky change sets) |
+| Bug fix | spec, architecture, then plan to production; no discovery, no UX design | G2, G4, G5 (risky), G6 |
+| Express | as a bug fix | G4 (with the spec, since there is no G2), G5 (risky), G6 |
+
+A profile without discovery starts from a brief written from the request. The gates it decides
+are recorded as decided by the profile (`approver: profile:bugfix`), and the rail shows the skipped
+stations. No profile skips architecture (it finds the repos, contracts and lanes the change touches),
+planning, tests, security scans, the performance rules, G5 for risky changes or G6. Products list
+the profiles their people may use; express needs listing and never applies to PHI or payments
+products. An incident's hotfix stays its own track, decided by on-call.
+
+```yaml
+# <product>-governance/product.yaml
+workflow:
+  profiles: [feature, bugfix, express]   # default: [feature, bugfix]
+  default: feature
+```
+
+## Agent notes for the gates
+
+A reviewer can't see what an agent took as given, where it departed from the brief, which options
+it weighed or what it wasn't sure of. So every document ends with an `## Agent notes` section, and
+the coder's reply carries the same notes for each pull request (`vrixel_sdlc/diary.py`):
+
+```
+## Agent notes
+- Assumed: <something not stated that the agent took as given>
+- Changed: <where it departed from the brief, the design or a rule, and why>
+- Traded off: <an option it weighed, and why it chose as it did>
+- Open: <a question for the people at the gate>
+```
+
+The tool keeps them per phase on the feature, shows them at the gate the phase goes to, open
+questions first (G4 under express also shows the spec's; G6 shows the coders'), and adds the
+coder's to the pull request description for its reviewers. A note is the agent's account, not a
+check: the evaluators, reviewers and people still decide.
+
+## Traceability
+
+Every link from a feature's reason to what runs in production is already written down: success
+metrics in the brief, goals and acceptance criteria in the spec, decisions and affected repos in
+the HLD, tasks and tests in the plan, pull requests per task, acceptance results per criterion,
+deployments per repo. `GET /api/features/{id}/trace` reads them into one view, and the feature's
+page shows it: each criterion with its task and test, pull requests, acceptance results and where
+it runs, the production incidents on its components, and the gaps in the chain (a criterion no task
+covers, a task without a pull request, a failed or missing acceptance result, a goal without a
+metric, an affected repo nothing changes). Nothing is stored twice, so the view is always what the
+pipeline has now (`vrixel_sdlc/traceability.py`).
+
+Back from code: `GET /api/products/{id}/trace?repo=org/name` or `?pr=org/name%2312` lists the
+features that changed it, with the criteria and tasks involved.
+
 ## Taking over, and learning from people's corrections
 
 A phase that keeps coming back is a person's to finish, and what the person corrects is learned so
@@ -1456,6 +1531,9 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | Agent roster and skills | `agents/roles.py` | Plugin skills per phase; critic skills double as evaluators |
 | Performance tests | `performance.py`, `config/quality.yaml` | Budgets over industry defaults, the rules that pick none, smoke or full per repo, the PR labels and the staging request |
 | Takeover and lessons | `graph/pipeline.py`, `lessons.py` | Gate history and revision limits; the person's version kept on hand-back; corrections recorded, lessons distilled and proposed as governance PRs, then pinned per feature into prompts and the critic's checklist |
+| Workflow profiles | `profiles.py`, `graph/pipeline.py` | Feature, bug fix and express routes; the profile brief, the gates a profile decides, and the guard that keeps architecture, G5 and G6 |
+| Agent notes | `diary.py`, `graph/phase.py` | The `## Agent notes` section and the coder's notes, kept per phase and shown at the gates and in PR descriptions |
+| Traceability | `traceability.py` | Metrics, goals, criteria, tasks, PRs, acceptance results, deployments and incidents in one view, with gaps; reverse lookup by repo or PR |
 | Pilot | `pilot.py` | People's effort, the shadow automatic-approval rule, and the report against the 15% target |
 | Evaluators | `evaluators/` | Deterministic checks run first; the checklist critic runs in a fresh context (judge independence, tier 1) and its quotes are verified against the document |
 | Model gateway | `gateway/gateway.py` | Role-to-model registry (`config/models.yaml`), data-class allowlist (VX-7), one ledger record per call |
@@ -1470,6 +1548,7 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | CI/CD | `integrations/openchoreo.py` | Agents promote to staging only; production promotion at G6 is human (VX-3). A production rollback is a person's, or the tool's under the remediation policy |
 | Knowledge write-back | `graph/phase.py` | After Operate, the capability is registered in the catalog |
 | Durability | `api/app.py` | `PostgresSaver` checkpointer; threads survive restarts and wait at gates for days |
+| Replicas | `cluster.py`, `events.py`, `intake.py` | Advisory lock per thread, the elected watcher, claims for GitHub requests, shared notes; live updates over NOTIFY; intake chats in Postgres |
 
 ## Decisions
 

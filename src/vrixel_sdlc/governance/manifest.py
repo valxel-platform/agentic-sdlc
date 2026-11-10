@@ -157,6 +157,9 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
     from ..performance import check as check_performance, settings as performance_settings
 
     problems += check_performance(raw.get("performance"))
+    from ..profiles import check as check_workflow
+
+    problems += check_workflow(raw.get("workflow"), entry.data_class)
     standards = {}
     if standards_cfg is not None:
         from ..provisioning import effective_standards
@@ -184,6 +187,7 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         tools=chosen_tools,
         quality=policy,
         performance=performance_settings(raw.get("performance") if isinstance(raw.get("performance"), dict) else None),
+        workflow=dict(raw.get("workflow") or {}) if isinstance(raw.get("workflow"), dict) else {},
         repo_standards=standards,
         repo_prefix=repo_prefix,
     )

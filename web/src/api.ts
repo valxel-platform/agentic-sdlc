@@ -76,6 +76,49 @@ export interface PendingItem {
   stuck?: boolean;
   /** Hand-backs and escalations: the document to edit (the agents' last draft). */
   content?: string;
+  /** What the agents assumed, changed, traded off and left open (open questions first). */
+  agent_notes?: AgentNote[];
+  /** The workflow profile: feature, bugfix or express. */
+  profile?: Profile;
+  /** Express at G4: the spec it approves too (there is no G2). */
+  spec_preview?: string;
+}
+
+export type Profile = "feature" | "bugfix" | "express";
+
+export const PROFILE_LABEL: Record<Profile, string> = {
+  feature: "Feature", bugfix: "Bug fix", express: "Express",
+};
+
+export const PROFILE_HELP: Record<Profile, string> = {
+  feature: "Every phase and gate: discovery, spec, UX design and architecture, then build and release.",
+  bugfix: "A defect in something that exists: no discovery or UX design. The spec and architecture are still reviewed.",
+  express: "A small, low-risk change: as a bug fix, and the spec is approved with the architecture at G4.",
+};
+
+export interface AgentNote {
+  kind: "open" | "changed" | "assumed" | "traded off";
+  text: string;
+  phase?: string;
+  task?: string;
+  repo?: string;
+}
+
+export interface TracePr { key: string; repo: string; number: number | null; url: string; task: string; merged: boolean }
+
+export interface Trace {
+  feature_id: string;
+  title: string;
+  profile: Profile;
+  metrics: { id: string; text: string; goals: string[] }[];
+  goals: { id: string; text: string; metrics: string[] }[];
+  criteria: { id: string; text: string; tasks: string[]; test: string; prs: TracePr[]; repos: string[];
+              acceptance: Record<string, string>; deployed: Record<string, string> }[];
+  decisions: { id: string; text: string }[];
+  repos: { repo: string; role: string; tasks: string[]; prs: TracePr[]; deployed: { env: string; release: string } | null }[];
+  release: { flag: string; percent: number | null; production: boolean; merged: boolean };
+  incidents: { id: string; title: string; status: string; severity: string; touch: string }[];
+  gaps: string[];
 }
 
 export interface PerformanceDecision {
@@ -121,6 +164,8 @@ export interface FeatureEvent { at: string; node: string; kind: string; detail?:
 
 export interface Feature extends FeatureSummary {
   description: string;
+  profile?: Profile;
+  track?: string;
   constitution_version: string;
   artifacts: Record<string, string>;
   pull_requests: Record<string, { repo: string; number: number; url: string; state: string; merged_by?: string; review_score?: number; task_id?: string }>;
@@ -417,7 +462,8 @@ export const api = {
   logout: () => request<{ ok: boolean }>("POST", "/auth/logout", {}),
   me: () => request<Me>("GET", "/me"),
   features: () => request<FeatureSummary[]>("GET", "/features"),
-  products: () => request<Record<string, { name?: string; kind: string; ok: boolean }>>("GET", "/products"),
+  products: () => request<Record<string, { name?: string; kind: string; ok: boolean; profiles?: Profile[];
+                                            default_profile?: Profile }>>("GET", "/products"),
   syncWork: (id: string) => request<unknown>("POST", `/features/${encodeURIComponent(id)}/sync`, {}),
   feature: (id: string) => request<Feature>("GET", `/features/${encodeURIComponent(id)}`),
   initiative: (id: string) => request<InitiativeView>("GET", `/features/${encodeURIComponent(id)}`),
@@ -449,7 +495,9 @@ export const api = {
   intake: (id: string) => request<IntakeSession>("GET", `/intake/${id}`),
   intakeSay: (id: string, text: string) => request<IntakeSession>("POST", `/intake/${id}/messages`, { text }),
   intakeDraft: (id: string, changes: Partial<Draft>) => request<IntakeSession>("PATCH", `/intake/${id}/draft`, changes),
-  intakeSubmit: (id: string, pilot = false) => request<IntakeSession>("POST", `/intake/${id}/submit`, { pilot }),
+  intakeSubmit: (id: string, pilot = false, profile = "") =>
+    request<IntakeSession>("POST", `/intake/${id}/submit`, { pilot, profile }),
+  trace: (id: string) => request<Trace>("GET", `/features/${encodeURIComponent(id)}/trace`),
   lessons: (productId: string) => request<LessonsOverview>("GET", `/products/${encodeURIComponent(productId)}/lessons`),
   pilotReport: (productId: string) => request<PilotReport>("GET", `/reports/pilot?product_id=${encodeURIComponent(productId)}`),
 };

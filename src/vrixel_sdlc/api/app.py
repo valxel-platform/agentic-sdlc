@@ -27,6 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from .. import profiles
 from ..duplicates import DuplicateIntent
 from ..config import load_settings
 from ..engine import FeatureEngine, InMemoryIndex, PostgresIndex
@@ -91,6 +92,8 @@ class FeatureIn(BaseModel):
                                       description="Required when the request looks like an existing feature")
     initiative_id: str = Field("", description="The approved initiative this feature delivers; empty = unplanned")
     pilot: bool = Field(False, description="Measure it in the pilot report, with the shadow modes on")
+    profile: str = Field("", pattern="^(|feature|bugfix|express)$",
+                         description="How much of the pipeline it goes through; empty = the product's default")
 
 
 class InitiativeIn(BaseModel):
@@ -140,6 +143,8 @@ class DecisionIn(BaseModel):
 
 class SubmitIn(BaseModel):
     pilot: bool = Field(False, description="Measure it in the pilot report, with the shadow modes on")
+    profile: str = Field("", pattern="^(|feature|bugfix|express)$",
+                         description="How much of the pipeline it goes through; empty = the product's default")
 
 
 class DevLoginIn(BaseModel):
@@ -202,7 +207,12 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         services.lessons = PostgresLessonStore(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
-        return FeatureEngine(services, saver, PostgresIndex(pool), work=work), pool
+        from ..cluster import PostgresCluster
+        from ..events import PostgresBus
+
+        return FeatureEngine(services, saver, PostgresIndex(pool), work=work,
+                             bus=PostgresBus(pool, settings.database_url),
+                             cluster=PostgresCluster(pool, settings.database_url)), pool
     from langgraph.checkpoint.memory import InMemorySaver
 
     services = build_services(settings, ledger=InMemoryLedger())
@@ -215,12 +225,16 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     auth = auth or AuthConfig.from_env()
     signer = SessionSigner(auth.secret)
     oauth = oauth or GitHubOAuth(auth)
-    intakes = IntakeStore()
+    stores: dict[str, Any] = {"intakes": IntakeStore()}  # Postgres once the engine has a database
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         if state["engine"] is None:
             state["engine"], state["pool"] = create_engine_from_env()
+            if state["pool"] is not None:
+                from ..intake import PostgresIntakeStore
+
+                stores["intakes"] = PostgresIntakeStore(state["pool"])
             # Polls CI and OpenChoreo for features waiting on them; webhooks make it immediate.
             state["engine"].start_watcher(float(os.environ.get("VRIXEL_WATCH_INTERVAL_S", "30")))
         yield
@@ -607,6 +621,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                 row |= {"name": p.name, "repos": [r.name for r in p.repos], "budget_usd": p.budget_usd,
                         "depends_on": list(p.depends_on), "runtime": p.runtime,
                         "constitution_version": snap.version, "articles": list(snap.constitution.article_ids),
+                        # The workflow profiles its people may start work with, and the default.
+                        "profiles": profiles.allowed(p.workflow, p.data_class),
+                        "default_profile": profiles.default(p.workflow),
                         "ok": True}
             except GovernanceError as exc:
                 row |= {"ok": False, "error": str(exc)}
@@ -624,7 +641,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                                created_by=user.login, simulate_faults=body.simulate_faults,
                                budget_usd=body.budget_usd, background=True,
                                not_duplicate_reason=body.not_duplicate_reason, initiative_id=body.initiative_id,
-                               pilot=body.pilot)
+                               pilot=body.pilot, profile=body.profile)
         except DuplicateIntent as exc:
             raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
         except ValueError as exc:
@@ -911,6 +928,24 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         v["pending"] = [decorate(feature_id, {**p, "product_id": v["product_id"]}, user) for p in v["pending"]]
         return v
 
+    @api.get("/features/{feature_id}/trace")
+    def feature_trace(feature_id: str, user: User = Depends(current_user)) -> dict:
+        """From the feature's metrics and criteria to its PRs, tests, deployments and incidents."""
+        try:
+            return eng().trace(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @api.get("/products/{product_id}/trace")
+    def product_trace(product_id: str, repo: str = "", pr: str = "", user: User = Depends(current_user)) -> dict:
+        """Back from code: the features (and their criteria) that changed a repo or a pull request."""
+        if product_id not in eng().services.settings.registry:
+            raise HTTPException(404, f"Unknown product {product_id}")
+        if not repo and not pr:
+            raise HTTPException(422, "Give a repo (org/name) or a pull request (org/name#12)")
+        return {"product_id": product_id, "repo": repo, "pr": pr,
+                "features": eng().trace_search(product_id, repo=repo, pr=pr)}
+
     @api.get("/features/{feature_id}/artifacts/{kind}")
     def artifact(feature_id: str, kind: str, user: User = Depends(current_user)) -> dict:
         try:
@@ -965,7 +1000,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     # --- intake chat ---
     def intake_session(sid: str, user: User):
         try:
-            return intakes.get(sid, user.login)
+            return stores["intakes"].get(sid, user.login)
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
 
@@ -974,15 +1009,16 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         lanes = lanes_for(user)
         if not lanes:
             raise HTTPException(403, "You aren't a member of any product organization")
-        s = intakes.create(user.login, lanes)
+        s = stores["intakes"].create(user.login, lanes)
         greeting = ("What would you like to build? Describe the problem in a sentence or two, "
                     "and mention the product if you know it.")
         s.messages.append({"role": "agent", "text": greeting, "at": s.created_at})
+        stores["intakes"].save(s)
         return s.to_dict()
 
     @api.get("/intake")
     def intake_list(user: User = Depends(current_user)) -> list[dict]:
-        return [s.to_dict() for s in intakes.list(user.login)]
+        return [s.to_dict() for s in stores["intakes"].list(user.login)]
 
     @api.get("/intake/{sid}")
     def intake_get(sid: str, user: User = Depends(current_user)) -> dict:
@@ -995,6 +1031,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             IntakeAgent(eng().services).respond(s, body.text)
         except PolicyViolation as exc:
             raise HTTPException(403, str(exc)) from exc
+        finally:
+            stores["intakes"].save(s)
         return s.to_dict()
 
     @api.patch("/intake/{sid}/draft")
@@ -1006,6 +1044,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(403, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
+        stores["intakes"].save(s)
         return s.to_dict()
 
     @api.post("/intake/{sid}/submit", status_code=201)
@@ -1023,14 +1062,17 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         try:
             s.feature_id = eng().create(product_id=s.draft.product_id, title=s.draft.title,
                                         description=s.draft.description(), created_by=user.login, background=True,
-                                        not_duplicate_reason=s.draft.not_duplicate_reason, pilot=bool(body and body.pilot))
+                                        not_duplicate_reason=s.draft.not_duplicate_reason, pilot=bool(body and body.pilot),
+                                        profile=(body.profile if body else ""))
         except DuplicateIntent as exc:  # a matching feature appeared since the check
             s.draft.similar, s.overlap_checked = exc.matches, True
+            stores["intakes"].save(s)
             raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
         except GovernanceError as exc:
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
-        s.messages.append({"role": "agent", "text": f"Submitted as {s.feature_id}. Agents are on the discovery phase now.",
+        s.messages.append({"role": "agent", "text": f"Submitted as {s.feature_id}. Agents have started on it.",
                            "at": s.messages[-1]["at"]})
+        stores["intakes"].save(s)
         return s.to_dict()
 
     # --- live updates ---

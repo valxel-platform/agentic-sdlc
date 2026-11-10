@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type PendingItem } from "../api";
+import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type PendingItem } from "../api";
 import Markdown from "react-markdown";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
@@ -46,6 +46,29 @@ function RememberField({ on, setOn, lesson, setLesson }: {
 const SEV_TONE: Record<string, string> = { critical: "stop", high: "stop", medium: "wait", low: "plain", info: "plain" };
 
 /** What's being decided, the evidence, and the actions this person is allowed to take. */
+const NOTE_LABEL: Record<AgentNote["kind"], string> = {
+  open: "Open question", changed: "Changed", assumed: "Assumed", "traded off": "Traded off",
+};
+
+/** What the agents assumed, changed, traded off and couldn't settle: open questions first. */
+function AgentNotes({ notes }: { notes: AgentNote[] }) {
+  return (
+    <div>
+      <h3>The agents' notes</h3>
+      <ul className="plain-list small">
+        {notes.map((n, i) => (
+          <li key={i}>
+            <strong>{NOTE_LABEL[n.kind]}:</strong> {n.text}
+            {(n.task || (n.phase && n.phase !== "")) && (
+              <span className="faint"> ({n.task ? `${n.task}, ${n.repo?.split("/").pop() ?? ""}` : n.phase})</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; featureId: string; onDone: () => void }) {
   const opened = useRef(Date.now());
   const [mode, setMode] = useState<Mode>(null);
@@ -185,6 +208,21 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             : "It can't be sent back again. Take it over to finish the document yourself, or stop the feature."}
         </div>
       )}
+
+      {item.profile && item.profile !== "feature" && item.type === "gate" && (
+        <p className="small muted">
+          {PROFILE_LABEL[item.profile]} workflow: {PROFILE_HELP[item.profile]}
+        </p>
+      )}
+
+      {item.spec_preview && (
+        <details open>
+          <summary>The spec you approve with this design (express: no separate spec gate)</summary>
+          <div className="evidence md"><Markdown>{item.spec_preview}</Markdown></div>
+        </details>
+      )}
+
+      {item.agent_notes && item.agent_notes.length > 0 && <AgentNotes notes={item.agent_notes} />}
 
       {item.history && item.history.length > 0 && (
         <div>

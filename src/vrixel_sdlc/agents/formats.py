@@ -10,6 +10,8 @@ which satisfy the checks.
 
 from __future__ import annotations
 
+from .. import diary as _diary
+
 _COMMON = ("Write Markdown. Use exactly these '## ' section headings (other sections may be added) and "
            "write the bullet lines in exactly the forms shown; checks read them by machine.")
 
@@ -94,6 +96,11 @@ flowchart LR  (one node per affected repo)
 ## Capability
 - <the capability this release registered or extended>""",
 }
+
+
+# Every document ends with the agent's notes for the people at the gate (vrixel_sdlc.diary).
+for _phase in CONTRACTS:
+    CONTRACTS[_phase] += "\n" + _diary.CONTRACT
 
 
 def contract(phase: str) -> str:
