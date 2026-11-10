@@ -1598,8 +1598,12 @@ effect once the other is also decided. An earlier approval of the other gate sti
   escalations.
 - **live**: `pip install -e ".[live]"`, then set `VRIXEL_MODE=live` and `ANTHROPIC_API_KEY`. Roles
   with `runtime: claude_code` run through the Claude Agent SDK; others call the Claude API through
-  the gateway. Set `VRIXEL_SKILLS_DIR` to a folder of installed plugins
-  (`<plugin>/skills/<skill>/SKILL.md`) to load the real skills. Live mode is not covered by the
+  the gateway. Skills come from the plugins in `VRIXEL_SKILLS_DIR` (`<plugin>/skills/<skill>/SKILL.md`,
+  or `<plugin>/commands/<skill>.md`). The image installs Anthropic's Product Management,
+  Engineering and Design plugins ([knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins),
+  pinned by commit in the Dockerfile) and ours, `plugins/vrixel` (the critics' skills), at
+  `/opt/vrixel/plugins`. Live mode refuses to start while a skill a phase uses is missing; CI checks
+  the pinned commit has them all. Live mode is not covered by the
   offline tests. Run it against a sandbox product first.
 
   A Claude Code session starts from Claude Code's own system prompt (the `claude_code` preset:

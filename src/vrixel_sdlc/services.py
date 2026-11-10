@@ -98,6 +98,22 @@ class Services:
         return replace(snap, product=replace(snap.product, repos=snap.product.repos + extra))
 
 
+def check_skills(base: str | None = None) -> None:
+    """Live agents work from the plugins' skills; a missing one would reach them as a placeholder.
+    Refuse to start instead, naming what is missing."""
+    import os
+
+    from .agents.context import missing_skills
+    from .agents.roles import used_skills
+
+    base = base if base is not None else os.environ.get("VRIXEL_SKILLS_DIR")
+    if not base:
+        raise RuntimeError("Live mode needs VRIXEL_SKILLS_DIR: the folder of installed plugins (the image sets it)")
+    missing = missing_skills(used_skills(), base)
+    if missing:
+        raise RuntimeError(f"Skills missing from {base}: {', '.join(missing)}")
+
+
 def build_services(
     settings: Settings | None = None,
     *,
@@ -121,6 +137,7 @@ def build_services(
     generic = GatewayRuntime(gateway)
     runtimes: dict[str, AgentRuntime] = {"generic": generic}
     if settings.mode == "live":
+        check_skills()
         runtimes["claude_code"] = ClaudeCodeRuntime(gateway)
     else:
         runtimes["claude_code"] = GatewayRuntime(
