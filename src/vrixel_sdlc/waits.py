@@ -30,10 +30,22 @@ def now() -> str:
 
 
 class WaitChecker:
-    def __init__(self, services) -> None:
+    def __init__(self, services, cluster=None) -> None:
+        from .cluster import MemoryCluster
+
         self.services = services
-        self._dispatched: set[tuple] = set()
-        self._rollout_asked: dict[tuple, datetime] = {}
+        # What was asked of GitHub, claimed across replicas so only one asks (cluster.py).
+        self.cluster = cluster or MemoryCluster()
+
+    @staticmethod
+    def _key(key: tuple) -> str:
+        return "dispatch:" + "|".join(str(k) for k in key)
+
+    def _claim(self, key: tuple) -> bool:
+        return self.cluster.claim(self._key(key))
+
+    def _unclaim(self, key: tuple) -> None:
+        self.cluster.unclaim(self._key(key))
 
     def _start_post_deploy(self, packet: dict, results: list[dict]) -> None:
         """Once a stage's deployment is ready, ask each repo to run its post-deploy suite
@@ -51,9 +63,8 @@ class WaitChecker:
             from .acceptance import check_name
 
             key = (packet.get("feature_id"), packet["wait"], packet.get("since"), t["repo"])
-            if key in self._dispatched:
+            if not self._claim(key):
                 continue
-            self._dispatched.add(key)
             try:
                 self.services.github.dispatch(repo=t["repo"], event_type="vrixel-acceptance", payload={
                     "stage": packet["wait"], "sha": t["sha"], "feature_id": t["feature_id"],
@@ -65,7 +76,7 @@ class WaitChecker:
                        if packet["wait"] == "staging" and "full" in perf.values()
                        and (packet.get("performance") or {}).get("perf_settings") else {})})
             except Exception:
-                self._dispatched.discard(key)
+                self._unclaim(key)
         # A web app is reached only through the product's BFF (VX-17): its own post-deploy tests run
         # against the BFF's public URL when the change set deploys one.
         roles = {t["repo"]: t.get("role", "") for t in q.get("targets") or []}
@@ -74,9 +85,8 @@ class WaitChecker:
             if r.get("kind") in ("store", "resource"):
                 continue  # store apps test themselves in their release workflow; resources have no tests
             key = (packet.get("feature_id"), packet["wait"], packet.get("since"), r["repo"])
-            if key in self._dispatched or not shas.get(r["repo"]):
+            if not shas.get(r["repo"]) or not self._claim(key):
                 continue
-            self._dispatched.add(key)
             try:
                 if packet["wait"] == "staging" and perf.get(r["repo"]) == "full":
                     self.services.github.set_status(repo=r["repo"], sha=shas[r["repo"]], context="performance / report",
@@ -89,7 +99,7 @@ class WaitChecker:
                     "performance": perf.get(r["repo"], "none"),
                     **(packet.get("performance") or {})})
             except Exception:
-                self._dispatched.discard(key)  # try again on the next check
+                self._unclaim(key)  # try again on the next check
 
     def _status(self, t: dict, context: str) -> dict | None:
         res = self.services.github.checks(repo=t["repo"], sha=t["sha"])
@@ -106,14 +116,18 @@ class WaitChecker:
         status = self._status(t, t["context"])
         if status and status["state"] in ("success", "failure"):
             return {"state": status["state"], "message": status.get("summary", ""), "url": status.get("url", "")}
-        key = (t["repo"], t["sha"], t["context"])
-        last = self._rollout_asked.get(key)
+        key = f"rollout_asked:{t['repo']}|{t['sha']}|{t['context']}"
+        last = self.cluster.get(key)
         recheck = timedelta(hours=float(t.get("recheck_hours") or DEFAULT_ROLLOUT["recheck_hours"]))
-        if last is None or datetime.now(timezone.utc) - last > recheck:
-            self.services.github.dispatch(repo=t["repo"], event_type="vrixel-rollout", payload={
-                "sha": t["sha"], "fraction": str(t["fraction"]), "context": t["context"],
-                "feature_id": t.get("feature_id", "")})
-            self._rollout_asked[key] = datetime.now(timezone.utc)
+        now_ = datetime.now(timezone.utc)
+        if last is None or now_ - datetime.fromisoformat(last) > recheck:
+            # Claimed per recheck window, so two replicas checking at once ask once.
+            window = int(now_.timestamp() // max(recheck.total_seconds(), 1))
+            if self.cluster.claim(f"{key}|{window}"):
+                self.services.github.dispatch(repo=t["repo"], event_type="vrixel-rollout", payload={
+                    "sha": t["sha"], "fraction": str(t["fraction"]), "context": t["context"],
+                    "feature_id": t.get("feature_id", "")})
+                self.cluster.put(key, now_.isoformat())
         return {"state": "pending", "message": (status or {}).get("summary", "") or "checking the release's health"}
 
     def _one(self, wait: str, t: dict) -> dict:

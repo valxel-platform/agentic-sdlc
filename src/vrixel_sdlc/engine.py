@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from langgraph.types import Command
 
+from .cluster import Busy, Cluster, LeaseLost, MemoryCluster, Notes
 from .events import EventBus
 from .graph import build_pipeline
 from .graph.pipeline import normalize
@@ -103,8 +104,11 @@ def openchoreo_auth():
 
 class FeatureEngine:
     def __init__(self, services: Services, checkpointer, index: FeatureIndex | None = None,
-                 bus: EventBus | None = None, workers: int = 4, work: WorkSync | None = None) -> None:
+                 bus: EventBus | None = None, workers: int = 4, work: WorkSync | None = None,
+                 cluster: Cluster | None = None) -> None:
         self.services = services
+        # Several replicas: thread locks, the watcher's leadership and shared notes (cluster.py).
+        self.cluster: Cluster = cluster or MemoryCluster()
         from .ops.incident import build_incident_graph
         from .ops.signals import InMemorySignalStore
         from .roadmap.graphs import build_initiative_graph, build_release_graph
@@ -197,14 +201,12 @@ class FeatureEngine:
             services.pager = from_env(os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         self.bus = bus or EventBus()
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="feature")
-        self._locks: dict[str, threading.Lock] = {}
-        self._locks_guard = threading.Lock()
-        self.running: set[str] = set()
-        self.errors: dict[str, str] = {}
+        self.running: set[str] = set()  # queued or running on this replica
+        self.errors = Notes(self.cluster, "error")  # a thread's last error, whichever replica ran it
         self.work = work or WorkSync(services, InMemoryLinkStore(),
                                      os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
-        self.sync_errors: dict[str, str] = {}
-        self.waits = WaitChecker(services)
+        self.sync_errors = Notes(self.cluster, "sync_error")
+        self.waits = WaitChecker(services, self.cluster)
         self._watcher: threading.Thread | None = None
         self._stop = threading.Event()
 
@@ -215,13 +217,18 @@ class FeatureEngine:
     def _config(feature_id: str) -> dict:
         return {"configurable": {"thread_id": feature_id}, "recursion_limit": 200}
 
-    def _lock(self, feature_id: str) -> threading.Lock:
-        with self._locks_guard:
-            return self._locks.setdefault(feature_id, threading.Lock())
+    def is_running(self, thread_id: str) -> bool:
+        """Running (or queued) here, or running on another replica."""
+        return thread_id in self.running or self.cluster.busy(thread_id)
 
     def _execute(self, feature_id: str, payload) -> None:
-        """Run the thread until it finishes or waits on a human, publishing each node as it ends."""
-        with self._lock(feature_id):
+        """Run the thread until it finishes or waits on a human, publishing each node as it ends.
+        Only one replica runs a thread at a time: the one holding its lock."""
+        lease = self.cluster.lock(feature_id)
+        if lease is None:
+            self.running.discard(feature_id)
+            raise Busy(f"{feature_id} is running on another replica")
+        try:
             self.running.add(feature_id)
             self.errors.pop(feature_id, None)
             self.bus.publish({"type": "feature.running", "feature_id": feature_id})
@@ -231,16 +238,23 @@ class FeatureEngine:
                         for node in chunk:
                             if node != "__interrupt__":
                                 self.bus.publish({"type": "feature.node", "feature_id": feature_id, "node": node})
+                        if not lease.alive():  # another replica may carry it on from the last checkpoint
+                            raise LeaseLost(f"{feature_id}: this replica lost the thread's lock")
                     payload = self._ready_wait(feature_id)  # CI or a deploy already done: carry on
+            except LeaseLost:
+                raise
             except Exception as exc:  # surfaced on the feature page; the checkpoint keeps the last good step
                 self.errors[feature_id] = f"{type(exc).__name__}: {exc}"
                 raise
             finally:
                 self.running.discard(feature_id)
+                lease.release()
                 self._note_asked(feature_id)
                 self.sync_work(feature_id)
                 self.bus.publish({"type": "feature.updated", "feature_id": feature_id,
                                   "pending": len(self.pending(feature_id))})
+        finally:
+            lease.release()
         self._wake_release_waits(feature_id)
 
     def _flag_on(self, s: dict) -> bool | None:
@@ -257,7 +271,7 @@ class FeatureEngine:
         product_id = thread_id.split("-", 1)[0]
         for row in self.index.all():
             other = row["feature_id"]
-            if row["product_id"] != product_id or other == thread_id or other in self.running:
+            if row["product_id"] != product_id or other == thread_id or self.is_running(other):
                 continue
             if kind_of(thread_id) == "feature" and row.get("kind") != "release":
                 continue  # a feature's progress only matters to releases
@@ -284,7 +298,7 @@ class FeatureEngine:
     def poke(self, feature_id: str) -> bool:
         """Check a feature's external wait now (the watcher's tick, or a GitHub webhook). Resumes
         in the background when the wait is over; returns whether it did."""
-        if feature_id in self.running:
+        if self.is_running(feature_id):
             return False
         try:
             cmd = self._ready_wait(feature_id)
@@ -306,7 +320,8 @@ class FeatureEngine:
         return out
 
     def start_watcher(self, interval_s: float = 30.0) -> None:
-        """Poll features that wait on CI or OpenChoreo. One replica runs it (see README)."""
+        """Poll features that wait on CI or OpenChoreo. Every replica starts it; only the one that
+        holds the watcher's lock polls (cluster.py)."""
         if self._watcher is not None:
             return
 
@@ -314,6 +329,8 @@ class FeatureEngine:
             import time
 
             while not self._stop.wait(interval_s):
+                if not self.cluster.leader("watcher"):
+                    continue  # another replica watches; this one takes over if that one goes
                 for fid in self.waiting_on_external():
                     self.poke(fid)
                 today = time.strftime("%Y-%m-%d", time.gmtime())
@@ -325,6 +342,10 @@ class FeatureEngine:
                         pass
                 if time.time() - self._cost_checked > 3600:  # cost data moves daily; hourly is plenty
                     self._cost_checked = time.time()
+                    try:
+                        self.cluster.prune(30)
+                    except Exception:
+                        pass
                     for job in (self.collect_costs, self.review_costs):
                         try:
                             job()
@@ -369,13 +390,13 @@ class FeatureEngine:
         progress (and at which station), or stopped. Read from the durable index and checkpoints,
         so it survives restarts."""
         out = []
-        for row in self.index.all():
-            if row["product_id"] != product_id or row.get("kind", "feature") != "feature":
-                continue
+        rows = [r for r in self.index.all() if r["product_id"] == product_id and r.get("kind", "feature") == "feature"]
+        busy = self.running | self.cluster.busy_among([r["feature_id"] for r in rows])
+        for row in rows:
             snap = self.graph.get_state(self._config(row["feature_id"]))
             s = snap.values or {}
             pending = [{"interrupt_id": i.id, **i.value} for i in snap.interrupts]
-            stations = rail(s, pending, running=row["feature_id"] in self.running) if s else []
+            stations = rail(s, pending, running=row["feature_id"] in busy) if s else []
             stage = next((x["key"] for x in stations if x["state"] in ("waiting", "current", "stopped")), "")
             status = ("stopped" if s.get("status") == "aborted" else
                       "released" if s.get("status") == "done" or (s.get("release") or {}).get("production") else
@@ -383,7 +404,7 @@ class FeatureEngine:
             out.append({"feature_id": row["feature_id"], "title": s.get("title") or row["title"],
                         "description": s.get("description", ""), "status": status,
                         "initiative_id": s.get("initiative_id", ""), "cost_usd": float(s.get("cost_usd", 0.0)),
-                        "flag_on": self._flag_on(s),
+                        "flag_on": self._flag_on(s), "profile": s.get("profile", "feature"),
                         "stage": "" if status != "in_progress" else stage.upper() if stage.startswith("g") else stage})
         return out
 
@@ -717,7 +738,7 @@ class FeatureEngine:
             self.decide(incident_id, item["interrupt_id"], {"decision": "merge", "into": into, "approver": approver,
                                                             "feedback": reason or f"Merged into {into}"})
             ended = True
-        elif wait and incident_id not in self.running:  # the tool was watching it recover
+        elif wait and not self.is_running(incident_id):  # the tool was watching it recover
             self.services.close_incident(incident_id)
             self._execute(incident_id, Command(resume={wait["interrupt_id"]: {"status": "merged", "into": into}}))
             ended = True
@@ -941,8 +962,41 @@ class FeatureEngine:
                 break
         return out
 
+    # --- traceability: from a feature's reason to production, and back -------------------------
+    def trace(self, feature_id: str) -> dict:
+        """The feature's trace: metrics, goals, criteria, tasks, PRs, acceptance results,
+        deployments and the production incidents on its components (vrixel_sdlc.traceability)."""
+        from . import traceability
+
+        s = self._state(feature_id)
+        if not s:
+            raise KeyError(f"Unknown feature {feature_id}")
+        arts = s.get("artifacts") or {}
+
+        def load(kind: str) -> str:
+            try:
+                return self.services.artifacts.load(arts[kind]) if kind in arts else ""
+            except Exception:
+                return ""
+
+        components = sorted({r for r, d in (s.get("deployments") or {}).items()
+                             if d.get("env") and d.get("kind") != "resource"})
+        incidents = [{"id": i.get("feature_id", ""), "title": i.get("title", ""), "status": i.get("status", ""),
+                      "severity": i.get("severity", ""), "touch": i.get("touch", "")}
+                     for i in (self._touching(s["product_id"], components) if components else [])]
+        return traceability.build(s, load, incidents)
+
+    def trace_search(self, product_id: str, *, repo: str = "", pr: str = "") -> list[dict]:
+        """Which of a product's features touched a repo or a pull request, and through which criteria."""
+        from . import traceability
+
+        rows = [{"feature_id": r["feature_id"], "title": r["title"], "state": self._state(r["feature_id"])}
+                for r in self.index.all()
+                if r["product_id"] == product_id and r.get("kind", "feature") == "feature"]
+        return traceability.search(rows, repo=repo, pr=pr)
+
     def poke_now(self, thread_id: str) -> None:
-        if thread_id in self.running:
+        if self.is_running(thread_id):
             return
         try:
             cmd = self._ready_wait(thread_id)
@@ -1199,11 +1253,18 @@ class FeatureEngine:
     def create(self, *, product_id: str, title: str, description: str = "", created_by: str = "",
                simulate_faults: dict[str, int] | None = None, budget_usd: float | None = None,
                background: bool = False, not_duplicate_reason: str = "", initiative_id: str = "",
-               track: str = "standard", hotfix: dict | None = None, pilot: bool = False) -> str:
+               track: str = "standard", hotfix: dict | None = None, pilot: bool = False,
+               profile: str = "") -> str:
+        from . import profiles
         from .duplicates import DuplicateIntent
 
         # Read and validate the product's governance from its own org, and pin the commits.
         snap = self.services.snapshot(product_id)
+        workflow = getattr(snap.product, "workflow", {}) or {}
+        profile = "feature" if track == "hotfix" else (profile or profiles.default(workflow))
+        if track != "hotfix" and profile not in profiles.allowed(workflow, snap.product.data_class):
+            raise ValueError(f"{product_id} doesn't allow the {profile} profile "
+                             f"(allowed: {', '.join(profiles.allowed(workflow, snap.product.data_class))})")
         if initiative_id and not self.approved_initiative(product_id, initiative_id):
             raise ValueError(f"{initiative_id} is not an approved initiative of {product_id}")
         with self._create_lock:  # two identical requests at once must not both pass the check
@@ -1218,7 +1279,8 @@ class FeatureEngine:
         inp = {"feature_id": feature_id, "product_id": product_id, "title": title, "description": description,
                "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins,
                "related_features": similar, "not_duplicate_reason": not_duplicate_reason.strip(),
-               "initiative_id": initiative_id, "track": track, "hotfix": dict(hotfix or {}), "pilot": bool(pilot)}
+               "initiative_id": initiative_id, "track": track, "hotfix": dict(hotfix or {}), "pilot": bool(pilot),
+               "profile": profile}
         if budget_usd:
             inp["token_budget_usd"] = float(budget_usd)
         self.bus.publish({"type": "feature.created", "feature_id": feature_id, "product_id": product_id})
@@ -1256,7 +1318,7 @@ class FeatureEngine:
         raise KeyError(f"No pending interrupt {interrupt_id} on {feature_id}")
 
     def decide(self, feature_id: str, interrupt_id: str, decision: dict, *, background: bool = False) -> dict:
-        if feature_id in self.running:
+        if self.is_running(feature_id):
             raise RuntimeError(f"{feature_id} is still running; decide once it is waiting")
         item = self.item(feature_id, interrupt_id)
         if item["type"] == "external":
@@ -1308,9 +1370,11 @@ class FeatureEngine:
             "description": s.get("description", ""),
             "created_by": s.get("created_by", ""),
             "status": s.get("status"),
-            "running": feature_id in self.running,
+            "profile": s.get("profile", "feature"),
+            "track": s.get("track", "standard"),
+            "running": (running := self.is_running(feature_id)),
             "error": self.errors.get(feature_id),
-            "rail": rail(s, pending, running=feature_id in self.running),
+            "rail": rail(s, pending, running=running),
             "constitution_version": s.get("constitution_version"),
             "governance": s.get("governance"),
             "phase_status": s.get("phase_status", {}),
@@ -1435,6 +1499,10 @@ def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
             waiting_phases.add({"pr": "build", "build": "build", "dev": "build", "staging": "release",
                                 "production": "operate"}.get(p.get("stage"), "build"))
     merged = (s.get("change_set") or {}).get("merged")
+    from .profiles import get as _profile
+
+    prof = _profile(s.get("profile"))
+    skipped = set(prof.skips) | set(prof.skips_gates)
     stations = []
     for key, kind in RAIL:
         if kind == "gate":
@@ -1456,6 +1524,8 @@ def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
                 st = "todo"
         if s.get("track") == "hotfix" and key in EXPEDITED:
             st = "skipped"  # an incident's hotfix starts at planning
+        elif key in skipped:
+            st = "skipped"  # the workflow profile leaves it out
         stations.append({"key": key, "kind": kind, "state": st})
     for p in pending:  # CI or OpenChoreo: work in progress, not a person's turn
         if p["type"] == "external":

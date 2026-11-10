@@ -52,3 +52,7 @@ approvers:
 high_risk_paths:
 - src/auth/
 - migrations/
+
+# Workflow profiles people may start work with (vrixel_sdlc.profiles): small low-risk changes can go express.
+workflow:
+  profiles: [feature, express]

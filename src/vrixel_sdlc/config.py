@@ -51,6 +51,8 @@ class ProductConfig:
     quality: dict = field(default_factory=dict)
     # Performance budgets and rules over the industry defaults (vrixel_sdlc.performance.settings)
     performance: dict = field(default_factory=dict)
+    # Which workflow profiles people may start work with, and the default (vrixel_sdlc.profiles)
+    workflow: dict = field(default_factory=dict)
     # Effective golden-path settings for new repos (see vrixel_sdlc.provisioning)
     repo_standards: dict = field(default_factory=dict)
     # Name prefix for new repos (e.g. 'cln-'). Required while a product has no repos yet.

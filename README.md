@@ -90,8 +90,23 @@ HttpOnly session cookie and discards the GitHub token.
 
 The API records the signed-in login as the approver; a request body cannot override it.
 
-Run one replica. Live updates and intake drafts are held in process. Pipeline state is durable in
-Postgres, so a restart loses only open intake chats.
+Run as many replicas as you like behind one load balancer, all on the same Postgres
+(`src/vrixel_sdlc/cluster.py`). Nothing routes a person back to the same replica:
+
+- **One run per feature.** The replica that moves a feature, incident, release or initiative on
+  holds its Postgres advisory lock while it runs. Another replica asked to move it on at the same
+  time answers that it is still running, and every replica shows it as running. A replica that
+  dies lets go with its connection; one that loses its lock connection stops before the next step,
+  and the work carries on from the last checkpoint.
+- **One watcher.** Every replica starts the watcher; only the one holding its lock polls CI and
+  OpenChoreo and runs the daily inventory and hourly cost review. If it goes, another takes over on
+  its next tick.
+- **Asked once.** Post-deploy, acceptance and rollout runs the tool asks GitHub for are claimed in
+  a table first, so two replicas never both ask.
+- **Shared.** Live updates go through Postgres NOTIFY to every replica's browsers; intake chats,
+  a thread's last error and its tracker sync error are in tables.
+
+Without a database (development) everything is in memory: run one process.
 
 ## Organizations and product governance
 
@@ -666,8 +681,27 @@ webhook. When one fails or times out:
   tasks are redone (their PRs get new commits), and CI runs again, up to the product's
   `max_loops`. When those run out, the build's escalation asks people: let agents retry, or vouch
   for it.
-- **A failed build or deployment** asks the release managers (G6 approvers) to try again, carry
-  on anyway, or stop. Retrying production means asking for G6 again.
+- **A failed build, a failed deployment check or failing tests in dev or staging** go back to the
+  agents too (see [Fixing failures before production](#fixing-failures-before-production)). The
+  release managers (G6 approvers) decide only when the tries run out or nothing the feature changed
+  is to blame: try again, carry on anyway, or stop. A deployment the platform refuses goes straight
+  to them. Production is never fixed this way: retrying it means asking for G6 again.
+
+### Fixing failures before production
+
+Before production the pipeline fixes its own failures; people step in only when it can't. Whatever
+fails (red CI, blocking security findings, the OpenChoreo build, a component that isn't ready, or
+integration, end-to-end, acceptance or performance tests in dev or staging), the tool works out which
+of the feature's repos it points at (for a failed acceptance criterion, the repos whose tasks cover
+it), gives their coders what failed, and redoes only those tasks. Before merge the pull requests get
+new commits; after merge the fix goes on a branch of its own (`feature/<id>-fix-<n>`) and goes
+through CI, G5 when the change is risky, the merge, the build, dev and staging again.
+
+Each feature gets the product's `max_loops` tries before merge (CI and security findings) and as
+many again after it (build, dev and staging), counted afresh once staging passes. When they run out,
+or the failure is outside what the feature changed (a managed service, the platform), people decide:
+the build's escalation before merge, the release managers or security approvers after it. Every try
+is an `auto_fix` event with the failures, so the decision shows what the agents already tried.
 
 Agents bind only dev and staging (VX-3). Production is bound after G6, recorded under the
 approver's name, and OpenChoreo's own authorization is the backstop.
@@ -725,12 +759,12 @@ Tool output reaches the pipeline through two open formats: check runs (any CI) a
 GitHub code scanning (any scanner). That is what keeps tools swappable.
 
 **What happens on a result**
-- **Failed tests, low coverage, or a required suite that never reports:** before merge, the build
-  goes back to its escalation (agents fix, or a person vouches). After merge, the release
-  managers decide.
-- **Findings at or above `block_on`:** the lane's security approvers decide (`approvers.security`
-  in `product.yaml`, else the G5 approvers). They can have agents fix them (before merge; agents
-  get the findings as feedback), scan again (after merge), accept the risk, or stop the feature.
+- **Failed tests, low coverage, or a required suite that never reports:** the agents fix them
+  first, before or after merge; when the tries run out the build's escalation (before merge) or
+  the release managers (after) decide.
+- **Findings at or above `block_on`:** the agents fix them first, the same way. When the tries run
+  out the lane's security approvers decide (`approvers.security` in `product.yaml`, else the G5
+  approvers): have agents try again, scan again, accept the risk, or stop the feature.
 - **Accepting a risk** creates a waiver for each finding. It records the reason (required), the
   approver and an expiry of at most 90 days. Waived findings stop blocking until the waiver
   expires; they are listed under "Accepted risks" in the release document and on the G6 panel.
@@ -1400,6 +1434,68 @@ GitHub as usual. Then read the report: the human share against 15%, where people
 work came back, and the shadow modes' agreement, which decide the next changes (cheaper models for
 low-risk work, automatic approval, learning from repeated corrections).
 
+## Workflow profiles: feature and express
+
+Not every change needs discovery and a UX design. Whoever starts the work picks a profile (the New
+intent page asks when the product allows more than one); the gates that matter stay whatever the
+profile (`vrixel_sdlc/profiles.py`):
+
+| Profile | Runs | Gates people decide |
+| --- | --- | --- |
+| Feature | every phase | G1 to G6 (G5 for risky change sets) |
+| Express | a small, low-risk change: spec, architecture, then plan to production; no discovery, no UX design | G4 (with the spec, since there is no G2), G5 (risky), G6 |
+
+Express starts from a brief written from the request. The gates it decides are recorded as decided
+by the profile (`approver: profile:express`), and the rail shows the skipped stations. It doesn't
+skip architecture (it finds the repos, contracts and lanes the change touches), planning, tests,
+security scans, the performance rules, G5 for risky changes or G6. Products list the profiles their
+people may use; express needs listing and never applies to PHI or payments products.
+
+Defects are not a profile. Before production the pipeline fixes its own failures (see [Fixing
+failures before production](#fixing-failures-before-production)); in production, alerts, error
+reports and reported problems open incidents, which mitigate and then hotfix or change the intent.
+
+```yaml
+# <product>-governance/product.yaml
+workflow:
+  profiles: [feature, express]   # default: [feature]
+  default: feature
+```
+
+## Agent notes for the gates
+
+A reviewer can't see what an agent took as given, where it departed from the brief, which options
+it weighed or what it wasn't sure of. So every document ends with an `## Agent notes` section, and
+the coder's reply carries the same notes for each pull request (`vrixel_sdlc/diary.py`):
+
+```
+## Agent notes
+- Assumed: <something not stated that the agent took as given>
+- Changed: <where it departed from the brief, the design or a rule, and why>
+- Traded off: <an option it weighed, and why it chose as it did>
+- Open: <a question for the people at the gate>
+```
+
+The tool keeps them per phase on the feature, shows them at the gate the phase goes to, open
+questions first (G4 under express also shows the spec's; G6 shows the coders'), and adds the
+coder's to the pull request description for its reviewers. A note is the agent's account, not a
+check: the evaluators, reviewers and people still decide.
+
+## Traceability
+
+Every link from a feature's reason to what runs in production is already written down: success
+metrics in the brief, goals and acceptance criteria in the spec, decisions and affected repos in
+the HLD, tasks and tests in the plan, pull requests per task, acceptance results per criterion,
+deployments per repo. `GET /api/features/{id}/trace` reads them into one view, and the feature's
+page shows it: each criterion with its task and test, pull requests, acceptance results and where
+it runs, the production incidents on its components, and the gaps in the chain (a criterion no task
+covers, a task without a pull request, a failed or missing acceptance result, a goal without a
+metric, an affected repo nothing changes). Nothing is stored twice, so the view is always what the
+pipeline has now (`vrixel_sdlc/traceability.py`).
+
+Back from code: `GET /api/products/{id}/trace?repo=org/name` or `?pr=org/name%2312` lists the
+features that changed it, with the criteria and tasks involved.
+
 ## Taking over, and learning from people's corrections
 
 A phase that keeps coming back is a person's to finish, and what the person corrects is learned so
@@ -1456,6 +1552,10 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | Agent roster and skills | `agents/roles.py` | Plugin skills per phase; critic skills double as evaluators |
 | Performance tests | `performance.py`, `config/quality.yaml` | Budgets over industry defaults, the rules that pick none, smoke or full per repo, the PR labels and the staging request |
 | Takeover and lessons | `graph/pipeline.py`, `lessons.py` | Gate history and revision limits; the person's version kept on hand-back; corrections recorded, lessons distilled and proposed as governance PRs, then pinned per feature into prompts and the critic's checklist |
+| Fixing failures before production | `graph/pipeline.py` (`fix_or_ask`, `failing_repos`) | Failures in CI, the build, dev and staging go back to the coders of the repos they point at, on a fix branch after merge; people decide when the tries run out |
+| Workflow profiles | `profiles.py`, `graph/pipeline.py` | Feature and express routes; the profile brief, the gates a profile decides, and the guard that keeps architecture, G5 and G6 |
+| Agent notes | `diary.py`, `graph/phase.py` | The `## Agent notes` section and the coder's notes, kept per phase and shown at the gates and in PR descriptions |
+| Traceability | `traceability.py` | Metrics, goals, criteria, tasks, PRs, acceptance results, deployments and incidents in one view, with gaps; reverse lookup by repo or PR |
 | Pilot | `pilot.py` | People's effort, the shadow automatic-approval rule, and the report against the 15% target |
 | Evaluators | `evaluators/` | Deterministic checks run first; the checklist critic runs in a fresh context (judge independence, tier 1) and its quotes are verified against the document |
 | Model gateway | `gateway/gateway.py` | Role-to-model registry (`config/models.yaml`), data-class allowlist (VX-7), one ledger record per call |
@@ -1470,6 +1570,7 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | CI/CD | `integrations/openchoreo.py` | Agents promote to staging only; production promotion at G6 is human (VX-3). A production rollback is a person's, or the tool's under the remediation policy |
 | Knowledge write-back | `graph/phase.py` | After Operate, the capability is registered in the catalog |
 | Durability | `api/app.py` | `PostgresSaver` checkpointer; threads survive restarts and wait at gates for days |
+| Replicas | `cluster.py`, `events.py`, `intake.py` | Advisory lock per thread, the elected watcher, claims for GitHub requests, shared notes; live updates over NOTIFY; intake chats in Postgres |
 
 ## Decisions
 

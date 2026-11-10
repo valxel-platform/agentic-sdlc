@@ -84,8 +84,15 @@ class IntakeSession:
         return d
 
 
+def session_from(d: dict) -> IntakeSession:
+    d = {k: v for k, v in d.items() if k not in ("ready", "missing")}
+    d["draft"] = Draft(**(d.get("draft") or {}))
+    return IntakeSession(**d)
+
+
 class IntakeStore:
-    """In-memory sessions (drafts are lost on restart; submitted features are not)."""
+    """In-memory sessions: one process (drafts are lost on restart; submitted features are not).
+    PostgresIntakeStore keeps them for every replica."""
 
     def __init__(self) -> None:
         self._s: dict[str, IntakeSession] = {}
@@ -107,6 +114,43 @@ class IntakeStore:
     def list(self, owner: str) -> list[IntakeSession]:
         with self._lock:
             return sorted((s for s in self._s.values() if s.owner == owner), key=lambda s: s.created_at, reverse=True)
+
+    def save(self, s: IntakeSession) -> None:
+        """Sessions are changed in place; in memory there is nothing more to do."""
+
+
+class PostgresIntakeStore:
+    """Intake chats in Postgres: any replica continues a conversation, and drafts survive restarts."""
+
+    def __init__(self, pool) -> None:
+        self.pool = pool
+        with pool.connection() as conn:
+            conn.execute("create table if not exists vrixel_intake (id text primary key, owner text not null,"
+                         " data jsonb not null, created_at timestamptz not null default now())")
+
+    def create(self, owner: str, lanes: list[str]) -> IntakeSession:
+        s = IntakeSession(id=uuid.uuid4().hex[:12], owner=owner, lanes=lanes)
+        self.save(s)
+        return s
+
+    def save(self, s: IntakeSession) -> None:
+        with self.pool.connection() as conn:
+            conn.execute("insert into vrixel_intake (id, owner, data) values (%s, %s, %s) on conflict (id)"
+                         " do update set data = excluded.data", (s.id, s.owner, json.dumps(asdict(s))))
+
+    def get(self, sid: str, owner: str) -> IntakeSession:
+        with self.pool.connection() as conn:
+            row = conn.execute("select data from vrixel_intake where id = %s and owner = %s", (sid, owner)).fetchone()
+        if not row:
+            raise KeyError(f"No intake conversation {sid}")
+        data = row["data"] if isinstance(row, dict) else row[0]
+        return session_from(data)
+
+    def list(self, owner: str) -> list[IntakeSession]:
+        with self.pool.connection() as conn:
+            rows = conn.execute("select data from vrixel_intake where owner = %s order by created_at desc limit 50",
+                                (owner,)).fetchall()
+        return [session_from(r["data"] if isinstance(r, dict) else r[0]) for r in rows]
 
 
 def _title_from(problem: str) -> str:

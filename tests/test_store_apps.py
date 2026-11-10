@@ -128,12 +128,16 @@ def test_an_unhealthy_release_is_halted_and_goes_to_people(engine, services, mon
     assert rollout_wait(engine, fid)["targets"][0]["context"] == "rollout / 50%"
 
 
-def test_a_failed_store_build_goes_to_the_release_managers(engine, services):
+def test_a_failed_store_build_goes_to_the_agents_then_the_release_managers(engine, services):
     services.github.release_result = "failure"
-    v = engine.auto_drive(engine.start(product_id="FARM", title="Offline crop log")["feature_id"], max_steps=12,
+    fid = engine.start(product_id="FARM", title="Offline crop log")["feature_id"]
+    v = engine.auto_drive(fid, max_steps=40,
                           decisions={"escalation:delivery": {"decision": "abort", "feedback": "store build broken"}})
     assert v["status"] == "aborted"
-    assert [d["payload"]["stage"] for d in released(services)] == ["dev"]
+    tries = [e for e in v["events"] if e["kind"] == "auto_fix"]
+    limit = services.feature_snapshot(engine.graph.get_state(engine._config(fid)).values).product.max_loops
+    assert len(tries) == limit  # the agents tried first; then people stopped it
+    assert [d["payload"]["stage"] for d in released(services)] == ["dev"] * (limit + 1)
 
 
 def test_rollout_policy_is_checked():

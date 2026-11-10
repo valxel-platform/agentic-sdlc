@@ -22,7 +22,7 @@ from ..integrations.openchoreo import PIPELINE
 from ..state import GATES, PHASES, FeatureState, GateDecision
 from .. import store
 from ..waits import LABELS, STORE_TIMEOUT_S, TIMEOUT_S
-from .. import lessons
+from .. import lessons, profiles
 from .phase import capability_id, design_knowledge, event, gates_status, make_phase_node, now, touched_lanes
 
 GATE_DECISIONS = ("approve", "revise", "takeover", "abort")
@@ -106,7 +106,19 @@ def after_ci(state: FeatureState) -> str:
 def after_phase(phase: str, state: FeatureState) -> str:
     if phase == "build":
         return "ci_wait"
+    if phase == "spec" and "g2" in profiles.get(state.get("profile")).skips_gates:
+        return "architecture"  # express: G4 approves the spec with the design
     return NEXT_AFTER_PHASE[phase]
+
+
+def approve_target(gate: str, state: FeatureState):
+    """Where an approved gate sends the work: G2 skips UX design when the profile does."""
+    target = GATE_APPROVE_TARGET[gate]
+    if isinstance(target, list):
+        skipped = profiles.get(state.get("profile")).skips
+        target = [t for t in target if t not in skipped]
+        return target[0] if len(target) == 1 else target
+    return target
 
 
 def _route(phase: str):
@@ -120,6 +132,8 @@ def _route(phase: str):
 
 def _route_targets(phase: str) -> list[str]:
     nxt = ["ci_wait"] if phase == "build" else [NEXT_AFTER_PHASE[phase]]
+    if phase == "spec":
+        nxt.append("architecture")  # express
     return [f"escalate_{phase}", *nxt]
 
 
@@ -181,6 +195,33 @@ def make_hotfix_brief(services):
     return hotfix_brief
 
 
+def make_profile_brief(services):
+    """A bug fix or an express change skips discovery and UX design: it starts at the spec from
+    what the person wrote, and the gates the profile decides are recorded as decided by it."""
+
+    def profile_brief(state: FeatureState) -> dict:
+        profile = profiles.get(state.get("profile"))
+        snap = services.feature_snapshot(state)
+        ref = services.artifacts.save(feature_id=state["feature_id"], kind="OPP", phase="discovery",
+                                      content=profiles.brief(state, profile), parents=[],
+                                      constitution_version=snap.version)
+        decided = [GateDecision(gate=g, phase=PHASE_SPECS_GATE.get(g, ""), decision="approve",
+                                approver=f"profile:{profile.name}", feedback=f"{profile.title}: not a gate in this profile",
+                                active_minutes=0.0, at=now()) for g in profile.skips_gates]
+        return {
+            "artifacts": {"OPP": ref},
+            "approvals": {g: True for g in profile.skips_gates},
+            "phase_status": {p: "skipped" for p in profile.skips},
+            "gate_decisions": decided,
+            "events": [event("intake", "profile", f"{profile.title}: starts at the spec; skips "
+                             + ", ".join(profile.skips) + "; gates decided by the profile: "
+                             + ", ".join(g.upper() for g in profile.skips_gates), profile=profile.name)],
+        }
+
+    return profile_brief
+
+
+PHASE_SPECS_GATE = {"g1": "discovery", "g2": "spec", "g3": "design", "g4": "architecture", "g5": "build", "g6": "release"}
 CROSS_LANE_GATES = ("g4", "g5", "g6")
 
 
@@ -191,6 +232,18 @@ def quality_summary(state: FeatureState) -> dict:
                "findings": len(r.get("findings") or []), "waived": len(r.get("waived") or [])}
               for st, q in stages.items() for r in q.get("suites", [])]
     return {"suites": suites, "waivers": list(state.get("waivers") or [])}
+
+
+def gate_notes(state: FeatureState, gate: str, phase: str) -> list[dict]:
+    diaries = state.get("diaries") or {}
+    notes = [{**n, "phase": phase} for n in diaries.get(phase) or []]
+    if gate == "g4" and "g2" in profiles.get(state.get("profile")).skips_gates:
+        notes += [{**n, "phase": "spec"} for n in diaries.get("spec") or []]
+    if gate == "g6":  # the release decision sees what the coders assumed too
+        notes += [{**n, "phase": "build"} for n in diaries.get("build") or []]
+    from ..diary import ORDER
+
+    return sorted(notes, key=lambda n: ORDER.index(n["kind"]))
 
 
 def make_gate(gate: str, services):
@@ -254,7 +307,15 @@ def make_gate(gate: str, services):
                               if state.get("track") == "hotfix" and gate in ("g5", "g6")
                               else lane.approvers.get(gate, [])),
                 "track": state.get("track", "standard"),
+                "profile": state.get("profile", "feature"),
+                # Express: no G2, so G4 approves the spec together with the design.
+                "spec_preview": (services.artifacts.load(state["artifacts"]["PRD"])[:2000]
+                                 if gate == "g4" and "g2" in profiles.get(state.get("profile")).skips_gates
+                                 and (state.get("artifacts") or {}).get("PRD") else ""),
                 "risk_tier": state.get("risk_tier"),
+                # What the agents assumed, changed, traded off and left open in this phase (open first);
+                # G4 under express also shows the spec's, since it approves the spec too.
+                "agent_notes": gate_notes(state, gate, phase),
                 # G5 and G6 see the evidence: every suite run so far, and any accepted risks.
                 "quality": quality_summary(state) if gate in ("g5", "g6") else None,
                 # G5 and G6 see which performance tests the change needed, and why.
@@ -440,7 +501,7 @@ def make_gate(gate: str, services):
             update["release"] = release
             if release["production"] or release.get("flag_on"):
                 record_change(services, release_record_for(state, update, records, approvers), update, gate)
-        return Command(goto="production_wait" if gate == "g6" else target, update=update)
+        return Command(goto="production_wait" if gate == "g6" else approve_target(gate, state), update=update)
 
     dest = ("production_wait",) if gate == "g6" else (tuple(target) if isinstance(target, list) else (target,))
     return gate_node, (*dest, phase, END)
@@ -538,6 +599,7 @@ def make_escalation(phase: str, services):
             # What people already asked for, and the agents' last draft to finish yourself.
             "history": correction_history(state, phase), "revisions": times_sent_back(state, phase),
             "content": draft,
+            "agent_notes": list((state.get("diaries") or {}).get(phase) or []),
             "allowed": list(ESCALATION_DECISIONS),
         }
         d = normalize(interrupt(packet), ESCALATION_DECISIONS)
@@ -579,8 +641,9 @@ def make_escalation(phase: str, services):
             return Command(goto=spec.gate, update=update)
         if spec.gate:  # the human's resolution stands in for the gate approval
             update["approvals"] = {spec.gate: True}
-            target = GATE_APPROVE_TARGET[spec.gate]
-            return Command(goto=target, update=update)
+            if phase == "spec" and "g2" in profiles.get(state.get("profile")).skips_gates:
+                return Command(goto="architecture", update=update)  # express: G4 reviews the spec too
+            return Command(goto=approve_target(spec.gate, state), update=update)
         nxt = after_ci(state) if phase == "build" else after_phase(phase, state)  # a person vouched for CI
         return Command(goto=nxt, update=update)
 
@@ -590,6 +653,8 @@ def make_escalation(phase: str, services):
     elif spec.gate:
         t = GATE_APPROVE_TARGET[spec.gate]
         targets |= set(t) if isinstance(t, list) else {t}
+        if phase == "spec":
+            targets.add("architecture")
     elif phase == "build":
         targets |= {"g5", "merge_train"}
     else:
@@ -906,6 +971,59 @@ def security_review(services, state: FeatureState, wait: str, res: dict, *, ok: 
         event("security", "retry", d["feedback"] or res.get("reason", ""), approver=d["approver"])]})
 
 
+def failing_repos(state: FeatureState, res: dict) -> list[str]:
+    """The repos of this change set whose code a failure points at: failed builds, deployments and
+    suites, blocking findings, and for a failed acceptance criterion the repos whose tasks cover it.
+    Only those the feature's tasks change can be fixed by its agents."""
+    tasks = state.get("tasks") or []
+    ours = {t["repo"] for t in tasks}
+    repos = {r.get("repo") for r in res.get("results") or [] if r.get("state") not in ("success", None)}
+    q = res.get("quality") or {}
+    for s in q.get("suites") or []:
+        if s.get("state") == "failed":
+            repos.add(s.get("repo"))
+            failed = [ac for ac, st in ((s.get("details") or {}).get("criteria") or {}).items() if st == "failed"]
+            repos |= {t["repo"] for t in tasks if set(failed) & set(t.get("acs") or [])}
+    repos |= {f.get("repo") for f in q.get("blocking") or []}
+    return sorted(r for r in repos if r and r in ours)
+
+
+def failure_lines(res: dict) -> list[str]:
+    q = res.get("quality") or {}
+    lines = list(q.get("test_failures") or [])
+    lines += [f"{f['severity']} {f['title']} in {f['repo']} ({f.get('url', '')})" for f in q.get("blocking") or []]
+    lines += [f"{r.get('repo') or r.get('component')}: {r.get('message') or r.get('state')}"
+              for r in res.get("results") or [] if r.get("state") not in ("success", None)]
+    return list(dict.fromkeys(lines)) or [res.get("reason", "it failed")]
+
+
+PRE_PRODUCTION = ("build", "dev", "staging")
+
+
+def fix_or_ask(services, state: FeatureState, wait: str, res: dict, people, extra: dict | None = None) -> Command:
+    """A failure before production goes back to the agents first, with what failed: they fix the
+    repos it points at, and the change goes through CI, the merge, the build and the environments
+    again. People decide only when the tries run out (the product's max_loops) or nothing the
+    feature changed is to blame (a platform outage, a managed service), through `people`."""
+    failing = failing_repos(state, res)
+    tries = int(state.get("fix_retries") or 0)
+    limit = services.feature_snapshot(state).product.max_loops
+    if wait not in PRE_PRODUCTION or not failing or tries >= limit:
+        return people()
+    n = tries + 1
+    lines = failure_lines(res)
+    what = {"build": "The OpenChoreo build failed", "dev": "Dev failed", "staging": "Staging failed"}[wait]
+    update = {**(extra or {}), "delivery": {wait: res}, **_quality_update(res), "fix_retries": n,
+              "rerun_repos": failing, "ci_retries": 0,
+              "feedback": {"build": f"{what} after the change merged. Fix these failures:\n"
+                                    + "\n".join(f"- {x}" for x in lines)},
+              "events": [event(f"{wait}_wait", "auto_fix", f"{what} in {', '.join(failing)}: agents fix it "
+                               f"(try {n} of {limit})", findings=lines)]}
+    if (state.get("change_set") or {}).get("merged"):
+        update["fix_branch"] = f"feature/{state['feature_id']}-fix-{n}"  # the merged branch can't take new commits
+    return Command(goto="build", update=update)
+
+
 def ask_release_managers(state: FeatureState, wait: str, res: dict) -> dict:
     """A failed CI-to-production step goes to people, like a stuck phase."""
     packet = {"type": "escalation", "phase": "delivery", "wait": wait, "feature_id": state["feature_id"],
@@ -967,6 +1085,16 @@ def make_ci_wait(services):
         if res["status"] == "security":
             fix = "Fix these security findings:\n" + "\n".join(
                 f"- {f['severity']} {f['title']} in {f['repo']} ({f['url']})" for f in res["quality"]["blocking"])
+            # The agents fix blocking findings first; security approvers decide (fix, accept the
+            # risk, or stop) only when the tries run out.
+            tries, limit = int(state.get("ci_retries") or 0), services.feature_snapshot(state).product.max_loops
+            failing = failing_repos(state, res)
+            if tries < limit and failing:
+                return Command(goto="build", update={
+                    "delivery": {"ci": res}, **_quality_update(res), "ci_retries": tries + 1, "rerun_repos": failing,
+                    "feedback": {"build": fix},
+                    "events": [event("ci_wait", "auto_fix", f"Security findings in {', '.join(failing)}: agents fix "
+                                     f"them (try {tries + 1} of {limit})", findings=failure_lines(res))]})
             return security_review(services, state, "ci", res, ok=nxt, retry="build",
                                    retry_update={"feedback": {"build": fix}})
         findings = (list((res.get("quality") or {}).get("test_failures") or []) or
@@ -1004,16 +1132,16 @@ def make_build_wait(services):
         cs = dict(state.get("change_set") or {})
         cs["runs"] = {**runs, **{r["repo"]: {**runs[r["repo"]], "state": r["state"]} for r in res["results"]}}
         if res["status"] == "security":
-            return security_review(services, state, "build", res, ok="deploy_dev", retry="build_wait",
-                                   extra={"change_set": cs})
+            return fix_or_ask(services, state, "build", res, lambda: security_review(
+                services, state, "build", res, ok="deploy_dev", retry="build_wait", extra={"change_set": cs}))
         if res["status"] == "success":
             return Command(goto="deploy_dev", update={"delivery": {"build": res}, "change_set": cs, **_quality_update(res),
                                                       "events": [event("build_wait", "passed",
                                                                        f"{len(todo)} OpenChoreo builds succeeded")]})
-        return _people_said(state, "build", res, ok="deploy_dev", retry="merge_train",
-                            extra={"change_set": cs, **_quality_update(res)})
+        return fix_or_ask(services, state, "build", res, lambda: _people_said(
+            state, "build", res, ok="deploy_dev", retry="merge_train", extra={"change_set": cs, **_quality_update(res)}))
 
-    return build_wait, ("deploy_dev", "merge_train", "build_wait", END)
+    return build_wait, ("deploy_dev", "merge_train", "build_wait", "build", END)
 
 
 def make_deploy(stage: str, services, nxt: str):
@@ -1097,14 +1225,18 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
         res = interrupt(packet)
         report_to_github(services, state, stage, res)
         if res["status"] == "security":
-            return security_review(services, state, stage, res, ok=ok, retry=f"{stage}_wait")
+            return fix_or_ask(services, state, stage, res, lambda: security_review(
+                services, state, stage, res, ok=ok, retry=f"{stage}_wait"))
         if res["status"] == "success":
-            return Command(goto=ok, update={"delivery": {stage: res}, **_quality_update(res),
+            # Staging passed: the next failure starts a fresh count of tries.
+            reset = {"fix_retries": 0, "fix_branch": ""} if stage == "staging" else {}
+            return Command(goto=ok, update={"delivery": {stage: res}, **_quality_update(res), **reset,
                                             "events": [event(f"{stage}_wait", "passed",
                                                              f"{len(targets)} components ready in {stage}")]})
-        return _people_said(state, stage, res, ok=ok, retry=retry, extra=_quality_update(res))
+        return fix_or_ask(services, state, stage, res, lambda: _people_said(
+            state, stage, res, ok=ok, retry=retry, extra=_quality_update(res)))
 
-    return env_wait, (ok, retry, f"{stage}_wait", END)
+    return env_wait, (ok, retry, f"{stage}_wait", "build", END)
 
 
 def release_store_app(services, state: FeatureState, repo: str, sha: str, stage: str, *, actor: str) -> dict:
@@ -1276,6 +1408,12 @@ def acceptance_targets(services, state: FeatureState, stage: str, deployed: list
              **acceptance.selection(state["feature_id"], repos, stage)}]
 
 
+def first_step(state: FeatureState) -> str:
+    if state.get("track") == "hotfix":
+        return "hotfix_brief"
+    return "discovery" if profiles.get(state.get("profile")).starts_at == "discovery" else "profile_brief"
+
+
 def finalize(state: FeatureState) -> dict:
     minutes = sum(g.get("active_minutes", 0.0) for g in state.get("gate_decisions", []))
     return {"status": "done", "events": [event("finalize", "done", "feature released and registered",
@@ -1315,10 +1453,11 @@ def build_pipeline(services, checkpointer=None):
     g.add_node("finalize", finalize)
 
     g.add_node("hotfix_brief", make_hotfix_brief(services))
+    g.add_node("profile_brief", make_profile_brief(services))
     g.add_edge(START, "intake")
-    g.add_conditional_edges("intake", lambda s: "hotfix_brief" if s.get("track") == "hotfix" else "discovery",
-                            ["hotfix_brief", "discovery"])
+    g.add_conditional_edges("intake", first_step, ["hotfix_brief", "profile_brief", "discovery"])
     g.add_edge("hotfix_brief", "plan")
+    g.add_edge("profile_brief", "spec")
     for phase in PHASES:
         g.add_conditional_edges(phase, _route(phase), _route_targets(phase))
     g.add_edge("merge_train", "build_wait")

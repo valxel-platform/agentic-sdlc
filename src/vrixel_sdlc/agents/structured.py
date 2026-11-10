@@ -56,6 +56,9 @@ class CoderReply(BaseModel):
     summary: str
     files: list[str] = Field(default_factory=list)
     tests: TestRun
+    # For the reviewer and the people at G5: each 'Assumed: ...', 'Changed: ...', 'Traded off: ...' or
+    # 'Open: ...' (vrixel_sdlc.diary); empty when there is nothing the diff doesn't show.
+    notes: list[str] = Field(default_factory=list)
 
 
 M = TypeVar("M", bound=BaseModel)

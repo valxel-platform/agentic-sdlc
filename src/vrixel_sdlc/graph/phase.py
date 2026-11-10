@@ -18,7 +18,7 @@ from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers
 from ..agents.parse import merge_sections, parse_affected_repos, parse_tasks
-from .. import performance
+from .. import diary, performance
 from .. import lessons
 from ..config import ProductConfig
 from ..provisioning import naming_policy
@@ -106,6 +106,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "parent_texts": parents,
         "parent_ids": [arts[k]["id"] for k in spec.parents if k in arts],
         "feedback": state.get("feedback", {}).get(phase),
+        # After the change set merged, a fix for a failure in dev or staging goes on a branch of its own.
+        "branch": state.get("fix_branch") or f"feature/{state['feature_id']}",
         "pilot": bool(state.get("pilot")),
         "simulate_faults": dict(state.get("simulate_faults") or {}),
         "tasks": list(state.get("tasks") or []),
@@ -432,24 +434,25 @@ def build_build_subgraph(services):
         fail = attempt <= int(ctx["simulate_faults"].get("build", 0)) and task["id"] == first
         res = call_agent(
             services, role="coder", phase="build", ctx=ctx, skills=spec.skills,
-            tail=(f"Implement {task['id']} in {task['repo']} on branch feature/{ctx['feature_id']}. "
+            tail=(f"Implement {task['id']} in {task['repo']} on branch {ctx.get('branch') or 'feature/' + ctx['feature_id']}. "
                   f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run the tests and report what they said."
                   + (f" Fix this first: {ctx['feedback']}" if ctx.get("feedback") else "")
                   + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
-                    " type the change uses.\n\n" + structured.instruction(structured.CoderReply)),
+                    " type the change uses. " + diary.CODER + "\n\n" + structured.instruction(structured.CoderReply)),
             stub_text=templates.code_result(ctx, task, passed=not fail),
             schema=structured.schema(structured.CoderReply),
         )
         # The coder's own test run gates review; CI on the pull request is the final word (ci_wait).
         reply, error = structured.parse(res.text, structured.CoderReply)
-        result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
+        result = {**task, "branch": ctx.get("branch") or f"feature/{ctx['feature_id']}", "attempt": attempt,
                   # What the coder says it changed decides the performance test; the plan's list otherwise.
                   "files": list(reply.files) if reply and reply.files else list(task.get("files") or []),
                   "tests_passed": bool(reply and reply.tests.passed),
                   "summary": reply.summary if reply else res.text,
+                  "notes": diary.entries(list(reply.notes)) if reply else [],
                   "tests": reply.tests.model_dump() if reply else {"passed": False, "failed": [],
                                                                     "error": f"no structured result: {error}"}}
         return {"task_results": {task["id"]: result}, "usage": {"tokens": res.tokens, "cost_usd": res.cost_usd}}
@@ -471,7 +474,7 @@ def build_build_subgraph(services):
             labels = [f"change-set:CS-{ctx['feature_id']}", f"product:{ctx['product_id']}"]
             pr = services.github.open_pr(
                 repo=r["repo"], branch=r["branch"], title=f"{ctx['feature_id']} {tid}: {ctx['title']}",
-                body=r["summary"], files=r["files"],
+                body=pr_body(r), files=r["files"],
                 labels=labels + ([performance.label(perf.level)] if performance.label(perf.level) else []),
             )
             gates_status(services, [pr], "pending", f"{ctx['feature_id']}: waiting for CI and the pipeline's gates")
@@ -513,9 +516,10 @@ def build_build_subgraph(services):
                 if perf.level != before and performance.label(perf.level):
                     pr = services.github.open_pr(
                         repo=r["repo"], branch=r["branch"], title=f"{ctx['feature_id']} {tid}: {ctx['title']}",
-                        body=r["summary"], files=r["files"], labels=labels + [performance.label(perf.level)])
+                        body=pr_body(r), files=r["files"], labels=labels + [performance.label(perf.level)])
                     perf_pending(services, pr, perf.level)
             reviews[tid] = ({"pr": pr, "score": reply.score, "approve": reply.approve and not reply.blocking,
+                             "coder_notes": r.get("notes") or [],
                              "blocking": reply.blocking, "notes": reply.notes, "role": r["role"],
                              "performance": perf.as_dict()} if reply else
                             {"pr": pr, "score": 0.0, "approve": False, "role": r["role"], "notes": [], "performance": perf.as_dict(),
@@ -581,6 +585,12 @@ def touched_lanes(snap, repo_names: list[str]) -> list[str]:
     return sorted({lanes[r].product_id for r in repo_names if r in lanes} - {own})
 
 
+def pr_body(result: dict) -> str:
+    """The PR description: what changed, and the coder's notes for its reviewers."""
+    notes = diary.markdown(result.get("notes") or [])
+    return result["summary"] + (f"\n\n{notes}" if notes else "")
+
+
 def make_phase_node(phase: str, services):
     sub = build_build_subgraph(services) if phase == "build" else build_phase_subgraph(phase, services)
     spec = PHASE_SPECS[phase]
@@ -625,6 +635,11 @@ def make_phase_node(phase: str, services):
                 delta["diagrams"] = [diagram]
             if ev:
                 delta["events"].append(ev)
+        if out.get("draft") and phase != "build":
+            notes = diary.parse(out["draft"]["content"])
+            delta["diaries"] = {phase: notes}
+            if notes:
+                delta["events"].append(event(phase, "agent_notes", diary.summary(notes), count=len(notes)))
         if out.get("draft"):
             ref = services.artifacts.save(
                 feature_id=state["feature_id"], kind=spec.kind, phase=phase, content=out["draft"]["content"],
@@ -672,6 +687,9 @@ def make_phase_node(phase: str, services):
                                               **({"shadow": rv["shadow"]} if rv.get("shadow") else {})}
                                              for tid, rv in sorted(reviews.items())]
             delta["rerun_repos"] = []
+            notes = [{**n, "task": tid, "repo": rv["pr"]["repo"]} for tid, rv in sorted(reviews.items())
+                     for n in rv.get("coder_notes") or []]
+            delta["diaries"] = {"build": notes}
             delta["change_set"] = {"id": f"CS-{state['feature_id']}", "branch": f"feature/{state['feature_id']}",
                                    "merge_order": [r for _, r in repos], "merged": False}
         elif phase == "release":

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, ApiError, type Feature, type FeatureCost, type FeatureEvent } from "../api";
+import { api, ApiError, PROFILE_HELP, PROFILE_LABEL, type Feature, type FeatureCost, type FeatureEvent } from "../api";
 import { CostTable } from "../components/Costs";
 import { useLive } from "../live";
 import { Rail } from "../components/Rail";
@@ -8,6 +8,7 @@ import { ArtifactBody } from "../components/Artifact";
 import { DecisionPanel } from "../components/Decision";
 import { Delivery, Diagrams, NewRepos, WorkItems } from "../components/External";
 import { QualityTable } from "../components/Quality";
+import { TracePanel } from "../components/Trace";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money, threadPath } from "../vocab";
 
 const ORDER = ["OPP", "PRD", "UX", "HLD", "PLAN", "BUILD", "REL", "OPS"];
@@ -101,6 +102,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
         <h1>{f.title}</h1>
         <div className="meta">
           {f.created_by && <span>Intent from {f.created_by}</span>}
+          {f.profile && f.profile !== "feature" && <span title={PROFILE_HELP[f.profile]}>{PROFILE_LABEL[f.profile]} workflow</span>}
           {f.risk_tier && <span>{RISK[f.risk_tier]}</span>}
           {f.lanes_touched && f.lanes_touched.length > 0 && <span>Also changes {f.lanes_touched.join(", ")}</span>}
           {f.initiative_id ? <span>Delivers <Link to={threadPath(f.initiative_id)}>{f.initiative_id}</Link></span> : <span>Unplanned work</span>}
@@ -199,6 +201,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
               </div>
             </section>
           )}
+          <TracePanel featureId={f.feature_id} version={f.events.length} />
           <NewRepos repos={f.new_repos ?? []} />
           <Delivery f={f} />
           <Diagrams diagrams={f.diagrams ?? []} />
