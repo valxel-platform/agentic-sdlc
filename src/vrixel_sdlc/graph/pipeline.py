@@ -971,6 +971,59 @@ def security_review(services, state: FeatureState, wait: str, res: dict, *, ok: 
         event("security", "retry", d["feedback"] or res.get("reason", ""), approver=d["approver"])]})
 
 
+def failing_repos(state: FeatureState, res: dict) -> list[str]:
+    """The repos of this change set whose code a failure points at: failed builds, deployments and
+    suites, blocking findings, and for a failed acceptance criterion the repos whose tasks cover it.
+    Only those the feature's tasks change can be fixed by its agents."""
+    tasks = state.get("tasks") or []
+    ours = {t["repo"] for t in tasks}
+    repos = {r.get("repo") for r in res.get("results") or [] if r.get("state") not in ("success", None)}
+    q = res.get("quality") or {}
+    for s in q.get("suites") or []:
+        if s.get("state") == "failed":
+            repos.add(s.get("repo"))
+            failed = [ac for ac, st in ((s.get("details") or {}).get("criteria") or {}).items() if st == "failed"]
+            repos |= {t["repo"] for t in tasks if set(failed) & set(t.get("acs") or [])}
+    repos |= {f.get("repo") for f in q.get("blocking") or []}
+    return sorted(r for r in repos if r and r in ours)
+
+
+def failure_lines(res: dict) -> list[str]:
+    q = res.get("quality") or {}
+    lines = list(q.get("test_failures") or [])
+    lines += [f"{f['severity']} {f['title']} in {f['repo']} ({f.get('url', '')})" for f in q.get("blocking") or []]
+    lines += [f"{r.get('repo') or r.get('component')}: {r.get('message') or r.get('state')}"
+              for r in res.get("results") or [] if r.get("state") not in ("success", None)]
+    return list(dict.fromkeys(lines)) or [res.get("reason", "it failed")]
+
+
+PRE_PRODUCTION = ("build", "dev", "staging")
+
+
+def fix_or_ask(services, state: FeatureState, wait: str, res: dict, people, extra: dict | None = None) -> Command:
+    """A failure before production goes back to the agents first, with what failed: they fix the
+    repos it points at, and the change goes through CI, the merge, the build and the environments
+    again. People decide only when the tries run out (the product's max_loops) or nothing the
+    feature changed is to blame (a platform outage, a managed service), through `people`."""
+    failing = failing_repos(state, res)
+    tries = int(state.get("fix_retries") or 0)
+    limit = services.feature_snapshot(state).product.max_loops
+    if wait not in PRE_PRODUCTION or not failing or tries >= limit:
+        return people()
+    n = tries + 1
+    lines = failure_lines(res)
+    what = {"build": "The OpenChoreo build failed", "dev": "Dev failed", "staging": "Staging failed"}[wait]
+    update = {**(extra or {}), "delivery": {wait: res}, **_quality_update(res), "fix_retries": n,
+              "rerun_repos": failing, "ci_retries": 0,
+              "feedback": {"build": f"{what} after the change merged. Fix these failures:\n"
+                                    + "\n".join(f"- {x}" for x in lines)},
+              "events": [event(f"{wait}_wait", "auto_fix", f"{what} in {', '.join(failing)}: agents fix it "
+                               f"(try {n} of {limit})", findings=lines)]}
+    if (state.get("change_set") or {}).get("merged"):
+        update["fix_branch"] = f"feature/{state['feature_id']}-fix-{n}"  # the merged branch can't take new commits
+    return Command(goto="build", update=update)
+
+
 def ask_release_managers(state: FeatureState, wait: str, res: dict) -> dict:
     """A failed CI-to-production step goes to people, like a stuck phase."""
     packet = {"type": "escalation", "phase": "delivery", "wait": wait, "feature_id": state["feature_id"],
@@ -1032,6 +1085,16 @@ def make_ci_wait(services):
         if res["status"] == "security":
             fix = "Fix these security findings:\n" + "\n".join(
                 f"- {f['severity']} {f['title']} in {f['repo']} ({f['url']})" for f in res["quality"]["blocking"])
+            # The agents fix blocking findings first; security approvers decide (fix, accept the
+            # risk, or stop) only when the tries run out.
+            tries, limit = int(state.get("ci_retries") or 0), services.feature_snapshot(state).product.max_loops
+            failing = failing_repos(state, res)
+            if tries < limit and failing:
+                return Command(goto="build", update={
+                    "delivery": {"ci": res}, **_quality_update(res), "ci_retries": tries + 1, "rerun_repos": failing,
+                    "feedback": {"build": fix},
+                    "events": [event("ci_wait", "auto_fix", f"Security findings in {', '.join(failing)}: agents fix "
+                                     f"them (try {tries + 1} of {limit})", findings=failure_lines(res))]})
             return security_review(services, state, "ci", res, ok=nxt, retry="build",
                                    retry_update={"feedback": {"build": fix}})
         findings = (list((res.get("quality") or {}).get("test_failures") or []) or
@@ -1069,16 +1132,16 @@ def make_build_wait(services):
         cs = dict(state.get("change_set") or {})
         cs["runs"] = {**runs, **{r["repo"]: {**runs[r["repo"]], "state": r["state"]} for r in res["results"]}}
         if res["status"] == "security":
-            return security_review(services, state, "build", res, ok="deploy_dev", retry="build_wait",
-                                   extra={"change_set": cs})
+            return fix_or_ask(services, state, "build", res, lambda: security_review(
+                services, state, "build", res, ok="deploy_dev", retry="build_wait", extra={"change_set": cs}))
         if res["status"] == "success":
             return Command(goto="deploy_dev", update={"delivery": {"build": res}, "change_set": cs, **_quality_update(res),
                                                       "events": [event("build_wait", "passed",
                                                                        f"{len(todo)} OpenChoreo builds succeeded")]})
-        return _people_said(state, "build", res, ok="deploy_dev", retry="merge_train",
-                            extra={"change_set": cs, **_quality_update(res)})
+        return fix_or_ask(services, state, "build", res, lambda: _people_said(
+            state, "build", res, ok="deploy_dev", retry="merge_train", extra={"change_set": cs, **_quality_update(res)}))
 
-    return build_wait, ("deploy_dev", "merge_train", "build_wait", END)
+    return build_wait, ("deploy_dev", "merge_train", "build_wait", "build", END)
 
 
 def make_deploy(stage: str, services, nxt: str):
@@ -1162,14 +1225,18 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
         res = interrupt(packet)
         report_to_github(services, state, stage, res)
         if res["status"] == "security":
-            return security_review(services, state, stage, res, ok=ok, retry=f"{stage}_wait")
+            return fix_or_ask(services, state, stage, res, lambda: security_review(
+                services, state, stage, res, ok=ok, retry=f"{stage}_wait"))
         if res["status"] == "success":
-            return Command(goto=ok, update={"delivery": {stage: res}, **_quality_update(res),
+            # Staging passed: the next failure starts a fresh count of tries.
+            reset = {"fix_retries": 0, "fix_branch": ""} if stage == "staging" else {}
+            return Command(goto=ok, update={"delivery": {stage: res}, **_quality_update(res), **reset,
                                             "events": [event(f"{stage}_wait", "passed",
                                                              f"{len(targets)} components ready in {stage}")]})
-        return _people_said(state, stage, res, ok=ok, retry=retry, extra=_quality_update(res))
+        return fix_or_ask(services, state, stage, res, lambda: _people_said(
+            state, stage, res, ok=ok, retry=retry, extra=_quality_update(res)))
 
-    return env_wait, (ok, retry, f"{stage}_wait", END)
+    return env_wait, (ok, retry, f"{stage}_wait", "build", END)
 
 
 def release_store_app(services, state: FeatureState, repo: str, sha: str, stage: str, *, actor: str) -> dict:

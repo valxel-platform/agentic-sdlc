@@ -106,6 +106,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "parent_texts": parents,
         "parent_ids": [arts[k]["id"] for k in spec.parents if k in arts],
         "feedback": state.get("feedback", {}).get(phase),
+        # After the change set merged, a fix for a failure in dev or staging goes on a branch of its own.
+        "branch": state.get("fix_branch") or f"feature/{state['feature_id']}",
         "pilot": bool(state.get("pilot")),
         "simulate_faults": dict(state.get("simulate_faults") or {}),
         "tasks": list(state.get("tasks") or []),
@@ -432,7 +434,7 @@ def build_build_subgraph(services):
         fail = attempt <= int(ctx["simulate_faults"].get("build", 0)) and task["id"] == first
         res = call_agent(
             services, role="coder", phase="build", ctx=ctx, skills=spec.skills,
-            tail=(f"Implement {task['id']} in {task['repo']} on branch feature/{ctx['feature_id']}. "
+            tail=(f"Implement {task['id']} in {task['repo']} on branch {ctx.get('branch') or 'feature/' + ctx['feature_id']}. "
                   f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run the tests and report what they said."
                   + (f" Fix this first: {ctx['feedback']}" if ctx.get("feedback") else "")
                   + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
@@ -445,7 +447,7 @@ def build_build_subgraph(services):
         )
         # The coder's own test run gates review; CI on the pull request is the final word (ci_wait).
         reply, error = structured.parse(res.text, structured.CoderReply)
-        result = {**task, "branch": f"feature/{ctx['feature_id']}", "attempt": attempt,
+        result = {**task, "branch": ctx.get("branch") or f"feature/{ctx['feature_id']}", "attempt": attempt,
                   # What the coder says it changed decides the performance test; the plan's list otherwise.
                   "files": list(reply.files) if reply and reply.files else list(task.get("files") or []),
                   "tests_passed": bool(reply and reply.tests.passed),

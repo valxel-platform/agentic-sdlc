@@ -78,22 +78,21 @@ export interface PendingItem {
   content?: string;
   /** What the agents assumed, changed, traded off and left open (open questions first). */
   agent_notes?: AgentNote[];
-  /** The workflow profile: feature, bugfix or express. */
+  /** The workflow profile: feature or express. */
   profile?: Profile;
   /** Express at G4: the spec it approves too (there is no G2). */
   spec_preview?: string;
 }
 
-export type Profile = "feature" | "bugfix" | "express";
+export type Profile = "feature" | "express";
 
 export const PROFILE_LABEL: Record<Profile, string> = {
-  feature: "Feature", bugfix: "Bug fix", express: "Express",
+  feature: "Feature", express: "Express",
 };
 
 export const PROFILE_HELP: Record<Profile, string> = {
   feature: "Every phase and gate: discovery, spec, UX design and architecture, then build and release.",
-  bugfix: "A defect in something that exists: no discovery or UX design. The spec and architecture are still reviewed.",
-  express: "A small, low-risk change: as a bug fix, and the spec is approved with the architecture at G4.",
+  express: "A small, low-risk change: no discovery or UX design, and the spec is approved with the architecture at G4.",
 };
 
 export interface AgentNote {

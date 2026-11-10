@@ -681,8 +681,27 @@ webhook. When one fails or times out:
   tasks are redone (their PRs get new commits), and CI runs again, up to the product's
   `max_loops`. When those run out, the build's escalation asks people: let agents retry, or vouch
   for it.
-- **A failed build or deployment** asks the release managers (G6 approvers) to try again, carry
-  on anyway, or stop. Retrying production means asking for G6 again.
+- **A failed build, a failed deployment check or failing tests in dev or staging** go back to the
+  agents too (see [Fixing failures before production](#fixing-failures-before-production)). The
+  release managers (G6 approvers) decide only when the tries run out or nothing the feature changed
+  is to blame: try again, carry on anyway, or stop. A deployment the platform refuses goes straight
+  to them. Production is never fixed this way: retrying it means asking for G6 again.
+
+### Fixing failures before production
+
+Before production the pipeline fixes its own failures; people step in only when it can't. Whatever
+fails (red CI, blocking security findings, the OpenChoreo build, a component that isn't ready, or
+integration, end-to-end, acceptance or performance tests in dev or staging), the tool works out which
+of the feature's repos it points at (for a failed acceptance criterion, the repos whose tasks cover
+it), gives their coders what failed, and redoes only those tasks. Before merge the pull requests get
+new commits; after merge the fix goes on a branch of its own (`feature/<id>-fix-<n>`) and goes
+through CI, G5 when the change is risky, the merge, the build, dev and staging again.
+
+Each feature gets the product's `max_loops` tries before merge (CI and security findings) and as
+many again after it (build, dev and staging), counted afresh once staging passes. When they run out,
+or the failure is outside what the feature changed (a managed service, the platform), people decide:
+the build's escalation before merge, the release managers or security approvers after it. Every try
+is an `auto_fix` event with the failures, so the decision shows what the agents already tried.
 
 Agents bind only dev and staging (VX-3). Production is bound after G6, recorded under the
 approver's name, and OpenChoreo's own authorization is the backstop.
@@ -740,12 +759,12 @@ Tool output reaches the pipeline through two open formats: check runs (any CI) a
 GitHub code scanning (any scanner). That is what keeps tools swappable.
 
 **What happens on a result**
-- **Failed tests, low coverage, or a required suite that never reports:** before merge, the build
-  goes back to its escalation (agents fix, or a person vouches). After merge, the release
-  managers decide.
-- **Findings at or above `block_on`:** the lane's security approvers decide (`approvers.security`
-  in `product.yaml`, else the G5 approvers). They can have agents fix them (before merge; agents
-  get the findings as feedback), scan again (after merge), accept the risk, or stop the feature.
+- **Failed tests, low coverage, or a required suite that never reports:** the agents fix them
+  first, before or after merge; when the tries run out the build's escalation (before merge) or
+  the release managers (after) decide.
+- **Findings at or above `block_on`:** the agents fix them first, the same way. When the tries run
+  out the lane's security approvers decide (`approvers.security` in `product.yaml`, else the G5
+  approvers): have agents try again, scan again, accept the risk, or stop the feature.
 - **Accepting a risk** creates a waiver for each finding. It records the reason (required), the
   approver and an expiry of at most 90 days. Waived findings stop blocking until the waiver
   expires; they are listed under "Accepted risks" in the release document and on the G6 panel.
@@ -1415,7 +1434,7 @@ GitHub as usual. Then read the report: the human share against 15%, where people
 work came back, and the shadow modes' agreement, which decide the next changes (cheaper models for
 low-risk work, automatic approval, learning from repeated corrections).
 
-## Workflow profiles: feature, bug fix, express
+## Workflow profiles: feature and express
 
 Not every change needs discovery and a UX design. Whoever starts the work picks a profile (the New
 intent page asks when the product allows more than one); the gates that matter stay whatever the
@@ -1424,20 +1443,22 @@ profile (`vrixel_sdlc/profiles.py`):
 | Profile | Runs | Gates people decide |
 | --- | --- | --- |
 | Feature | every phase | G1 to G6 (G5 for risky change sets) |
-| Bug fix | spec, architecture, then plan to production; no discovery, no UX design | G2, G4, G5 (risky), G6 |
-| Express | as a bug fix | G4 (with the spec, since there is no G2), G5 (risky), G6 |
+| Express | a small, low-risk change: spec, architecture, then plan to production; no discovery, no UX design | G4 (with the spec, since there is no G2), G5 (risky), G6 |
 
-A profile without discovery starts from a brief written from the request. The gates it decides
-are recorded as decided by the profile (`approver: profile:bugfix`), and the rail shows the skipped
-stations. No profile skips architecture (it finds the repos, contracts and lanes the change touches),
-planning, tests, security scans, the performance rules, G5 for risky changes or G6. Products list
-the profiles their people may use; express needs listing and never applies to PHI or payments
-products. An incident's hotfix stays its own track, decided by on-call.
+Express starts from a brief written from the request. The gates it decides are recorded as decided
+by the profile (`approver: profile:express`), and the rail shows the skipped stations. It doesn't
+skip architecture (it finds the repos, contracts and lanes the change touches), planning, tests,
+security scans, the performance rules, G5 for risky changes or G6. Products list the profiles their
+people may use; express needs listing and never applies to PHI or payments products.
+
+Defects are not a profile. Before production the pipeline fixes its own failures (see [Fixing
+failures before production](#fixing-failures-before-production)); in production, alerts, error
+reports and reported problems open incidents, which mitigate and then hotfix or change the intent.
 
 ```yaml
 # <product>-governance/product.yaml
 workflow:
-  profiles: [feature, bugfix, express]   # default: [feature, bugfix]
+  profiles: [feature, express]   # default: [feature]
   default: feature
 ```
 
@@ -1531,7 +1552,8 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | Agent roster and skills | `agents/roles.py` | Plugin skills per phase; critic skills double as evaluators |
 | Performance tests | `performance.py`, `config/quality.yaml` | Budgets over industry defaults, the rules that pick none, smoke or full per repo, the PR labels and the staging request |
 | Takeover and lessons | `graph/pipeline.py`, `lessons.py` | Gate history and revision limits; the person's version kept on hand-back; corrections recorded, lessons distilled and proposed as governance PRs, then pinned per feature into prompts and the critic's checklist |
-| Workflow profiles | `profiles.py`, `graph/pipeline.py` | Feature, bug fix and express routes; the profile brief, the gates a profile decides, and the guard that keeps architecture, G5 and G6 |
+| Fixing failures before production | `graph/pipeline.py` (`fix_or_ask`, `failing_repos`) | Failures in CI, the build, dev and staging go back to the coders of the repos they point at, on a fix branch after merge; people decide when the tries run out |
+| Workflow profiles | `profiles.py`, `graph/pipeline.py` | Feature and express routes; the profile brief, the gates a profile decides, and the guard that keeps architecture, G5 and G6 |
 | Agent notes | `diary.py`, `graph/phase.py` | The `## Agent notes` section and the coder's notes, kept per phase and shown at the gates and in PR descriptions |
 | Traceability | `traceability.py` | Metrics, goals, criteria, tasks, PRs, acceptance results, deployments and incidents in one view, with gaps; reverse lookup by repo or PR |
 | Pilot | `pilot.py` | People's effort, the shadow automatic-approval rule, and the report against the 15% target |

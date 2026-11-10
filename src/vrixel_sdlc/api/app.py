@@ -92,7 +92,7 @@ class FeatureIn(BaseModel):
                                       description="Required when the request looks like an existing feature")
     initiative_id: str = Field("", description="The approved initiative this feature delivers; empty = unplanned")
     pilot: bool = Field(False, description="Measure it in the pilot report, with the shadow modes on")
-    profile: str = Field("", pattern="^(|feature|bugfix|express)$",
+    profile: str = Field("", pattern="^(|feature|express)$",
                          description="How much of the pipeline it goes through; empty = the product's default")
 
 
@@ -143,7 +143,7 @@ class DecisionIn(BaseModel):
 
 class SubmitIn(BaseModel):
     pilot: bool = Field(False, description="Measure it in the pilot report, with the shadow modes on")
-    profile: str = Field("", pattern="^(|feature|bugfix|express)$",
+    profile: str = Field("", pattern="^(|feature|express)$",
                          description="How much of the pipeline it goes through; empty = the product's default")
 
 

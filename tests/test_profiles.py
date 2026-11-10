@@ -1,5 +1,5 @@
-"""Workflow profiles: bug fixes and express changes skip discovery and UX design; express also
-lets G4 approve the spec. No profile skips architecture, G5 for risky changes, or G6."""
+"""Workflow profiles: express changes skip discovery and UX design and let G4 approve the spec.
+No profile skips architecture, G5 for risky changes, or G6. Defects are not a profile."""
 
 import pytest
 
@@ -12,43 +12,28 @@ def gates_asked(engine, fid):
 
 
 def test_products_choose_their_profiles():
-    assert profiles.allowed(None, "general") == ["feature", "bugfix"]
-    assert profiles.allowed({"profiles": ["feature", "bugfix", "express"]}, "general") == ["feature", "bugfix", "express"]
+    assert profiles.allowed(None, "general") == ["feature"]
+    assert profiles.allowed({"profiles": ["feature", "express"]}, "general") == ["feature", "express"]
+    assert "bugfix" not in profiles.PROFILES  # defects: fixed before production, incidents after
     assert profiles.allowed({"profiles": ["feature", "express"]}, "phi") == ["feature"]
     assert profiles.check({"profiles": ["feature", "express"]}, "phi") == [
         "workflow.profiles: express isn't available to phi products"]
-    assert "workflow.profiles must include feature" in profiles.check({"profiles": ["bugfix"]}, "general")
+    assert "workflow.profiles must include feature" in profiles.check({"profiles": ["express"]}, "general")
     assert any("not a profile" in p for p in profiles.check({"profiles": ["feature", "yolo"]}, "general"))
-    assert any("default" in p for p in profiles.check({"profiles": ["feature"], "default": "bugfix"}, "general"))
+    assert any("default" in p for p in profiles.check({"profiles": ["feature"], "default": "express"}, "general"))
     assert profiles.check({"speed": 1}, "general") == ["workflow.speed is not a setting (use profiles, default)"]
 
 
-def test_a_bugfix_starts_at_the_spec_and_skips_ux_design(engine, services):
-    fid = engine.start(product_id="FARM", title="Login fails with a plus sign", profile="bugfix",
-                       description="Farmers whose email has a + can't sign in")["feature_id"]
-    v = engine.view(fid)
-    assert v["profile"] == "bugfix" and gates_asked(engine, fid) == ["g2"]
-    assert {s["key"]: s["state"] for s in v["rail"]}["discovery"] == "skipped"
-    assert {s["key"]: s["state"] for s in v["rail"]}["g3"] == "skipped"
-    brief = services.artifacts.load(engine.graph.get_state(engine._config(fid)).values["artifacts"]["OPP"])
-    assert "can't sign in" in brief and "Bug fix" in brief
-    approve(engine, fid, "g2")
-    assert gates_asked(engine, fid) == ["g4"]  # straight to architecture, no design
-    approve(engine, fid, "g4")
-    state = engine.graph.get_state(engine._config(fid)).values
-    assert state["phase_status"].get("design") == "skipped" and "UX" not in state["artifacts"]
-    assert any(d["approver"] == "profile:bugfix" and d["gate"] == "g1" for d in state["gate_decisions"])
-    v = engine.auto_drive(fid)
-    assert v["status"] == "done"
-    assert (engine.graph.get_state(engine._config(fid)).values["approvals"] or {}).get("g6")
-
-
-def test_express_lets_g4_approve_the_spec_and_keeps_g6(engine):
+def test_express_lets_g4_approve_the_spec_and_keeps_g6(engine, services):
     fid = engine.start(product_id="FARM", title="Rename the harvest button", profile="express")["feature_id"]
     [g4] = [p for p in engine.pending(fid) if p["type"] == "gate"]
     assert g4["gate"] == "g4" and g4["profile"] == "express" and g4["spec_preview"].startswith("# PRD")
     v = engine.view(fid)
-    assert {s["key"]: s["state"] for s in v["rail"]}["g2"] == "skipped"
+    rail = {s["key"]: s["state"] for s in v["rail"]}
+    assert rail["g2"] == "skipped" and rail["discovery"] == "skipped" and rail["design"] == "skipped"
+    state = engine.graph.get_state(engine._config(fid)).values
+    assert "Express" in services.artifacts.load(state["artifacts"]["OPP"])
+    assert {d["gate"] for d in state["gate_decisions"] if d["approver"] == "profile:express"} == {"g1", "g2", "g3"}
     approve(engine, fid, "g4")
     asked = set()
     for _ in range(40):

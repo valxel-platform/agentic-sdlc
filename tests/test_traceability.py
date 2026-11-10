@@ -17,7 +17,7 @@ PLAN = "# Plan\n## Traceability\n- AC-1 -> TASK-1 / TEST-1\n- AC-2 -> TASK-2 / T
 
 
 def state(**over):
-    s = {"feature_id": "F-1", "title": "Check-in", "profile": "bugfix",
+    s = {"feature_id": "F-1", "title": "Check-in", "profile": "express",
          "tasks": [{"id": "TASK-1", "repo": "o/api", "acs": ["AC-1"]},
                    {"id": "TASK-2", "repo": "o/web", "acs": ["AC-2"]}],
          "pull_requests": {"o/api#4": {"repo": "o/api", "number": 4, "url": "u4", "task_id": "TASK-1"}},
@@ -42,7 +42,7 @@ def test_a_feature_traces_from_metrics_to_production():
     assert t["decisions"] == [{"id": "ADR-F-1", "text": "Extend the intake API"}]
     assert [r["repo"] for r in t["repos"]] == ["o/api", "o/web", "o/docs"]
     assert t["release"] == {"flag": "f.k", "percent": 25, "production": True, "merged": True}
-    assert t["incidents"][0]["id"] == "INC-1" and t["profile"] == "bugfix"
+    assert t["incidents"][0]["id"] == "INC-1" and t["profile"] == "express"
     assert set(t["gaps"]) == {
         "G2 has no metric that measures it", "M2 measures no goal", "AC-3 is covered by no task",
         "o/docs is affected but no task changes it", "TASK-2 (o/web) has no pull request",
@@ -92,5 +92,5 @@ def test_the_api_serves_the_trace_and_the_reverse_lookup(engine):
         assert c.get("/api/products/FARM/trace").status_code == 422
         assert c.get("/api/products/NOPE/trace", params={"repo": "a/b"}).status_code == 404
         products = c.get("/api/products").json()
-        assert products["FARM"]["profiles"] == ["feature", "bugfix", "express"]
-        assert products["CLN"]["profiles"] == ["feature", "bugfix"]
+        assert products["FARM"]["profiles"] == ["feature", "express"]
+        assert products["CLN"]["profiles"] == ["feature"]

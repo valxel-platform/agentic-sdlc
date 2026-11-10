@@ -5,17 +5,22 @@ Not every change needs discovery and a UX design. The person who starts the work
 
   feature   everything: discovery G1, spec G2, design G3 and architecture G4 in parallel, plan,
             build, CI (G5 when risky), dev, staging, release G6, production
-  bugfix    a defect in something that exists: no discovery and no UX design. Spec G2 states the
-            defect and how to tell it is fixed; architecture G4 finds where; then the rest
-  express   a small, low-risk change: as bugfix, and the spec isn't a gate of its own. G4 approves
-            the spec and the design together
+  express   a small, low-risk change (copy, a label, a setting, a minor tweak): no discovery and no
+            UX design, and the spec isn't a gate of its own. G4 approves the spec and the design
+            together
+
+Defects are not a profile. Before production the pipeline fixes its own failures (red CI, a failed
+build, deployment or test in dev or staging, a security finding): the agents get what failed and
+try again, up to the product's max_loops, and people decide only when they can't. In production,
+alerts, error reports and reported problems open incidents, which mitigate and then hotfix or
+change the intent (ops/incident.py).
 
 No profile skips architecture (it finds the repos, contracts and lanes a change touches), planning,
 tests, security scans, the performance rules, G5 for risky changes, or G6 before production. An
 incident's hotfix is its own track (graph/pipeline.py hotfix_brief), decided by on-call.
 
 Products choose which profiles their people may use (product.yaml `workflow.profiles`; feature and
-bugfix by default). Express needs listing explicitly, and never applies to PHI or payments
+nothing else by default). Express needs listing explicitly, and never applies to PHI or payments
 products: their specs are always reviewed on their own.
 """
 
@@ -35,10 +40,9 @@ class Profile:
 
 PROFILES: dict[str, Profile] = {
     "feature": Profile("feature", "Feature", (), (), "discovery"),
-    "bugfix": Profile("bugfix", "Bug fix", ("discovery", "design"), ("g1", "g3"), "spec"),
     "express": Profile("express", "Express", ("discovery", "design"), ("g1", "g2", "g3"), "spec"),
 }
-DEFAULT_ALLOWED = ("feature", "bugfix")
+DEFAULT_ALLOWED = ("feature",)
 REGULATED = ("phi", "payments")
 
 
@@ -83,14 +87,11 @@ def check(raw: dict | None, data_class: str) -> list[str]:
 
 def brief(state: dict, profile: Profile) -> str:
     """The opportunity brief a profile without discovery starts from: what the person wrote."""
-    what = "Defect" if profile.name == "bugfix" else "Change"
     return "\n".join([
         f"# Opportunity brief: {state['title']}", "",
         "## Problem", (state.get("description") or state["title"]).strip(), "",
-        "## Capability", f"Extends: the existing capability this {what.lower()} belongs to", "",
-        "## Success metrics", f"- M1: the {what.lower()} described above is resolved, with no new errors on the "
-        "affected journeys", "",
-        "## Profile", f"- {profile.title}: discovery and UX design skipped "
-        f"({'the spec is approved with the architecture at G4' if 'g2' in profile.skips_gates else 'the spec is reviewed at G2'})",
-        "",
+        "## Capability", "Extends: the existing capability this change belongs to", "",
+        "## Success metrics", "- M1: the change described above is live, with no new errors on the affected journeys", "",
+        "## Profile", f"- {profile.title}: discovery and UX design skipped; the spec is approved with the "
+        "architecture at G4", "",
     ])

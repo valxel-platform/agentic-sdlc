@@ -55,4 +55,4 @@ high_risk_paths:
 
 # Workflow profiles people may start work with (vrixel_sdlc.profiles): small low-risk changes can go express.
 workflow:
-  profiles: [feature, bugfix, express]
+  profiles: [feature, express]
