@@ -1249,6 +1249,20 @@ TypeScript). Add it to the product's `repos:` to turn this on.
   the stage for any criterion that failed or has no test, and G6 shows each criterion's result.
   `budget_s` (default 600s in dev, 900s in staging) reports runs that are too slow.
 
+## The Backstage catalog: Git is the source
+
+Each repo a feature changes carries a Backstage `Component` in `catalog-info.yaml` at its root. The
+build commits it to the feature branch next to the code, so it is reviewed in the pull request and
+merges with it; Backstage in the OpenChoreo portal discovers it from the default branch. The tool
+never writes to Backstage.
+
+The pipeline fills only what it knows (the GitHub slug, the product as `system`, the OpenChoreo
+project and component, a type from the repo's role, the product owners' team as `owner`) and adds
+the feature's capability to the `vrixel.io/capabilities` annotation. It keeps everything else: a
+description, links, `dependsOn`, an `API` entity, or a type, owner or lifecycle someone changed.
+The tool's own catalog (Postgres) still holds capabilities while they are designed and in flight,
+which Backstage doesn't model (`vrixel_sdlc/catalog_info.py`).
+
 ## Diagrams and work tracking
 
 Each product chooses its tools in `<product>-governance/product.yaml`. The tools org runs the connections
