@@ -155,7 +155,13 @@ def session_home(template: str, target: Path) -> str:
     """A Codex home for one session: a copy of the template (the installed plugins and the config
     that enables them), or an empty one. Sessions never share state or see a user's config."""
     if template and Path(template).is_dir():
-        shutil.copytree(template, target, symlinks=True)
+        target.mkdir(parents=True)
+        for part in ("config.toml", "plugins"):  # what the template is for; never its scratch state
+            src = Path(template) / part
+            if src.is_dir():
+                shutil.copytree(src, target / part, symlinks=True)
+            elif src.is_file():
+                shutil.copy2(src, target / part)
     else:
         target.mkdir(parents=True)
     return str(target)

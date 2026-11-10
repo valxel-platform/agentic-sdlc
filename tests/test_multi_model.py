@@ -336,12 +336,14 @@ def test_each_codex_session_starts_from_a_copy_of_the_plugin_home(tmp_path, monk
     template = tmp_path / "codex-home"
     (template / "plugins" / "cache").mkdir(parents=True)
     (template / "config.toml").write_text('[plugins."engineering@vrixel-plugins"]\nenabled = true\n')
+    (template / "tmp").mkdir()  # the install's scratch state stays behind
     seen = []
 
     class Peek(FakeCodex):
         def __call__(self, cmd, **kw):
             home = Path(kw["env"]["CODEX_HOME"])
             seen.append((home, (home / "config.toml").read_text()))
+            assert sorted(p.name for p in home.iterdir()) == ["config.toml", "plugins"]
             (home / "state.db").write_text("session state")
             return super().__call__(cmd, **kw)
 

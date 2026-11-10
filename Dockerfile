@@ -46,7 +46,9 @@ COPY --from=codex /codex /usr/local/bin/codex
 # The same plugins, installed for Codex: each Codex session starts from a copy of this home.
 RUN export CODEX_HOME=/opt/vrixel/codex-home && mkdir -p "$CODEX_HOME" \
  && codex plugin marketplace add /opt/vrixel/plugins \
- && for p in product-management engineering design vrixel; do codex plugin add "$p@vrixel-plugins"; done
+ && for p in product-management engineering design vrixel; do codex plugin add "$p@vrixel-plugins"; done \
+ && find "$CODEX_HOME" -mindepth 1 -maxdepth 1 ! -name config.toml ! -name plugins -exec rm -rf {} + \
+ && chmod -R a+rX "$CODEX_HOME"
 
 RUN useradd --create-home --uid 10001 vrixel && mkdir -p /data/artifacts && chown -R vrixel /data
 USER vrixel
