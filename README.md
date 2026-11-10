@@ -1385,8 +1385,12 @@ layers, its JSON reply, its caps) is the same whichever vendor runs it.
   has no price under `prices`. Every model that runs needs a price, so feature budgets hold
   whichever vendor does the work; self-hosted models are priced at zero (paid for as infrastructure).
 - **Codex sessions** get the phase's skills, constitution, product and feature context first in
-  the prompt (through stdin), then the task, and reply with the stage's JSON schema
-  (`--output-schema`). They run sandboxed to the checkout with no approvals, stop at the role's
+  the prompt (through stdin), then the task. Codex reads Claude-format plugins, so the same
+  skills-only plugins are installed for it in the image (`/opt/vrixel/codex-home`, a plugin
+  marketplace over `/opt/vrixel/plugins`); each session starts from a copy of that home, sees every
+  plugin skill by name and reads one when it needs it (plugin commands, such as
+  `product-management:brainstorm`, reach it only through the pasted skills). Sessions reply with the stage's JSON schema
+  (`--output-schema`), run sandboxed to the checkout with no approvals, stop at the role's
   `max_minutes`, and are costed from their token usage. Codex has no dollar cap of its own: a session
   that spent more than its cap is logged and the feature's budget check sees it. A provider that
   can't be reached is given up on after a few reconnects, so the next fallback gets the task.
@@ -1633,8 +1637,10 @@ effect once the other is also decided. An earlier approval of the other gate sti
   or `<plugin>/commands/<skill>.md`). The image installs Anthropic's Product Management,
   Engineering and Design plugins ([knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins),
   pinned by commit in the Dockerfile) and ours, `plugins/vrixel` (the critics' skills), at
-  `/opt/vrixel/plugins`. Live mode refuses to start while a skill a phase uses is missing; CI checks
-  the pinned commit has them all. Live mode is not covered by the
+  `/opt/vrixel/plugins`, skills and commands only: `plugins/prepare.sh` leaves out each plugin's
+  connectors (`.mcp.json`: Slack, Linear, Atlassian and others) and hooks, so an agent working on
+  product code reaches no outside tool through a plugin. Live mode refuses to start while a skill a
+  phase uses is missing; CI checks the pinned commit has them all. Live mode is not covered by the
   offline tests. Run it against a sandbox product first.
 
   A Claude Code session starts from Claude Code's own system prompt (the `claude_code` preset:

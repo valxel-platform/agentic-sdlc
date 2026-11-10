@@ -106,7 +106,7 @@ def test_a_bad_request_is_an_error_not_a_fallback():
 def test_the_codex_command_is_headless_sandboxed_and_reads_the_prompt_from_stdin():
     cmd = codex_command("openai/gpt-5.4", cwd="/work", schema_path="/t/s.json", last_path="/t/l.txt", provider=None)
     assert cmd[:3] == ["codex", "exec", "--json"] and cmd[-1] == "-"
-    assert {"--ephemeral", "--ignore-user-config", "--skip-git-repo-check"} <= set(cmd)
+    assert {"--ephemeral", "--skip-git-repo-check"} <= set(cmd)
     assert cmd[cmd.index("--sandbox") + 1] == "workspace-write" and 'model="gpt-5.4"' in cmd
     assert cmd[cmd.index("--output-schema") + 1] == "/t/s.json" and cmd[cmd.index("--cd") + 1] == "/work"
     own = codex_command("selfhosted/qwen3-coder", cwd=None, schema_path=None, last_path="/t/l",
@@ -157,6 +157,7 @@ def test_a_codex_session_replies_in_the_schema_and_is_costed(tmp_path, monkeypat
     _, kw = fake.calls[0]
     assert res.text == '{"done": true}' and "Implement T1" in kw["input"]
     assert kw["env"]["CODEX_API_KEY"] == "sk-test" and kw["timeout"] == 40 * 60
+    assert Path(kw["env"]["CODEX_HOME"]).name == "home"  # a home of its own, gone after the session
     rec = gw.ledger.records()[-1]
     assert (rec.runtime, rec.provider, rec.input_tokens, rec.cache_read_input_tokens) == ("codex", "openai", 600, 400)
     assert res.cost_usd == pytest.approx((600 * 1.0 + 400 * 0.1 + 100 * 10.0) / 1e6)
@@ -329,3 +330,43 @@ def test_a_session_stuck_reconnecting_is_stopped_early(tmp_path):
     proc = run_codex([sys.executable, str(script)], input="prompt", env={}, timeout=30)
     assert time.monotonic() - started < 10 and proc.returncode == -9
     assert "unreachable" in failure_from(proc.stdout)
+
+
+def test_each_codex_session_starts_from_a_copy_of_the_plugin_home(tmp_path, monkeypatch):
+    template = tmp_path / "codex-home"
+    (template / "plugins" / "cache").mkdir(parents=True)
+    (template / "config.toml").write_text('[plugins."engineering@vrixel-plugins"]\nenabled = true\n')
+    (template / "tmp").mkdir()  # the install's scratch state stays behind
+    seen = []
+
+    class Peek(FakeCodex):
+        def __call__(self, cmd, **kw):
+            home = Path(kw["env"]["CODEX_HOME"])
+            seen.append((home, (home / "config.toml").read_text()))
+            assert sorted(p.name for p in home.iterdir()) == ["config.toml", "plugins"]
+            (home / "state.db").write_text("session state")
+            return super().__call__(cmd, **kw)
+
+    gw = codex_gateway(tmp_path, monkeypatch)
+    rt = CodexRuntime(gw, runner=Peek(), home_template=str(template))
+    for _ in range(2):
+        rt.run(AgentTask(role="coder_codex", phase="build", tags=tags("coder_codex"), layers=layers()))
+    assert seen[0][0] != seen[1][0] and all("engineering@vrixel-plugins" in c for _, c in seen)
+    assert not (template / "state.db").exists() and not seen[0][0].exists()
+
+
+def test_the_image_plugins_are_skills_only_and_form_a_marketplace(tmp_path):
+    upstream = tmp_path / "kwp"
+    for p in ("product-management", "engineering", "design"):
+        (upstream / p / "skills" / "s").mkdir(parents=True)
+        (upstream / p / "skills" / "s" / "SKILL.md").write_text("---\nname: s\n---\n")
+        (upstream / p / ".mcp.json").write_text('{"mcpServers": {"slack": {}}}')
+    (upstream / "engineering" / "hooks").mkdir()
+    (upstream / "LICENSE").write_text("Apache")
+    out = tmp_path / "out"
+    subprocess.run([str(ROOT / "plugins" / "prepare.sh"), str(upstream), str(ROOT / "plugins" / "vrixel"), str(out)],
+                   check=True)
+    assert not list(out.rglob(".mcp.json")) and not (out / "engineering" / "hooks").exists()
+    market = json.loads((out / ".claude-plugin" / "marketplace.json").read_text())
+    assert {p["name"] for p in market["plugins"]} == {"product-management", "engineering", "design", "vrixel"}
+    assert all((out / p["source"]).is_dir() for p in market["plugins"])

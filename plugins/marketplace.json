@@ -1,0 +1,10 @@
+{
+  "name": "vrixel-plugins",
+  "owner": { "name": "Vrixel" },
+  "plugins": [
+    { "name": "product-management", "source": "./product-management", "description": "Anthropic's Product Management skills (knowledge-work-plugins), skills only" },
+    { "name": "engineering", "source": "./engineering", "description": "Anthropic's Engineering skills (knowledge-work-plugins), skills only" },
+    { "name": "design", "source": "./design", "description": "Anthropic's Design skills (knowledge-work-plugins), skills only" },
+    { "name": "vrixel", "source": "./vrixel", "description": "How the Vrixel SDLC tool's critics judge a PRD, a plan, a release and a launch's results" }
+  ]
+}

@@ -3,7 +3,10 @@ models or any model behind an OpenAI-compatible Responses API (a self-hosted vLL
 
 The stage contract is the same as Claude Code's: the session works in the checkout, reads the
 repository's AGENTS.md as Codex always does, and replies with the stage's JSON schema
-(`--output-schema`). Codex keeps its own built-in instructions; our layers L2-L5 (the phase's
+(`--output-schema`). Each session gets its own Codex home (CODEX_HOME), copied from the image's
+template (VRIXEL_CODEX_HOME), in which the same skills-only plugins Claude Code loads are
+installed: the agent sees every plugin skill by name and description and reads one when it needs
+it. Nothing from a user's own Codex configuration applies. Codex keeps its own built-in instructions; our layers L2-L5 (the phase's
 skills, the constitution, the product, the feature) go first in the prompt, then the task, so
 providers that cache prompt prefixes reuse them. The prompt goes through stdin, so its size is
 not limited by the process-argument cap.
@@ -24,6 +27,7 @@ import json
 import logging
 import os
 import queue
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -101,7 +105,7 @@ def codex_command(model: str, *, cwd: str | None, schema_path: str | None, last_
                   provider: tuple[str, str, str] | None) -> list[str]:
     """`codex exec` for one session. provider: (id, base_url, api_key_env) for a model that is not
     OpenAI's; None uses OpenAI with CODEX_API_KEY."""
-    cmd = ["codex", "exec", "--json", "--ephemeral", "--ignore-user-config", "--skip-git-repo-check",
+    cmd = ["codex", "exec", "--json", "--ephemeral", "--skip-git-repo-check",
            "--sandbox", "workspace-write", "-c", "approval_policy=never",
            "-c", f"model={json.dumps(model.split('/', 1)[-1])}", "-o", last_path]
     if provider:
@@ -147,14 +151,32 @@ def failure_from(events: str) -> str:
     return ""
 
 
+def session_home(template: str, target: Path) -> str:
+    """A Codex home for one session: a copy of the template (the installed plugins and the config
+    that enables them), or an empty one. Sessions never share state or see a user's config."""
+    if template and Path(template).is_dir():
+        target.mkdir(parents=True)
+        for part in ("config.toml", "plugins"):  # what the template is for; never its scratch state
+            src = Path(template) / part
+            if src.is_dir():
+                shutil.copytree(src, target / part, symlinks=True)
+            elif src.is_file():
+                shutil.copy2(src, target / part)
+    else:
+        target.mkdir(parents=True)
+    return str(target)
+
+
 class CodexRuntime:
     name = "codex"
     capabilities = frozenset({"text", "code_execution"})
 
-    def __init__(self, gateway: ModelGateway, *, cwd: str | None = None, runner: Runner = run_codex):
+    def __init__(self, gateway: ModelGateway, *, cwd: str | None = None, runner: Runner = run_codex,
+                 home_template: str | None = None):
         self.gateway = gateway
         self.cwd = cwd
         self.runner = runner
+        self.home_template = home_template if home_template is not None else os.environ.get("VRIXEL_CODEX_HOME", "")
 
     def run(self, task: AgentTask) -> AgentResult:
         settings = self.gateway.settings
@@ -172,6 +194,7 @@ class CodexRuntime:
             provider = (role.provider, pc.url(), pc.api_key_env)
         started = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="vrixel-codex-") as tmp:
+            env["CODEX_HOME"] = session_home(self.home_template, Path(tmp) / "home")
             schema_path = None
             if task.schema:
                 schema_path = str(Path(tmp) / "schema.json")
