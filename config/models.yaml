@@ -1,8 +1,19 @@
 # Role-to-model registry. Changing a role's provider or model is a config change,
 # promoted only after the role passes its phase's golden evals.
-# runtime: claude_code (Claude Agent SDK, plugins native) | generic (one gateway call per task, any provider; text only)
-# max_turns, max_call_usd: caps for one Claude Code session (defaults 40 turns, $10); a session
-# never gets more than what's left of the feature's budget either.
+# runtime: claude_code (Claude Agent SDK, plugins native) | codex (OpenAI's Codex CLI: OpenAI's
+#          models or an open-weight model behind an OpenAI-compatible endpoint) | generic (one
+#          gateway call per task, any provider; text only)
+# max_turns, max_call_usd: caps for one session (defaults 40 turns, $10); a session never gets more
+#          than what's left of the feature's budget either. Codex has neither cap: it gets
+#          max_minutes (default 30) and its cost is checked after.
+# fallback: roles that take the same task, in order, when this role's provider is rate limited,
+#          overloaded or down. Each must be allowed the product's data class, or it is skipped.
+# second_opinion: roles (other model families) that may review the same change with the same
+#          instructions and reply format; the first that can run and may see the product's data
+#          class does (OpenAI for general data, the self-hosted model for PHI and payments). second_opinion_blocking: true lets its blocking
+#          findings block the merge; false (the default) reports them beside the review.
+# Roles used only as a fallback or second opinion are optional: they turn off, with a warning,
+# when their provider isn't configured or their model has no price below.
 roles:
   # Documents are written in one call each, with the cached prompt layers; only work that reads
   # or changes a repo runs as a Claude Code session (architect, coder, reviewer).
@@ -11,8 +22,10 @@ roles:
   designer:   { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
   architect:  { runtime: claude_code, model: anthropic/claude-opus-5-5, max_turns: 40, max_call_usd: 12 }
   planner:    { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
-  coder:      { runtime: claude_code, model: anthropic/claude-sonnet-5-5, max_turns: 80, max_call_usd: 15 }
-  reviewer:   { runtime: claude_code, model: anthropic/claude-opus-5-5, max_turns: 30, max_call_usd: 6 }
+  coder:      { runtime: claude_code, model: anthropic/claude-sonnet-5-5, max_turns: 80, max_call_usd: 15,
+                fallback: [coder_codex, coder_open] }
+  reviewer:   { runtime: claude_code, model: anthropic/claude-opus-5-5, max_turns: 30, max_call_usd: 6,
+                fallback: [reviewer_open], second_opinion: [reviewer_second, reviewer_open] }
   release:    { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
   ops:        { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
   critic:     { runtime: generic,     model: anthropic/claude-opus-5-5 }
@@ -25,12 +38,29 @@ roles:
   critic_shadow:   { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
   reviewer_shadow: { runtime: claude_code, model: anthropic/claude-sonnet-5-5, max_turns: 30, max_call_usd: 3 }
 
+  # Other vendors, behind the same stage contract. Optional: see the note at the top.
+  coder_codex:     { runtime: codex, model: openai/gpt-5.4, max_call_usd: 15, max_minutes: 40 }
+  coder_open:      { runtime: codex, model: selfhosted/qwen3-coder, max_minutes: 40 }
+  reviewer_second: { runtime: codex, model: openai/gpt-5.4, max_call_usd: 6, max_minutes: 20 }
+  reviewer_open:   { runtime: codex, model: selfhosted/qwen3-coder, max_minutes: 20 }
+
+# Providers reached over an OpenAI-compatible API. Anthropic is built in. A codex role with an
+# openai model uses CODEX_API_KEY (or OPENAI_API_KEY); one with another provider needs that
+# provider to serve the Responses API (vLLM does).
+providers:
+  openai:     { base_url: "https://api.openai.com/v1", api_key_env: OPENAI_API_KEY }
+  selfhosted: { base_url_env: VRIXEL_SELFHOSTED_URL, api_key_env: VRIXEL_SELFHOSTED_API_KEY }
+
+# USD per million tokens (input, output, cached input) for models the tool has no built-in price
+# for. A role whose model has no price can't run in live mode, so budgets hold whichever vendor
+# does the work. Fill in OpenAI's current prices to turn on coder_codex and reviewer_second.
+prices:
+  # gpt-5.4: [input, output, cached_input]
+  qwen3-coder: [0, 0, 0]   # self-hosted: paid for as infrastructure, not per token
+
 # Which providers may see each data class. PHI and payment work stays with providers
 # under the right agreements; self-hosted models are the in-boundary fallback.
 data_classes:
   phi:      { allowed_providers: [anthropic, selfhosted] }
   payments: { allowed_providers: [anthropic, selfhosted] }
   general:  { allowed_providers: ["*"] }
-
-failover:
-  anthropic/claude-sonnet-5-5: []

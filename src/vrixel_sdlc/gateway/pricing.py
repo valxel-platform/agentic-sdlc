@@ -1,4 +1,5 @@
-"""List prices per million tokens (Anthropic, October 2026). Estimates only; billing comes
+"""List prices per million tokens (Anthropic, October 2026; other providers' come from
+models.yaml `prices`). Estimates only; billing comes
 from the Usage and Cost API, which the nightly reconciliation compares against the ledger."""
 
 from __future__ import annotations
@@ -24,9 +25,11 @@ def estimate_cost(
     cache_read_input_tokens: int,
     output_tokens: int,
     ttl: str = "1h",
+    prices: dict[str, tuple[float, float, float]] | None = None,
 ) -> tuple[float, str]:
-    """Return (usd, cost_basis). cost_basis is 'list' or 'unknown'."""
-    price = PRICES.get(model_name(model))
+    """Return (usd, cost_basis). cost_basis is 'list' or 'unknown'. `prices` (models.yaml) adds or
+    overrides prices for other providers' models, keyed by the model name without the provider."""
+    price = (prices or {}).get(model_name(model)) or PRICES.get(model_name(model))
     if price is None:
         return 0.0, "unknown"
     pin, pout, pread = price
@@ -37,3 +40,7 @@ def estimate_cost(
         + output_tokens * pout
     ) / 1_000_000
     return round(usd, 6), "list"
+
+
+def has_price(model: str, prices: dict | None = None) -> bool:
+    return model_name(model) in (prices or {}) or model_name(model) in PRICES

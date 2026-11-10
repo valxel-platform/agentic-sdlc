@@ -107,6 +107,7 @@ class ModelGateway:
             cache_read_input_tokens=resp.cache_read_input_tokens,
             output_tokens=resp.output_tokens,
             ttl=ttl,
+            prices=self.settings.prices,
         )
         rec = UsageRecord(
             ts=datetime.now(timezone.utc).isoformat(),

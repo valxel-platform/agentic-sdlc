@@ -30,6 +30,7 @@ class AgentResult:
     tokens: int
     cost_usd: float
     request_ids: list[str] = field(default_factory=list)
+    role: str = ""  # the role that did the work: the one asked for, or a fallback
 
 
 class AgentRuntime(Protocol):

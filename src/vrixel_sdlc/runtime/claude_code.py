@@ -26,7 +26,7 @@ import os
 import time
 from pathlib import Path
 
-from ..gateway import ModelGateway, ModelResponse, PolicyViolation
+from ..gateway import ModelGateway, ModelResponse, PolicyViolation, ProviderUnavailable, is_transient
 from .base import AgentResult, AgentTask
 
 log = logging.getLogger(__name__)
@@ -83,7 +83,14 @@ class ClaudeCodeRuntime:
         role = self.gateway.settings.role(task.role)
         if not self.gateway.allowed(role.provider, task.tags.data_class):
             raise PolicyViolation(f"{task.tags.data_class} data may not reach {role.provider!r}")
-        return asyncio.run(self._run(task, role.model))
+        try:
+            return asyncio.run(self._run(task, role.model))
+        except ProviderUnavailable:
+            raise
+        except Exception as exc:  # the CLI reports overload and rate limits as text
+            if is_transient(str(exc)):
+                raise ProviderUnavailable(f"claude_code: {exc}") from exc
+            raise
 
     async def _run(self, task: AgentTask, model: str) -> AgentResult:
         from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query  # lazy import
@@ -99,6 +106,8 @@ class ClaudeCodeRuntime:
                     log.warning("%s/%s: a plugin did not load: %s", task.phase, task.role, err)
             if isinstance(message, ResultMessage):
                 result = message
+                if getattr(message, "is_error", False) and is_transient(str(getattr(message, "result", ""))):
+                    raise ProviderUnavailable(f"claude_code: {getattr(message, 'result', '')}")
                 structured = getattr(message, "structured_output", None)
                 text = (json.dumps(structured) if structured is not None else getattr(message, "result", "")) or text
         usage = (getattr(result, "usage", None) or {}) if result else {}
