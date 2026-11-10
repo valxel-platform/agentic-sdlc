@@ -66,8 +66,9 @@ DEFAULTS = {
 DEFAULT_HOT_PATHS = (
     "**/*Controller.java", "**/*Handler.java", "**/*Store.java", "**/*Repository.java", "**/*Service.java",
     "**/events/**", "**/security/**",
-    "src/*/server.py", "src/*/store.py", "src/*/graph.py", "src/*/tools.py", "src/*/api.py",
-    "src/api/**", "src/app/**", "src/screens/**", "src/outbox/**",
+    "src/*/server.py", "src/*/store.py", "src/*/graph.py", "src/*/tools.py", "src/*/api.py", "src/*/chat.py",
+    "src/*/locks.py",
+    "src/api/**", "src/app/**", "src/chat/**", "src/screens/**", "src/outbox/**",
 )
 MIGRATIONS = ("**/db/migration/**", "**/migrations/**", "**/*.sql")
 RUNTIME = ("Dockerfile", "gradle/libs.versions.toml", "build.gradle.kts", "pyproject.toml", "package.json",
