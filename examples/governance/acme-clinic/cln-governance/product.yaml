@@ -48,6 +48,10 @@ approvers:
   - acme-clinic/security
   g6:
   - acme-clinic/release-managers
+  # Who may release at G6 although the traceability matrix has gaps (with a recorded reason).
+  traceability:
+  - acme-clinic/product-owners
+  - acme-clinic/qa
 high_risk_paths:
 - src/auth/
 - migrations/

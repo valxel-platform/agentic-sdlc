@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type PendingItem } from "../api";
+import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type PendingItem, type ReleaseTraceability } from "../api";
 import Markdown from "react-markdown";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
@@ -72,6 +72,33 @@ function AgentNotes({ notes }: { notes: AgentNote[] }) {
   );
 }
 
+/** G6: whether every requirement is traced to passing tests, what the plan defers, and how the
+ * work tracker differs from the tool's matrix. */
+function ReleaseTrace({ t }: { t: ReleaseTraceability }) {
+  return (
+    <div role={t.blocks ? "alert" : "status"}>
+      <h3>Traceability</h3>
+      {t.complete ? <p className="small">Every requirement is traced to passing tests.</p> : (
+        <>
+          <p className="small">{t.blocks ? "Releasing needs these closed, or an override with your reason:" : "Gaps (a hotfix isn't held for them):"}</p>
+          <ul className="plain-list small">{t.gaps.map((g) => <li key={g}>{g}</li>)}</ul>
+        </>
+      )}
+      {t.deferred.length > 0 && (
+        <p className="small">Approving accepts what the plan defers: {t.deferred.map((d) => `${d.id} (${d.reason})`).join("; ")}</p>
+      )}
+      {t.drift.length > 0 && (
+        <>
+          <p className="small">{t.drift_blocks ? "The work tracker differs from the matrix (this product holds releases for it):"
+            : "The work tracker differs from the matrix (a warning):"}</p>
+          <ul className="plain-list small">{t.drift.map((d) => <li key={d}>{d}</li>)}</ul>
+        </>
+      )}
+      {t.drift_error && <p className="small muted">The work tracker couldn't be checked: {t.drift_error}</p>}
+    </div>
+  );
+}
+
 export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; featureId: string; onDone: () => void }) {
   const opened = useRef(Date.now());
   const [mode, setMode] = useState<Mode>(null);
@@ -81,6 +108,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   const [content, setContent] = useState("");
   const [picked, setPicked] = useState<string[] | null>(null);
   const [reason, setReason] = useState("");
+  const [override, setOverride] = useState("");
   const [remember, setRemember] = useState(false);
   const [lesson, setLesson] = useState("");
   const [busy, setBusy] = useState(false);
@@ -89,7 +117,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   useEffect(() => {
     opened.current = Date.now();
     setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(item.content ?? ""); setErr(""); setPicked(null);
-    setReason(""); setRemember(false); setLesson("");
+    setReason(""); setRemember(false); setLesson(""); setOverride("");
   }, [item.interrupt_id, item.content]);
 
   async function send(decision: string, extra: Record<string, unknown> = {}) {
@@ -340,6 +368,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
 
       {item.design_review && <DesignReviewPanel review={item.design_review} />}
 
+      {item.traceability && <ReleaseTrace t={item.traceability} />}
+
       {item.alarms_firing && item.alarms_firing.length > 0 && (
         <div role="status">
           <h3>Alarms firing before production</h3>
@@ -463,8 +493,16 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
           <div className="actions">
             {item.type === "gate" && mode === null && (
               <>
-                <button className="btn go" disabled={busy || (item.gate === "incident" && chosen.length === 0)}
-                  onClick={() => send("approve", item.gate === "incident" ? { action_ids: chosen } : {})}>
+                {item.traceability?.blocks && (
+                  <label className="field" style={{ width: "100%" }}>
+                    Release anyway: why (recorded with the release; only {item.traceability.override_approvers.join(", ") || "the traceability approvers"} can)
+                    <textarea id="override-reason" value={override} onChange={(e) => setOverride(e.target.value)} />
+                  </label>
+                )}
+                <button className="btn go"
+                  disabled={busy || (item.gate === "incident" && chosen.length === 0) || (!!item.traceability?.blocks && !override.trim())}
+                  onClick={() => send("approve", item.gate === "incident" ? { action_ids: chosen }
+                    : item.traceability?.blocks ? { override_reason: override.trim() } : {})}>
                   {item.gate === "incident" ? `Approve ${chosen.length} action${chosen.length === 1 ? "" : "s"}` : gate?.approve ?? "Approve"}</button>
                 {item.gate !== "release" && canRevise && <button className="btn secondary" disabled={busy} onClick={() => setMode("revise")}>
                   {item.gate === "incident" ? "Look again" : item.gate === "postmortem" ? "Rewrite" : "Request changes"}</button>}

@@ -50,6 +50,10 @@ approvers:
   - acme-pay/security
   g6:
   - acme-pay/release-managers
+  # Who may release at G6 although the traceability matrix has gaps (with a recorded reason).
+  traceability:
+  - acme-pay/product-owners
+  - acme-pay/qa
 high_risk_paths:
 - src/ledger/
 - src/rails/

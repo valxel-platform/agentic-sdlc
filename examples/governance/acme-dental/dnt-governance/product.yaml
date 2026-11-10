@@ -44,6 +44,10 @@ approvers:
   - acme-dental/security
   g6:
   - acme-dental/release-managers
+  # Who may release at G6 although the traceability matrix has gaps (with a recorded reason).
+  traceability:
+  - acme-dental/product-owners
+  - acme-dental/qa
 high_risk_paths:
 - src/auth/
 - migrations/

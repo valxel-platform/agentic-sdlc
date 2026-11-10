@@ -29,6 +29,19 @@ class WorkTracker(Protocol):
                parent: dict | None) -> dict: ...
     def set_status(self, cfg: dict, item: dict, status: str) -> None: ...  # status: in_progress|done|cancelled
     def comment(self, cfg: dict, item: dict, text: str) -> None: ...
+    # The item as the tracker has it now (for reconciling): {"status": todo|in_progress|done|cancelled,
+    # "summary": ...}, or None when it no longer exists.
+    def get(self, cfg: dict, item: dict) -> dict | None: ...
+
+
+def status_from(cfg: dict, name: str) -> str:
+    """A tracker status name read back as ours (done wins where done and cancelled share a name)."""
+    n = (name or "").strip().lower()
+    names = {k: str(v).lower() for k, v in (cfg.get("statuses") or {}).items()}
+    for ours in ("done", "cancelled", "in_progress"):
+        if names.get(ours) == n:
+            return ours
+    return "todo"
 
 
 def marker_label(marker: str) -> str:
@@ -121,6 +134,19 @@ class JiraTracker:
         self._call(("addOrEditJiraIssueComment", "addCommentToJiraIssue"),
                    {("issueIdOrKey", "issueKey"): item["key"], ("commentBody", "body", "comment"): text})
 
+    def get(self, cfg, item):
+        try:
+            res = self._call(("getJiraIssue",), {("issueIdOrKey", "issueKey"): item["key"],
+                                                 ("fields",): ["summary", "status"]})
+        except McpError as exc:
+            if "404" in str(exc) or "not exist" in str(exc).lower() or "not found" in str(exc).lower():
+                return None
+            raise
+        fields = (res or {}).get("fields") or res or {}
+        status = fields.get("status") or {}
+        return {"status": status_from(cfg, status.get("name", "") if isinstance(status, dict) else str(status)),
+                "summary": str(fields.get("summary", ""))}
+
 
 # --------------------------------------------------------------------------- OpenProject
 
@@ -196,6 +222,19 @@ class OpenProjectTracker:
         self.server.call(tool, fit_args(self.server, tool, {
             ("work_package_id", "id"): int(item["id"]), ("comment", "body", "text"): text}))
 
+    def get(self, cfg, item):
+        tool = pick_tool(self.server, "get_work_package")
+        try:
+            wp = self.server.call(tool, fit_args(self.server, tool, {("id", "work_package_id"): int(item["id"])}))
+        except McpError as exc:
+            if "404" in str(exc) or "not found" in str(exc).lower():
+                return None
+            raise
+        wp = wp if isinstance(wp, dict) else {}
+        status = (wp.get("_links") or {}).get("status") or wp.get("status") or {}
+        name = status.get("title") or status.get("name") if isinstance(status, dict) else str(status)
+        return {"status": status_from(cfg, name or ""), "summary": str(wp.get("subject", ""))}
+
 
 # --------------------------------------------------------------------------- offline stand-in
 
@@ -244,3 +283,9 @@ class StubTracker:
         self._maybe_fail()
         with self._lock:
             self.items[item["id"]]["comments"].append(text)
+
+    def get(self, cfg, item):
+        self._maybe_fail()
+        with self._lock:
+            it = self.items.get(item["id"])
+            return {"status": it["status"], "summary": it["summary"]} if it else None

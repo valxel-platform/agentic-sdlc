@@ -25,6 +25,8 @@ export interface PendingItem {
   quality?: { suites: QualitySuite[]; waivers: Waiver[] } | null;
   new_repos?: RepoPlan[];
   aws_resources?: AwsResources | null;
+  // At G6: the traceability matrix. When it blocks, approving needs an override and its reason.
+  traceability?: ReleaseTraceability | null;
   // At G6: CloudWatch alarms firing before production on what the feature touches.
   alarms_firing?: { env: string; resource: string; alarm: string; severity: string; says: string;
                     since: string; url: string; title: string }[];
@@ -105,14 +107,32 @@ export interface AgentNote {
 
 export interface TracePr { key: string; repo: string; number: number | null; url: string; task: string; merged: boolean }
 
+export interface TraceCase {
+  id: string; req: string; kind: string; what: string; ref: string; via: string;
+  status: "passed" | "failed" | "written" | "missing" | "pending" | "manual" | "unknown";
+}
+
+export interface TraceRequirement {
+  id: string; type: string; text: string; goals: string[]; design: Record<string, string>; deferred: string | null;
+  tasks: string[]; cases: TraceCase[]; test: string; prs: TracePr[]; repos: string[];
+  acceptance: Record<string, string>; deployed: Record<string, string>;
+}
+
+export interface ReleaseTraceability {
+  complete: boolean; gaps: string[]; deferred: { id: string; reason: string }[];
+  drift: string[]; drift_error: string; drift_blocks: boolean; blocks: boolean; override_approvers: string[];
+}
+
 export interface Trace {
   feature_id: string;
   title: string;
   profile: Profile;
   metrics: { id: string; text: string; goals: string[] }[];
-  goals: { id: string; text: string; metrics: string[] }[];
-  criteria: { id: string; text: string; tasks: string[]; test: string; prs: TracePr[]; repos: string[];
-              acceptance: Record<string, string>; deployed: Record<string, string> }[];
+  goals: { id: string; text: string; metrics: string[]; requirements: string[] }[];
+  criteria: TraceRequirement[];
+  nfrs: TraceRequirement[];
+  deferred: { id: string; reason: string }[];
+  complete: boolean;
   decisions: { id: string; text: string }[];
   repos: { repo: string; role: string; tasks: string[]; prs: TracePr[]; deployed: { env: string; release: string } | null }[];
   release: { flag: string; percent: number | null; production: boolean; merged: boolean };
@@ -497,6 +517,7 @@ export const api = {
   intakeSubmit: (id: string, pilot = false, profile = "") =>
     request<IntakeSession>("POST", `/intake/${id}/submit`, { pilot, profile }),
   trace: (id: string) => request<Trace>("GET", `/features/${encodeURIComponent(id)}/trace`),
+  traceCsvUrl: (id: string) => `/api/features/${encodeURIComponent(id)}/trace.csv`,
   lessons: (productId: string) => request<LessonsOverview>("GET", `/products/${encodeURIComponent(productId)}/lessons`),
   pilotReport: (productId: string) => request<PilotReport>("GET", `/reports/pilot?product_id=${encodeURIComponent(productId)}`),
 };

@@ -133,10 +133,13 @@ def test_a_weakened_change_goes_back_to_its_coder_with_what_it_weakened(svc, mon
     calls = {"n": 0}
 
     def fake(github, *, repo, branch, files):
+        if github is not svc.github:  # another test's engine still running in the background
+            return []
         calls["n"] += 1
         return ["tests/test_x.py: skips a test: `@pytest.mark.skip`"] if calls["n"] == 1 else []
 
-    monkeypatch.setattr(weakening, "findings", fake)
+    from vrixel_sdlc.graph import phase  # the module the build calls, even if another test reloaded it
+    monkeypatch.setattr(phase.weakening, "findings", fake)
     seen = spy_tails(svc, monkeypatch)
     eng = FeatureEngine(svc, InMemorySaver())
     fid = eng.create(product_id="FARM", title="Offline crop log")
@@ -193,7 +196,7 @@ def test_the_design_and_hld_must_cite_every_criterion():
     ux = "# UX\n## Screens\n- S1: form\n## Accessibility\n- WCAG 2.1 AA: x\n## Coverage\n- AC-1: S1\n- AC-9: S2\n"
     found = checks.run_checks("design", ux, ctx)
     assert "AC-2 is not in the UX spec's Coverage section (say where it is handled, or why not here)" in found
-    assert "AC-9 in the UX spec's Coverage section is not a criterion in the PRD" in found
+    assert "AC-9 in the UX spec's Coverage section is not a requirement in the PRD" in found
     assert not [f for f in checks.coverage("## Coverage\n- AC-1: S1\n- AC-2: not on screen: an API rule", ctx, "UX spec")]
 
 

@@ -6,9 +6,15 @@ from __future__ import annotations
 import re
 
 from ..agents.parse import (
+    CASE_KINDS,
+    NFR_KINDS,
     bullets,
     is_testable,
+    parse_ac_goals,
     parse_acs,
+    parse_cases,
+    parse_deferred,
+    parse_nfrs,
     parse_affected_repos,
     parse_tasks,
     parse_trace,
@@ -41,23 +47,56 @@ def _spec(text: str, ctx: dict) -> list[str]:
     cited = {b.split()[0] for b in bullets(section(text, "Constitution articles")) if b}
     if not cited & set(ctx.get("articles", [])):
         out.append("PRD cites no constitution articles")
+    # Every criterion serves a goal the PRD has (the link from metric to test).
+    goals = {g.split(":")[0].strip() for g in bullets(section(text, "Goals"))}
+    for ac_id, served in parse_ac_goals(text).items():
+        if not served:
+            out.append(f"{ac_id} names no goal: write '- {ac_id} (G1): ...'")
+        for g in served:
+            if goals and g not in goals:
+                out.append(f"{ac_id} serves {g}, which isn't one of the PRD's goals")
+    out += _nfrs(text, goals)
     return out
 
 
-_COVER = re.compile(r"^-\s*(AC-\d+)\s*:\s*(.+?)\s*$", re.M)
-_DEFERRED = re.compile(r"^-\s*(AC-\d+)\s*->\s*deferred\s*:\s*(.*?)\s*$", re.M | re.I)
+_MEASURABLE = re.compile(r"\d|WCAG|OWASP|HIPAA|PCI|SOC ?2|GDPR|ISO ?27001|FIPS", re.I)
+
+
+def _nfrs(text: str, goals: set[str]) -> list[str]:
+    """The PRD's non-functional requirements: present (or explicitly none), of a known kind, and
+    measurable, so a test can prove them."""
+    body = section(text, "Non-functional requirements")
+    if not body:
+        return ["PRD has no Non-functional requirements section (list them, or '- None: <why>')"]
+    nfrs = parse_nfrs(text)
+    if not nfrs and not any(b.lower().startswith("none") for b in bullets(body)):
+        return ["Non-functional requirements lists none in the form '- NFR-1 (performance, G1): <target>'"]
+    out = []
+    for nid, n in nfrs.items():
+        if n["kind"] not in NFR_KINDS:
+            out.append(f"{nid}'s kind {n['kind']!r} is not one of: {', '.join(NFR_KINDS)}")
+        if not _MEASURABLE.search(n["text"]):
+            out.append(f"{nid} is not measurable: give a number, a percentile, a limit or a named standard")
+        if n["goal"] and goals and n["goal"] not in goals:
+            out.append(f"{nid} serves {n['goal']}, which isn't one of the PRD's goals")
+    return out
+
+
+_COVER = re.compile(r"^-\s*((?:AC|NFR)-\d+)\s*:\s*(.+?)\s*$", re.M)
 
 
 def coverage(text: str, ctx: dict, what: str) -> list[str]:
     """Every PRD criterion is cited in the document's Coverage section, with where it is handled;
     none that the PRD doesn't have (borrowed from AI-DLC's upstream-coverage and traceability)."""
-    acs = parse_acs(ctx.get("parent_texts", {}).get("PRD", ""))
+    prd = ctx.get("parent_texts", {}).get("PRD", "")
+    acs = list(parse_acs(prd)) + (list(parse_nfrs(prd)) if what == "HLD" else [])
     if not acs:
         return []
     cited = {ac: where for ac, where in _COVER.findall(section(text, "Coverage"))}
     out = [f"{ac} is not in the {what}'s Coverage section (say where it is handled, or why not here)"
            for ac in acs if ac not in cited or not cited[ac].strip()]
-    out += [f"{ac} in the {what}'s Coverage section is not a criterion in the PRD" for ac in cited if ac not in acs]
+    known = set(acs) | set(parse_nfrs(prd))
+    out += [f"{ac} in the {what}'s Coverage section is not a requirement in the PRD" for ac in cited if ac not in known]
     return out
 
 
@@ -217,24 +256,27 @@ def _plan(text: str, ctx: dict) -> list[str]:
     tasks = parse_tasks(text)
     if not tasks:
         out.append("Plan has no machine-readable task list")
-    acs = parse_acs(ctx.get("parent_texts", {}).get("PRD", ""))
-    traced = {ac for ac, _, _ in parse_trace(text)}
-    deferred = dict(_DEFERRED.findall(section(text, "Traceability")))
-    for ac in acs:
-        if ac in deferred:
-            if not deferred[ac].strip():
-                out.append(f"{ac} is deferred without a reason")
-        elif ac not in traced:
-            out.append(f"{ac} has no task and test (VX-5)")
+    prd = ctx.get("parent_texts", {}).get("PRD", "")
+    acs = parse_acs(prd)
+    reqs = list(acs) + list(parse_nfrs(prd))
+    traced = {req for req, _, _ in parse_trace(text)}
+    deferred = parse_deferred(text)
+    for req in reqs:
+        if req in deferred:
+            if not deferred[req].strip():
+                out.append(f"{req} is deferred without a reason")
+        elif req not in traced:
+            out.append(f"{req} has no task (VX-5)")
     # The other direction: every task traces to the PRD, or says why it is needed.
     for t in tasks:
         named = list(t.get("acs") or [])
-        unknown = [a for a in named if acs and a not in acs]
+        unknown = [a for a in named if reqs and a not in reqs]
         if unknown:
             out.append(f"{t.get('id')} names {', '.join(unknown)}, which the PRD doesn't have")
         if not named and not str(t.get("why") or "").strip():
             out.append(f"{t.get('id')} implements no acceptance criterion and doesn't say why it's needed "
                        "(work the PRD doesn't ask for)")
+    out += _cases(text, reqs, deferred, tasks)
     affected = {r["name"] for r in parse_affected_repos(ctx.get("parent_texts", {}).get("HLD", ""))}
     for t in tasks:
         if affected and t.get("repo") not in affected:
@@ -242,6 +284,32 @@ def _plan(text: str, ctx: dict) -> list[str]:
     from .. import acceptance
 
     out += acceptance.check_plan(text, {**ctx, "plan_tasks": tasks})
+    return out
+
+
+def _cases(text: str, reqs: list[str], deferred: dict, tasks: list[dict]) -> list[str]:
+    """The plan's test cases: every requirement not deferred has one, each names a requirement the
+    PRD has, a known kind and a test reference the pipeline can check."""
+    if not reqs:
+        return []
+    cases = parse_cases(text)
+    out = []
+    by_req: dict[str, list[dict]] = {}
+    ids = {t.get("id"): t for t in tasks}
+    for c in cases:
+        by_req.setdefault(c["req"], []).append(c)
+        if c["req"] not in reqs:
+            out.append(f"{c['id']} tests {c['req']}, which the PRD doesn't have")
+        if c["kind"] not in CASE_KINDS:
+            out.append(f"{c['id']}'s kind {c['kind']!r} is not one of: {', '.join(CASE_KINDS)}")
+        if c["via"] == "unknown":
+            out.append(f"{c['id']}'s test '{c['ref']}' is not 'TASK-n <file>::<name>', 'acceptance <file> \"<title>\"', "
+                       "'suite <name>' or 'manual: <why>'")
+        elif c["via"] == "test" and c["task"] not in ids:
+            out.append(f"{c['id']} names {c['task']}, which isn't a task in the plan")
+    for req in reqs:
+        if req not in deferred and not by_req.get(req):
+            out.append(f"{req} has no test case")
     return out
 
 

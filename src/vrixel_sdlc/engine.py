@@ -206,6 +206,7 @@ class FeatureEngine:
         self.work = work or WorkSync(services, InMemoryLinkStore(),
                                      os.environ.get("VRIXEL_PUBLIC_URL") or "http://localhost:8080")
         self.sync_errors = Notes(self.cluster, "sync_error")
+        services.work_sync = self.work  # G6 reconciles the tracker with the traceability matrix
         self.waits = WaitChecker(services, self.cluster)
         self._watcher: threading.Thread | None = None
         self._stop = threading.Event()
@@ -1468,6 +1469,8 @@ class FeatureEngine:
                 d = scripted[key].pop(0)
             elif p["type"] == "gate":
                 d = {"decision": "approve"}
+                if (p.get("traceability") or {}).get("blocks"):  # the helper has no one to ask: say so on the record
+                    d["override_reason"] = "Overridden by the auto-drive helper (demo or test run)"
             else:
                 d = {"decision": "resolved", "feedback": "resolved by a human"}
             self.decide(feature_id, p["interrupt_id"], {"approver": approver, "active_minutes": 5, **d})

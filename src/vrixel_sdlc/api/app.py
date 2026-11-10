@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -139,6 +139,9 @@ class DecisionIn(BaseModel):
     action_ids: list[str] | None = Field(default=None, description="Incidents only: which proposed actions to approve")
     reason: str | None = Field(default=None, description="Why it's sent back (revise, retry, abort): one of the "
                                "pilot's reasons, e.g. missing_requirement, wrong_approach, quality")
+    override_reason: str | None = Field(default=None, max_length=1000, description="G6 only: release although the "
+                                        "traceability matrix has gaps (or tracker drift that blocks), and why. "
+                                        "Only the product's traceability approvers may.")
 
 
 class SubmitIn(BaseModel):
@@ -936,6 +939,18 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
 
+    @api.get("/features/{feature_id}/trace.csv", response_class=PlainTextResponse)
+    def feature_trace_csv(feature_id: str, user: User = Depends(current_user)) -> PlainTextResponse:
+        """The traceability matrix as a table: one row per test case, for auditors and spreadsheets."""
+        from .. import traceability
+
+        try:
+            t = eng().trace(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return PlainTextResponse(traceability.to_csv(t), media_type="text/csv", headers={
+            "Content-Disposition": f'attachment; filename="{feature_id}-traceability.csv"'})
+
     @api.get("/products/{product_id}/trace")
     def product_trace(product_id: str, repo: str = "", pr: str = "", user: User = Depends(current_user)) -> dict:
         """Back from code: the features (and their criteria) that changed a repo or a pull request."""
@@ -976,6 +991,18 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         approvers = item_approvers(feature_id, {**item, "product_id": eng().view(feature_id)["product_id"]})
         if not can_decide(user, {"approvers": approvers}):
             raise HTTPException(403, f"Only {', '.join(approvers) or 'the listed approvers'} can decide this")
+        trace = item.get("traceability") or {}
+        if body.override_reason and not trace.get("blocks"):
+            raise HTTPException(422, "Nothing to override: the traceability matrix is complete")
+        if body.decision == "approve" and trace.get("blocks"):
+            if not (body.override_reason or "").strip():
+                raise HTTPException(409, "The traceability matrix isn't complete: "
+                                    + "; ".join((trace.get("gaps") or [])[:5])
+                                    + ". Release only with an override and its reason.")
+            who = trace.get("override_approvers") or []
+            if not can_decide(user, {"approvers": who}):
+                raise HTTPException(403, f"Only {', '.join(who) or 'the traceability approvers'} can release "
+                                    "with traceability gaps")
         decision = body.model_dump(exclude_none=True) | {"approver": user.login}
         try:
             return eng().decide(feature_id, interrupt_id, decision, background=True)
