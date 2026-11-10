@@ -3,6 +3,8 @@ costs a critic call's worth of judgment, and they are the evaluator layer a huma
 
 from __future__ import annotations
 
+import re
+
 from ..agents.parse import (
     bullets,
     is_testable,
@@ -42,8 +44,25 @@ def _spec(text: str, ctx: dict) -> list[str]:
     return out
 
 
+_COVER = re.compile(r"^-\s*(AC-\d+)\s*:\s*(.+?)\s*$", re.M)
+_DEFERRED = re.compile(r"^-\s*(AC-\d+)\s*->\s*deferred\s*:\s*(.*?)\s*$", re.M | re.I)
+
+
+def coverage(text: str, ctx: dict, what: str) -> list[str]:
+    """Every PRD criterion is cited in the document's Coverage section, with where it is handled;
+    none that the PRD doesn't have (borrowed from AI-DLC's upstream-coverage and traceability)."""
+    acs = parse_acs(ctx.get("parent_texts", {}).get("PRD", ""))
+    if not acs:
+        return []
+    cited = {ac: where for ac, where in _COVER.findall(section(text, "Coverage"))}
+    out = [f"{ac} is not in the {what}'s Coverage section (say where it is handled, or why not here)"
+           for ac in acs if ac not in cited or not cited[ac].strip()]
+    out += [f"{ac} in the {what}'s Coverage section is not a criterion in the PRD" for ac in cited if ac not in acs]
+    return out
+
+
 def _design(text: str, ctx: dict) -> list[str]:
-    out = []
+    out = coverage(text, ctx, "UX spec")
     if not bullets(section(text, "Screens")):
         out.append("UX spec lists no screens")
     if "WCAG" not in section(text, "Accessibility"):
@@ -52,7 +71,7 @@ def _design(text: str, ctx: dict) -> list[str]:
 
 
 def _architecture(text: str, ctx: dict) -> list[str]:
-    out = []
+    out = coverage(text, ctx, "HLD")
     if not bullets(section(text, "ADRs")):
         out.append("HLD records no ADRs")
     repos = parse_affected_repos(text)
@@ -200,9 +219,22 @@ def _plan(text: str, ctx: dict) -> list[str]:
         out.append("Plan has no machine-readable task list")
     acs = parse_acs(ctx.get("parent_texts", {}).get("PRD", ""))
     traced = {ac for ac, _, _ in parse_trace(text)}
+    deferred = dict(_DEFERRED.findall(section(text, "Traceability")))
     for ac in acs:
-        if ac not in traced:
+        if ac in deferred:
+            if not deferred[ac].strip():
+                out.append(f"{ac} is deferred without a reason")
+        elif ac not in traced:
             out.append(f"{ac} has no task and test (VX-5)")
+    # The other direction: every task traces to the PRD, or says why it is needed.
+    for t in tasks:
+        named = list(t.get("acs") or [])
+        unknown = [a for a in named if acs and a not in acs]
+        if unknown:
+            out.append(f"{t.get('id')} names {', '.join(unknown)}, which the PRD doesn't have")
+        if not named and not str(t.get("why") or "").strip():
+            out.append(f"{t.get('id')} implements no acceptance criterion and doesn't say why it's needed "
+                       "(work the PRD doesn't ask for)")
     affected = {r["name"] for r in parse_affected_repos(ctx.get("parent_texts", {}).get("HLD", ""))}
     for t in tasks:
         if affected and t.get("repo") not in affected:

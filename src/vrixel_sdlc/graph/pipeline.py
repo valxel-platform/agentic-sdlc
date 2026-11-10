@@ -415,6 +415,10 @@ def make_gate(gate: str, services):
         approvers = ", ".join(r["approver"] for r in records if r["decision"] in ("approve", "handback"))
         update: dict = human_update | {"gate_decisions": records, "approvals": {gate: True},
                                        "events": [event(gate, "approved", d["feedback"], approver=approvers, lanes=approving)]}
+        assumed = [n["text"] for n in gate_notes(state, gate, phase) if n["kind"] == "assumed"]
+        if assumed:  # approving is confirming them, on the record (AI-DLC's assumption confirmation)
+            update["events"].append(event(gate, "assumptions_confirmed", "; ".join(assumed)[:1000],
+                                          approver=approvers, count=len(assumed)))
         if human is not None:
             update["events"].append(event(gate, "taken_over", f"{kind} written by {approvers}", approver=approvers,
                                           artifact=ref["id"]))

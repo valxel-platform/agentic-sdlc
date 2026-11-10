@@ -55,6 +55,9 @@ function AgentNotes({ notes }: { notes: AgentNote[] }) {
   return (
     <div>
       <h3>The agents' notes</h3>
+      {notes.some((n) => n.kind === "assumed") && (
+        <p className="small">Approving confirms what the agents assumed. If an assumption is wrong, ask for changes instead.</p>
+      )}
       <ul className="plain-list small">
         {notes.map((n, i) => (
           <li key={i}>

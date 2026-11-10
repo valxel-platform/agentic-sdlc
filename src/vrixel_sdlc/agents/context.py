@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 
 from ..config import ProductConfig
 from ..constitution import Constitution
 from ..gateway import PromptLayers, serialize_tools
+from . import untrusted
 
 # Design knowledge (decisions, contracts, catalog) is put in the prompt by the pipeline rather than
 # offered as lookup tools: the corpus per product is small and bounded, and prefetching makes every
@@ -77,6 +79,36 @@ def product_pack(product: ProductConfig, context: str = "", design_knowledge: st
     )
 
 
+PERSONAS = Path(__file__).parent / "personas"
+# Variants of a role (fallbacks, second opinions, pilot shadows) work from the same persona.
+_VARIANT = re.compile(r"_(codex|open|second|shadow)$")
+# Roles whose work runs as an agent session with a turn or time cap.
+SESSION_ROLES = ("architect", "coder", "reviewer")
+
+SAVE_BEFORE_CAP = """## Your turn budget
+Your session stops at a fixed number of turns or minutes, possibly without warning, and whatever
+you haven't replied by then is lost. Keep the last part of your budget for the reply: a reply
+with fewer verified findings or a partial change described honestly always beats no reply. When
+you are running low, stop investigating, list what you couldn't check as open questions, and
+reply."""
+
+
+def base_role(role: str) -> str:
+    return _VARIANT.sub("", role)
+
+
+@lru_cache(maxsize=64)
+def persona(role: str) -> str:
+    """Who the agent is (agents/personas/<role>.md), then the rules every role follows."""
+    base = base_role(role)
+    path = PERSONAS / f"{base}.md"
+    text = path.read_text(encoding="utf-8").strip() if path.is_file() else f"# Role: {base}"
+    parts = [text, untrusted.RULE]
+    if base in SESSION_ROLES:
+        parts.append(SAVE_BEFORE_CAP)
+    return "\n\n".join(parts)
+
+
 def build_layers(
     *,
     role: str,
@@ -93,7 +125,7 @@ def build_layers(
     feature = "\n\n".join(f"<artifact kind=\"{k}\">\n{parent_texts[k]}\n</artifact>" for k in sorted(parent_texts))
     return PromptLayers(
         tools=tools,
-        skills=f"# Role: {role}\n\n{skill_text}",
+        skills=f"{persona(role)}\n\n{skill_text}",
         constitution=constitution.text,
         product_context=product_pack(product, product_context, design_knowledge),
         feature_context=feature,

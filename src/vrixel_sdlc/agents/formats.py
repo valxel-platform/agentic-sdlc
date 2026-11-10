@@ -39,6 +39,8 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
 - S1: <screen>
 ## States
 - <loading, empty, error, success, ...>
+## Coverage                    (one line for every acceptance criterion in the PRD)
+- AC-1: S1                     (the screen or state that shows it, or 'not on screen: <why>')
 ## Accessibility
 - WCAG 2.1 AA: <specific criteria>""",
     "architecture": """# HLD: <title>
@@ -67,6 +69,8 @@ flowchart LR  (one node per affected repo)
 ## Resources                   (AWS services, only when needed; each with an ADR)
 - <name>: <type>; <param>=<value>
   writes: <repo>; reads: <repo>
+## Coverage                    (one line for every acceptance criterion in the PRD)
+- AC-1: <org>/<repo>: <the part of the design that handles it>     (or 'no change: <why>')
 ## Performance                 (decides which performance tests run)
 - Expected load: <requests or events per second at peak, or "as today">
 - New traffic: <yes|no>: <why>
@@ -80,8 +84,10 @@ flowchart LR  (one node per affected repo)
 {"tasks": [{"id": "TASK-1", "repo": "<org>/<repo from the HLD's Affected repos>", "role": "<role>",
             "acs": ["AC-1"], "files": ["<path>"]}]}
 ```
+(every task lists the criteria it implements; a task that implements none directly says why in "why")
 ## Traceability
 - AC-1 -> TASK-1 / TEST-1     (one line for every acceptance criterion in the PRD)
+- AC-2 -> deferred: <why, and when it will be done>   (only a criterion deliberately left out)
 ## Acceptance tests            (when the product has an acceptance repo and the feature spans repos)
 - AC-1: extend <file> "<test title>"      or      - AC-1: add <file> covers: <component> <route or page>""",
     "release": """# Release: <title>
