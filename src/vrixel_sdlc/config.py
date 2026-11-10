@@ -142,13 +142,28 @@ class Limits:
 
 @dataclass(frozen=True)
 class RoleConfig:
-    runtime: str  # claude_code | generic
+    runtime: str  # claude_code | codex | generic
     model: str  # "<provider>/<model-name>"
     ttl: str = "1h"
-    # Caps for one agent session (Claude Code): turns, and dollars (also never more than what's
-    # left of the feature's budget). A session that hits one stops and its phase sees the failure.
+    # Caps for one agent session: turns, and dollars (also never more than what's left of the
+    # feature's budget). A session that hits one stops and its phase sees the failure. Codex has
+    # no turn or dollar cap of its own: it gets max_minutes, and its cost is checked after.
     max_turns: int = 40
     max_call_usd: float = 10.0
+    max_minutes: int = 30
+    # Other roles to run the same task when this one's provider is unavailable (rate limited,
+    # overloaded, down), tried in order; each must be allowed the product's data class.
+    fallback: tuple[str, ...] = ()
+    # Other roles (ideally other model families) that may review the same change too: the first
+    # one that can run and may see the product's data class does.
+    second_opinion: tuple[str, ...] = ()
+    # True: the second opinion's blocking findings block too. False: they are reported only.
+    second_opinion_blocking: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "fallback", tuple(self.fallback or ()))
+        so = self.second_opinion
+        object.__setattr__(self, "second_opinion", (so,) if isinstance(so, str) else tuple(so or ()))
 
     @property
     def provider(self) -> str:
@@ -157,6 +172,26 @@ class RoleConfig:
     @property
     def model_name(self) -> str:
         return self.model.split("/", 1)[-1]
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    """A model provider reached over an OpenAI-compatible API (OpenAI, a self-hosted vLLM, the
+    products' LLM gateway). Anthropic needs no entry: it is built in."""
+
+    name: str
+    base_url: str = ""
+    base_url_env: str = ""  # read the URL from this variable instead (self-hosted endpoints)
+    api_key_env: str = ""
+
+    def url(self) -> str:
+        return (os.environ.get(self.base_url_env, "") if self.base_url_env else self.base_url).rstrip("/")
+
+    def api_key(self) -> str:
+        return os.environ.get(self.api_key_env, "") if self.api_key_env else ""
+
+    def configured(self) -> bool:
+        return bool(self.url()) and (not self.api_key_env or bool(self.api_key()))
 
 
 @dataclass
@@ -175,7 +210,8 @@ class Settings:
     registry: dict[str, RegistryEntry]
     roles: dict[str, RoleConfig]
     data_classes: dict[str, list[str]]
-    failover: dict[str, list[str]] = field(default_factory=dict)
+    providers: dict[str, "ProviderConfig"] = field(default_factory=dict)
+    prices: dict[str, tuple[float, float, float]] = field(default_factory=dict)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     quality: Any = None  # vrixel_sdlc.quality.QualityConfig
     repos: Any = None  # vrixel_sdlc.provisioning.RepoStandards
@@ -238,7 +274,7 @@ def load_settings(
         )
         for pid, p in reg["products"].items()
     }
-    return Settings(
+    settings = Settings(
         mode=(mode or os.environ.get("VRIXEL_MODE") or "stub").lower(),
         database_url=database_url if database_url is not None else os.environ.get("DATABASE_URL"),
         artifact_dir=art_dir,
@@ -264,12 +300,17 @@ def load_settings(
         registry=registry,
         roles={name: RoleConfig(**spec) for name, spec in models_raw["roles"].items()},
         data_classes={n: list(s["allowed_providers"]) for n, s in models_raw["data_classes"].items()},
-        failover=models_raw.get("failover") or {},
+        providers={n: ProviderConfig(name=n, **(p or {})) for n, p in (models_raw.get("providers") or {}).items()},
+        prices={m: tuple(float(x) for x in v) for m, v in (models_raw.get("prices") or {}).items()},
         tools=load_tools(cfg_dir / "tools.yaml"),
         quality=_load_quality(cfg_dir / "quality.yaml"),
         knowledge=_load_knowledge(cfg_dir / "knowledge.yaml"),
         repos=_load_repos(cfg_dir / "repos.yaml"),
     )
+    from .models import validate
+
+    validate(settings)
+    return settings
 
 
 def _load_repos(path: Path):

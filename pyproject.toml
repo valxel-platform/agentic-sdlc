@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-live = ["anthropic>=0.70", "claude-agent-sdk>=0.2"]
+live = ["anthropic>=0.70", "claude-agent-sdk>=0.2", "httpx>=0.27"]
 github = ["pyjwt[crypto]>=2.8"]
 # Lucid, Jira and OpenProject through their MCP servers.
 integrations = ["mcp>=1.10"]

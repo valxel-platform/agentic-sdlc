@@ -8,6 +8,7 @@ and only refs, scores and usage flow back to the feature thread.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 
 from langchain_core.runnables import RunnableConfig
@@ -24,10 +25,12 @@ from ..config import ProductConfig
 from ..provisioning import naming_policy
 from ..evaluators import critique, run_checks
 from ..agents import formats, structured
-from ..gateway import CallTags
+from ..gateway import CallTags, ProviderUnavailable
 from ..repo_roles import REPO_ORDER
 from ..runtime import AgentResult, AgentTask
 from ..state import FeatureState, PhaseState
+
+log = logging.getLogger(__name__)
 
 
 
@@ -187,13 +190,12 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
                stub_text: str | None, max_tokens: int = 4096, schema: dict | None = None,
                budget_usd: float | None = None) -> AgentResult:
     """One agent session. Its dollar cap is the role's, and never more than what's left of the
-    feature's budget (ctx budget_remaining_usd, or `budget_usd` when the caller knows better)."""
+    feature's budget (ctx budget_remaining_usd, or `budget_usd` when the caller knows better).
+
+    The same task (prompt layers, reply schema, caps) goes to the role's fallbacks, in order, when
+    the role's provider is unavailable; the result says which role did the work."""
     snap = services.snapshot(ctx["product_id"], ctx.get("governance"))
     product = snap.product
-    runtime = services.runtime_for(role)
-    missing = PHASE_SPECS[phase].required_capabilities - runtime.capabilities
-    if missing:
-        raise RuntimeError(f"Runtime {runtime.name} lacks {sorted(missing)} required by phase {phase}")
     learned = lessons.instruction(snap.lessons, phase) if role not in NO_LESSON_ROLES else ""
     if learned:  # what people taught earlier features of this product, for this phase
         tail = f"{tail}\n\n{learned}"
@@ -202,14 +204,63 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
         parent_texts=ctx.get("parent_texts", {}), tail=tail, product_context=snap.product_context,
         design_knowledge=ctx.get("knowledge_text", ""),
     )
-    tags = CallTags(
-        product_id=ctx["product_id"], feature_id=ctx["feature_id"], phase=phase, role=role,
-        data_class=product.data_class, workspace=product.workspace, prompt_version=f"{phase}@1",
-    )
     left = budget_usd if budget_usd is not None else ctx.get("budget_remaining_usd")
-    return runtime.run(AgentTask(role=role, phase=phase, tags=tags, layers=layers,
-                                 stub_text=stub_text, max_tokens=max_tokens, schema=schema,
-                                 max_budget_usd=None if left is None else max(0.0, float(left))))
+    candidates = services.roles_for(role, product.data_class)
+    for i, who in enumerate(candidates):
+        runtime = services.runtime_for(who)
+        missing = PHASE_SPECS[phase].required_capabilities - runtime.capabilities
+        if missing:
+            if i == 0:
+                raise RuntimeError(f"Runtime {runtime.name} lacks {sorted(missing)} required by phase {phase}")
+            continue  # a fallback that can't do this phase's work is skipped
+        tags = CallTags(
+            product_id=ctx["product_id"], feature_id=ctx["feature_id"], phase=phase, role=who,
+            data_class=product.data_class, workspace=product.workspace, prompt_version=f"{phase}@1",
+        )
+        try:
+            res = runtime.run(AgentTask(role=who, phase=phase, tags=tags, layers=layers,
+                                        stub_text=stub_text, max_tokens=max_tokens, schema=schema,
+                                        max_budget_usd=None if left is None else max(0.0, float(left))))
+        except ProviderUnavailable as exc:
+            if i == len(candidates) - 1:
+                raise
+            log.warning("%s %s/%s: %s; handing the task to %s", ctx["feature_id"], phase, who, exc, candidates[i + 1])
+            continue
+        res.role = who
+        return res
+    raise RuntimeError(f"No runtime for role {role} can do phase {phase}")
+
+
+def product_data_class(services, ctx: dict) -> str:
+    return services.snapshot(ctx["product_id"], ctx.get("governance")).product.data_class
+
+
+def second_line(review: dict) -> str:
+    so = review.get("second_opinion") or {}
+    if so.get("skipped"):
+        return f"; no second opinion ({so['skipped']})"
+    if not so:
+        return ""
+    verdict = "approves" if so["approve"] else "blocks: " + "; ".join(so["blocking"])
+    return f"; second opinion ({so['model']}) {verdict}" + ("" if so["counts"] else " (advisory)")
+
+
+def merge_second_opinion(review: dict, res: AgentResult, role: str, model: str, *, blocking: bool) -> dict:
+    """Add a second model's review of the same change. Its blocking findings block too when the
+    reviewer's `second_opinion_blocking` is on; otherwise they are reported beside the review."""
+    reply, error = structured.parse(res.text, structured.ReviewReply)
+    found = list(reply.blocking) if reply else [f"The second opinion's reply didn't fit its schema: {error}"]
+    approve = bool(reply and reply.approve and not reply.blocking)
+    out = dict(review)
+    out["second_opinion"] = {"role": role, "model": model, "approve": approve, "blocking": found,
+                             "notes": list(reply.notes) if reply else [], "agree": approve == review.get("approve"),
+                             "counts": blocking, "cost_usd": round(res.cost_usd, 4)}
+    if blocking and not approve:
+        out["approve"] = False
+        out["blocking"] = list(review.get("blocking") or []) + [f"[{model}] {b}" for b in found]
+        if reply:
+            out["score"] = min(float(review.get("score", 1.0)), float(reply.score))
+    return out
 
 
 def _finish(s: PhaseState, findings: list[str], usage: dict) -> dict:
@@ -524,6 +575,18 @@ def build_build_subgraph(services):
                              "performance": perf.as_dict()} if reply else
                             {"pr": pr, "score": 0.0, "approve": False, "role": r["role"], "notes": [], "performance": perf.as_dict(),
                              "blocking": [f"The review reply didn't fit its schema: {error}"]})
+            second = services.second_opinion("reviewer", product_data_class(services, ctx), reviewed_by=res.role)
+            if second.role:
+                # Another model reads the same PR with the same instructions and reply format.
+                sres = call_agent(services, role=second.role, phase="build", ctx=ctx, skills=spec.critic_skills,
+                                  tail=review_tail, max_tokens=1024, schema=structured.schema(structured.ReviewReply),
+                                  stub_text=json.dumps({"approve": True, "blocking": [], "notes": [], "score": 0.9}))
+                reviews[tid] = merge_second_opinion(
+                    reviews[tid], sres, second.role, services.settings.role(sres.role or second.role).model,
+                    blocking=services.settings.role("reviewer").second_opinion_blocking)
+                tokens, cost = tokens + sres.tokens, cost + sres.cost_usd
+            elif second.skipped:
+                reviews[tid]["second_opinion"] = {"skipped": second.skipped}
             if ctx.get("pilot") and "reviewer_shadow" in services.settings.roles:
                 # Pilot: a cheaper reviewer reads the same PR; only its agreement is kept.
                 sres = call_agent(services, role="reviewer_shadow", phase="build", ctx=ctx, skills=spec.critic_skills,
@@ -546,7 +609,7 @@ def build_build_subgraph(services):
         findings += audit_findings(s["ctx"], results)
         findings += events_findings(s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]
-        lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}"
+        lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}" + second_line(rv)
                   for tid, rv in sorted(reviews.items())]
         draft = {"kind": spec.kind, "content": "\n".join(lines) + "\n"}
         return {"findings": findings, "score": min([rv["score"] for rv in reviews.values()] or [0.0]),

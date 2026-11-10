@@ -22,7 +22,7 @@ from .integrations import (
 from .integrations.diagrams import DiagramPublisher, DrawioPublisher, LucidPublisher, StubLucidPublisher
 from .integrations.mcp_client import ClientCredentials, McpHttp
 from .integrations.worktracking import JiraTracker, OpenProjectTracker, StubTracker, WorkTracker
-from .runtime import AgentRuntime, ClaudeCodeRuntime, GatewayRuntime
+from .runtime import AgentRuntime, ClaudeCodeRuntime, CodexRuntime, GatewayRuntime
 
 
 @dataclass
@@ -73,9 +73,24 @@ class Services:
     feature_info: object = None  # feature id -> {risk_tier, components}, set by the engine
     cohort_logs: object = None  # vrixel_sdlc.ops.cohorts log source: users with a flag on against off
 
+    available_roles: frozenset = frozenset()  # roles whose provider is configured, set by build_services
+
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
         return self.runtimes.get(kind) or self.runtimes["generic"]
+
+    def roles_for(self, role: str, data_class: str) -> list[str]:
+        """The role, then its fallbacks for when its provider is unavailable."""
+        from .models import chain
+
+        return chain(self.settings, set(self.available_roles or self.settings.roles), role, data_class)
+
+    def second_opinion(self, role: str, data_class: str, reviewed_by: str | None = None):
+        """Another model to review the same work, if the role has one that can run here."""
+        from .models import second_opinion
+
+        return second_opinion(self.settings, set(self.available_roles or self.settings.roles), role, data_class,
+                              reviewed_by)
 
     def snapshot(self, product_id: str, pins: dict | None = None) -> GovernanceSnapshot:
         """The product's governance, read from its own org. Pass the feature's pins inside a
@@ -128,21 +143,30 @@ def build_services(
 ) -> Services:
     settings = settings or load_settings()
     ledger = ledger or InMemoryLedger()
+    from .models import available_roles
+
+    available = available_roles(settings)
     providers: dict = {"stub": StubProvider()}
     if settings.mode == "live":
-        from .gateway import AnthropicProvider
+        from .gateway import AnthropicProvider, OpenAICompatibleProvider
 
-        providers["anthropic"] = AnthropicProvider()
+        if any(settings.role(r).provider == "anthropic" for r in available):
+            providers["anthropic"] = AnthropicProvider()
+        for name, pc in settings.providers.items():
+            if pc.configured():
+                providers[name] = OpenAICompatibleProvider(name, pc.url(), pc.api_key())
     gateway = ModelGateway(settings, ledger, providers)
     generic = GatewayRuntime(gateway)
     runtimes: dict[str, AgentRuntime] = {"generic": generic}
     if settings.mode == "live":
         check_skills()
         runtimes["claude_code"] = ClaudeCodeRuntime(gateway)
+        runtimes["codex"] = CodexRuntime(gateway)
     else:
         runtimes["claude_code"] = GatewayRuntime(
             gateway, name="claude_code", capabilities=frozenset({"text", "native_plugins", "subagents"})
         )
+        runtimes["codex"] = GatewayRuntime(gateway, name="codex", capabilities=frozenset({"text", "code_execution"}))
     if github is None or openchoreo is None:
         live_github, live_oc = default_delivery(settings)
         github, openchoreo = github or live_github, openchoreo or live_oc
@@ -164,6 +188,7 @@ def build_services(
     svc.knowledge = default_knowledge(svc)
     svc.flags = default_flags(settings, svc)
     svc.provisioner = default_provisioner(settings, github, openchoreo)
+    svc.available_roles = frozenset(available)
     return svc
 
 

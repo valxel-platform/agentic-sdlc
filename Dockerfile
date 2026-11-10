@@ -18,7 +18,13 @@ RUN mkdir /plugins \
  && cp /upstream/LICENSE /plugins/LICENSE.knowledge-work-plugins
 COPY plugins/vrixel /plugins/vrixel
 
-# Stage 3: the API, which also serves the built web interface.
+# Stage 3: OpenAI's Codex CLI, for roles that run on the codex runtime (models.yaml).
+FROM alpine:3.22 AS codex
+ARG CODEX_VERSION=0.167.0
+ADD https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz /tmp/codex.tar.gz
+RUN tar -xzf /tmp/codex.tar.gz -C /tmp && install -m 0755 /tmp/codex-x86_64-unknown-linux-musl /codex
+
+# Stage 4: the API, which also serves the built web interface.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -36,6 +42,7 @@ COPY config ./config
 COPY examples ./examples
 COPY --from=web /web/dist ./web/dist
 COPY --from=plugins /plugins /opt/vrixel/plugins
+COPY --from=codex /codex /usr/local/bin/codex
 
 RUN useradd --create-home --uid 10001 vrixel && mkdir -p /data/artifacts && chown -R vrixel /data
 USER vrixel

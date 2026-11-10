@@ -1360,6 +1360,37 @@ APIs and MCP servers, 60 s for an agent's run, 5 s for a worker's attempt; `FLAG
 and the users with the feature on being slow more often stops the release like failing more does
 (see [Gradual releases](#gradual-releases)).
 
+## Models: more than one vendor
+
+Every role in `config/models.yaml` names a runtime and a model, so a stage's contract (its prompt
+layers, its JSON reply, its caps) is the same whichever vendor runs it.
+
+| Runtime | What runs | Models |
+| --- | --- | --- |
+| `claude_code` | Claude Agent SDK: an agent session in the checkout | Anthropic |
+| `codex` | OpenAI's Codex CLI (`codex exec`): an agent session in the checkout | OpenAI, or an open-weight model behind an OpenAI-compatible Responses API (vLLM) |
+| `generic` | one gateway call per task (documents, critiques, triage) | Anthropic, or any OpenAI-compatible chat API (`providers` in models.yaml) |
+
+- **Fallbacks.** A role lists `fallback` roles. When its provider is rate limited, overloaded or
+  unreachable, the same task goes to the next one that may see the product's data class. The
+  coder falls back to Codex on OpenAI, then to the self-hosted model; for PHI and payment products
+  only the self-hosted model is allowed. The ledger records which role did the work.
+- **A second opinion.** The reviewer lists `second_opinion` roles. Another model family reads the
+  same PR with the same instructions and reply format: OpenAI for general data, the self-hosted
+  model for PHI and payments, never the model that did the review. It is advisory at first (shown
+  beside the review in the build summary, with whether the two agree);
+  `second_opinion_blocking: true` makes its blocking findings block the merge.
+- **Optional vendors.** Roles used only as a fallback or second opinion turn off, with a warning,
+  when their provider isn't configured (`OPENAI_API_KEY`, `VRIXEL_SELFHOSTED_URL`) or their model
+  has no price under `prices`. Every model that runs needs a price, so feature budgets hold
+  whichever vendor does the work; self-hosted models are priced at zero (paid for as infrastructure).
+- **Codex sessions** get the phase's skills, constitution, product and feature context first in
+  the prompt (through stdin), then the task, and reply with the stage's JSON schema
+  (`--output-schema`). They run sandboxed to the checkout with no approvals, stop at the role's
+  `max_minutes`, and are costed from their token usage. Codex has no dollar cap of its own: a session
+  that spent more than its cap is logged and the feature's budget check sees it. A provider that
+  can't be reached is given up on after a few reconnects, so the next fallback gets the task.
+
 ## Predictable results
 
 The pipeline reads agents' work by machine, so the shapes are fixed and every reply is checked:
