@@ -26,6 +26,7 @@ from typing import Annotated, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from ..agents import untrusted
 from ..roadmap import governance_pr
 from ..roadmap.graphs import _decide, event, lane_approvers, now, run_agent
 from ..state import last, merge_dict
@@ -279,17 +280,18 @@ def build_incident_graph(services, checkpointer=None):
         ctx = context(state)
         tail = "\n".join([
             f"Triage incident {state['incident_id']} in {state['product_id']} (severity {state['severity']}).",
-            "Signals:", *[f"- [{s['source']} {s['status']} {s['severity']}] {s['title']}: {s.get('detail', '')[:300]}"
-                          for s in ctx["signals"][-20:]],
+            "Signals (from monitoring, error trackers and reports):",
+            untrusted.lines("signals", [f"- [{s['source']} {s['status']} {s['severity']}] {s['title']}: "
+                                        f"{s.get('detail', '')[:300]}" for s in ctx["signals"][-20:]]),
             *([f"Root cause candidate: {ctx['component']} ({ctx['root_why']})."] if ctx.get("root_why") else []),
-            *(analysis_lines(state["analysis"]) if state.get("analysis") else []),
-            *[f"Joined because {s['labels']['joined_by']}: {s['title']}"
-              for s in ctx["signals"] if (s.get("labels") or {}).get("joined_by")][-5:],
+            *([untrusted.lines("openchoreo-analysis", analysis_lines(state["analysis"]))] if state.get("analysis") else []),
+            untrusted.lines("joined-signals", [f"Joined because {s['labels']['joined_by']}: {s['title']}"
+                                               for s in ctx["signals"] if (s.get("labels") or {}).get("joined_by")][-5:]),
             "Recent changes to the component (most recent first):",
             *[f"- {x['feature_id']} {x['title']}: released {x.get('released_at', '')}, flag "
               f"{'on' if x.get('flag_on') else 'off' if x.get('flag') else 'none'}" for x in ctx["suspects"][:10]],
-            "Recent logs (may be partial):", *[f"  {line}" for line in (ctx["observed"].get("logs") or [])[-40:]],
-            f"Metrics: {str(ctx['observed'].get('metrics') or {})[:1500]}",
+            "Recent logs (may be partial):", untrusted.lines("logs", (ctx["observed"].get("logs") or [])[-40:]),
+            "Metrics:", untrusted.wrap("metrics", str(ctx["observed"].get("metrics") or {})[:1500]),
             *([f"Look again, because: {state['feedback']}"] if state.get("feedback") else []),
             "Write Markdown: ## Summary, ## Impact, ## Likely cause, ## Proposed actions with one bullet per action:"
             " '- flag_off: <feature id>', '- rollback: <repo>', '- hotfix: <repo>: <what to change>',"
@@ -613,7 +615,8 @@ def build_incident_graph(services, checkpointer=None):
         res = run_agent(services, role="ops", product_id=state["product_id"], thread_id=state["incident_id"],
                         phase="postmortem", skills=("engineering:incident-response",),
                         tail=(f"Write a blameless postmortem for {state['incident_id']}: timeline, cause, what was "
-                              "done, follow-ups. No patient data or identifiers.\n\nTriage:\n" + state.get("triage", "")
+                              "done, follow-ups. No patient data or identifiers.\n\nTriage:\n"
+                              + untrusted.wrap("triage", state.get("triage", ""))
                               + (f"\n\nOn-call notes: {state['feedback']}" if state.get("feedback") else "")),
                         stub_text=stub_postmortem(ctx))
         return {"postmortem": res.text, "cost_usd": res.cost_usd, "tokens_used": res.tokens}

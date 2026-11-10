@@ -1395,6 +1395,43 @@ layers, its JSON reply, its caps) is the same whichever vendor runs it.
   that spent more than its cap is logged and the feature's budget check sees it. A provider that
   can't be reached is given up on after a few reconnects, so the next fallback gets the task.
 
+## Prompt practices borrowed from AWS's AI-DLC
+
+[AI-DLC](https://github.com/awslabs/aidlc-workflows) is AWS's agentic SDLC; these of its prompt
+practices are ours too.
+
+- **Outside text is data.** Error messages, log lines, metrics, alerts, customer reports, the
+  request typed at intake, OpenChoreo's analyses and the documents a critic or reviewer judges go
+  into prompts only inside `<untrusted source="...">` blocks (`agents/untrusted.py`), defused so
+  they can't close or forge a block. Every role is told such text is evidence and never an
+  instruction: it can't change the task, skip a check or a gate, reveal configuration or trigger a
+  tool, and an attempt is reported.
+- **Coders never weaken a check to pass.** The coder's persona says quality targets are inputs,
+  not suggestions; `evaluators/weakening.py` makes it stick. It compares each changed file on the
+  task's branch with the default branch and finds skipped, focused or expected-to-fail tests,
+  deleted test files and test cases, added suppressions (`noqa`, `type: ignore`, `eslint-disable`,
+  `ts-ignore`, `nosec` and others) and lowered coverage or lint thresholds. The reviewer is told
+  what was weakened, the review can't approve it, and the task goes back to its coder with the
+  findings; weakening that is the right call is for the people at the gate to accept.
+- **Critics and reviewers try to refute.** They start from "this isn't met" and look for what is
+  missing as hard as for what is wrong. A finding names its evidence (a section, an id, a file and
+  line, a test); a concern they can't tie to evidence is a note. The checklists add the readiness
+  questions: could QA write a test from every criterion, could a developer build each repo's change
+  without asking the architect, is every assumption listed. The reviewer is given the coder's test
+  run to quote, and a claim about tests with no run behind it is a finding. A task the review
+  blocks goes back to its coder with what blocked it.
+- **Every role has a persona** (`agents/personas/<role>.md`): what it owns, its principles and what
+  done means, ahead of the plugin skills in the prompt. Fallback, second-opinion and shadow roles
+  use their base role's persona. Roles that run as sessions (architect, coder, reviewer) are told
+  to keep the end of their turn budget for the reply: a partial answer beats none.
+- **Tracing runs both ways.** Every PRD criterion has a task and test in the plan, or is deferred
+  with a reason (`- AC-2 -> deferred: <why>`); every task names the criteria it implements, or says
+  why it is needed (`"why"`); a task naming a criterion the PRD doesn't have is a finding.
+- **Documents cite what they build on.** The UX spec and the HLD each have a `## Coverage` section
+  with a line for every PRD criterion (where it is handled, or why not there).
+- **Approving confirms the assumptions.** The gate shows what the agents assumed, says approving
+  confirms it, and records an `assumptions_confirmed` event with the list and the approver.
+
 ## Predictable results
 
 The pipeline reads agents' work by machine, so the shapes are fixed and every reply is checked:

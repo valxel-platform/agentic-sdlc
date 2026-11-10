@@ -17,6 +17,7 @@ from typing import Annotated, Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from ..agents import untrusted
 from ..agents.context import build_layers
 from ..gateway import CallTags
 from ..runtime import AgentTask
@@ -110,7 +111,7 @@ def build_initiative_graph(services, checkpointer=None):
         findings = state.get("findings") or []
         tail = "\n".join([
             f"Draft initiative {state['initiative_id']} for product {state['product_id']}: {state['title']}.",
-            f"Request: {state.get('request', '')}",
+            "Request:\n" + untrusted.wrap("request", state.get("request", "")),
             "Write Markdown with these sections: ## Goal (an existing goal '- GOAL-...: title', or "
             "'- New goal: <title> (measure: <how measured>)'), ## Outcome, ## Success measure, ## Horizon (now, "
             "next or later), ## Budget (USD envelope for all its features), ## Lanes (the product and any lane it "

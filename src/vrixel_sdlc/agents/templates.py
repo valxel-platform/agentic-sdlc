@@ -78,6 +78,7 @@ def design(ctx: dict, defective: bool) -> str:
         f"# UX spec: {ctx['title']}",
         "", "## Screens", f"- S1: {ctx['title']} form", "- S2: Confirmation",
         "", "## States", "- Loading, empty, error, success",
+        "", "## Coverage", *coverage_lines(ctx, "S1"),
         "", "## Handoff", "- Uses design-system tokens and existing form components",
     ]
     if not defective:
@@ -177,6 +178,7 @@ def architecture(ctx: dict, defective: bool) -> str:
               "- New traffic: no: an existing journey changes",
               "- Data growth: no: no new records are kept",
               "- Journeys: none beyond the feature's own"]
+    lines += ["", "## Coverage", *coverage_lines(ctx, (repos[0]["name"] if repos else "the product"))]
     lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15", "- VX-16", "- VX-17"]
     lines += ["", "## Agent notes", "- Traded off: extend the existing components rather than add a service,"
               " so there are fewer parts to run", "- Open: whether this change needs a feature flag beyond"
@@ -284,7 +286,10 @@ def plan(ctx: dict, defective: bool) -> str:
         else:
             k = builders.index(repo)
             mine = [ac for j, ac in enumerate(acs) if j % len(builders) == k]
-        tasks.append({"id": f"TASK-{i}", "repo": repo["name"], "role": repo["role"], "acs": mine, "files": files})
+        task = {"id": f"TASK-{i}", "repo": repo["name"], "role": repo["role"], "acs": mine, "files": files}
+        if not mine:  # more repos than criteria: this one supports the others
+            task["why"] = f"supports {', '.join(acs) or 'the feature'} through {repo['role']} changes the others use"
+        tasks.append(task)
     trace = []
     for j, ac in enumerate(acs, start=1):
         owner = next((t["id"] for t in tasks if ac in t["acs"]), tasks[0]["id"])
@@ -300,6 +305,12 @@ def plan(ctx: dict, defective: bool) -> str:
         lines += ["", "## Acceptance tests", *_acceptance_lines(ctx, repos, acs, slug)]
     lines += ["", "## Agent notes", "- Assumed: each repo's existing tests keep running in CI as they do today"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def coverage_lines(ctx: dict, where: str) -> list[str]:
+    """One line per PRD acceptance criterion: where this document handles it."""
+    acs = list(parse_acs((ctx.get("parent_texts") or {}).get("PRD", "")))
+    return [f"- {ac}: {where}" for ac in acs] or ["- None: no acceptance criteria yet"]
 
 
 def _endpoint_lines(repos: list[dict]) -> list[str]:

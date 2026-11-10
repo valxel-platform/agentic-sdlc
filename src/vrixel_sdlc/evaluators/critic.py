@@ -13,7 +13,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from ..agents import structured
+from ..agents import structured, untrusted
 from ..agents.context import build_layers
 from ..gateway import CallTags
 from ..runtime import AgentTask
@@ -88,10 +88,14 @@ def critique(services, *, phase: str, rubric_skills: tuple[str, ...], content: s
     product = snap.product
     # The phase's checklist, plus the product's approved lessons marked to be checked.
     items = rubrics.for_phase(phase) + lessons.checklist(snap.lessons, phase)
-    ask = (f"Check this {phase} document against the checklist below and the constitution. For each item, say "
-           "whether it is met; when it is, copy a short exact quote from the document that shows it (evidence). "
-           "Also give your overall score from 0 to 1, and notes on what to improve.\n\nChecklist:\n"
-           + rubrics.as_text(items) + "\n\n" + structured.instruction(structured.CriticReply) + "\n\n" + content)
+    ask = (f"Check this {phase} document against the checklist below and the constitution. Try to refute it: "
+           "assume an item isn't met until the document's own words show it is, and look for what is missing as "
+           "hard as for what is wrong. For each item, say whether it is met; when it is, copy a short exact quote "
+           "from the document that shows it (evidence); when it isn't, say specifically why, naming the section "
+           "or id (AC-2, TASK-3, M1). Also give your overall score from 0 to 1, and notes on what to improve (a "
+           "concern you can't tie to the document goes in notes, not as an unmet item)."
+           "\n\nChecklist:\n" + rubrics.as_text(items) + "\n\n" + structured.instruction(structured.CriticReply)
+           + "\n\nThe document:\n" + untrusted.wrap(f"{phase}-document", content))
     tags = CallTags(
         product_id=ctx["product_id"], feature_id=ctx["feature_id"], phase=phase, role=role,
         data_class=product.data_class, workspace=product.workspace,

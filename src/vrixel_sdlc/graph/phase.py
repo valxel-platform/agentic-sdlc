@@ -23,8 +23,8 @@ from .. import diary, performance
 from .. import lessons
 from ..config import ProductConfig
 from ..provisioning import naming_policy
-from ..evaluators import critique, run_checks
-from ..agents import formats, structured
+from ..evaluators import critique, run_checks, weakening
+from ..agents import formats, structured, untrusted
 from ..gateway import CallTags, ProviderUnavailable
 from ..repo_roles import REPO_ORDER
 from ..runtime import AgentResult, AgentTask
@@ -235,6 +235,26 @@ def product_data_class(services, ctx: dict) -> str:
     return services.snapshot(ctx["product_id"], ctx.get("governance")).product.data_class
 
 
+def blocking_of(review: dict | None) -> list[str]:
+    if not review or review.get("approve", True):
+        return []
+    return list(review.get("blocking") or []) + [f"weakens a check: {w}" for w in review.get("weakened") or []]
+
+
+def review_evidence(result: dict, weakened: list[str]) -> str:
+    """What the reviewer must weigh besides the diff: the coder's own test run, quoted, and anything
+    the change weakens."""
+    tests = result.get("tests") or {}
+    ran = (f" The coder's test run: {'passed' if tests.get('passed') else 'failed'}"
+           + (f", failing: {', '.join(tests['failed'][:10])}" if tests.get("failed") else "")
+           + (f", error: {tests['error']}" if tests.get("error") else "") + "."
+           " Quote it in your notes; a claim about tests or coverage with no run behind it is a finding.")
+    if not weakened:
+        return ran
+    return ran + (" These changes weaken a check to make it pass; each is blocking unless the plan asked for it: "
+                  + "; ".join(weakened) + ".")
+
+
 def second_line(review: dict) -> str:
     so = review.get("second_opinion") or {}
     if so.get("skipped"):
@@ -283,7 +303,7 @@ def build_phase_subgraph(phase: str, services):
         ctx = {**s["ctx"], "prior_findings": s.get("findings") or []}
         defective = attempt <= int(ctx["simulate_faults"].get(phase, 0))
         tail = [f"Produce the {spec.kind} artifact for {ctx['feature_id']}: {ctx['title']}.",
-                f"Request: {ctx.get('description', '')}", formats.contract(phase)]
+                "Request:\n" + untrusted.wrap("request", ctx.get("description", "")), formats.contract(phase)]
         if ctx.get("feedback"):
             tail.append(f"Human feedback to address: {ctx['feedback']}")
         if ctx["prior_findings"]:
@@ -473,11 +493,16 @@ def build_build_subgraph(services):
         return {"attempt": s.get("attempt", 0) + 1}
 
     def dispatch(s: PhaseState):
-        done = {tid for tid, r in (s.get("task_results") or {}).items() if r["tests_passed"]}
+        reviews = s.get("reviews") or {}
+        # Done: tests pass, and the review (if any) didn't block. A blocked task goes back to its
+        # coder with what blocked it, so a retry fixes the review's findings too.
+        done = {tid for tid, r in (s.get("task_results") or {}).items()
+                if r["tests_passed"] and (reviews.get(tid) or {}).get("approve", True)}
         pending = [t for t in s["ctx"]["tasks"] if t["id"] not in done]
         if not pending:
             return "review"
-        return [Send("code_task", {"task": t, "ctx": s["ctx"], "attempt": s["attempt"]}) for t in pending]
+        return [Send("code_task", {"task": t, "ctx": s["ctx"], "attempt": s["attempt"],
+                                   "fix": blocking_of(reviews.get(t["id"]))}) for t in pending]
 
     def code_task(payload: dict) -> dict:
         task, ctx, attempt = payload["task"], payload["ctx"], payload["attempt"]
@@ -488,6 +513,8 @@ def build_build_subgraph(services):
             tail=(f"Implement {task['id']} in {task['repo']} on branch {ctx.get('branch') or 'feature/' + ctx['feature_id']}. "
                   f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run the tests and report what they said."
                   + (f" Fix this first: {ctx['feedback']}" if ctx.get("feedback") else "")
+                  + (" The review blocked your last attempt; fix each of these without weakening any check: "
+                     + "; ".join(payload["fix"]) + "." if payload.get("fix") else "")
                   + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task)
@@ -511,8 +538,9 @@ def build_build_subgraph(services):
     def review(s: PhaseState) -> dict:
         ctx, reviews, tokens, cost = s["ctx"], {}, 0, 0.0
         for tid, r in sorted((s.get("task_results") or {}).items()):
-            if not r["tests_passed"] or tid in (s.get("reviews") or {}):
-                continue
+            earlier = (s.get("reviews") or {}).get(tid)
+            if not r["tests_passed"] or (earlier and earlier.get("attempt") == r.get("attempt")):
+                continue  # not ready for review, or this attempt has been reviewed
             # The change note puts the task's trace (ACs, files, tests) in the repo, on the branch the
             # PR merges; with stub agents it is also the commit that makes the PR possible.
             services.github.put_file(
@@ -531,6 +559,8 @@ def build_build_subgraph(services):
             gates_status(services, [pr], "pending", f"{ctx['feature_id']}: waiting for CI and the pipeline's gates")
             if perf.level != "none":  # the smoke test is owed: pending until the template's job reports
                 perf_pending(services, pr, perf.level)
+            # What the change weakens (a skipped test, a lowered threshold), read from the branch itself.
+            weakened = weakening.findings(services.github, repo=r["repo"], branch=r["branch"], files=r["files"])
             res = call_agent(
                 services, role="reviewer", phase="build", ctx=ctx, skills=spec.critic_skills,
                 tail=(review_tail := f"Review {pr['url']} against the plan and constitution."
@@ -554,8 +584,11 @@ def build_build_subgraph(services):
                          " data only." if r.get("role") == "acceptance" else "")
                       + " List performance risks the change brings (an N+1 query, a call inside a loop, an"
                         " unbounded read, a blocking call on a hot path) under performance."
-                      + " Approve only if nothing must change before merge; list what must change as blocking."
-                      + f"\n\n{structured.instruction(structured.ReviewReply)}\n\n{r['summary']}"),
+                      + " Approve only if nothing must change before merge; list what must change as blocking,"
+                        " each naming its evidence (a file and line, a test, a criterion, the test output)."
+                      + review_evidence(r, weakened)
+                      + f"\n\n{structured.instruction(structured.ReviewReply)}\n\nThe pull request description:\n"
+                      + untrusted.wrap("pull-request-description", r["summary"])),
                 stub_text=json.dumps({"approve": True, "blocking": [], "notes": [], "score": 0.9}), max_tokens=1024,
                 schema=structured.schema(structured.ReviewReply),
             )
@@ -569,11 +602,14 @@ def build_build_subgraph(services):
                         repo=r["repo"], branch=r["branch"], title=f"{ctx['feature_id']} {tid}: {ctx['title']}",
                         body=pr_body(r), files=r["files"], labels=labels + [performance.label(perf.level)])
                     perf_pending(services, pr, perf.level)
-            reviews[tid] = ({"pr": pr, "score": reply.score, "approve": reply.approve and not reply.blocking,
+            reviews[tid] = ({"pr": pr, "score": reply.score,
+                             "approve": reply.approve and not reply.blocking and not weakened,
+                             "weakened": weakened, "attempt": r.get("attempt"),
                              "coder_notes": r.get("notes") or [],
                              "blocking": reply.blocking, "notes": reply.notes, "role": r["role"],
                              "performance": perf.as_dict()} if reply else
                             {"pr": pr, "score": 0.0, "approve": False, "role": r["role"], "notes": [], "performance": perf.as_dict(),
+                             "weakened": weakened, "attempt": r.get("attempt"),
                              "blocking": [f"The review reply didn't fit its schema: {error}"]})
             second = services.second_opinion("reviewer", product_data_class(services, ctx), reviewed_by=res.role)
             if second.role:
@@ -605,6 +641,9 @@ def build_build_subgraph(services):
                     if not results.get(t["id"], {}).get("tests_passed")]
         findings += [f"{tid}: the review blocks: " + "; ".join(rv.get("blocking") or ["not approved"])
                      for tid, rv in reviews.items() if not rv.get("approve", True)]
+        # Weakening a check never passes on the reviewer's say-so (evaluators/weakening.py).
+        findings += [f"{tid}: weakens a check to pass: {w}" for tid, rv in sorted(reviews.items())
+                     for w in rv.get("weakened") or []]
         findings += flag_findings(s["ctx"], results)
         findings += audit_findings(s["ctx"], results)
         findings += events_findings(s["ctx"], results)

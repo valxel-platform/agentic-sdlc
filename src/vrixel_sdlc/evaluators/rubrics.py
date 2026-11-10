@@ -1,7 +1,8 @@
 """What the critic checks in each phase's document: yes/no items, each answered with a quote from
 the document. A document passes when every must-have item is met with a quote that is really in
 it; should-have items are reported but don't block. The deterministic checks (checks.py) run
-first; these are the judgments only a reader can make."""
+first; these are the judgments only a reader can make. The readiness questions (could QA test it,
+could a developer build it without asking) come from AWS's AI-DLC reviewers."""
 
 from __future__ import annotations
 
@@ -21,12 +22,17 @@ RUBRICS: dict[str, tuple[Item, ...]] = {
         Item("metrics", "Each success metric has a number or threshold that can be measured after release"),
         Item("evidence", "Names the evidence or assumptions behind the problem"),
         Item("options", "Considers at least one alternative or existing capability", must=False),
+        Item("assumptions", "Every assumption the brief relies on is listed under Agent notes as 'Assumed:' "
+                            "(none presented as fact)"),
     ),
     "spec": (
         Item("observable", "Every acceptance criterion describes behavior a user or caller can observe"),
         Item("goals", "The goals follow from the brief's problem and success metrics"),
         Item("errors", "Acceptance criteria cover what happens when input is wrong or a dependency fails"),
+        Item("testable", "QA could write a test from every acceptance criterion without asking the author"),
         Item("scope", "Non-goals rule out at least one thing a reader might expect", must=False),
+        Item("assumptions", "Every assumption the PRD relies on is listed under Agent notes as 'Assumed:' "
+                            "(none presented as fact)"),
     ),
     "design": (
         Item("coverage", "Every acceptance criterion in the PRD has a screen or state that shows it"),
@@ -39,7 +45,10 @@ RUBRICS: dict[str, tuple[Item, ...]] = {
         Item("contracts", "Contract changes stay compatible for existing callers (expand before contract)"),
         Item("data", "Says how the product's data class is protected in the new flow"),
         Item("adrs", "Each ADR states the decision, the alternatives considered and the consequences"),
+        Item("buildable", "A developer could build each repo's change from this document without asking the architect"),
         Item("failure", "Describes what happens when a new dependency is slow or down", must=False),
+        Item("blast", "Says what else breaks if a new or changed component fails, and how that is contained",
+             must=False),
         Item("performance", "States the expected load and whether the feature adds traffic or data volume",
              must=False),
     ),
