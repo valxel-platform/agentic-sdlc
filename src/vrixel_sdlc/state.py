@@ -79,6 +79,7 @@ class FeatureState(TypedDict, total=False):
     status: Annotated[str, last]  # running | done | aborted
     risk_tier: Annotated[str, last]  # low | high | regulated
     tasks: Annotated[list[dict], last]
+    cases: Annotated[list[dict], last]  # the plan's test cases (agents/parse.py parse_cases)
     release: Annotated[dict, last]
     change_set: Annotated[dict, last]
     lanes_touched: Annotated[list[str], last]  # dependency lanes whose repos the HLD changes
@@ -101,6 +102,9 @@ class FeatureState(TypedDict, total=False):
     escalations: Annotated[dict[str, dict], merge_dict]
     approvals: Annotated[dict[str, bool], merge_dict]
     pull_requests: Annotated[dict[str, dict], merge_dict]
+    # Each planned test case's test on its task's branch: {case id: {req, task, file, test, found}}.
+    case_evidence: Annotated[dict[str, dict], merge_dict]
+    traceability: Annotated[dict, last]  # the matrix G6 approved (traceability.snapshot), with any override
     gate_decisions: Annotated[list[GateDecision], operator.add]
     new_repos: Annotated[list[dict], last]  # repos created for this feature, with what was applied
     deployments: Annotated[dict[str, dict], merge_dict]  # component -> {"env", "release", "repo", ...}

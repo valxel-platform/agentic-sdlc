@@ -7,9 +7,18 @@ import re
 
 from ..repo_roles import ROLE_PATTERN
 
-_AC = re.compile(r"^- (AC-\d+):\s*(.+)$", re.M)
+# '- AC-1 (G1): Given ...' (the goal it serves, in brackets, is optional for older documents)
+_AC = re.compile(r"^- (AC-\d+)(?:\s*\(([^)]*)\))?:\s*(.+)$", re.M)
+# '- NFR-1 (performance, G1): <measurable target>'
+_NFR = re.compile(r"^- (NFR-\d+)\s*\(\s*([a-z][a-z -]*?)\s*(?:,\s*(G\d+)\s*)?\):\s*(.+)$", re.M)
+NFR_KINDS = ("performance", "availability", "reliability", "scalability", "security", "privacy",
+             "accessibility", "compliance", "usability", "maintainability", "observability", "other")
+# '- TC-1 (AC-1, error): <what it checks> -> TASK-1 tests/test_x.py::test_name'
+_CASE = re.compile(r"^- (TC-\d+)\s*\(\s*((?:AC|NFR)-\d+)\s*,\s*([a-z][a-z -]*?)\s*\):\s*(.+?)\s*->\s*(.+?)\s*$", re.M)
+CASE_KINDS = ("happy", "error", "edge", "permission", "dependency", "data", *NFR_KINDS)
+_DEFER = re.compile(r"^- ((?:AC|NFR)-\d+)\s*->\s*deferred\s*:\s*(.*?)\s*$", re.M | re.I)
 _REPO = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+) \((" + ROLE_PATTERN + r")\)\s*$", re.M)
-_TRACE = re.compile(r"^- (AC-\d+) -> (TASK-\d+) / (TEST-\d+)\s*$", re.M)
+_TRACE = re.compile(r"^- ((?:AC|NFR)-\d+) -> (TASK-\d+)(?: / (\S+))?\s*$", re.M)
 _JSON_BLOCK = re.compile(r"```json\n(.*?)\n```", re.S)
 
 
@@ -46,7 +55,43 @@ def bullets(text: str) -> list[str]:
 
 
 def parse_acs(prd: str) -> dict[str, str]:
-    return dict(_AC.findall(section(prd, "Acceptance criteria")))
+    return {ac: text for ac, _, text in _AC.findall(section(prd, "Acceptance criteria"))}
+
+
+def parse_ac_goals(prd: str) -> dict[str, list[str]]:
+    """Each criterion's goals, from '- AC-1 (G1): ...' ('(G1, G2)' for several)."""
+    return {ac: re.findall(r"\bG\d+\b", goals or "") for ac, goals, _ in _AC.findall(section(prd, "Acceptance criteria"))}
+
+
+def parse_nfrs(prd: str) -> dict[str, dict]:
+    """'## Non-functional requirements' lines: id -> {kind, goal, text}."""
+    return {n: {"kind": kind.strip(), "goal": goal or "", "text": text.strip()}
+            for n, kind, goal, text in _NFR.findall(section(prd, "Non-functional requirements"))}
+
+
+def parse_cases(plan: str) -> list[dict]:
+    """'## Test cases' lines. The test reference after '->' is one of:
+    'TASK-1 <path>::<test name>' (a test in that task's repo), 'acceptance <file> "<title>"' (the
+    product's acceptance repo), 'suite <name>' (a quality suite: performance, perf-smoke, sast, ...),
+    or 'manual: <why>' (a check people do; it needs an override at G6)."""
+    out = []
+    for cid, req, kind, what, ref in _CASE.findall(section(plan, "Test cases")):
+        case = {"id": cid, "req": req, "kind": kind.strip(), "what": what, "ref": ref, "via": "unknown"}
+        if m := re.match(r"^(TASK-\d+)\s+(\S+?)::(\S+)$", ref):
+            case.update(via="test", task=m.group(1), file=m.group(2), test=m.group(3))
+        elif m := re.match(r'^acceptance\s+(\S+)(?:\s+"([^"]+)")?$', ref):
+            case.update(via="acceptance", file=m.group(1), test=m.group(2) or "")
+        elif m := re.match(r"^suite\s+([\w./-]+)$", ref):
+            case.update(via="suite", suite=m.group(1))
+        elif m := re.match(r"^manual\s*:\s*(.+)$", ref):
+            case.update(via="manual", why=m.group(1))
+        out.append(case)
+    return out
+
+
+def parse_deferred(plan: str) -> dict[str, str]:
+    """Requirements the plan deliberately leaves out: id -> reason ('' when none was given)."""
+    return dict(_DEFER.findall(section(plan, "Traceability")))
 
 
 def is_testable(ac: str) -> bool:

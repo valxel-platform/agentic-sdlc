@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 from langchain_core.runnables import RunnableConfig
@@ -18,7 +19,7 @@ from langgraph.types import Send
 from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers
-from ..agents.parse import merge_sections, parse_affected_repos, parse_tasks
+from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
 from .. import diary, performance
 from .. import lessons
 from ..config import ProductConfig
@@ -114,6 +115,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "pilot": bool(state.get("pilot")),
         "simulate_faults": dict(state.get("simulate_faults") or {}),
         "tasks": list(state.get("tasks") or []),
+        "cases": list(state.get("cases") or []),
         "components": list((state.get("change_set") or {}).get("merge_order", [])),
         "deployments": sorted((state.get("deployments") or {}).values(), key=lambda d: d["repo"]),
         "quality": dict(state.get("quality") or {}),
@@ -233,6 +235,33 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
 
 def product_data_class(services, ctx: dict) -> str:
     return services.snapshot(ctx["product_id"], ctx.get("governance")).product.data_class
+
+
+def cases_instruction(cases: list[dict]) -> str:
+    if not cases:
+        return ""
+    return (" Write these planned test cases as tests with exactly these names (the release checks they"
+            " exist and pass), and run them: " + "; ".join(
+                f"{c['id']} ({c['req']}, {c['kind']}): {c['what']} -> {c['file']}::{c['test']}" for c in cases) + ".")
+
+
+def written_cases(github, repo: str, branch: str, cases: list[dict]) -> dict[str, dict]:
+    """Whether each case's test is on the branch: its file exists and names the test."""
+    out, files = {}, {}
+    for c in cases:
+        if c["file"] not in files:
+            try:
+                files[c["file"]] = github.get_file(repo=repo, path=c["file"], ref=branch) or ""
+            except Exception:
+                files[c["file"]] = None  # unreadable now: not counted as missing
+        text = files[c["file"]]
+        found = None if text is None else bool(re.search(rf"\b{re.escape(c['test'])}\b", text))
+        out[c["id"]] = {"req": c["req"], "file": c["file"], "test": c["test"], "found": found is not False}
+    return out
+
+
+def missing_cases(result: dict) -> list[str]:
+    return [cid for cid, c in sorted((result.get("cases") or {}).items()) if not c.get("found")]
 
 
 def blocking_of(review: dict | None) -> list[str]:
@@ -497,15 +526,19 @@ def build_build_subgraph(services):
         # Done: tests pass, and the review (if any) didn't block. A blocked task goes back to its
         # coder with what blocked it, so a retry fixes the review's findings too.
         done = {tid for tid, r in (s.get("task_results") or {}).items()
-                if r["tests_passed"] and (reviews.get(tid) or {}).get("approve", True)}
+                if r["tests_passed"] and (reviews.get(tid) or {}).get("approve", True) and not missing_cases(r)}
         pending = [t for t in s["ctx"]["tasks"] if t["id"] not in done]
         if not pending:
             return "review"
+        results = s.get("task_results") or {}
         return [Send("code_task", {"task": t, "ctx": s["ctx"], "attempt": s["attempt"],
-                                   "fix": blocking_of(reviews.get(t["id"]))}) for t in pending]
+                                   "fix": blocking_of(reviews.get(t["id"])) + [
+                                       f"write the test for {c} under exactly the planned name"
+                                       for c in missing_cases(results.get(t["id"]) or {})]}) for t in pending]
 
     def code_task(payload: dict) -> dict:
         task, ctx, attempt = payload["task"], payload["ctx"], payload["attempt"]
+        mine = [c for c in ctx.get("cases") or [] if c.get("via") == "test" and c.get("task") == task["id"]]
         first = ctx["tasks"][0]["id"] if ctx["tasks"] else None
         fail = attempt <= int(ctx["simulate_faults"].get("build", 0)) and task["id"] == first
         res = call_agent(
@@ -515,6 +548,7 @@ def build_build_subgraph(services):
                   + (f" Fix this first: {ctx['feedback']}" if ctx.get("feedback") else "")
                   + (" The review blocked your last attempt; fix each of these without weakening any check: "
                      + "; ".join(payload["fix"]) + "." if payload.get("fix") else "")
+                  + cases_instruction(mine)
                   + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task)
@@ -525,10 +559,18 @@ def build_build_subgraph(services):
         )
         # The coder's own test run gates review; CI on the pull request is the final word (ci_wait).
         reply, error = structured.parse(res.text, structured.CoderReply)
+        branch = ctx.get("branch") or f"feature/{ctx['feature_id']}"
+        if services.settings.mode == "stub" and mine and not fail:  # stand-in agents push no code: the tests they'd write
+            for path, content in templates.stub_tests(mine).items():
+                services.github.put_file(repo=task["repo"], branch=branch, path=path, content=content,
+                                         message=f"{ctx['feature_id']} {task['id']}: tests")
+        found = written_cases(services.github, task["repo"], branch, mine)
         result = {**task, "branch": ctx.get("branch") or f"feature/{ctx['feature_id']}", "attempt": attempt,
                   # What the coder says it changed decides the performance test; the plan's list otherwise.
                   "files": list(reply.files) if reply and reply.files else list(task.get("files") or []),
                   "tests_passed": bool(reply and reply.tests.passed),
+                  # Each planned test case: is a test with its name on the branch (traceability.py)?
+                  "cases": found,
                   "summary": reply.summary if reply else res.text,
                   "notes": diary.entries(list(reply.notes)) if reply else [],
                   "tests": reply.tests.model_dump() if reply else {"passed": False, "failed": [],
@@ -641,6 +683,10 @@ def build_build_subgraph(services):
                     if not results.get(t["id"], {}).get("tests_passed")]
         findings += [f"{tid}: the review blocks: " + "; ".join(rv.get("blocking") or ["not approved"])
                      for tid, rv in reviews.items() if not rv.get("approve", True)]
+        # Every planned test case has its test on the branch, under the planned name.
+        findings += [f"{tid}: {cid}'s test {c['file']}::{c['test']} is not on the branch"
+                     for tid, r in sorted(results.items()) if r.get("tests_passed")
+                     for cid, c in sorted((r.get("cases") or {}).items()) if not c.get("found")]
         # Weakening a check never passes on the reviewer's say-so (evaluators/weakening.py).
         findings += [f"{tid}: weakens a check to pass: {w}" for tid, rv in sorted(reviews.items())
                      for w in rv.get("weakened") or []]
@@ -760,8 +806,11 @@ def make_phase_node(phase: str, services):
             delta["lanes_touched"] = touched_lanes(snap, affected)
         elif phase == "plan":
             delta["tasks"] = parse_tasks(out["draft"]["content"])
+            delta["cases"] = parse_cases(out["draft"]["content"])
         elif phase == "build":
             reviews = out.get("reviews") or {}
+            delta["case_evidence"] = {cid: {**c, "task": tid} for tid, r in (out.get("task_results") or {}).items()
+                                      for cid, c in (r.get("cases") or {}).items()}
             delta["pull_requests"] = {
                 f"{rv['pr']['repo']}#{rv['pr']['number']}": {**rv["pr"], "task_id": tid, "role": rv["role"],
                                                              "review_score": rv["score"]}

@@ -164,11 +164,18 @@ def test_tracker_follows_the_feature_from_intent_to_release(tmp_path, gov_root):
 
     v = eng.auto_drive(fid, approver="maria")
     items = v["work_tracking"]["items"]
-    assert [i["item"] for i in items] == ["epic", "AC-1", "AC-2", "AC-3", "TASK-1", "TASK-2"]
+    assert sorted(i["item"] for i in items) == sorted(
+        ["epic", "AC-1", "AC-2", "AC-3", "NFR-1", "NFR-2", "TASK-1", "TASK-2"] + [f"TC-{n}" for n in range(1, 9)])
     assert all(i["status"] == "done" for i in items)
-    stories = [x for x in jira.items.values() if x["kind"] != "epic"]
     epic = next(x for x in jira.items.values() if x["kind"] == "epic")
+    stories = [x for x in jira.items.values() if x["kind"] in ("story", "task")]
     assert all(x["parent"] == epic["id"] for x in stories)
+    by_key = {x["key"]: x for x in jira.items.values()}
+    story_of = {x["summary"].split("]")[0].split("/")[-1]: x["id"] for x in jira.items.values() if x["kind"] == "story"}
+    subtasks = [x for x in jira.items.values() if x["kind"] == "subtask"]
+    assert len(subtasks) == 8 and by_key  # one per test case, each under its requirement's story
+    assert all(x["parent"] == story_of[x["summary"].split("(")[1].split(",")[0]] for x in subtasks)
+    assert eng.work.reconcile(eng._state(fid)) == {"drift": [], "block": False}
     assert epic["comments"][0] == "G1 Intent approved by maria."
     assert any("Architecture diagram v1 (lucid)" in c for c in epic["comments"])
 
@@ -265,14 +272,16 @@ def test_jira_over_the_atlassian_mcp_tools(tmp_path, gov_root):
     assert epic["type"] == "Epic" and epic["summary"] == "[FARM-FEAT-1] Offline crop log"
     assert "vrixel-FARM-FEAT-1" in epic["labels"]
     stories = [i for i in issues.values() if i["type"] == "Story"]
-    assert len(stories) == 3 and all(s["parent"] == "FARM-1" for s in stories)
+    assert len(stories) == 5 and all(s["parent"] == "FARM-1" for s in stories)  # 3 criteria, 2 NFRs
+    subtasks = [i for i in issues.values() if i["type"] == "Sub-task"]
+    assert len(subtasks) == 8 and all(s["parent"] != "FARM-1" for s in subtasks)  # test cases, under their story
     assert all(i["status"] == "Done" for i in issues.values())
     assert ("FARM-1", "G1 Intent approved by maria.") in store["comments"]
 
     # Lost link store (e.g. a restore): the markers find the existing issues instead of duplicating.
     eng.work.links = type(eng.work.links)()
     eng.sync_work(v["feature_id"])
-    assert len(issues) == 6
+    assert len(issues) == 16
 
 
 def fake_openproject():
@@ -326,7 +335,7 @@ def test_openproject_over_its_mcp_tools(tmp_path, gov_root):
     wps = store["wps"]
     assert wps[1]["subject"] == "[CLN-FEAT-1] Consent check on intake" and wps[1]["type_id"] == 5
     stories = [w for w in wps.values() if w["type_id"] == 4]
-    assert len(stories) == 3 and all(w["parent_id"] == 1 for w in stories)
+    assert len(stories) == 5 and all(w["parent_id"] == 1 for w in stories)  # 3 criteria, 2 NFRs
     assert all(w["status_id"] == 12 for w in wps.values())  # Closed, matched by name
     assert v["work_tracking"]["items"][0]["url"] == "https://op.example.com/work_packages/1"
     assert (1, "G1 Intent approved by li.") in store["comments"]

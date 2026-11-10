@@ -72,8 +72,9 @@ def test_list_price_math():
 
 
 def test_spec_check_flags_untestable_acceptance_criteria():
-    prd = ("## Goals\n- G1\n\n## Non-goals\n- x\n\n## Acceptance criteria\n- AC-1: it works\n"
-           "- AC-2: Given a user, when they save, then it persists\n\n## Constitution articles\n- VX-5\n")
+    prd = ("## Goals\n- G1: x\n\n## Non-goals\n- x\n\n## Acceptance criteria\n- AC-1 (G1): it works\n"
+           "- AC-2 (G1): Given a user, when they save, then it persists\n\n## Non-functional requirements\n"
+           "- None: nothing beyond the product's own\n\n## Constitution articles\n- VX-5\n")
     assert list(parse_acs(prd)) == ["AC-1", "AC-2"]
     findings = run_checks("spec", prd, {"articles": ["VX-5"]})
     assert findings == ["AC-1 is not testable: write it as Given / when / then"]

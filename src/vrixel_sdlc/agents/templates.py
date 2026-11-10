@@ -8,7 +8,7 @@ import json
 import re
 
 from ..repo_roles import REPO_ORDER as _REPO_ORDER
-from .parse import parse_acs, parse_affected_repos
+from .parse import parse_acs, parse_affected_repos, parse_nfrs
 
 
 
@@ -53,19 +53,22 @@ def discovery(ctx: dict, defective: bool) -> str:
 def spec(ctx: dict, defective: bool) -> str:
     title = ctx["title"]
     if defective:
-        acs = [f"- AC-1: {title} works well", f"- AC-2: {title} is fast"]
+        acs = [f"- AC-1 (G1): {title} works well", f"- AC-2 (G1): {title} is fast"]
     else:
         acs = [
-            f"- AC-1: Given a signed-in user, when they complete {title}, then the change is saved and confirmed",
-            f"- AC-2: Given invalid input, when they submit {title}, then a specific error is shown and nothing is saved",
-            f"- AC-3: Given the action succeeds, when an auditor reviews it, then an audit record shows who, what and when",
+            f"- AC-1 (G1): Given a signed-in user, when they complete {title}, then the change is saved and confirmed",
+            f"- AC-2 (G1): Given invalid input, when they submit {title}, then a specific error is shown and nothing is saved",
+            f"- AC-3 (G1): Given the action succeeds, when an auditor reviews it, then an audit record shows who, what and when",
         ]
     product_article = (ctx.get("product_articles") or ["VX-2"])[0]
     lines = [
         f"# PRD: {title}", f"Feature: {ctx['feature_id']}",
-        "", "## Goals", f"- G1: Deliver {title} (measured by M1)",
+        "", "## Goals", f"- G1: Deliver {title} (measured by M1, M2)",
         "", "## Non-goals", f"- Changes outside {ctx['product_name']} scope",
         "", "## Acceptance criteria", *acs,
+        "", "## Non-functional requirements",
+        f"- NFR-1 (performance, G1): {title} answers 95% of requests within 500 ms at the expected peak",
+        f"- NFR-2 (accessibility, G1): {title} meets WCAG 2.1 AA (keyboard path, labels, 4.5:1 contrast)",
         "", "## Constitution articles", "- VX-5", f"- {product_article}",
     ]
     if not defective:
@@ -178,7 +181,7 @@ def architecture(ctx: dict, defective: bool) -> str:
               "- New traffic: no: an existing journey changes",
               "- Data growth: no: no new records are kept",
               "- Journeys: none beyond the feature's own"]
-    lines += ["", "## Coverage", *coverage_lines(ctx, (repos[0]["name"] if repos else "the product"))]
+    lines += ["", "## Coverage", *coverage_lines(ctx, (repos[0]["name"] if repos else "the product"), nfrs=True)]
     lines += ["", "## Constitution articles", "- VX-4", "- VX-8", "- VX-15", "- VX-16", "- VX-17"]
     lines += ["", "## Agent notes", "- Traded off: extend the existing components rather than add a service,"
               " so there are fewer parts to run", "- Open: whether this change needs a feature flag beyond"
@@ -290,16 +293,30 @@ def plan(ctx: dict, defective: bool) -> str:
         if not mine:  # more repos than criteria: this one supports the others
             task["why"] = f"supports {', '.join(acs) or 'the feature'} through {repo['role']} changes the others use"
         tasks.append(task)
-    trace = []
-    for j, ac in enumerate(acs, start=1):
-        owner = next((t["id"] for t in tasks if ac in t["acs"]), tasks[0]["id"])
-        trace.append(f"- {ac} -> {owner} / TEST-{j}")
+    nfrs = parse_nfrs(ctx["parent_texts"].get("PRD", ""))
+    acs_text = parse_acs(ctx["parent_texts"].get("PRD", ""))
+    trace, cases = [], []
+    for ac in acs:
+        owner = next((t for t in tasks if ac in t["acs"] and t["role"] != "acceptance"), None) or tasks[0]
+        trace.append(f"- {ac} -> {owner['id']}")
+        test_file = next((f for f in owner["files"] if "test" in f or ".spec." in f), f"tests/test_{slug}.py")
+        name = f"test_{ac.lower().replace('-', '')}"
+        cases.append(f"- TC-{len(cases) + 1} ({ac}, happy): {acs_text.get(ac, '')[:80]} -> {owner['id']} {test_file}::{name}_happy")
+        cases.append(f"- TC-{len(cases) + 1} ({ac}, error): {ac} with bad input or a failing dependency"
+                     f" -> {owner['id']} {test_file}::{name}_error")
+    builder = next((t for t in tasks if t["role"] != "acceptance"), tasks[0] if tasks else None)
+    for nfr, spec in nfrs.items():
+        if builder:
+            trace.append(f"- {nfr} -> {builder['id']}")
+        suite = {"performance": "performance", "accessibility": "e2e", "security": "sast"}.get(spec["kind"], "integration")
+        cases.append(f"- TC-{len(cases) + 1} ({nfr}, {spec['kind']}): {spec['text'][:80]} -> suite {suite}")
     if defective and trace:
         trace = trace[:-1]
     lines = [
         f"# Plan: {ctx['title']}",
         "", "## Tasks", "```json", json.dumps({"tasks": tasks}, indent=2), "```",
         "", "## Traceability", *trace,
+        "", "## Test cases", *cases,
     ]
     if acc:
         lines += ["", "## Acceptance tests", *_acceptance_lines(ctx, repos, acs, slug)]
@@ -307,10 +324,11 @@ def plan(ctx: dict, defective: bool) -> str:
     return "\n".join(lines + _feedback(ctx)) + "\n"
 
 
-def coverage_lines(ctx: dict, where: str) -> list[str]:
-    """One line per PRD acceptance criterion: where this document handles it."""
-    acs = list(parse_acs((ctx.get("parent_texts") or {}).get("PRD", "")))
-    return [f"- {ac}: {where}" for ac in acs] or ["- None: no acceptance criteria yet"]
+def coverage_lines(ctx: dict, where: str, nfrs: bool = False) -> list[str]:
+    """One line per PRD acceptance criterion (and NFR, for the HLD): where this document handles it."""
+    prd = (ctx.get("parent_texts") or {}).get("PRD", "")
+    reqs = list(parse_acs(prd)) + (list(parse_nfrs(prd)) if nfrs else [])
+    return [f"- {r}: {where}" for r in reqs] or ["- None: no acceptance criteria yet"]
 
 
 def _endpoint_lines(repos: list[dict]) -> list[str]:
@@ -372,6 +390,16 @@ def code_task(ctx: dict, task: dict, passed: bool) -> str:
           if task.get("role") == "acceptance" else []),
         f"Tests: {'passed' if passed else 'failed: test_' + _slug(task['id'])}",
     ]) + "\n"
+
+
+def stub_tests(cases: list[dict]) -> dict[str, str]:
+    """The test files a stand-in coder would push for its planned cases, by path."""
+    files: dict[str, list[str]] = {}
+    for c in cases:
+        line = (f"def {c['test']}():\n    assert True  # {c['id']} ({c['req']}, {c['kind']})\n" if c["file"].endswith(".py")
+                else f"test('{c['test']}', () => {{ /* {c['id']} ({c['req']}, {c['kind']}) */ }});\n")
+        files.setdefault(c["file"], []).append(line)
+    return {path: "\n".join(lines) for path, lines in files.items()}
 
 
 def code_result(ctx: dict, task: dict, passed: bool) -> str:

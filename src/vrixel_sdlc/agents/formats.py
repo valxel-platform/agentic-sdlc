@@ -31,7 +31,12 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
 ## Non-goals
 - <what this feature won't do>
 ## Acceptance criteria
-- AC-1: Given <context>, when <action>, then <observable result>
+- AC-1 (G1): Given <context>, when <action>, then <observable result>     (the goal it serves in brackets)
+## Non-functional requirements
+- NFR-1 (performance, G1): <a measurable target: a number, a percentile, a limit or a named standard>
+                        kinds: performance, availability, reliability, scalability, security, privacy,
+                        accessibility, compliance, usability, maintainability, observability, other
+                        (or '- None: <why this feature adds no requirement beyond the product's own>')
 ## Constitution articles
 - VX-<n>                (at least one article of the platform or product constitution)""",
     "design": """# UX spec: <title>
@@ -69,8 +74,9 @@ flowchart LR  (one node per affected repo)
 ## Resources                   (AWS services, only when needed; each with an ADR)
 - <name>: <type>; <param>=<value>
   writes: <repo>; reads: <repo>
-## Coverage                    (one line for every acceptance criterion in the PRD)
+## Coverage                    (one line for every acceptance criterion and NFR in the PRD)
 - AC-1: <org>/<repo>: <the part of the design that handles it>     (or 'no change: <why>')
+- NFR-1: <how the design meets it>
 ## Performance                 (decides which performance tests run)
 - Expected load: <requests or events per second at peak, or "as today">
 - New traffic: <yes|no>: <why>
@@ -86,8 +92,17 @@ flowchart LR  (one node per affected repo)
 ```
 (every task lists the criteria it implements; a task that implements none directly says why in "why")
 ## Traceability
-- AC-1 -> TASK-1 / TEST-1     (one line for every acceptance criterion in the PRD)
-- AC-2 -> deferred: <why, and when it will be done>   (only a criterion deliberately left out)
+- AC-1 -> TASK-1              (one line for every acceptance criterion and NFR in the PRD)
+- NFR-1 -> TASK-1
+- AC-2 -> deferred: <why, and when it will be done>   (only a requirement deliberately left out)
+## Test cases                  (at least one for every requirement not deferred; cover the error paths too)
+- TC-1 (AC-1, happy): <what it checks> -> TASK-1 <test file>::<test name>
+- TC-2 (AC-1, error): <what it checks> -> TASK-1 <test file>::<test name>
+- TC-3 (NFR-1, performance): <what it checks> -> suite performance
+                        kinds: happy, error, edge, permission, dependency, data, or the NFR's kind
+                        test: 'TASK-n <file>::<name>' (that task's coder writes it under exactly that name),
+                        'acceptance <file> "<title>"', 'suite <quality suite>', or 'manual: <why>' (needs
+                        a person to override at release)
 ## Acceptance tests            (when the product has an acceptance repo and the feature spans repos)
 - AC-1: extend <file> "<test title>"      or      - AC-1: add <file> covers: <component> <route or page>""",
     "release": """# Release: <title>

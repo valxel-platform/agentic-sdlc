@@ -1,9 +1,26 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, type Trace, type TracePr } from "../api";
+import { api, type Trace, type TraceCase, type TracePr } from "../api";
 import { threadPath } from "../vocab";
 
 const RESULT: Record<string, string> = { passed: "passed", failed: "failed", skipped: "skipped", missing: "not run" };
+const CASE: Record<TraceCase["status"], string> = {
+  passed: "passed", failed: "failed", written: "written, not merged", missing: "test not on the branch",
+  pending: "not run yet", manual: "manual", unknown: "no checkable test",
+};
+
+function Cases({ cases }: { cases: TraceCase[] }) {
+  if (cases.length === 0) return <strong>no test case</strong>;
+  return (
+    <ul className="plain-list small">
+      {cases.map((c) => (
+        <li key={c.id} title={`${c.what}\n${c.ref}`}>
+          {c.id} ({c.kind}): {c.status === "passed" ? CASE[c.status] : <strong>{CASE[c.status] ?? c.status}</strong>}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function Prs({ prs }: { prs: TracePr[] }) {
   if (prs.length === 0) return <span className="faint">none yet</span>;
@@ -19,9 +36,9 @@ function Prs({ prs }: { prs: TracePr[] }) {
   );
 }
 
-/** From the feature's reason to production: each acceptance criterion with the goal it serves, the
- * task and test that cover it, its pull requests, its acceptance results and where it runs, plus
- * the gaps in that chain and production incidents on its components. */
+/** From the feature's reason to production: each requirement (acceptance criteria and NFRs) with the
+ * goal it serves, its tasks, its test cases and their results, its pull requests, its acceptance
+ * results and where it runs, plus the gaps in that chain and production incidents on its components. */
 export function TracePanel({ featureId, version }: { featureId: string; version: number }) {
   const [t, setT] = useState<Trace | null>(null);
   const [err, setErr] = useState("");
@@ -44,24 +61,36 @@ export function TracePanel({ featureId, version }: { featureId: string; version:
             ))}
           </p>
         )}
+        <p className="small">
+          {t.complete ? "Every requirement is traced to passing tests." : `${t.gaps.length} gap${t.gaps.length === 1 ? "" : "s"} below.`}{" "}
+          <a href={api.traceCsvUrl(featureId)} download>Export the matrix (CSV)</a>
+        </p>
         <table className="quality">
-          <caption className="visually-hidden">Each acceptance criterion from task to production</caption>
+          <caption className="visually-hidden">Each requirement from goal to test and production</caption>
           <thead>
-            <tr><th scope="col">Criterion</th><th scope="col">Task and test</th><th scope="col">Pull requests</th>
-              <th scope="col">Acceptance</th><th scope="col">Running in</th></tr>
+            <tr><th scope="col">Requirement</th><th scope="col">Goal</th><th scope="col">Tasks</th><th scope="col">Test cases</th>
+              <th scope="col">Pull requests</th><th scope="col">Acceptance</th><th scope="col">Running in</th></tr>
           </thead>
           <tbody>
-            {t.criteria.map((c) => (
+            {[...t.criteria, ...(t.nfrs ?? [])].map((c) => (
               <tr key={c.id}>
-                <th scope="row" title={c.text}>{c.id}</th>
-                <td>{c.tasks.length ? `${c.tasks.join(", ")}${c.test ? ` / ${c.test}` : ""}` : <strong>no task</strong>}</td>
-                <td><Prs prs={c.prs} /></td>
-                <td>{Object.keys(c.acceptance).length
-                  ? Object.entries(c.acceptance).map(([st, r]) => `${st}: ${RESULT[r] ?? r}`).join(", ")
-                  : <span className="faint">not run</span>}</td>
-                <td>{Object.keys(c.deployed).length
-                  ? Object.entries(c.deployed).map(([repo, env]) => `${repo.split("/").pop()} in ${env}`).join(", ")
-                  : <span className="faint">not deployed</span>}</td>
+                <th scope="row" title={c.text}>{c.id}{c.type !== "functional" && <span className="faint"> {c.type}</span>}</th>
+                <td>{c.goals.join(", ") || <span className="faint">none</span>}</td>
+                {c.deferred !== null ? (
+                  <td colSpan={5}><span className="muted">Deferred: {c.deferred}</span></td>
+                ) : (
+                  <>
+                    <td>{c.tasks.length ? c.tasks.join(", ") : <strong>no task</strong>}</td>
+                    <td><Cases cases={c.cases} /></td>
+                    <td><Prs prs={c.prs} /></td>
+                    <td>{Object.keys(c.acceptance).length
+                      ? Object.entries(c.acceptance).map(([st, r]) => `${st}: ${RESULT[r] ?? r}`).join(", ")
+                      : <span className="faint">not run</span>}</td>
+                    <td>{Object.keys(c.deployed).length
+                      ? Object.entries(c.deployed).map(([repo, env]) => `${repo.split("/").pop()} in ${env}`).join(", ")
+                      : <span className="faint">not deployed</span>}</td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>

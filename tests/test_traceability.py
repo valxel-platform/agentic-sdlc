@@ -47,6 +47,7 @@ def test_a_feature_traces_from_metrics_to_production():
         "G2 has no metric that measures it", "M2 measures no goal", "AC-3 is covered by no task",
         "o/docs is affected but no task changes it", "TASK-2 (o/web) has no pull request",
         "AC-2's acceptance test failed in staging", "AC-3 has no acceptance result",
+        "The plan lists no test cases",  # an older plan: no test cases, so the matrix can't be complete
     }
 
 
@@ -65,7 +66,8 @@ def test_the_engine_traces_a_released_feature(engine, client=None):
     engine.auto_drive(fid)
     t = engine.trace(fid)
     assert t["criteria"] and all(c["tasks"] and c["prs"] for c in t["criteria"])
-    assert t["goals"][0]["metrics"] == ["M1"] and t["metrics"][0]["goals"] == ["G1"]
+    assert t["goals"][0]["metrics"] == ["M1", "M2"] and t["metrics"][0]["goals"] == ["G1"]
+    assert t["complete"] and t["gaps"] == [] and t["nfrs"] and all(c["cases"] for c in t["criteria"] + t["nfrs"])
     assert any(r["deployed"] for r in t["repos"])
     repo = t["criteria"][0]["repos"][0]
     assert any(f["feature_id"] == fid for f in engine.trace_search("FARM", repo=repo))

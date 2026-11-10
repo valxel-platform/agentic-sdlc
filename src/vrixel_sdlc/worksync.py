@@ -7,10 +7,17 @@ outage therefore never stops agents or gates: the feature records the error and 
 catches up.
 
   G1 approved   -> epic                                  (in progress once G2 is approved)
-  G2 approved   -> one story per acceptance criterion    (in progress at build, done at merge)
+  G2 approved   -> one story per acceptance criterion and NFR (in progress at build; done when its
+                   test cases pass, or at merge for older plans; cancelled when deferred)
   plan passed   -> one task per planned repo change      (in progress with its PR, done at merge)
+                -> one sub-task per test case, under its requirement's story
+                   (in progress once its test is written, done when it passes)
   any decision  -> a comment on the epic (who, what, feedback); diagrams likewise
   released      -> epic done;  stopped -> open items cancelled
+
+`reconcile` reads the items back and reports drift: an item closed, reopened, renamed or deleted in
+the tracker that the tool's matrix disagrees with, or one missing. G6 shows it as a warning, or
+blocks on it where the product sets `work_tracking.block_on_drift: true`.
 """
 
 from __future__ import annotations
@@ -19,7 +26,7 @@ import threading
 from dataclasses import dataclass
 from typing import Protocol
 
-from .agents.parse import parse_acs
+from .agents.parse import parse_acs, parse_nfrs
 from .integrations.worktracking import STATUS_ORDER, WorkTracker
 
 GATE_NAMES = {"g1": "G1 Intent", "g2": "G2 Scope", "g3": "G3 Experience", "g4": "G4 Architecture",
@@ -31,8 +38,8 @@ VERB = {"approve": "approved", "revise": "sent back", "takeover": "taken over", 
 
 @dataclass
 class Desired:
-    key: str  # "epic", "AC-1", "TASK-1"
-    kind: str  # epic | story | task
+    key: str  # "epic", "AC-1", "NFR-1", "TASK-1", "TC-1"
+    kind: str  # epic | story | task | subtask
     summary: str
     description: str
     status: str  # todo | in_progress | done | cancelled
@@ -90,7 +97,11 @@ def _ended(s: dict) -> str | None:
     return {"done": "done", "aborted": "cancelled"}.get(s.get("status") or "")
 
 
-def desired_items(s: dict, *, prd_text: str, feature_url: str, restricted_repos: dict[str, str]) -> list[Desired]:
+CASE_STATUS = {"passed": "done", "written": "in_progress", "failed": "in_progress"}
+
+
+def desired_items(s: dict, *, prd_text: str, feature_url: str, restricted_repos: dict[str, str],
+                  trace: dict | None = None) -> list[Desired]:
     """What the tracker should hold for this feature state. `restricted_repos` maps a repo to the
     lane whose data class may not be sent to this tracker; such tasks carry no detail."""
     fid, title = s["feature_id"], s["title"]
@@ -106,13 +117,27 @@ def desired_items(s: dict, *, prd_text: str, feature_url: str, restricted_repos:
     out.append(Desired("epic", "epic", f"[{fid}] {title}",
                        f"{s.get('description') or title}\n\nTracked by the Vrixel SDLC: {feature_url}",
                        epic_status))
+    reqs = {r["id"]: r for r in (trace or {}).get("criteria", []) + (trace or {}).get("nfrs", [])}
     if approvals.get("g2"):
-        for ac_id, text in parse_acs(prd_text).items():
-            status = "done" if merged else ("in_progress" if building else "todo")
+        nfrs = parse_nfrs(prd_text)
+        stories = [(ac_id, f"[{fid}/{ac_id}] {text}", f"Acceptance criterion {ac_id} of {fid}.\n\n{text}")
+                   for ac_id, text in parse_acs(prd_text).items()]
+        stories += [(n, f"[{fid}/{n}] ({spec['kind']}) {spec['text']}",
+                     f"Non-functional requirement {n} ({spec['kind']}) of {fid}.\n\n{spec['text']}")
+                    for n, spec in nfrs.items()]
+        for rid, summary, desc in stories:
+            req = reqs.get(rid) or {}
+            cases = req.get("cases") or []
+            if req.get("deferred") is not None:
+                status, desc = "cancelled", f"{desc}\n\nDeferred: {req['deferred']}"
+            elif cases:  # done when its test cases pass, not merely when the code merges
+                status = ("done" if all(c["status"] == "passed" for c in cases)
+                          else "in_progress" if building else "todo")
+            else:
+                status = "done" if merged else ("in_progress" if building else "todo")
             if ended == "cancelled" and status != "done":
                 status = "cancelled"
-            out.append(Desired(ac_id, "story", f"[{fid}/{ac_id}] {text}",
-                               f"Acceptance criterion {ac_id} of {fid}.\n\n{text}", status, parent="epic"))
+            out.append(Desired(rid, "story", summary, desc, status, parent="epic"))
     prs = s.get("pull_requests") or {}
     for t in s.get("tasks") or []:
         mine = [pr for pr in prs.values() if pr.get("task_id") == t["id"]]
@@ -130,6 +155,20 @@ def desired_items(s: dict, *, prd_text: str, feature_url: str, restricted_repos:
                               *[f"- {f}" for f in t.get("files", [])],
                               *[f"Pull request: {p['url']}" for p in mine]])
         out.append(Desired(t["id"], "task", summary, desc, status, parent="epic"))
+    if approvals.get("g2"):  # the test cases, as sub-tasks of their requirement's story
+        repo_of = {t["id"]: t["repo"] for t in s.get("tasks") or []}
+        for rid, req in reqs.items():
+            for c in req.get("cases") or []:
+                status = CASE_STATUS.get(c["status"], "todo")
+                if ended == "cancelled" and status != "done":
+                    status = "cancelled"
+                lane = restricted_repos.get(repo_of.get(c.get("task", ""), ""))
+                summary = (f"[{fid}/{c['id']}] ({rid}, {c['kind']}) test in {lane}" if lane
+                           else f"[{fid}/{c['id']}] ({rid}, {c['kind']}) {c['what']}")
+                desc = (f"Details stay on the feature page: {lane}'s data class does not allow this tracker. "
+                        f"{feature_url}" if lane else
+                        f"Test case {c['id']} of {rid}: {c['what']}\nTest: {c['ref']}\nStatus: {c['status']}")
+                out.append(Desired(c["id"], "subtask", summary[:250], desc, status, parent=rid))
     return out
 
 
@@ -169,6 +208,54 @@ class WorkSync:
             return None, None
         return cfg, self.services.trackers.get(cfg["provider"])
 
+    def _load(self, s: dict):
+        arts = s.get("artifacts") or {}
+
+        def load(kind: str) -> str:
+            try:
+                return self.services.artifacts.load(arts[kind]) if kind in arts else ""
+            except Exception:
+                return ""
+        return load
+
+    def desired(self, s: dict, cfg: dict) -> list[Desired]:
+        from . import traceability
+
+        snap = self.services.snapshot(s["product_id"], s.get("governance"))
+        tools = self.services.settings.tools
+        restricted = {repo: lane.product_id for repo, lane in snap.lane_of_repo().items()
+                      if not tools.allowed(lane.data_class, cfg["provider"])}
+        load = self._load(s)
+        return desired_items(s, prd_text=load("PRD"), feature_url=f"{self.public_url}/features/{s['feature_id']}",
+                             restricted_repos=restricted, trace=traceability.build(s, load))
+
+    def reconcile(self, s: dict) -> dict:
+        """The tracker against the tool's matrix: {"drift": [...], "block": bool}. Read only."""
+        cfg, tracker = self.config(s)
+        if not cfg or tracker is None:
+            return {"drift": [], "block": False}
+        fid, have, drift = s["feature_id"], self.links.get(s["feature_id"]), []
+        names = {"todo": "open", "in_progress": "in progress", "done": "done", "cancelled": "cancelled"}
+        for d in self.desired(s, cfg):
+            row = have.get(d.key)
+            label = f"{d.key} ({d.kind})" if d.key != "epic" else "the epic"
+            if row is None:
+                drift.append(f"{label} is missing from the tracker")
+                continue
+            got = tracker.get(cfg, row)
+            if got is None:
+                drift.append(f"{label} ({row.get('key', '')}) was deleted in the tracker")
+                continue
+            ref = row.get("key", "")
+            closed = {"done", "cancelled"}
+            if got["status"] in closed and d.status not in closed:
+                drift.append(f"{label} ({ref}) is {names[got['status']]} in the tracker, but {names[d.status]} here")
+            elif d.status in closed and got["status"] not in closed:
+                drift.append(f"{label} ({ref}) is {names[d.status]} here, but {names[got['status']]} in the tracker")
+            if got.get("summary") and got["summary"].strip() != str(row.get("summary", "")).strip():
+                drift.append(f"{label} ({ref}) was renamed in the tracker: {got['summary'][:120]!r}")
+        return {"drift": drift, "block": bool(cfg.get("block_on_drift"))}
+
     def sync(self, s: dict) -> dict:
         """Reconcile one feature. Returns {"provider", "created", "moved", "commented"}."""
         cfg, tracker = self.config(s)
@@ -176,14 +263,7 @@ class WorkSync:
             return {}
         fid = s["feature_id"]
         with self._lock(fid):
-            snap = self.services.snapshot(s["product_id"], s.get("governance"))
-            tools = self.services.settings.tools
-            restricted = {repo: lane.product_id for repo, lane in snap.lane_of_repo().items()
-                          if not tools.allowed(lane.data_class, cfg["provider"])}
-            prd_ref = (s.get("artifacts") or {}).get("PRD")
-            prd = self.services.artifacts.load(prd_ref) if prd_ref else ""
-            want = desired_items(s, prd_text=prd, feature_url=f"{self.public_url}/features/{fid}",
-                                 restricted_repos=restricted)
+            want = self.desired(s, cfg)
             have = self.links.get(fid)
             done = {"provider": cfg["provider"], "created": 0, "moved": 0, "commented": 0}
 

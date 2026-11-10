@@ -44,6 +44,10 @@ approvers:
   - acme-shop/security
   g6:
   - acme-shop/release-managers
+  # Who may release at G6 although the traceability matrix has gaps (with a recorded reason).
+  traceability:
+  - acme-shop/product-owners
+  - acme-shop/qa
 high_risk_paths:
 - src/auth/
 - migrations/

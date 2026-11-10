@@ -1262,7 +1262,8 @@ tools:
   work_tracking:
     provider: jira           # jira | openproject
     project: FARM              # Jira project key or OpenProject project identifier
-    # optional: epic_type, story_type, task_type, statuses: {in_progress, done, cancelled}
+    # optional: epic_type, story_type, task_type, subtask_type, statuses: {in_progress, done, cancelled}
+    # block_on_drift: false   # true holds G6 while the tracker disagrees with the matrix
 ```
 
 | Data class | Allowed by default | Note |
@@ -1291,15 +1292,21 @@ OpenProject project with the feature.
 | When | In the tracker |
 | --- | --- |
 | G1 approved | Epic `[FARM-FEAT-1] title`, linked to the feature page |
-| G2 approved | One story per acceptance criterion, under the epic; epic in progress |
-| Plan passed | One task per planned repo change; tasks in a restricted lane carry no detail |
-| Build and merge | A task is in progress once it has a PR and done when merged; stories done at merge |
+| G2 approved | One story per acceptance criterion and per NFR, under the epic; epic in progress |
+| Plan passed | One task per planned repo change, and one sub-task per test case under its story; a deferred requirement's story is cancelled; items in a restricted lane carry no detail |
+| Build and merge | A task is in progress once it has a PR and done when merged; a sub-task follows its test case's status; a story is done when all its test cases have passed |
 | Every decision | A comment on the epic with gate, decision, approver and feedback; diagram links too |
 | Released or stopped | Epic done, or open items cancelled |
 
 Sync is idempotent: each item carries a marker (a Jira label, an OpenProject subject prefix), so
 a retry finds what it created. A tracker outage shows on the feature page and never stops agents
-or gates; the next step, or **Sync now**, catches up.
+or gates; the next step, or **Sync now**, catches up. Sub-tasks use `subtask_type` (Jira
+"Sub-task", OpenProject "Task" with the story as parent).
+
+Before G6 the engine reads every item back from the tracker and compares it with the matrix. Drift
+is an item that is missing or deleted, closed in the tracker while its tests haven't passed, open
+in the tracker though done here, or renamed. The G6 packet lists it; by default it only warns, and
+`block_on_drift: true` makes it hold the release like any other gap.
 
 Adapters resolve tool and argument names from each server's published tool schemas, so they keep
 working when a server renames a parameter. Without credentials a provider runs as an offline
@@ -1555,15 +1562,58 @@ check: the evaluators, reviewers and people still decide.
 
 ## Traceability
 
-Every link from a feature's reason to what runs in production is already written down: success
-metrics in the brief, goals and acceptance criteria in the spec, decisions and affected repos in
-the HLD, tasks and tests in the plan, pull requests per task, acceptance results per criterion,
-deployments per repo. `GET /api/features/{id}/trace` reads them into one view, and the feature's
-page shows it: each criterion with its task and test, pull requests, acceptance results and where
-it runs, the production incidents on its components, and the gaps in the chain (a criterion no task
-covers, a task without a pull request, a failed or missing acceptance result, a goal without a
-metric, an affected repo nothing changes). Nothing is stored twice, so the view is always what the
-pipeline has now (`vrixel_sdlc/traceability.py`).
+Every link from a feature's reason to what runs in production is written down: success metrics in
+the brief, goals, acceptance criteria and non-functional requirements in the spec, decisions and
+affected repos in the HLD, tasks and test cases in the plan, pull requests per task, test results,
+deployments per repo. `GET /api/features/{id}/trace` reads them into one matrix, and the feature's
+page shows it: each requirement with its goal, design, tasks and test cases and their status, pull
+requests, acceptance results and where it runs, the production incidents on its components, and the
+gaps in the chain. Nothing is stored twice, so the matrix is always what the pipeline has now
+(`vrixel_sdlc/traceability.py`). `GET /api/features/{id}/trace.csv` exports one row per test case.
+
+**In the spec.** Each criterion names the goal it serves, and NFRs are requirements in their own
+right, with a kind and a measurable target:
+
+```markdown
+## Acceptance criteria
+- AC-1 (G1): Given a farmer offline, when they log a crop, then it is saved on the device
+## Non-functional requirements
+- NFR-1 (performance, G1): saving answers within 200 ms on a mid-range phone
+- NFR-2 (accessibility): meets WCAG 2.1 AA        # or "- None: <why>"
+```
+
+The evaluator rejects a criterion without a goal, a goal that doesn't exist, an NFR kind outside
+the list (performance, availability, reliability, scalability, security, privacy, accessibility,
+compliance, usability, maintainability, observability, other) and an NFR with no number, limit or named standard.
+
+**In the plan.** Every requirement traces to a task (or is deferred, with a reason) and has at
+least one test case, and each case says how it will be checked:
+
+```markdown
+## Traceability
+- AC-1 -> TASK-1
+- NFR-2 -> deferred: the design system's audit covers it next sprint
+## Test cases
+- TC-1 (AC-1, happy): saves offline -> TASK-1 tests/crop.test.ts::saves_offline
+- TC-2 (AC-1, error): names the bad field -> acceptance tests/crop.spec.ts "bad date"
+- TC-3 (NFR-1, performance): save under 200 ms -> suite perf-smoke
+- TC-4 (AC-1, edge): storage full -> manual: needs a full device
+```
+
+**In the build.** Each coder gets its task's test cases and must write each test under exactly the
+planned name. The engine looks for it on the branch; a missing test sends the task back to its
+coder, and the evaluator reports it if it is still missing. A case's status is `passed` (its PR
+merged, its acceptance criterion passed, or its suite passed), `failed`, `written`, `missing`,
+`pending`, `manual` or `unknown`.
+
+**At G6.** A complete matrix is a prerequisite for release: every requirement has a goal, a task
+and test cases, and every case has passed. The G6 packet shows the matrix, its gaps, the
+deferrals and the tracker drift. While it is incomplete, approving needs an override reason from
+someone in `approvers.traceability` in `product.yaml` (G2's approvers if unset); the API answers
+409 without a reason and 403 for anyone else. The override, the deferrals and a snapshot of the
+matrix are written to the release's change record, in its hash chain. Hotfixes are shown their
+gaps but never held. Release trains approve G6 in advance, so they aren't held either; review their
+matrices before the train runs.
 
 Back from code: `GET /api/products/{id}/trace?repo=org/name` or `?pr=org/name%2312` lists the
 features that changed it, with the criteria and tasks involved.

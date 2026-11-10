@@ -17,7 +17,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from ..agents import GATE_APPROVE_TARGET, GATE_PHASE, NEXT_AFTER_PHASE, PHASE_SPECS
-from ..agents.parse import parse_affected_repos, parse_new_repos, parse_tasks
+from ..agents.parse import parse_affected_repos, parse_cases, parse_new_repos, parse_tasks
 from ..integrations.openchoreo import PIPELINE
 from ..state import GATES, PHASES, FeatureState, GateDecision
 from .. import store
@@ -84,6 +84,7 @@ def human_artifact(services, state: FeatureState, phase: str, content: str) -> d
     update: dict = {"artifacts": {spec.kind: ref}, "trace_links": [[p, ref["id"]] for p in parents]}
     if phase == "plan":
         update["tasks"] = parse_tasks(content)
+        update["cases"] = parse_cases(content)
     if phase == "architecture":
         update["lanes_touched"] = touched_lanes(services.feature_snapshot(state),
                                                 [r["name"] for r in parse_affected_repos(content)])
@@ -283,6 +284,7 @@ def make_gate(gate: str, services):
         history, sent_back = correction_history(state, phase), times_sent_back(state, phase)
         allowed = [x for x in GATE_DECISIONS if not (x == "revise" and sent_back >= limits.max_gate_revisions)]
         records, d = [], None
+        trace_decision: tuple[dict, dict] | None = None
         corrections: list[dict] = []
         taken: list[tuple[dict, str, str]] = []  # (decision, agents' draft, person's version)
         human: str | None = None
@@ -330,6 +332,9 @@ def make_gate(gate: str, services):
                 "design_review": review,
                 # G6 sees the CloudWatch alarms firing before production on what the feature touches.
                 "alarms_firing": _alarms_firing(services, state) if gate == "g6" else [],
+                # G6: the traceability matrix must be complete, or a named person overrides it with a reason.
+                "traceability": (release_traceability(services, state, lane)
+                                 if gate == "g6" and lane_id == state["product_id"] else None),
                 # G1 decides whether this intent is new: what the product already has that looks like it.
                 "related_features": list(state.get("related_features") or []) if gate == "g1" else [],
                 # G1 also decides whether the work fits the roadmap: its initiative and what's left of
@@ -349,7 +354,17 @@ def make_gate(gate: str, services):
             if human is not None:  # an earlier lane took it over: later lanes decide on that version
                 packet["preview"] = human[:2000]
             d = normalize(interrupt(packet), tuple(allowed))
+            trace = packet.get("traceability") or {}
+            while (d["decision"] == "approve" and trace.get("blocks")
+                   and not str(d.get("override_reason") or "").strip()):
+                # Production needs a complete matrix: ask again until it's an override with a reason
+                # (the API checks the person may override) or another decision.
+                packet = {**packet, "refused": "The traceability matrix isn't complete: release only with an "
+                                              "override and its reason, or send it back."}
+                d = normalize(interrupt(packet), tuple(allowed))
             records.append(_record(gate, phase, d, lane_id))
+            if trace and d["decision"] == "approve":
+                trace_decision = (trace, d)
             if state.get("pilot"):  # what the trial rule would have done, beside what the person did
                 from ..pilot import shadow_auto_approval
 
@@ -415,6 +430,19 @@ def make_gate(gate: str, services):
         approvers = ", ".join(r["approver"] for r in records if r["decision"] in ("approve", "handback"))
         update: dict = human_update | {"gate_decisions": records, "approvals": {gate: True},
                                        "events": [event(gate, "approved", d["feedback"], approver=approvers, lanes=approving)]}
+        if trace_decision is not None:
+            trace, td = trace_decision
+            update["traceability"] = {**trace["snapshot"], "drift": list(trace.get("drift") or []),
+                                      "approved_by": td["approver"], "at": now(),
+                                      **({"override": {"by": td["approver"], "reason": td["override_reason"]}}
+                                         if trace.get("blocks") else {})}
+            if trace.get("blocks"):
+                update["events"].append(event(gate, "traceability_overridden", str(td["override_reason"])[:500],
+                                              approver=td["approver"], gaps=len(trace["gaps"]),
+                                              drift=len(trace.get("drift") or [])))
+            if trace["snapshot"]["deferred"]:  # approving is accepting what the plan leaves out
+                update["events"].append(event(gate, "deferrals_confirmed", "; ".join(
+                    f"{x['id']}: {x['reason']}" for x in trace["snapshot"]["deferred"])[:1000], approver=td["approver"]))
         assumed = [n["text"] for n in gate_notes(state, gate, phase) if n["kind"] == "assumed"]
         if assumed:  # approving is confirming them, on the record (AI-DLC's assumption confirmation)
             update["events"].append(event(gate, "assumptions_confirmed", "; ".join(assumed)[:1000],
@@ -511,6 +539,36 @@ def make_gate(gate: str, services):
     return gate_node, (*dest, phase, END)
 
 
+def release_traceability(services, state: FeatureState, lane) -> dict:
+    """What G6 shows and checks: the matrix's gaps and deferrals, the tracker's drift from it, and
+    who may release despite gaps. Hotfixes (decided by on-call) are shown it but never blocked."""
+    from .. import traceability
+
+    arts = state.get("artifacts") or {}
+
+    def load(kind: str) -> str:
+        try:
+            return services.artifacts.load(arts[kind]) if kind in arts else ""
+        except Exception:
+            return ""
+
+    trace = traceability.build(state, load)
+    drift, drift_error, drift_blocks = [], "", False
+    sync = getattr(services, "work_sync", None)
+    if sync is not None:
+        try:
+            got = sync.reconcile(state)
+            drift, drift_blocks = got.get("drift") or [], bool(got.get("block"))
+        except Exception as exc:  # a tracker outage never decides a release
+            drift_error = f"{type(exc).__name__}: {exc}"
+    hotfix = state.get("track") == "hotfix"
+    blocks = not hotfix and (not trace["complete"] or (drift_blocks and bool(drift)))
+    return {"complete": trace["complete"], "gaps": trace["gaps"], "deferred": trace["deferred"],
+            "drift": drift, "drift_error": drift_error, "drift_blocks": drift_blocks, "blocks": blocks,
+            "override_approvers": list(lane.approvers.get("traceability") or lane.approvers.get("g2") or []),
+            "snapshot": traceability.snapshot(trace)}
+
+
 def release_record_for(state: FeatureState, update: dict, records: list[dict], approvers: str) -> dict:
     """The change record for a G6 release, from the feature and what this approval just did."""
     from ..ops.changes import release_record
@@ -518,6 +576,7 @@ def release_record_for(state: FeatureState, update: dict, records: list[dict], a
     n = sum(1 for g in state.get("gate_decisions") or [] if g.get("gate") == "g6")
     now_state = {**state, "deployments": {**(state.get("deployments") or {}), **(update.get("deployments") or {})},
                  "release": update.get("release") or state.get("release") or {},
+                 "traceability": update.get("traceability") or state.get("traceability"),
                  "gate_decisions": [*(state.get("gate_decisions") or []), *records]}
     return release_record(now_state, approvers, n)
 
@@ -635,6 +694,7 @@ def make_escalation(phase: str, services):
         if phase == "plan":
             ref = update.get("artifacts", {}).get("PLAN") or state.get("artifacts", {}).get("PLAN")
             update["tasks"] = parse_tasks(services.artifacts.load(ref)) if ref else []
+            update["cases"] = parse_cases(services.artifacts.load(ref)) if ref else []
         if phase == "architecture":
             ref = update.get("artifacts", {}).get("HLD") or state.get("artifacts", {}).get("HLD")
             snap = services.feature_snapshot(state)

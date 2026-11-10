@@ -211,7 +211,10 @@ def evidence_of(state: dict) -> dict:
                               for k, v in suites.items()}
     waivers = [{"finding": w.get("finding") or w.get("id", ""), "expires": w.get("expires", ""),
                 "by": w.get("approver") or w.get("by", "")} for w in state.get("waivers") or []]
-    return {"pull_requests": prs, "quality": quality, "waivers": waivers}
+    out = {"pull_requests": prs, "quality": quality, "waivers": waivers}
+    if state.get("traceability"):  # the matrix G6 released on, frozen into the hash chain
+        out["traceability"] = state["traceability"]
+    return out
 
 
 def release_targets(deployments: dict, flag: str = "", flag_on: bool | None = None,
