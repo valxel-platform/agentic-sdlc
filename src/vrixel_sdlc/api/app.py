@@ -234,6 +234,10 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     async def lifespan(_app: FastAPI):
         if state["engine"] is None:
             state["engine"], state["pool"] = create_engine_from_env()
+            from .. import strict
+
+            if strict.enabled():  # refuse to serve while anything would quietly run as a stand-in
+                strict.check(state["engine"].services, auth_mode=auth.mode)
             if state["pool"] is not None:
                 from ..intake import PostgresIntakeStore
 
@@ -357,8 +361,10 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     # --- governance and features ---
     @api.get("/healthz")
     def healthz() -> dict:
+        from .. import strict
+
         return {"ok": True, "mode": eng().services.settings.mode, "auth": auth.mode,
-                "delivery": os.environ.get("VRIXEL_DELIVERY", "stub")}
+                "delivery": os.environ.get("VRIXEL_DELIVERY", "stub"), "strict": strict.enabled()}
 
     # --- production signals ---
     def bearer_ok(request: Request) -> None:

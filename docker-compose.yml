@@ -18,6 +18,7 @@ services:
     environment:
       DATABASE_URL: postgresql://vrixel:vrixel@postgres:5432/vrixel
       VRIXEL_MODE: ${VRIXEL_MODE:-stub}
+      VRIXEL_STRICT: ${VRIXEL_STRICT:-0}   # 1 in production: refuse to start while anything runs as a stand-in
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # local reads examples/governance; github reads each product org's governance repo.
       VRIXEL_GOVERNANCE_SOURCE: ${VRIXEL_GOVERNANCE_SOURCE:-local}
