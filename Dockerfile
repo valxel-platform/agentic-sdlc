@@ -8,14 +8,18 @@ COPY web ./
 RUN npm run build
 
 # Stage 2: the plugins whose skills the agents follow: Anthropic's Product Management, Engineering
-# and Design plugins (Apache 2.0) at a pinned commit, and ours (plugins/vrixel). CI checks that
-# every skill the phases name is in them; bump the commit in a PR so that check runs.
+# and Design plugins (Apache 2.0) at a pinned commit, and ours (plugins/vrixel). The pin is config
+# (config/plugins.yaml), so moving it goes through the config repo's evals; this default must name
+# the same commit (tests/test_plugins.py checks), and CI builds with the config's. CI also checks
+# that every skill the phases name is in them.
 FROM alpine:3.22 AS plugins
 ARG KNOWLEDGE_WORK_PLUGINS_REF=e605d8ddbfb688da57dfaaceebd93f12a64ef1d3
 ADD --keep-git-dir=false https://github.com/anthropics/knowledge-work-plugins.git#${KNOWLEDGE_WORK_PLUGINS_REF} /upstream
 COPY plugins /src/plugins
-# Skills and commands only: the plugins' connectors (.mcp.json) and hooks are left out.
-RUN /src/plugins/prepare.sh /upstream /src/plugins/vrixel /plugins
+# Skills and commands only: the plugins' connectors (.mcp.json) and hooks are left out. REF records
+# the commit, so the tool can tell when a config pins another one.
+RUN /src/plugins/prepare.sh /upstream /src/plugins/vrixel /plugins \
+ && echo "${KNOWLEDGE_WORK_PLUGINS_REF}" > /plugins/REF
 
 # Stage 3: OpenAI's Codex CLI, for roles that run on the codex runtime (models.yaml).
 FROM alpine:3.22 AS codex
@@ -31,6 +35,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VRIXEL_ROOT=/app \
     VRIXEL_ARTIFACT_DIR=/data/artifacts \
     VRIXEL_SKILLS_DIR=/opt/vrixel/plugins \
+    VRIXEL_PLUGIN_SRC=/opt/vrixel/plugin-src \
     VRIXEL_CODEX_HOME=/opt/vrixel/codex-home
 
 WORKDIR /app
@@ -42,6 +47,8 @@ COPY config ./config
 COPY examples ./examples
 COPY --from=web /web/dist ./web/dist
 COPY --from=plugins /plugins /opt/vrixel/plugins
+# What lays out a copy at another pin (an eval run's or the canary's config): vrixel_sdlc.plugins.
+COPY plugins /opt/vrixel/plugin-src
 COPY --from=codex /codex /usr/local/bin/codex
 # The same plugins, installed for Codex: each Codex session starts from a copy of this home.
 RUN export CODEX_HOME=/opt/vrixel/codex-home && mkdir -p "$CODEX_HOME" \

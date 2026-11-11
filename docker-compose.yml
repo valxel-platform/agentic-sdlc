@@ -23,6 +23,8 @@ services:
       VRIXEL_OTEL_HEADERS: ${VRIXEL_OTEL_HEADERS:-}
       VRIXEL_TRACE_URL: ${VRIXEL_TRACE_URL:-}           # e.g. https://langfuse.example.com/project/vrixel/traces/{trace_id}
       VRIXEL_CONFIG_REPO: ${VRIXEL_CONFIG_REPO:-}       # config PRs are evaluated against past work (vrixel / evals)
+      VRIXEL_CANARY_CONFIG_DIR: ${VRIXEL_CANARY_CONFIG_DIR:-}   # a candidate config a share of new features runs with
+      VRIXEL_CANARY_PERCENT: ${VRIXEL_CANARY_PERCENT:-0}
       VRIXEL_EVAL_APPROVERS: ${VRIXEL_EVAL_APPROVERS:-}
       VRIXEL_LANGFUSE_URL: ${VRIXEL_LANGFUSE_URL:-}
       VRIXEL_LANGFUSE_PUBLIC_KEY: ${VRIXEL_LANGFUSE_PUBLIC_KEY:-}

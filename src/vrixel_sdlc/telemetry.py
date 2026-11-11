@@ -156,22 +156,23 @@ class Telemetry:
     def enabled(self) -> bool:
         return self._tracer is not None
 
-    def attributes(self, task, runtime: str) -> dict:
+    def attributes(self, task, runtime: str, config_version: str = "") -> dict:
         t = task.tags
         out = {"vrixel.feature_id": t.feature_id, "vrixel.product_id": t.product_id, "vrixel.phase": t.phase,
                "vrixel.role": t.role, "vrixel.data_class": t.data_class, "vrixel.runtime": runtime,
-               "vrixel.prompt_version": t.prompt_version, "vrixel.config_version": self.config_version,
+               "vrixel.prompt_version": t.prompt_version,
+               "vrixel.config_version": config_version or self.config_version,
                "gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": t.role}
         out.update({f"vrixel.{k}": v for k, v in current_labels().items()})
         return {k: v for k, v in out.items() if v not in (None, "")}
 
     @contextmanager
-    def agent_span(self, task, runtime: str, *, model: str = "", provider: str = ""):
+    def agent_span(self, task, runtime: str, *, model: str = "", provider: str = "", config_version: str = ""):
         """The span for one agent session; yields it (None when tracing is off)."""
         if not self.enabled:
             yield None
             return
-        attrs = self.attributes(task, runtime)
+        attrs = self.attributes(task, runtime, config_version)
         if model:
             attrs["gen_ai.request.model"] = model.split("/", 1)[-1]
         if provider:
@@ -236,6 +237,8 @@ class Telemetry:
             span.set_attribute("vrixel.cost_usd", float(result.cost_usd or 0.0))
             if result.role and result.role != task.role:
                 span.set_attribute("vrixel.fallback_role", result.role)
+            if getattr(result, "extra_skills", ()):
+                span.set_attribute("vrixel.extra_skills", list(result.extra_skills))
         if error is not None:
             from opentelemetry.trace import Status, StatusCode
 
@@ -264,10 +267,13 @@ class TracedRuntime:
         return getattr(self.inner, item)
 
     def run(self, task):
-        settings = getattr(getattr(self.inner, "gateway", None), "settings", None)
+        gateway = getattr(self.inner, "gateway", None)
+        settings = getattr(gateway, "settings", None)
         role = settings.role(task.role) if settings is not None else None
+        # The config this runtime's gateway runs (the canary's, for a canary feature).
         with self.telemetry.agent_span(task, self.name, model=getattr(role, "model", ""),
-                                       provider=getattr(role, "provider", "")) as span:
+                                       provider=getattr(role, "provider", ""),
+                                       config_version=getattr(gateway, "config_version", "")) as span:
             task.telemetry = {"env": self.telemetry.subprocess_env(task, self.name),
                               "codex_config": self.telemetry.codex_config(task) if self.name == "codex" else ""}
             try:
@@ -297,6 +303,7 @@ def sessions(records, link=None, *, phases: tuple[str, ...] = ()) -> list[dict]:
             "at": first.ts, "phase": first.phase, "role": first.role, "runtime": first.runtime,
             "model": first.model, "task": first.task_id, "attempt": first.attempt,
             "calls": len(rows), "duration_s": round(sum(r.duration_s for r in rows), 2),
+            "extra_skills": sorted({s for r in rows for s in (getattr(r, "extra_skills", "") or "").split(",") if s}),
             "tokens": sum(r.total_input + r.output_tokens for r in rows),
             "cost_usd": round(sum(r.est_cost_usd for r in rows), 4)})
     return sorted(out, key=lambda x: x["at"])

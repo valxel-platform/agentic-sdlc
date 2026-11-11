@@ -24,6 +24,8 @@ class AgentTask:
     schema: dict | None = None
     # Set by the tracing wrapper (vrixel_sdlc.telemetry): {"env": ..., "codex_config": ...} for the session.
     telemetry: dict | None = None
+    # The skills the phase gave this session (pasted into L2); anything else it loads is recorded.
+    skills: tuple[str, ...] = ()
 
 
 @dataclass
@@ -33,6 +35,8 @@ class AgentResult:
     cost_usd: float
     request_ids: list[str] = field(default_factory=list)
     role: str = ""  # the role that did the work: the one asked for, or a fallback
+    # Installed skills the session loaded by itself, beyond its phase's (vrixel_sdlc.plugins).
+    extra_skills: tuple[str, ...] = ()
 
 
 class AgentRuntime(Protocol):

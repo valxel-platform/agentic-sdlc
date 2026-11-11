@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type PendingItem, type ReleaseCandidate, type ReleaseTraceability } from "../api";
+import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type AgentEvals, type PendingItem, type ReleaseCandidate, type ReleaseTraceability } from "../api";
 import Markdown from "react-markdown";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
@@ -97,6 +97,32 @@ function ReleaseTrace({ t }: { t: ReleaseTraceability }) {
         </>
       )}
       {t.drift_error && <p className="small muted">The work tracker couldn't be checked: {t.drift_error}</p>}
+    </div>
+  );
+}
+
+/** G6: the product's own agents, by their evals, against the last release that changed them. */
+function AgentEvalsPanel({ rows }: { rows: AgentEvals[] }) {
+  const stage: Record<string, string> = { pr: "Recorded responses (PR)", dev: "Real model (dev)" };
+  const pct = (v: number | null | undefined) => (v == null ? "–" : `${Math.round(v * 100)}%`);
+  return (
+    <div role="status">
+      <h3>The agents this change ships</h3>
+      <table className="quality">
+        <caption className="visually-hidden">Agent evals by stage, against the previous release</caption>
+        <thead><tr><th scope="col">Agent</th><th scope="col">Evals</th><th scope="col">Passed</th>
+          <th scope="col">Last release</th><th scope="col">Change</th></tr></thead>
+        <tbody>
+          {rows.flatMap((r) => Object.entries(r.stages).map(([st, e]) => (
+            <tr key={`${r.repo}-${st}`}>
+              <th scope="row">{r.repo.split("/").pop()}</th><td>{stage[st] ?? st}</td>
+              <td>{e.passed} of {e.passed + e.failed} ({pct(e.rate)})</td>
+              <td>{r.previous[st] ? `${pct(r.previous[st].rate)} (${r.previous_feature})` : "first release"}</td>
+              <td>{r.change[st] == null ? "–" : `${r.change[st] >= 0 ? "+" : ""}${Math.round(r.change[st] * 100)} points`}</td>
+            </tr>
+          )))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -391,6 +417,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       {item.traceability && <ReleaseTrace t={item.traceability} />}
 
       {item.packages && item.packages.length > 0 && <ReleaseCandidates items={item.packages} />}
+
+      {item.agent_evals && item.agent_evals.length > 0 && <AgentEvalsPanel rows={item.agent_evals} />}
 
       {item.agent_sessions && item.agent_sessions.length > 0 && (
         <details>

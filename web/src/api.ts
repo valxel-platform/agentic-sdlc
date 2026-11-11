@@ -29,6 +29,8 @@ export interface PendingItem {
   traceability?: ReleaseTraceability | null;
   // At a shared lane's G6: each release candidate, and whether its workflow published it.
   packages?: ReleaseCandidate[] | null;
+  // At G6: each agent repo's evals by stage, against the last release of the same agent.
+  agent_evals?: AgentEvals[] | null;
   // At G5 and G6: the coder and reviewer sessions, each with a link to its trace.
   agent_sessions?: AgentSession[] | null;
   // Why the last decision was refused (asked again).
@@ -187,15 +189,25 @@ export interface GateDecision {
 
 export interface FeatureEvent { at: string; node: string; kind: string; detail?: string; [k: string]: unknown }
 
+export interface EvalCounts { suite: string; passed: number; failed: number; rate: number | null; state: string }
+export interface AgentEvals {
+  repo: string; stages: Record<string, EvalCounts>; previous: Record<string, EvalCounts>;
+  previous_feature: string; change: Record<string, number>;
+}
+
 export interface AgentSession {
   trace_id: string; url: string; at: string; phase: string; role: string; runtime: string; model: string;
   task: string; attempt: string; calls: number; duration_s: number; tokens: number; cost_usd: number;
+  // Installed skills the session loaded by itself, beyond the ones its phase gave it.
+  extra_skills?: string[];
 }
 
 export interface Feature extends FeatureSummary {
   attachments?: Attachment[];
   description: string;
   agent_sessions?: AgentSession[];
+  // "canary": the feature's agents run with the candidate config.
+  config_variant?: string;
   profile?: Profile;
   track?: string;
   constitution_version: string;
