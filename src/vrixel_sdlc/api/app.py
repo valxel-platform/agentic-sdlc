@@ -24,7 +24,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from .. import profiles
@@ -94,6 +94,15 @@ class FeatureIn(BaseModel):
     pilot: bool = Field(False, description="Measure it in the pilot report, with the shadow modes on")
     profile: str = Field("", pattern="^(|feature|express)$",
                          description="How much of the pipeline it goes through; empty = the product's default")
+
+
+class ReadingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    value: float
+    start: str = Field(min_length=10, max_length=40)
+    end: str = Field(min_length=10, max_length=40)
+    n: int | None = Field(default=None, ge=0)
+    k: int | None = Field(default=None, ge=0)
 
 
 class InitiativeIn(BaseModel):
@@ -940,6 +949,39 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
         member_of(user, product_id)
         return product_roadmap(eng(), product_id)
+
+    @api.get("/features/{feature_id}/outcome")
+    def feature_outcome(feature_id: str, user: User = Depends(current_user)) -> dict:
+        """The goals a feature moves, its events in staging and its readouts after release."""
+        from ..outcomes.readouts import feature_outcome as outcome
+
+        try:
+            v = eng().view(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, f"Unknown feature {feature_id}") from exc
+        member_of(user, v["product_id"])
+        return outcome(eng(), feature_id)
+
+    @api.post("/products/{product_id}/goals/{goal_id}/readings", status_code=201)
+    def record_reading(product_id: str, goal_id: str, body: ReadingIn, user: User = Depends(current_user)) -> dict:
+        """A goal's number typed in by one of the product's owners (goals whose source is manual)."""
+        from ..outcomes import read as outcomes
+        from ..outcomes import readouts
+
+        member_of(user, product_id)
+        product = eng().services.snapshot(product_id).product
+        owners = list(product.approvers.get("g1") or []) + list(product.approvers.get("g0") or [])
+        if not any(user.matches(a) for a in owners):
+            raise HTTPException(403, f"Only {product_id}'s product owners enter its numbers")
+        try:
+            r = outcomes.record_manual(eng().services, product_id, goal_id, value=body.value, n=body.n, k=body.k,
+                                       start=body.start, end=body.end, entered_by=user.login)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc).strip("'\"")) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        retaken = readouts.retake_waiting(eng(), product_id, goal_id)
+        return {"reading": r.as_dict(), "readouts": retaken}
 
     @api.post("/initiatives", status_code=201)
     def create_initiative(body: InitiativeIn, user: User = Depends(current_user)) -> dict:

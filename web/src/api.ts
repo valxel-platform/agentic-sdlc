@@ -435,10 +435,32 @@ export interface RoadmapInitiative {
   id: string; title: string; goal: string; horizon: string; status: string; budget_usd: number; lanes: string[];
   release_model: string; record: string; spent_usd: number; features: FeatureRow[];
   progress: { released: number; total: number; planned: number };
+  outcome?: { goal_id: string; status: OutcomeStatus; why?: string; progress?: number; expected?: number | null } | null;
+}
+export interface GoalMetric {
+  goal_id: string; source: "sql" | "prometheus" | "posthog" | "manual"; unit: string; direction: "up" | "down";
+  baseline: number | null; target: number | null; by: string;
+}
+export type OutcomeStatus = "on_track" | "flat" | "off_track" | "no_data";
+export interface GoalOutcome {
+  metric: GoalMetric; latest: number | null; status: OutcomeStatus; why?: string; progress?: number; expected?: number | null;
+  trend: { end: string; value: number | null; status: string; note: string }[];
+}
+export interface ReadingRow { start: string; end: string; status: string; value: number | null; n: number | null; note: string }
+export interface Readout {
+  feature_id: string; goal_id: string; window_days: number; released_at: string; source: string; unit: string;
+  direction: string; before: ReadingRow; after: ReadingRow; change: number | null; toward: boolean | null; caveat: string;
+}
+export interface WantedNumber { goal_id: string; feature_id: string; window_days: number; start: string; end: string; unit: string }
+export interface FeatureOutcome {
+  feature_id: string; product_id: string; goals: string[]; metrics: Record<string, GoalMetric>; released_at: string;
+  instrumentation: InstrumentationCheck | null; readouts: Readout[];
+  upcoming: { goal_id: string; window_days: number; due: string }[];
 }
 export interface Roadmap {
   product_id: string; record: { repo: string; sha: string; error: string };
-  goals: { id: string; title: string; measure: string; period: string }[];
+  goals: { id: string; title: string; measure: string; period: string; outcome?: GoalOutcome | null }[];
+  outcomes?: { wanted: WantedNumber[]; windows: number[]; readouts: Record<string, Readout[]>; min_cell?: number };
   initiatives: RoadmapInitiative[];
   releases: { id: string; title: string; model: string; status: string; target_date: string; features: string[]; record: string }[];
   unplanned: FeatureRow[];
@@ -577,6 +599,10 @@ export const api = {
   reportProblem: (body: { product_id: string; title: string; description: string; severity: string; component?: string }) =>
     request<{ feature_id: string }>("POST", "/incidents", body),
   roadmap: (productId: string) => request<Roadmap>("GET", `/roadmap/${encodeURIComponent(productId)}`),
+  recordReading: (productId: string, goalId: string, body: { value: number; start: string; end: string; n?: number; k?: number }) =>
+    request<{ reading: ReadingRow; readouts: Readout[] }>("POST",
+      `/products/${encodeURIComponent(productId)}/goals/${encodeURIComponent(goalId)}/readings`, body),
+  featureOutcome: (id: string) => request<FeatureOutcome>("GET", `/features/${encodeURIComponent(id)}/outcome`),
   createInitiative: (body: { product_id: string; title: string; request: string; measure?: string; horizon?: string }) =>
     request<{ feature_id: string }>("POST", "/initiatives", body),
   startCandidate: (id: string, index: number, not_duplicate_reason = "") =>

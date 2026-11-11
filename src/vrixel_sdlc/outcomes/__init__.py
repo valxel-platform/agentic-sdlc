@@ -39,6 +39,7 @@ REGULATED = ("phi", "payments")
 # classes have no such rule (PCI protects card data, which never reaches a metric), so suppression is
 # off unless the product sets tools.metrics.min_cell.
 SUPPRESSED_CLASSES = ("phi",)
+DEFAULT_WINDOWS = (7, 30, 90)  # days after a feature reaches all users; each product may set its own
 
 
 def min_cell_for(data_class: str) -> int:
@@ -70,7 +71,8 @@ class Reading:
     end: str
     status: str  # ok | suppressed | no_data | error
     value: float | None = None
-    n: int | None = None
+    n: int | None = None  # the count behind the value (a rate's denominator)
+    k: int | None = None  # a rate's numerator: the count on top, checked like n
     note: str = ""
     at: str = ""
     entered_by: str = ""  # manual readings: who typed it in

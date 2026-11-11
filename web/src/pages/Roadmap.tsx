@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type FeatureRow, type Me, type Roadmap, type RoadmapInitiative } from "../api";
 import { useLive } from "../live";
+import { GoalOutcomeLine, StatusChip, WantedForm } from "../components/Outcome";
 import { HORIZONS, MODELS, money, threadPath } from "../vocab";
 
 const STATUS: Record<string, string> = {
@@ -34,6 +35,9 @@ function InitiativeCard({ i }: { i: RoadmapInitiative }) {
         {i.status !== "approved" && <span className="chip plain">{STATUS[i.status] ?? i.status}</span>}
       </div>
       <p className="small muted">{i.id}{i.goal ? `, ${i.goal}` : ""}</p>
+      {i.outcome && ["approved", "active"].includes(i.status) && (
+        <p className="small"><StatusChip status={i.outcome.status} why={i.outcome.why} /> <span className="muted">goal since approval</span></p>
+      )}
       {["approved", "active", "done"].includes(i.status) && <Progress i={i} />}
       <p className="small faint">
         {MODELS[i.release_model] ?? i.release_model}
@@ -181,7 +185,7 @@ export function RoadmapPage({ me }: { me: Me }) {
       {form === "initiative" && <NewInitiative productId={productId} onCancel={() => setForm(null)} />}
       {form === "release" && <NewRelease productId={productId} features={inProgress} onCancel={() => setForm(null)} />}
       {rm && (
-        <>
+        <div className="roadmap">
           <section className="panel" aria-labelledby="h-goals">
             <h2 id="h-goals" className="section-title">Goals</h2>
             {rm.goals.length === 0 ? (
@@ -190,11 +194,25 @@ export function RoadmapPage({ me }: { me: Me }) {
               <ul className="ext-list">
                 {rm.goals.map((g) => (
                   <li key={g.id}><strong>{g.title}</strong> <span className="small muted">{g.id}{g.period ? `, ${g.period}` : ""}</span>
-                    {g.measure && <div className="small">Measured by: {g.measure}</div>}</li>
+                    {g.measure && <div className="small">Measured by: {g.measure}</div>}
+                    {g.outcome ? <GoalOutcomeLine o={g.outcome} /> :
+                      <div className="small faint">Not measured: add a metric to this goal in roadmap/goals.yaml</div>}</li>
                 ))}
               </ul>
             )}
           </section>
+
+          {(rm.outcomes?.wanted.length ?? 0) > 0 && (
+            <section className="panel" aria-labelledby="h-wanted">
+              <h2 id="h-wanted" className="section-title">Numbers to enter</h2>
+              <p className="small muted pad">These goals are entered by hand, and a feature's readout is due. Product owners enter the number for each period.</p>
+              <ul className="ext-list">
+                {rm.outcomes!.wanted.map((w) => (
+                  <WantedForm key={`${w.goal_id}-${w.feature_id}-${w.window_days}`} productId={productId} w={w} onDone={load} />
+                ))}
+              </ul>
+            </section>
+          )}
 
           {inFlight.length > 0 && (
             <section className="panel" aria-labelledby="h-flight">
@@ -251,7 +269,7 @@ export function RoadmapPage({ me }: { me: Me }) {
           <p className="small faint">
             {rm.record.error ? `Couldn't read the roadmap record: ${rm.record.error}` : `Roadmap record: ${rm.record.repo}@${rm.record.sha.slice(0, 7)}, roadmap/`}
           </p>
-        </>
+        </div>
       )}
     </>
   );

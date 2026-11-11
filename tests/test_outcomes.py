@@ -61,6 +61,21 @@ def test_queries_that_could_leak_rows_are_refused(query, says):
     assert any(says in p for p in problems), problems
 
 
+def test_a_phi_rate_also_suppresses_its_numerator(services):
+    rate = metric("SELECT count(*) FILTER (WHERE left_early)::float / count(*) AS value, count(*) AS n "
+                  "FROM visits WHERE arrived_at >= :start AND arrived_at < :end", unit="% of arrivals")
+    assert any("`k`" in p for p in select_problems(rate, "phi"))
+    assert select_problems(rate, "general") == []
+    assert not any("`k`" in p for p in select_problems(metric(), "phi"))  # an average isn't a rate
+    outcomes.sources(services)
+    services.metric_sources["sql"], _ = sql_source(["value", "n", "k"], [(0.02, 300, 6)])
+    from vrixel_sdlc.outcomes.read import suppress
+    from vrixel_sdlc.outcomes import Reading
+
+    r = suppress(Reading("CLN", "G", "sql", "a", "b", "ok", value=0.02, n=300, k=6), "phi", 11)
+    assert r.status == "suppressed" and r.value is None
+
+
 def test_a_subquery_may_group_and_strings_are_not_keywords():
     q = ("SELECT avg(c) AS value, count(*) AS n FROM (SELECT clinic, count(*) AS c FROM visits "
          "WHERE kind = 'update' AND arrived_at >= :start AND arrived_at < :end GROUP BY clinic) t")
@@ -168,14 +183,17 @@ def manifest(services, metrics, pid="CLN"):
 
 def test_product_metric_sources_are_checked(services):
     got, err = manifest(services, {"sql": {}, "prometheus": {"url": "https://prom.cln.example/"}})
-    assert not err and got == {"sources": {"sql": {}, "prometheus": {"url": "https://prom.cln.example"}}, "min_cell": 11}
+    assert not err and got == {"sources": {"sql": {}, "prometheus": {"url": "https://prom.cln.example"}}, "min_cell": 11,
+                                     "windows": [7, 30, 90]}
     assert "not approved for phi" in manifest(services, {"posthog": {"url": "https://ph", "project": 1}})[1]
     assert "platform secrets" in manifest(services, {"sql": {"dsn": "postgres://x"}})[1]
     assert "at least 11" in manifest(services, {"sql": {}, "min_cell": 5})[1]
     got, err = manifest(services, {"posthog": {"url": "https://ph.example", "project": 7}}, pid="FARM")
     assert not err and got["min_cell"] == 1  # suppression is off outside PHI unless the product sets it
-    got, _ = manifest(services, {"sql": {}, "min_cell": 5}, pid="FARM")
-    assert got["min_cell"] == 5
+    got, _ = manifest(services, {"sql": {}, "min_cell": 5, "windows": [14, 60]}, pid="FARM")
+    assert got["min_cell"] == 5 and got["windows"] == [14, 60]  # a farm season, not a clinic week
+    for bad in ([30, 7], [0], [400], list(range(1, 8))):
+        assert "windows" in manifest(services, {"sql": {}, "windows": bad}, pid="FARM")[1]
 
 
 # ------------------------------------------------------------------------- reading goals
@@ -208,7 +226,7 @@ def test_a_number_typed_in_is_read_back(services):
     with pytest.raises(ValueError, match="read from sql"):
         outcomes.record_manual(services, "CLN", "GOAL-CLN-1", value=3.1, n=80, start="2026-10-01", end="2026-11-01",
                                entered_by="sunil")
-    outcomes.record_manual(services, "CLN", "GOAL-CLN-2", value=3.1, n=812, start="2026-10-01T00:00:00+00:00",
+    outcomes.record_manual(services, "CLN", "GOAL-CLN-2", value=3.1, n=812, k=25, start="2026-10-01T00:00:00+00:00",
                            end="2026-11-01T00:00:00+00:00", entered_by="sunil")
     r = outcomes.read(services, "CLN", "GOAL-CLN-2", start="2026-10-15T00:00:00+00:00", end="2026-11-15T00:00:00+00:00")
     assert (r.status, r.value, r.entered_by) == ("ok", 3.1, "sunil")

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from . import SUPPRESSED_CLASSES, Metric, Reading, min_cell_for, parse_metric
+from . import DEFAULT_WINDOWS, SUPPRESSED_CLASSES, Metric, Reading, min_cell_for, parse_metric
 from .sources import default_sources, now
 
 
@@ -28,7 +28,8 @@ def product_metrics(services, product_id: str) -> tuple[dict, str]:
         tools = {}
     cfg = tools.get("metrics") or {}
     return {"sources": dict(cfg.get("sources") or {}),
-            "min_cell": int(cfg.get("min_cell") or min_cell_for(entry.data_class))}, entry.data_class
+            "min_cell": int(cfg.get("min_cell") or min_cell_for(entry.data_class)),
+            "windows": tuple(cfg.get("windows") or DEFAULT_WINDOWS)}, entry.data_class
 
 
 def goals(services, product_id: str) -> list[dict]:
@@ -76,8 +77,9 @@ def window(days: int, end: str = "") -> tuple[str, str]:
 
 def suppress(reading: Reading, data_class: str, min_cell: int) -> Reading:
     """Small counts never leave as numbers: the reading says 'under <min_cell>' instead. Zero is shown."""
-    if reading.status == "ok" and reading.n is not None and 0 < reading.n < min_cell:
-        reading.status, reading.value, reading.n = "suppressed", None, None
+    small = [c for c in (reading.n, reading.k) if c is not None and 0 < c < min_cell]
+    if reading.status == "ok" and small:
+        reading.status, reading.value, reading.n, reading.k = "suppressed", None, None, None
         reading.note = f"fewer than {min_cell} behind it"
     elif reading.status == "ok" and reading.n is None and data_class in SUPPRESSED_CLASSES and reading.source in ("sql", "posthog"):
         reading.status, reading.value = "error", None
@@ -110,7 +112,7 @@ def read(services, product_id: str, goal_id: str, *, start: str, end: str, recor
 
 
 def record_manual(services, product_id: str, goal_id: str, *, value: float, start: str, end: str,
-                  entered_by: str, n: int | None = None) -> Reading:
+                  entered_by: str, n: int | None = None, k: int | None = None) -> Reading:
     """A number someone typed in for a goal whose source is manual."""
     metric = _goal_metric(services, product_id, goal_id)
     if metric.source != "manual":
@@ -118,12 +120,16 @@ def record_manual(services, product_id: str, goal_id: str, *, value: float, star
     _, data_class = product_metrics(services, product_id)
     if data_class in SUPPRESSED_CLASSES and n is None:
         raise ValueError(f"{product_id} holds {data_class} data: say how many the number counts (n)")
+    from .sources import is_rate
+
+    if data_class in SUPPRESSED_CLASSES and is_rate(metric) and k is None:
+        raise ValueError(f"{goal_id} is a rate: say how many are on top (k) as well as the total (n)")
     if not entered_by:
         raise ValueError("Say who entered it")
     if datetime.fromisoformat(start.replace("Z", "+00:00")) >= datetime.fromisoformat(end.replace("Z", "+00:00")):
         raise ValueError("The period must end after it starts")
     reading = Reading(product_id=product_id, goal_id=goal_id, source="manual", start=start, end=end, status="ok",
-                      value=float(value), n=n, at=now(), entered_by=entered_by, note="entered by hand")
+                      value=float(value), n=n, k=k, at=now(), entered_by=entered_by, note="entered by hand")
     sources(services)
     services.readings.add(reading)
     return reading
