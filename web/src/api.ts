@@ -29,6 +29,8 @@ export interface PendingItem {
   traceability?: ReleaseTraceability | null;
   // At a shared lane's G6: each release candidate, and whether its workflow published it.
   packages?: ReleaseCandidate[] | null;
+  // At G5 and G6: the coder and reviewer sessions, each with a link to its trace.
+  agent_sessions?: AgentSession[] | null;
   // Why the last decision was refused (asked again).
   refused?: string;
   // At G6: CloudWatch alarms firing before production on what the feature touches.
@@ -185,8 +187,14 @@ export interface GateDecision {
 
 export interface FeatureEvent { at: string; node: string; kind: string; detail?: string; [k: string]: unknown }
 
+export interface AgentSession {
+  trace_id: string; url: string; at: string; phase: string; role: string; runtime: string; model: string;
+  task: string; attempt: string; calls: number; duration_s: number; tokens: number; cost_usd: number;
+}
+
 export interface Feature extends FeatureSummary {
   description: string;
+  agent_sessions?: AgentSession[];
   profile?: Profile;
   track?: string;
   constitution_version: string;

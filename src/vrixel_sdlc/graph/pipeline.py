@@ -332,6 +332,8 @@ def make_gate(gate: str, services):
                 "design_review": review,
                 # G6 sees the CloudWatch alarms firing before production on what the feature touches.
                 "alarms_firing": _alarms_firing(services, state) if gate == "g6" else [],
+                # G5 and G6 can open each build session's trace: what the coder and reviewer did, step by step.
+                "agent_sessions": (build_sessions(services, state) if gate in ("g5", "g6") else None),
                 # G6: the traceability matrix must be complete, or a named person overrides it with a reason.
                 "traceability": (release_traceability(services, state, lane)
                                  if gate == "g6" and lane_id == state["product_id"] else None),
@@ -554,6 +556,18 @@ def make_gate(gate: str, services):
 
     dest = ("production_wait",) if gate == "g6" else (tuple(target) if isinstance(target, list) else (target,))
     return gate_node, (*dest, phase, END)
+
+
+def build_sessions(services, state: FeatureState) -> list[dict]:
+    """The coder and reviewer sessions of this change set, with links to their traces."""
+    from ..telemetry import sessions
+
+    tel = getattr(services, "telemetry", None)
+    try:
+        records = services.ledger.records(state["feature_id"])
+    except Exception:
+        return []
+    return sessions(records, tel.cfg.link if tel is not None else None, phases=("build",))
 
 
 def bump_for(state: FeatureState, repo: str) -> str:

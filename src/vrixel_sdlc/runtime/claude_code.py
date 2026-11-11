@@ -62,7 +62,8 @@ def session_options(task: AgentTask, role, model: str, *, cwd: str | None, plugi
         "plugins": [{"type": "local", "path": p} for p in plugin_dirs],
         "model": model.split("/", 1)[-1],
         "cwd": cwd,
-        "env": {"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h"},
+        # Telemetry export under the tool's span, when tracing is on (vrixel_sdlc.telemetry).
+        "env": {"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h", **((task.telemetry or {}).get("env") or {})},
         # Caps: a session that runs away stops here, not at the feature's budget.
         "max_turns": task.max_turns or role.max_turns,
         "max_budget_usd": session_cap(task, role),

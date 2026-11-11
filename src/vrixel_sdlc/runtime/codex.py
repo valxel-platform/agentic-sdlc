@@ -167,6 +167,18 @@ def session_home(template: str, target: Path) -> str:
     return str(target)
 
 
+def add_otel(home: Path, section: str) -> None:
+    """The session's telemetry export (vrixel_sdlc.telemetry), unless its config already has one."""
+    if not section:
+        return
+    cfg = home / "config.toml"
+    text = cfg.read_text() if cfg.exists() else ""
+    if "[otel" in text:
+        log.warning("the Codex home template configures [otel] itself; the tool's export is left out")
+        return
+    cfg.write_text(text + section)
+
+
 class CodexRuntime:
     name = "codex"
     capabilities = frozenset({"text", "code_execution"})
@@ -195,6 +207,8 @@ class CodexRuntime:
         started = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="vrixel-codex-") as tmp:
             env["CODEX_HOME"] = session_home(self.home_template, Path(tmp) / "home")
+            add_otel(Path(env["CODEX_HOME"]), (task.telemetry or {}).get("codex_config", ""))
+            env.update((task.telemetry or {}).get("env") or {})
             schema_path = None
             if task.schema:
                 schema_path = str(Path(tmp) / "schema.json")

@@ -34,6 +34,11 @@ class UsageRecord:
     # What shaped the call (pilot.config_version) and how long it took, for the pilot report.
     config_version: str = ""
     duration_s: float = 0.0
+    # The agent session's trace (vrixel_sdlc.telemetry), and the task and attempt it was for.
+    trace_id: str = ""
+    span_id: str = ""
+    task_id: str = ""
+    attempt: str = ""
 
     @property
     def total_input(self) -> int:
@@ -73,6 +78,10 @@ class PostgresLedger:
     );
     ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS config_version TEXT NOT NULL DEFAULT '';
     ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS duration_s DOUBLE PRECISION NOT NULL DEFAULT 0;
+    ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS span_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS task_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS attempt TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS vrixel_usage_feature ON vrixel_usage (feature_id);
     CREATE INDEX IF NOT EXISTS vrixel_usage_product_ts ON vrixel_usage (product_id, ts);
     """

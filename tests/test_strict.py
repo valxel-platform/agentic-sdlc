@@ -28,7 +28,17 @@ def live_ish(services):
 
     services.diagrams["lucid"] = LucidPublisher(object())
     services.flags.describe = lambda pid: "flipt"
+    from vrixel_sdlc.telemetry import Telemetry, TelemetryConfig
+
+    services.telemetry = Telemetry(TelemetryConfig(endpoint="http://collector:4318"), provider=_Provider())
     return services
+
+
+class _Provider:  # stands for the OTLP exporter's tracer provider
+    def get_tracer(self, name):
+        from opentelemetry.sdk.trace import TracerProvider
+
+        return TracerProvider().get_tracer(name)
 
 
 def test_the_default_setup_lists_every_stand_in(services):
@@ -47,6 +57,11 @@ def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services):
     live_ish(services)
     gaps = strict.check(services, auth_mode="github", env=LIVE)
     assert gaps == []
+    from vrixel_sdlc.telemetry import Telemetry
+
+    traced, services.telemetry = services.telemetry, Telemetry()  # no endpoint: sessions aren't traced
+    assert strict.check(services, auth_mode="github", env=LIVE)[0].startswith("VRIXEL_OTEL_ENDPOINT is not set")
+    services.telemetry = traced
     real = services.snapshot
 
     def no_packages(pid, pins=None):  # a shared lane whose libraries don't say where they publish

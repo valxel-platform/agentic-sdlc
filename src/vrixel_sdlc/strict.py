@@ -67,6 +67,10 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
 def known_gaps(services) -> list[str]:
     """What runs, but can't be checked: strict mode warns about these and starts anyway."""
     out = []
+    tel = getattr(services, "telemetry", None)
+    if tel is None or not tel.enabled:
+        out.append("VRIXEL_OTEL_ENDPOINT is not set: agent sessions aren't traced, so a session can't be "
+                   "looked into from the feature page or G5/G6")
     for pid, entry in sorted(services.settings.registry.items()):
         if entry.kind != "shared":
             continue

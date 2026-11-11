@@ -1500,6 +1500,41 @@ practices are ours too.
 - **Approving confirms the assumptions.** The gate shows what the agents assumed, says approving
   confirms it, and records an `assumptions_confirmed` event with the list and the approver.
 
+## Agent traces: what each session did
+
+Every agent session is an OpenTelemetry span, `vrixel.agent <phase>/<role>`, carrying the feature,
+product, phase, role, task, attempt, data class and config version, plus OpenTelemetry's GenAI
+attributes (operation, agent, model, provider). Each session's own telemetry nests under it, so one
+trace shows the whole session (`vrixel_sdlc/telemetry.py`):
+
+- **Claude Code** sessions export a span per turn, model request, tool call and subagent, and an
+  event per tool result. The tool gives each session the OTLP settings, its resource attributes and
+  a `TRACEPARENT`, so the session's spans are children of the tool's span.
+- **Codex** sessions export a session span with model requests and tool calls, from an `[otel]`
+  table added to the session's own `CODEX_HOME` (unless the home template sets one).
+- **Single calls** (documents, critics, the second opinion) are the agent span itself.
+
+Every ledger row records the trace, task and attempt of the session that made it. The feature page
+lists the feature's sessions (step, agent and model, task and try, time, cost) with a link to each
+trace, and G5 and G6 show the coder and reviewer sessions of the change set, so an approver can see
+how a change was made, not only the diff.
+
+**What traces may carry** is set per data class in `config/telemetry.yaml`: `none` (structure
+only: tool names, timings, tokens, cost, outcome), `tool_details` (plus tool arguments: file paths,
+commands, search patterns) or `full` (plus prompts and tool output). The shipped setting is `none`
+for every class. PHI and payments go above `none` only when `content_store_baa: true`, and the
+tool sets each content switch explicitly for every session, so nothing inherited from the container
+turns content on.
+
+**Where traces go.** The tool sends OTLP/HTTP to `VRIXEL_OTEL_ENDPOINT`, a collector the platform
+runs, which routes them: structure for every lane to OpenChoreo's observability plane (next to the
+product's own traces, in the portal's Traces tab), and to the platform's self-hosted Langfuse for
+session views, eval datasets and people's labels, with content only for the lanes allowed it (the
+collector, Langfuse and the routing live in platform-foundation). `VRIXEL_TRACE_URL` is the link
+template, e.g. `https://langfuse.example.com/project/vrixel/traces/{trace_id}`. Without an endpoint,
+or without the OpenTelemetry SDK (`pip install '.[telemetry]'`, included in `live`), nothing is
+exported and strict mode warns.
+
 ## Predictable results
 
 The pipeline reads agents' work by machine, so the shapes are fixed and every reply is checked:
