@@ -21,7 +21,7 @@ from ..agents import templates
 from ..agents.context import build_layers
 from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
 from .. import diary, performance
-from .. import lessons, telemetry
+from .. import evals, lessons, telemetry
 from ..config import ProductConfig
 from ..provisioning import naming_policy
 from ..evaluators import critique, run_checks, weakening
@@ -323,6 +323,30 @@ def _finish(s: PhaseState, findings: list[str], usage: dict) -> dict:
     return {"status": "retry", "reason": ""}
 
 
+def document_tail(phase: str, ctx: dict, previous: str = "") -> str:
+    """The task for a document phase's agent: the request, the format contract, people's feedback,
+    the findings to fix and, on a retry, the previous draft. The evals replay it (vrixel_sdlc.evals)."""
+    spec = PHASE_SPECS[phase]
+    tail = [f"Produce the {spec.kind} artifact for {ctx['feature_id']}: {ctx['title']}.",
+            "Request:\n" + untrusted.wrap("request", ctx.get("description", "")), formats.contract(phase)]
+    if ctx.get("feedback"):
+        tail.append(f"Human feedback to address: {ctx['feedback']}")
+    if ctx.get("prior_findings"):
+        tail.append("Evaluator findings to fix:\n" + "\n".join(f"- {f}" for f in ctx["prior_findings"]))
+    if previous:
+        tail.append("Revise your previous draft (below) to fix the findings. Reply with only the sections you "
+                    "change, each starting with its '## ' heading line; sections you leave out are kept as they "
+                    "are.\n\n<previous_draft>\n" + previous + "\n</previous_draft>")
+    if phase == "architecture" and ctx.get("aws_catalog"):
+        from ..resources import catalog_guide
+
+        tail.append(catalog_guide(ctx["aws_catalog"], ctx.get("data_class", "")))
+        if ctx.get("aws_existing"):
+            tail.append("AWS resources the product already has (reuse them; never change their keys): " + ", ".join(
+                f"{r['name']} ({r.get('type', '')})" for r in ctx["aws_existing"]))
+    return "\n".join(t for t in tail if t)
+
+
 def build_phase_subgraph(phase: str, services):
     spec = PHASE_SPECS[phase]
     template = templates.PHASE_TEMPLATES[phase]
@@ -331,29 +355,12 @@ def build_phase_subgraph(phase: str, services):
         attempt = s.get("attempt", 0) + 1
         ctx = {**s["ctx"], "prior_findings": s.get("findings") or []}
         defective = attempt <= int(ctx["simulate_faults"].get(phase, 0))
-        tail = [f"Produce the {spec.kind} artifact for {ctx['feature_id']}: {ctx['title']}.",
-                "Request:\n" + untrusted.wrap("request", ctx.get("description", "")), formats.contract(phase)]
-        if ctx.get("feedback"):
-            tail.append(f"Human feedback to address: {ctx['feedback']}")
-        if ctx["prior_findings"]:
-            tail.append("Evaluator findings to fix:\n" + "\n".join(f"- {f}" for f in ctx["prior_findings"]))
         # A retry revises: the previous draft goes in, and only the sections that change come back.
         previous = (s.get("draft") or {}).get("content", "") if attempt > 1 else ""
-        if previous:
-            tail.append("Revise your previous draft (below) to fix the findings. Reply with only the sections you "
-                        "change, each starting with its '## ' heading line; sections you leave out are kept as they "
-                        "are.\n\n<previous_draft>\n" + previous + "\n</previous_draft>")
-        if phase == "architecture" and ctx.get("aws_catalog"):
-            from ..resources import catalog_guide
-
-            tail.append(catalog_guide(ctx["aws_catalog"], ctx.get("data_class", "")))
-            if ctx.get("aws_existing"):
-                tail.append("AWS resources the product already has (reuse them; never change their keys): " + ", ".join(
-                    f"{r['name']} ({r.get('type', '')})" for r in ctx["aws_existing"]))
         left = s["budget_remaining_usd"] - float((s.get("usage") or {}).get("cost_usd", 0.0))
         with telemetry.labels(attempt=attempt):
             res = call_agent(services, role=spec.role, phase=phase, ctx=ctx, skills=spec.skills,
-                             tail="\n".join(t for t in tail if t), stub_text=template(ctx, defective), budget_usd=left)
+                             tail=document_tail(phase, ctx, previous), stub_text=template(ctx, defective), budget_usd=left)
         content = merge_sections(previous, res.text) if previous else res.text
         return {"attempt": attempt, "draft": {"kind": spec.kind, "content": content},
                 "usage": {"tokens": res.tokens, "cost_usd": res.cost_usd}}
@@ -812,6 +819,12 @@ def make_phase_node(phase: str, services):
             )
             delta["artifacts"] = {spec.kind: ref}
             delta["trace_links"] = [[p, ref["id"]] for p in ctx["parent_ids"]]
+        if phase in evals.DOC_PHASES and out.get("draft") and getattr(services, "evals", None) is not None:
+            try:  # an eval case: what the agent was given, what it wrote and the critic's verdict
+                services.evals.capture(evals.case_from(state, phase, ctx, out,
+                                                       config_version=getattr(services.gateway, "config_version", "")))
+            except Exception:
+                log.warning("%s %s: eval case not kept", state["feature_id"], phase, exc_info=True)
         if status == "escalated":
             delta["escalations"] = {phase: {"phase": phase, "reason": out.get("reason", ""),
                                             "findings": list(out.get("findings") or [])}}

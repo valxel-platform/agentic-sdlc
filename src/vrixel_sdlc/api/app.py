@@ -168,6 +168,11 @@ class DraftIn(BaseModel):
     success_metric: str | None = None
 
 
+class EvalRunIn(BaseModel):
+    ref: str = Field(..., description="The config repo commit to evaluate")
+    base_ref: str = Field("", description="The commit to compare with (default: the config in use)")
+
+
 def create_engine_from_env() -> tuple[FeatureEngine, Any]:
     settings = load_settings()
     if settings.database_url:
@@ -183,6 +188,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..ops.signals import PostgresSignalStore
 
         services = build_services(settings, ledger=PostgresLedger(pool), catalog=PostgresCatalog(pool))
+        from ..evals import PostgresEvalStore
+
+        services.evals = PostgresEvalStore(pool)
         services.signals = PostgresSignalStore(pool)
         from ..ops.cost import PostgresCostReviews
 
@@ -605,10 +613,51 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             *[b.get("name") for b in event.get("branches") or [] if isinstance(b, dict)],
         }
         features = {b.split("/", 1)[1] for b in branches if b and b.startswith("feature/")}
+        gate = config_gate()
+        pr = event.get("pull_request") or {}
+        if (gate is not None and request.headers.get("x-github-event") == "pull_request"
+                and (event.get("repository") or {}).get("full_name") == gate.config_repo
+                and event.get("action") in ("opened", "synchronize", "reopened") and pr.get("head", {}).get("sha")):
+            # A change to the tool's config: replay past documents under it before it merges.
+            run = gate.start(pr["head"]["sha"], (pr.get("base") or {}).get("sha", ""),
+                             requested_by=(pr.get("user") or {}).get("login", ""))
+            return {"event": "pull_request", "eval_run": run["id"]}
         record_review_effort(eng(), request.headers.get("x-github-event", ""), event)
         waiting = set(eng().waiting_on_external())
         poked = [fid for fid in sorted(features & waiting if features else waiting) if eng().poke(fid)]
         return {"event": request.headers.get("x-github-event", ""), "resumed": poked}
+
+    def config_gate():
+        if "config_gate" not in stores:
+            from ..evals import ConfigGate
+
+            stores["config_gate"] = ConfigGate.from_env(eng().services, eng().services.github)
+        return stores["config_gate"]
+
+    @api.post("/evals/runs", status_code=202)
+    def start_eval_run(body: EvalRunIn, user: User = Depends(current_user)) -> dict:
+        """Replay past documents under the config at a commit of the config repo and compare."""
+        gate = config_gate()
+        if gate is None:
+            raise HTTPException(404, "Evals of config changes are off: set VRIXEL_CONFIG_REPO")
+        allowed = {t for t in os.environ.get("VRIXEL_EVAL_APPROVERS", "").split(",") if t}
+        if not allowed & set(user.teams) and user.login not in allowed:
+            raise HTTPException(403, "Only the teams in VRIXEL_EVAL_APPROVERS can start an eval run")
+        return gate.start(body.ref, body.base_ref, requested_by=user.login)
+
+    @api.get("/evals/runs")
+    def eval_runs(user: User = Depends(current_user)) -> list[dict]:
+        gate = config_gate()
+        runs = list(gate.runs.values()) if gate is not None else []
+        return [{k: r.get(k) for k in ("id", "repo", "ref", "base_ref", "status", "started_at", "finished_at", "requested_by")}
+                for r in sorted(runs, key=lambda r: r["started_at"], reverse=True)]
+
+    @api.get("/evals/runs/{run_id}")
+    def eval_run(run_id: str, user: User = Depends(current_user)) -> dict:
+        gate = config_gate()
+        if gate is None or run_id not in gate.runs:
+            raise HTTPException(404, f"No eval run {run_id}")
+        return gate.runs[run_id]
 
     @api.get("/products")
     def products(user: User = Depends(current_user)) -> dict:

@@ -64,9 +64,16 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
     return out
 
 
+def env_value(name: str) -> str:
+    return os.environ.get(name, "")
+
+
 def known_gaps(services) -> list[str]:
     """What runs, but can't be checked: strict mode warns about these and starts anyway."""
     out = []
+    if not env_value("VRIXEL_CONFIG_REPO"):
+        out.append("VRIXEL_CONFIG_REPO is not set: changes to models and settings aren't evaluated against past "
+                   "work before they merge")
     tel = getattr(services, "telemetry", None)
     if tel is None or not tel.enabled:
         out.append("VRIXEL_OTEL_ENDPOINT is not set: agent sessions aren't traced, so a session can't be "

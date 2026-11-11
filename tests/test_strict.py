@@ -53,7 +53,8 @@ def test_the_default_setup_lists_every_stand_in(services):
     assert not any("drawio" in f for f in found)  # draw.io commits files to the repo: it has no stand-in
 
 
-def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services):
+def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services, monkeypatch):
+    monkeypatch.setenv("VRIXEL_CONFIG_REPO", "vrixel-tools/sdlc-config")
     live_ish(services)
     gaps = strict.check(services, auth_mode="github", env=LIVE)
     assert gaps == []
@@ -77,7 +78,8 @@ def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services):
         "package, so G6 can't check that a release candidate was published to GitHub Packages"]
 
 
-def test_one_missing_token_is_enough_to_refuse(services):
+def test_one_missing_token_is_enough_to_refuse(services, monkeypatch):
+    monkeypatch.setenv("VRIXEL_CONFIG_REPO", "vrixel-tools/sdlc-config")
     live_ish(services)
     services.trackers["jira"] = StubTracker("jira")  # the Jira token has a typo
     with pytest.raises(strict.StrictModeError) as err:

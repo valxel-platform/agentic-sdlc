@@ -62,6 +62,21 @@ DOC_PHASES = ("discovery", "spec", "design", "architecture", "plan")
 SENT_BACK = ("revise", "retry")
 
 
+def label_eval_case(services, state: FeatureState, phase: str, rec: dict, *, human: str | None, reference: str) -> None:
+    """What people decided about the document an eval case holds (vrixel_sdlc.evals); the version
+    they approved becomes its reference. Best effort: never stops a gate."""
+    store = getattr(services, "evals", None)
+    if store is None or phase not in DOC_PHASES:
+        return
+    try:
+        store.label(state["feature_id"], phase, {
+            "decision": "takeover" if human is not None and rec.get("decision") == "takeover" else rec.get("decision", ""),
+            "reason": rec.get("reason", ""), "feedback": str(rec.get("feedback") or "")[:2000],
+            "taken_over": human is not None}, reference=reference or "")
+    except Exception:
+        pass
+
+
 def correction_history(state: FeatureState, phase: str) -> list[dict]:
     """People's earlier corrections to this phase in this feature (sent back, taken over), oldest first."""
     return [{k: g.get(k, "") for k in ("gate", "decision", "approver", "reason", "feedback", "at")}
@@ -421,6 +436,10 @@ def make_gate(gate: str, services):
                 review = design_review_for(services, snap, ref, state)
         # Aborts teach only when someone asked to remember why.
         learned = lessons.learn(services, state, [c for c in corrections if c["kind"] != "abort" or c["remember"]])
+        if preset is None and records:
+            label_eval_case(services, state, phase, records[0], human=human,
+                            reference=(human if human is not None else (services.artifacts.load(ref) if ref else ""))
+                            if d["decision"] == "approve" else "")
 
         if d["decision"] == "revise":
             # Earlier feedback stays with the agents too, so a second round doesn't undo the first.
@@ -725,6 +744,10 @@ def make_escalation(phase: str, services):
         update: dict = {"gate_decisions": [rec]}
         mine = d.get("artifact_content") or ""
         changed = d["decision"] == "resolved" and bool(mine.strip()) and mine.strip() != draft.strip()
+        if phase in DOC_PHASES and d["decision"] != "abort":
+            label_eval_case(services, state, phase, {**rec, "decision": f"escalation_{d['decision']}"},
+                            human=mine if changed else None,
+                            reference=(mine if changed else draft) if d["decision"] == "resolved" else "")
         if d["decision"] == "resolved":
             rec["changed"] = changed  # the pilot report: did people fix the document, or accept it as it was?
         said = correction(state, f"escalation:{phase}", phase, "resolved" if changed else d["decision"], d,
