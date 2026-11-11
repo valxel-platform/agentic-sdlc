@@ -561,8 +561,9 @@ holds it to the goals in goals.yaml and to its initiative's goal. The PRD then l
 show it (`## Instrumentation`: `- checkin_completed (GOAL-CLN-1): fires when ...; properties: ...`):
 every goal the brief names is fed by an event, and properties are categories and numbers, never a
 person's name, contact details or ids (PHI and payments events carry no person-level ids at all).
-The HLD names the repo that records each event, the coder records it (the OpenTelemetry counter
-`vrixel.events`, attribute `event=<name>`) and says so in the patch summary, and after staging passes
+The HLD names the repo that records each event, the coder records it with its template's API
+(`ProductEvents.record` in the Java service and worker, `events.record` in the Python agent and
+MCP server, `track` in the web and mobile apps, relayed by the BFF) and says so in the patch summary, and after staging passes
 the tool counts the events from the templates' per-minute summary line
 (`vrixel.events {"checkin_completed": 12}`, read through the OpenChoreo observer). G6 shows which
 fired and which never did: a goal fed only by silent events can't be measured once it ships.

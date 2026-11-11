@@ -114,7 +114,10 @@ def test_the_coder_is_told_and_held_to_it():
                                 "properties": ["wait_minutes"], "repo": "acme-clinic/cln-intake-api"}]}
     task = {"repo": "acme-clinic/cln-intake-api", "role": "provider"}
     assert "checkin_completed" in instrumentation_instruction(ctx, task)
+    assert 'ProductEvents.record("<name>")' in instrumentation_instruction(ctx, task)
     assert instrumentation_instruction(ctx, {"repo": "acme-clinic/cln-web", "role": "consumer"}) == ""
+    web = {**ctx, "instrumentation": [{**ctx["instrumentation"][0], "repo": "acme-clinic/cln-web"}]}
+    assert 'track("<name>")' in instrumentation_instruction(web, {"repo": "acme-clinic/cln-web", "role": "consumer"})
     said = {"T1": {**task, "tests_passed": True, "summary": "Instrumentation: checkin_completed"}}
     assert instrumentation_findings(ctx, said) == []
     said["T1"]["summary"] = "Adds the kiosk endpoint"
