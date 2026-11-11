@@ -335,8 +335,19 @@ export interface PilotFeature {
   loops: Record<string, number>; ci_retries: number; escalations: number;
 }
 interface Agreement { compared: number; agreed: number }
+export interface CriticAccuracy {
+  passed_then_approved: number; passed_then_revised: number; failed_then_fixed: number; failed_then_vouched: number;
+  false_pass_rate: number | null; false_fail_rate: number | null; missed_because: Record<string, number>;
+}
+export interface ConfigScore {
+  features: number; done: number; first_time_approval_rate: number | null; loops_per_feature: number;
+  critic_false_pass_rate: number | null; pre_merge_fixes: number; post_merge_fixes: number; incidents: number;
+  traceability_overrides: number; cost_per_feature_usd: number; human_share: number | null;
+}
 export interface PilotReport {
   product_id: string; count: number; done: number; features: PilotFeature[];
+  critic_accuracy: Record<string, CriticAccuracy>;
+  by_config: Record<string, ConfigScore>;
   estimated_minutes: { pr_review: number; pr_comment: number };
   totals: {
     cost_usd: number; shadow_cost_usd: number; human_minutes: number; agent_minutes: number; human_share: number | null;

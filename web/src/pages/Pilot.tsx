@@ -132,6 +132,61 @@ export function PilotPage({ me }: { me: Me }) {
             </ul>
           </section>
 
+          <section className="panel" aria-labelledby="h-critic">
+            <h2 id="h-critic" className="section-title">How far the critic can be trusted</h2>
+            <p className="pad small muted">
+              A false pass is a document the critic passed and people sent back. A false fail is one the critic kept failing
+              and people accepted as it was.
+            </p>
+            {Object.keys(rep.critic_accuracy).length === 0 ? <p className="pad muted">No documents have been decided yet.</p> : (
+              <div className="table-scroll">
+                <table className="quality">
+                  <caption className="visually-hidden">The critic's verdicts against people's decisions, by phase</caption>
+                  <thead>
+                    <tr><th scope="col">Phase</th><th scope="col">Passed, approved</th><th scope="col">Passed, sent back</th>
+                      <th scope="col">Failed, fixed</th><th scope="col">Failed, accepted</th>
+                      <th scope="col">False pass</th><th scope="col">False fail</th></tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(rep.critic_accuracy).map(([phase, a]) => (
+                      <tr key={phase}>
+                        <th scope="row">{phase}</th><td>{a.passed_then_approved}</td><td>{a.passed_then_revised}</td>
+                        <td>{a.failed_then_fixed}</td><td>{a.failed_then_vouched}</td>
+                        <td>{pct(a.false_pass_rate)}</td><td>{pct(a.false_fail_rate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section className="panel" aria-labelledby="h-config">
+            <h2 id="h-config" className="section-title">By configuration</h2>
+            <p className="pad small muted">Each config version is a set of models, runtimes and critic settings. Compare them on results before rolling a change out.</p>
+            <div className="table-scroll">
+              <table className="quality">
+                <caption className="visually-hidden">Results by config version</caption>
+                <thead>
+                  <tr><th scope="col">Config</th><th scope="col">Features</th><th scope="col">First-time approvals</th>
+                    <th scope="col">Loops per feature</th><th scope="col">Critic false pass</th><th scope="col">Fixes before merge</th>
+                    <th scope="col">Fixes after merge</th><th scope="col">Incidents</th><th scope="col">Cost per feature</th>
+                    <th scope="col">Human share</th></tr>
+                </thead>
+                <tbody>
+                  {Object.entries(rep.by_config).map(([cfg, c]) => (
+                    <tr key={cfg}>
+                      <th scope="row"><code>{cfg}</code></th><td>{c.features}</td><td>{pct(c.first_time_approval_rate)}</td>
+                      <td>{c.loops_per_feature}</td><td>{pct(c.critic_false_pass_rate)}</td><td>{c.pre_merge_fixes}</td>
+                      <td>{c.post_merge_fixes}</td><td>{c.incidents}</td><td>{money(c.cost_per_feature_usd)}</td>
+                      <td>{pct(c.human_share)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           <section className="panel" aria-labelledby="h-reasons">
             <h2 id="h-reasons" className="section-title">Why people sent work back</h2>
             {Object.keys(t.revise_reasons).length === 0 ? <p className="pad muted">Nothing was sent back.</p> : (

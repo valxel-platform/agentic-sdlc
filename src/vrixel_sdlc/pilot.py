@@ -147,6 +147,71 @@ def shadow_auto_approval(state: dict, gate: str, phase: str, data_class: str) ->
     return {"eligible": not why, "why": why}
 
 
+# Failures the agents fixed before anything merged, and after (pipeline.fix_or_ask, ci_wait).
+PRE_MERGE_FIXES = ("ci_wait", "change_set_wait")
+POST_MERGE_FIXES = ("build_wait", "dev_wait", "staging_wait")
+
+
+def critic_outcomes(state: dict) -> list[dict]:
+    """How each of the critic's verdicts on a document turned out with people.
+
+    passed_then_approved  the critic passed it and the gate approved it first time
+    passed_then_revised   the critic passed it, people sent it back or took it over (a false pass)
+    failed_then_fixed     the critic kept failing it (escalated) and people asked for more work or
+                          rewrote it (the critic was right)
+    failed_then_vouched   the critic kept failing it and people accepted the draft as it was (a false fail)
+    """
+    events = state.get("events") or []
+    decisions = sorted((d for d in state.get("gate_decisions") or [] if d.get("at")), key=lambda d: d["at"])
+    out = []
+    for e in events:
+        phase, kind = e.get("node", ""), e.get("kind", "")
+        if not (e.get("critic") or {}).get("items") and kind != "escalated":
+            continue
+        if kind not in ("passed", "escalated"):
+            continue
+        after = [d for d in decisions if d.get("phase") == phase and d["at"] >= e.get("at", "")]
+        if kind == "passed":
+            gate = next((d for d in after if d["gate"].startswith("g")), None)
+            if gate is None:
+                continue  # not decided yet
+            outcome = "passed_then_approved" if gate["decision"] == "approve" else "passed_then_revised"
+            out.append({"phase": phase, "outcome": outcome, "reason": gate.get("reason", ""), "at": e.get("at")})
+        else:
+            esc = next((d for d in after if d["gate"] == f"escalation:{phase}"), None)
+            if esc is None or esc["decision"] == "abort":
+                continue
+            vouched = esc["decision"] == "resolved" and not esc.get("changed")
+            out.append({"phase": phase, "outcome": "failed_then_vouched" if vouched else "failed_then_fixed",
+                        "reason": esc.get("reason", ""), "at": e.get("at")})
+    return out
+
+
+def outcomes(engine, feature_id: str, state: dict) -> dict:
+    """What happened after the agents' work: fixes before and after merge, overrides, incidents."""
+    events = state.get("events") or []
+    try:
+        incidents = len((engine.trace(feature_id) or {}).get("incidents") or [])
+    except Exception:
+        incidents = 0
+    return {
+        "pre_merge_fixes": sum(1 for e in events if e.get("kind") == "auto_fix" and e.get("node") in PRE_MERGE_FIXES),
+        "post_merge_fixes": sum(1 for e in events if e.get("kind") == "auto_fix" and e.get("node") in POST_MERGE_FIXES),
+        "delivery_escalations": sum(1 for d in state.get("gate_decisions") or [] if d["gate"].startswith("escalation:delivery")),
+        "traceability_overridden": bool((state.get("traceability") or {}).get("override")),
+        "rollout_stopped": any(e.get("node") in ("rollout", "flag_rollout") and e.get("kind") in ("stopped", "left_off", "rolled_back")
+                               for e in events),
+        "incidents": incidents,
+    }
+
+
+def main_config(records) -> str:
+    """The config version most of the feature's model calls ran under."""
+    c = Counter(getattr(r, "config_version", "") for r in records if not r.role.endswith("_shadow"))
+    c.pop("", None)
+    return c.most_common(1)[0][0] if c else ""
+
+
 def feature_report(engine, feature_id: str) -> dict:
     """One feature's numbers for the pilot report."""
     v = engine.view(feature_id)
@@ -173,7 +238,11 @@ def feature_report(engine, feature_id: str) -> dict:
     shadow_critics = [c["shadow"] for c in critics if c.get("shadow")]
     reviews = [rv for e in v.get("events") or [] for rv in (e.get("reviews") or [])]
     cost_main = round(sum(r.est_cost_usd for r in records if not r.role.endswith("_shadow")), 4)
+    verdicts = critic_outcomes(s)
     return {
+        "config_version": main_config(records),
+        "critic_outcomes": verdicts,
+        "outcomes": outcomes(engine, feature_id, s),
         "feature_id": feature_id, "title": v.get("title"), "status": v.get("status"), "pilot": bool(s.get("pilot")),
         "cost_usd": cost_main,
         "shadow_cost_usd": round(sum(r.est_cost_usd for r in records if r.role.endswith("_shadow")), 4),
@@ -236,6 +305,10 @@ def report(engine, product_id: str, *, pilot_only: bool = True, since: str = "")
 
     gates = sum(r["gates"] for r in rows)
     return {
+        # How far the critic can be trusted, per phase, against what people then decided.
+        "critic_accuracy": critic_accuracy(rows),
+        # The same numbers for each config version: what a model, prompt or lesson change did.
+        "by_config": by_config(rows),
         "product_id": product_id, "features": rows, "count": len(rows),
         "done": sum(1 for r in rows if r["status"] == "done"),
         "totals": {
@@ -256,6 +329,65 @@ def report(engine, product_id: str, *, pilot_only: bool = True, since: str = "")
         },
         "estimated_minutes": ESTIMATED_MINUTES,
     }
+
+
+OUTCOMES = ("passed_then_approved", "passed_then_revised", "failed_then_fixed", "failed_then_vouched")
+
+
+def _rate(n: int, d: int):
+    return round(n / d, 4) if d else None
+
+
+def critic_accuracy(rows: list[dict]) -> dict:
+    """Per phase: counts of each outcome, the false-pass rate (passed, then people disagreed) and
+    the false-fail rate (failed, then people accepted the draft as it was)."""
+    by: dict[str, Counter] = defaultdict(Counter)
+    reasons: dict[str, Counter] = defaultdict(Counter)
+    for r in rows:
+        for v in r.get("critic_outcomes") or []:
+            by[v["phase"]][v["outcome"]] += 1
+            if v["outcome"] == "passed_then_revised":
+                reasons[v["phase"]][v.get("reason") or "unspecified"] += 1
+    out = {}
+    for phase, c in sorted(by.items()):
+        passed = c["passed_then_approved"] + c["passed_then_revised"]
+        failed = c["failed_then_fixed"] + c["failed_then_vouched"]
+        out[phase] = {**{k: c[k] for k in OUTCOMES},
+                      "false_pass_rate": _rate(c["passed_then_revised"], passed),
+                      "false_fail_rate": _rate(c["failed_then_vouched"], failed),
+                      "missed_because": dict(reasons[phase])}
+    return out
+
+
+def by_config(rows: list[dict]) -> dict:
+    """Each config version's features: first-time approvals, loops, fixes, incidents, critic accuracy, cost."""
+    groups: dict[str, list] = defaultdict(list)
+    for r in rows:
+        groups[r.get("config_version") or "unknown"].append(r)
+    out = {}
+    for cfg, rs in sorted(groups.items()):
+        gates = sum(r["gates"] for r in rs)
+        verdicts = [v for r in rs for v in r.get("critic_outcomes") or []]
+        passed = [v for v in verdicts if v["outcome"].startswith("passed")]
+        o = [r.get("outcomes") or {} for r in rs]
+        out[cfg] = {
+            "features": len(rs), "done": sum(1 for r in rs if r["status"] == "done"),
+            "first_time_approval_rate": _rate(sum(r["first_time_approvals"] for r in rs), gates),
+            "loops_per_feature": round(sum(sum(r["loops"].values()) for r in rs) / len(rs), 2),
+            "critic_false_pass_rate": _rate(sum(1 for v in passed if v["outcome"] == "passed_then_revised"), len(passed)),
+            "pre_merge_fixes": sum(x.get("pre_merge_fixes", 0) for x in o),
+            "post_merge_fixes": sum(x.get("post_merge_fixes", 0) for x in o),
+            "incidents": sum(x.get("incidents", 0) for x in o),
+            "traceability_overrides": sum(1 for x in o if x.get("traceability_overridden")),
+            "cost_per_feature_usd": round(sum(r["cost_usd"] for r in rs) / len(rs), 4),
+            "human_share": _rate(sum(r["human_minutes"] for r in rs),
+                                 sum(r["human_minutes"] + r["agent_minutes"] for r in rs)),
+        }
+    return out
+
+
+def _pct(x) -> str:
+    return "n/a" if x is None else f"{x * 100:.0f}%"
 
 
 def markdown(rep: dict) -> str:
@@ -281,6 +413,24 @@ def markdown(rep: dict) -> str:
               f"- The old 0-1 score would have decided the same as the checklist on {old['agreed']} of {old['compared']} documents.",
               "", "## Why people sent work back", ""]
     lines += [f"- {k}: {n}" for k, n in sorted(t["revise_reasons"].items(), key=lambda x: -x[1])] or ["- Nothing was sent back."]
+    lines += ["", "## How far the critic can be trusted", "",
+              "False pass: the critic passed the document and people sent it back. False fail: the critic kept "
+              "failing it and people accepted the draft as it was.", "",
+              "| Phase | Passed, approved | Passed, sent back | Failed, fixed | Failed, accepted | False pass | False fail |",
+              "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    for phase, a in (rep.get("critic_accuracy") or {}).items():
+        lines.append(f"| {phase} | {a['passed_then_approved']} | {a['passed_then_revised']} | {a['failed_then_fixed']} | "
+                     f"{a['failed_then_vouched']} | {_pct(a['false_pass_rate'])} | {_pct(a['false_fail_rate'])} |")
+    if not rep.get("critic_accuracy"):
+        lines.append("| (no decided documents yet) | | | | | | |")
+    lines += ["", "## By configuration", "",
+              "What each config version (models, runtimes, critic and retry settings) did, so a change can be judged on results.", "",
+              "| Config | Features | First-time approvals | Loops/feature | Critic false pass | Fixes before merge | Fixes after merge | Incidents | Cost/feature | Human share |",
+              "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    for cfg, c in (rep.get("by_config") or {}).items():
+        lines.append(f"| {cfg} | {c['features']} | {_pct(c['first_time_approval_rate'])} | {c['loops_per_feature']} | "
+                     f"{_pct(c['critic_false_pass_rate'])} | {c['pre_merge_fixes']} | {c['post_merge_fixes']} | "
+                     f"{c['incidents']} | ${c['cost_per_feature_usd']:.2f} | {_pct(c['human_share'])} |")
     lines += ["", f"PR reviews count {ESTIMATED_MINUTES['pr_review']:.0f} min and PR comments "
               f"{ESTIMATED_MINUTES['pr_comment']:.0f} min each (estimates)."]
     return "\n".join(lines) + "\n"

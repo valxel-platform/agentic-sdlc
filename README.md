@@ -1623,6 +1623,23 @@ GitHub as usual. Then read the report: the human share against 15%, where people
 work came back, and the shadow modes' agreement, which decide the next changes (cheaper models for
 low-risk work, automatic approval, learning from repeated corrections).
 
+### How far the critic can be trusted, and what each configuration led to
+
+The report judges the agents by what happened next, using data the pipeline already keeps
+(`pilot.critic_outcomes`, `pilot.outcomes`):
+
+- **Critic accuracy, per phase.** Each of the critic's verdicts on a document is matched with the
+  people's next decision: passed and approved, passed and sent back (a false pass, with the reason
+  people gave), failed until it escalated and people asked for more or rewrote it (the critic was
+  right), or failed and people accepted the draft as it was (a false fail).
+- **Outcomes, per feature.** Failures the agents fixed before the merge (in CI or the change set's
+  own environment) and after it (build, dev, staging), delivery escalations, a traceability
+  override, a stopped rollout, and production incidents on what the feature changed.
+- **By configuration.** Every model call carries the config version (models, runtimes, critic and
+  retry settings). The report groups features by the version most of their calls ran under, with
+  first-time approvals, loops, the critic's false-pass rate, fixes before and after merge,
+  incidents, cost and the human share, so a model or prompt change is judged on results.
+
 ## Workflow profiles: feature and express
 
 Not every change needs discovery and a UX design. Whoever starts the work picks a profile (the New

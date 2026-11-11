@@ -725,6 +725,8 @@ def make_escalation(phase: str, services):
         update: dict = {"gate_decisions": [rec]}
         mine = d.get("artifact_content") or ""
         changed = d["decision"] == "resolved" and bool(mine.strip()) and mine.strip() != draft.strip()
+        if d["decision"] == "resolved":
+            rec["changed"] = changed  # the pilot report: did people fix the document, or accept it as it was?
         said = correction(state, f"escalation:{phase}", phase, "resolved" if changed else d["decision"], d,
                           len(state.get("gate_decisions") or []) + 1,
                           changes=lessons.changes(draft, mine) if changed else None)
