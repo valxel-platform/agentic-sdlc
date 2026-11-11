@@ -1,8 +1,9 @@
 """The roadmap record: a product's goals, initiatives and releases, kept in its governance repo.
 
     roadmap/
-      goals.yaml                    outcomes for a period: id, title, measure, period (parent: later,
-                                    for a portfolio goal the product goal rolls up to)
+      goals.yaml                    outcomes for a period: id, title, measure, period, metric (how the
+                                    tool reads it: vrixel_sdlc.outcomes), parent (later, for a
+                                    portfolio goal the product goal rolls up to)
       initiatives/INI-CLN-1.md      one approved initiative per file
       releases/REL-CLN-1.md         one release per file: a launch group or a release train
 
@@ -61,7 +62,8 @@ def parse_goals(text: str) -> list[dict]:
     for g in raw.get("goals") or []:
         if isinstance(g, dict) and g.get("id"):
             out.append({"id": str(g["id"]), "title": str(g.get("title") or ""), "measure": str(g.get("measure") or ""),
-                        "period": str(g.get("period") or ""), "parent": str(g.get("parent") or "")})
+                        "period": str(g.get("period") or ""), "parent": str(g.get("parent") or ""),
+                        "metric": g.get("metric")})  # checked by vrixel_sdlc.outcomes.parse_metric
     return out
 
 

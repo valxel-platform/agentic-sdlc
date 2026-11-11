@@ -51,11 +51,21 @@ providers:
     flipt: { token_env_prefix: VRIXEL_FLIPT_TOKEN_ }
   change_management:
     servicenow: { auth_env_prefix: VRIXEL_SERVICENOW_AUTH_ }   # the organization's own ServiceNow
+  # Where goal metrics are read (vrixel_sdlc.outcomes). Queries run read-only and return one
+  # aggregate; manual entry needs no provider. sql and prometheus are the product's own (its read
+  # replica, the Prometheus behind its OpenTelemetry collector); PostHog is optional, for teams
+  # that already use it.
+  metrics:
+    sql: { secret_env_prefix: VRIXEL_METRICS_DSN_ }
+    prometheus: { secret_env_prefix: VRIXEL_PROMETHEUS_TOKEN_ }
+    posthog: { secret_env_prefix: VRIXEL_POSTHOG_KEY_ }
 
 # Which providers may receive content from a lane of each data class. Agents never put PHI or
 # card data in diagrams or tickets, but design detail of regulated systems still leaves the
 # platform, so add a SaaS provider here only once a vendor agreement (BAA, DPA) covers it.
 data_classes:
-  general: [lucid, drawio, jira, openproject, flipt, servicenow]
-  phi: [drawio, openproject, flipt, servicenow]          # Flipt is self-hosted in the product's runtime;
-  payments: [drawio, openproject, flipt, servicenow]     # change receipts carry no patient or card data
+  general: [lucid, drawio, jira, openproject, flipt, servicenow, sql, prometheus, posthog]
+  phi: [drawio, openproject, flipt, servicenow, sql, prometheus]          # Flipt is self-hosted in the product's
+  payments: [drawio, openproject, flipt, servicenow, sql, prometheus]     # runtime; change receipts carry no
+                                                                          # patient or card data; metric sources
+                                                                          # return aggregates only

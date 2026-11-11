@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 import yaml
 
+from ..outcomes import stub_from_measure
 from ..roadmap.record import render_initiative
 from . import Vision, formats
 
@@ -95,7 +96,9 @@ def goals_yaml(brief: str) -> tuple[str, dict]:
     for n, g in enumerate([g for g in formats.goals(brief) if g.get("id")], 1):
         gid = f"GOAL-{pid}-{n}"
         mapping[g["id"]] = gid
-        rows.append({"id": gid, "title": g["goal"], "measure": g["measure"], "period": ""})
+        # Entered by hand until someone wires a query (vrixel_sdlc.outcomes): measurable from day one.
+        rows.append({"id": gid, "title": g["goal"], "measure": g["measure"], "period": "",
+                     "metric": stub_from_measure(g["measure"])})
     return yaml.safe_dump({"goals": rows}, sort_keys=False, allow_unicode=True), mapping
 
 

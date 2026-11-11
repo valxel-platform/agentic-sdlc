@@ -206,6 +206,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
 
         services.evals = PostgresEvalStore(pool)
         services.signals = PostgresSignalStore(pool)
+        from ..outcomes.store import PostgresReadingStore
+
+        services.readings = PostgresReadingStore(pool)
         from ..ops.cost import PostgresCostReviews
 
         services.cost_reviews = PostgresCostReviews(pool)
@@ -687,7 +690,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                 snap = services.snapshot(pid)
                 p = snap.product
                 modes = integration_modes(services)
-                row |= {"tools": {cap: {**spec, "mode": modes.get(spec["provider"], "stub")}
+                row |= {"tools": {cap: ({**spec, "mode": modes.get(spec["provider"], "stub")} if "provider" in spec
+                                        else {**spec, "sources": {n: {**c, "mode": modes.get(n, "stub")}
+                                                                  for n, c in (spec.get("sources") or {}).items()}})
                                   for cap, spec in p.tools.items()}}
                 if p.runtime:  # flags: this product's Flipt, in-memory flags, or none
                     mode = flag_modes(services, [pid]).get(pid, "stub")

@@ -239,6 +239,10 @@ def _tools(raw, entry: RegistryEntry, tools: ToolsConfig | None, problems: list[
         return {}
     tools = tools or ToolsConfig()
     out: dict = {}
+    if raw.get("metrics") is not None:
+        metrics = _metrics(raw["metrics"], entry, tools, problems)
+        if metrics is not None:
+            out["metrics"] = metrics
     for capability in ("diagrams", "work_tracking", "flags", "change_management"):
         spec = raw.get(capability)
         if spec is None:
@@ -268,10 +272,68 @@ def _tools(raw, entry: RegistryEntry, tools: ToolsConfig | None, problems: list[
             if spec is None:
                 continue
         out[capability] = spec
-    unknown = set(raw) - {"diagrams", "work_tracking", "flags", "change_management"}
+    unknown = set(raw) - {"diagrams", "work_tracking", "flags", "change_management", "metrics"}
     if unknown:
         problems.append(f"tools has unknown keys {sorted(unknown)}")
     return out
+
+
+def _metrics(spec, entry: RegistryEntry, tools: ToolsConfig, problems: list[str]) -> dict | None:
+    """tools.metrics: where the product's goal metrics are read (vrixel_sdlc.outcomes).
+
+        metrics:
+          sql: {}                                    # read replica; DSN is VRIXEL_METRICS_DSN_<ID>
+          prometheus: { url: https://prometheus.cln.example.com }
+          posthog: { url: https://posthog.example.com, project: 12 }
+          min_cell: 11                               # counts under this show as "under 11"; fixed at
+                                                     # 11 or more for PHI, off (1) by default otherwise
+
+    Manual entry needs no source. Credentials stay platform secrets, never in this file."""
+    from ..outcomes import min_cell_for
+
+    if not isinstance(spec, dict):
+        problems.append("tools.metrics must be a mapping of sources (sql, prometheus, posthog) and min_cell")
+        return None
+    known = tools.providers.get("metrics", {})
+    sources: dict[str, dict] = {}
+    for name, cfg in spec.items():
+        if name == "min_cell":
+            continue
+        cfg = dict(cfg or {}) if isinstance(cfg, dict) or cfg is None else None
+        if name not in known:
+            problems.append(f"tools.metrics.{name} must be one of {sorted(known) or ['(none configured)']}")
+            continue
+        if cfg is None:
+            problems.append(f"tools.metrics.{name} must be a mapping")
+            continue
+        if not tools.allowed(entry.data_class, name):
+            problems.append(f"tools.metrics.{name} is not approved for {entry.data_class} data; "
+                            f"approved: {sorted(tools.data_classes.get(entry.data_class, []))}")
+            continue
+        secretish = sorted(k for k in cfg if k.lower() in ("dsn", "password", "token", "key", "api_key"))
+        if secretish:
+            problems.append(f"tools.metrics.{name} names {', '.join(secretish)}: credentials are platform secrets, "
+                            "not product.yaml")
+            continue
+        if name in ("prometheus", "posthog") and not re.match(r"^https?://[^\s/]+", str(cfg.get("url") or "")):
+            problems.append(f"tools.metrics.{name}.url must be the server's address")
+            continue
+        if name == "posthog" and not re.fullmatch(r"\d+", str(cfg.get("project") or "")):
+            problems.append("tools.metrics.posthog.project must be the PostHog project's numeric id")
+            continue
+        if "url" in cfg:
+            cfg["url"] = str(cfg["url"]).rstrip("/")
+        sources[name] = cfg
+    try:
+        min_cell = int(spec.get("min_cell", min_cell_for(entry.data_class)))
+    except (TypeError, ValueError):
+        problems.append("tools.metrics.min_cell must be a whole number")
+        return None
+    floor = min_cell_for(entry.data_class)
+    if min_cell < floor:
+        problems.append(f"tools.metrics.min_cell must be at least {floor} for {entry.data_class} data")
+        return None
+    return {"sources": sources, "min_cell": min_cell}
 
 
 def _change_management(spec: dict, problems: list[str]) -> dict | None:

@@ -496,7 +496,7 @@ a `parent` and the record has a `scope` field, so a portfolio level can sit abov
 
 ```
 roadmap/
-  goals.yaml                outcomes for a period: id, title, measure, period (parent: later)
+  goals.yaml                outcomes for a period: id, title, measure, period, metric (parent: later)
   initiatives/INI-CLN-1.md  one approved initiative: goal, horizon (now/next/later), budget envelope,
                             lanes, release model, success measure, candidate features
   releases/REL-CLN-1.md     one release: launch group or release train, features, status, notes, evidence
@@ -506,6 +506,54 @@ The tool runs initiatives and releases as threads alongside features, computes p
 from the features themselves, and mirrors initiatives to Jira or OpenProject (an item one level
 above the feature epics; set `initiative_type` in `tools.work_tracking` if your tracker calls it
 something else) and releases as comments on member epics.
+
+**Goals the tool can read.** Each goal keeps its `measure` (the sentence people read) and may add
+a `metric`: how the tool reads it. This is step 1 of the outcome loop (readouts after release,
+initiative status and review decisions build on it).
+
+```yaml
+goals:
+  - id: GOAL-CLN-1
+    measure: Median front-desk check-in time under 3 minutes
+    metric:
+      source: sql                 # sql | prometheus | posthog | manual
+      query: |
+        SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY minutes) AS value, count(*) AS n
+        FROM visits WHERE arrived_at >= :start AND arrived_at < :end
+      unit: minutes
+      direction: down             # which way is better
+      baseline: 6.5
+      target: 3
+      by: 2027-06-30
+```
+
+The product names its sources in product.yaml, and adds no new tool by default: most outcomes are
+already business records, so `sql` reads the product's read replica; `prometheus` reads behaviour
+counters from the collector the product already runs; `posthog` is optional; `manual` needs
+nothing (the owner types the number in).
+
+```yaml
+tools:
+  metrics:
+    sql: {}                       # DSN: platform secret VRIXEL_METRICS_DSN_<PRODUCT_ID>
+    prometheus: { url: https://prometheus.cln.example.com }   # token: VRIXEL_PROMETHEUS_TOKEN_<ID>
+    min_cell: 11                  # counts 1-10 show as "under 11": fixed at 11+ for PHI, off by default otherwise
+```
+
+The tool only ever holds aggregates. A query is checked when it is defined: one read-only SELECT
+(or one PromQL aggregation with no `by`), filtered on `:start` and `:end`, returning one row named
+`value` (plus `n`, the count behind it, for PHI products). It runs read-only with a
+statement timeout, and a result with more than one row or any column but `value` and `n` is
+refused. PHI products follow the CMS cell-size convention: no count from 1 to 10 is shown (zero
+is); other products can switch suppression on with `min_cell`. Credentials are platform secrets, never product.yaml; PostHog isn't approved for PHI or
+payments data (config/tools.yaml). Inception writes every goal with a `manual` metric from its
+brief's measure, so a new product is measurable from day one.
+
+```
+vrixel outcomes check CLN                         # every goal's metric, and what's wrong with it
+vrixel outcomes read CLN GOAL-CLN-1 --days 30     # one reading, recorded (--dry-run: not recorded)
+vrixel outcomes record CLN GOAL-CLN-2 --value 3.1 --n 812 --start 2026-10-01 --end 2026-11-01
+```
 
 **Initiatives have their own gate, G0.** A strategist agent drafts the initiative from a request:
 the goal it serves (or a proposed new goal with a measure), outcome, success measure, horizon,
