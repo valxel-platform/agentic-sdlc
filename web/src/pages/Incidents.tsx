@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api, ApiError, type Analysis, type IncidentRow, type IncidentView, type Me, type UnmatchedSignal } from "../api";
 import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
@@ -269,7 +270,7 @@ export function IncidentPage() {
         {!mine && (
           <section className="panel" aria-labelledby="h-report">
             <h2 id="h-report" className="section-title">{v.postmortem ? "Postmortem" : "Triage"}</h2>
-            <div className="md pad"><Markdown>{v.postmortem || v.triage || "Triage in progress."}</Markdown></div>
+            <div className="md pad"><Markdown remarkPlugins={[remarkGfm]}>{v.postmortem || v.triage || "Triage in progress."}</Markdown></div>
           </section>
         )}
       </div>

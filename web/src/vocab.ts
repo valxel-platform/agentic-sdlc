@@ -2,6 +2,7 @@
 export const PHASES: Record<string, string> = {
   discovery: "Discovery", spec: "Spec", design: "Design", architecture: "Architecture",
   plan: "Plan", build: "Build", release: "Release", operate: "Operate", delivery: "Delivery", security: "Security", provisioning: "Repository setup",
+  brief: "Product brief", product_plan: "Architecture and roadmap", setup: "Setup",
 };
 
 const FAILED: Record<string, string> = {
@@ -20,6 +21,8 @@ export const WAITS: Record<string, string> = {
 
 export const GATES: Record<string, { name: string; question: string; approve: string }> = {
   g0: { name: "Initiative", question: "Commit to this initiative?", approve: "Approve initiative" },
+  brief: { name: "Brief", question: "Is this the product we want?", approve: "Approve brief" },
+  product: { name: "Product", question: "Approve the architecture and roadmap?", approve: "Approve and set up" },
   release: { name: "Release", question: "Approve this release?", approve: "Approve release" },
   incident: { name: "Incident", question: "What should we do about this incident?", approve: "Approve actions" },
   postmortem: { name: "Postmortem", question: "Close the incident with this postmortem?", approve: "Close incident" },
@@ -52,7 +55,7 @@ export const MODELS: Record<string, string> = { launch: "Launch group", train: "
 /** Where a thread lives in the app: features, initiatives and releases share ids like CLN-INI-1. */
 export function threadPath(id: string): string {
   const kind = id.split("-")[1];
-  return kind === "INI" ? `/initiatives/${id}` : kind === "REL" ? `/releases/${id}`
+  return kind === "INI" ? `/initiatives/${id}` : kind === "REL" ? `/releases/${id}` : kind === "PRD" ? `/products/${id}`
     : kind === "INC" ? `/incidents/${id}` : `/features/${id}`;
 }
 
@@ -62,6 +65,8 @@ export function gateLabel(gate?: string): string {
   if (gate === "release") return "Release";
   if (gate === "incident") return "On-call decision";
   if (gate === "postmortem") return "Postmortem";
+  if (gate === "brief") return "Brief";
+  if (gate === "product") return "Product";
   return g ? `${gate.toUpperCase()} ${g.name}` : gate.toUpperCase();
 }
 
@@ -73,6 +78,7 @@ export function waitingLabel(item: { type: string; gate?: string; phase?: string
   if (item.type === "escalation") return `${PHASES[item.phase ?? ""] ?? item.phase} needs a person`;
   if (item.type === "handback") return `${gateLabel(item.gate)}: taken over, waiting for hand-back`;
   const lane = item.lane && ownLane && item.lane !== ownLane ? ` (${item.lane})` : "";
+  if (item.gate === "brief" || item.gate === "product") return `Waiting for the ${item.gate} gate`;
   return `Waiting for ${gateLabel(item.gate)}${lane}`;
 }
 

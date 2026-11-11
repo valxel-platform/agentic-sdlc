@@ -15,6 +15,8 @@ export interface AwsResources {
 
 export interface PendingItem {
   interrupt_id: string;
+  // At the product gate: the architecture's AWS resources priced per environment.
+  monthly_usd?: Record<string, number>;
   type: "gate" | "handback" | "escalation" | "external";
   gate?: string;
   wait?: string;
@@ -401,6 +403,32 @@ export interface ReleaseView extends ThreadBase {
   model: "launch" | "train"; target_date: string; initiative: string; notes: string; evidence: string;
   approved_by: string; dropped: string[]; features: FeatureRow[];
 }
+/** Product inception (vrixel_sdlc.inception): a vision to a brief, an architecture and a roadmap. */
+export interface InceptionReport {
+  doc: string; status: "passed" | "escalated"; attempts: number; findings: string[];
+  checklist: { id: string; must: boolean; met: boolean; evidence: string; why: string }[];
+  cost_usd: number; monthly_usd: Record<string, number>; data_class: string;
+}
+export interface InceptionSetupStep { step: string; ok: boolean; url?: string; repo?: string; error?: string;
+  why?: string; line?: string; skipped?: boolean; teams?: string[]; result?: string }
+export interface InceptionView extends Omit<ThreadBase, "kind"> {
+  kind: "inception";
+  vision: { name: string; org: string; vision: string; goals: string[]; users: string[]; constraints: string[];
+            budget_usd: number; product_id: string; existing: boolean };
+  brief: string; architecture: string; roadmap: string;
+  reports: Partial<Record<"brief" | "architecture" | "roadmap", InceptionReport>>;
+  setup: { product_id?: string; governance_repo?: string; steps?: InceptionSetupStep[]; ok?: boolean };
+  council: string[];
+}
+export interface InceptionSummary {
+  id: string; title: string; org: string; existing: boolean; product_id: string; status: string;
+  created_by: string; cost_usd: number; running: boolean;
+}
+export interface InceptionIn {
+  name: string; org: string; vision: string; goals: string[]; users: string[]; constraints: string[];
+  budget_usd: number; product_id: string;
+}
+
 export interface RoadmapInitiative {
   id: string; title: string; goal: string; horizon: string; status: string; budget_usd: number; lanes: string[];
   release_model: string; record: string; spent_usd: number; features: FeatureRow[];
@@ -533,6 +561,9 @@ export const api = {
   syncWork: (id: string) => request<unknown>("POST", `/features/${encodeURIComponent(id)}/sync`, {}),
   feature: (id: string) => request<Feature>("GET", `/features/${encodeURIComponent(id)}`),
   initiative: (id: string) => request<InitiativeView>("GET", `/features/${encodeURIComponent(id)}`),
+  inception: (id: string) => request<InceptionView>("GET", `/features/${encodeURIComponent(id)}`),
+  inceptions: () => request<InceptionSummary[]>("GET", "/inceptions"),
+  createInception: (body: InceptionIn) => request<{ feature_id: string }>("POST", "/inceptions", body),
   release: (id: string) => request<ReleaseView>("GET", `/features/${encodeURIComponent(id)}`),
   incident: (id: string) => request<IncidentView>("GET", `/features/${encodeURIComponent(id)}`),
   mergeIncident: (id: string, into: string, reason: string) =>

@@ -168,7 +168,7 @@ def monthly_cost(text: str, catalog: dict) -> tuple[dict, str]:
 
 
 def draft(services, vision: Vision, doc: str, *, brief: str = "", architecture: str = "",
-          max_loops: int | None = None) -> Draft:
+          max_loops: int | None = None, feedback: str = "", previous: str = "") -> Draft:
     """One document, written and revised until the checks and the critic pass."""
     if doc not in DOCS:
         raise ValueError(f"No inception document {doc}; one of {', '.join(DOCS)}")
@@ -184,7 +184,9 @@ def draft(services, vision: Vision, doc: str, *, brief: str = "", architecture: 
     product_context = existing_context(services, vision.product_id) if vision.existing and vision.product_id else ""
     parents = {"brief": brief, "architecture": architecture}
     loops = max_loops or services.settings.limits.max_loops
-    text, cost, findings, judged = "", 0.0, [], []
+    # A gate's feedback starts the loop: the people's words first, then the draft they read.
+    text, cost, judged = previous, 0.0, []
+    findings = [f"From the people at the gate: {feedback}"] if feedback else []
     for attempt in range(1, loops + 1):
         text, spent = write(services, vision, doc, ctx, parents=parents, constitution=constitution,
                             product_context=product_context, data_class=data_class, feedback=findings, previous=text)
