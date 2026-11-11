@@ -198,6 +198,8 @@ export interface AgentEvals {
 export interface AgentSession {
   trace_id: string; url: string; at: string; phase: string; role: string; runtime: string; model: string;
   task: string; attempt: string; calls: number; duration_s: number; tokens: number; cost_usd: number;
+  // Installed skills the session loaded by itself, beyond the ones its phase gave it.
+  extra_skills?: string[];
 }
 
 export interface Feature extends FeatureSummary {

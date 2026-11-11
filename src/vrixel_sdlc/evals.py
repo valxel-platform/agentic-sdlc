@@ -211,12 +211,13 @@ def services_for(base_settings, config_dir: str | Path | None = None):
     from .config import load_settings
     from .gateway import InMemoryLedger
     from .integrations import StubGitHub, StubOpenChoreo, StubPackageRegistry
-    from .services import build_services
+    from .services import build_services, use_own_plugins
 
     settings = load_settings(mode=base_settings.mode, database_url="", config_dir=config_dir or base_settings.config_dir,
                              artifact_dir=tempfile.mkdtemp(prefix="vrixel-eval-"),
                              governance_source=base_settings.governance_source,
                              governance_root=base_settings.governance_root)
+    use_own_plugins(settings)  # a candidate that moves the plugin pin runs with the plugins it pins
     return build_services(settings, ledger=InMemoryLedger(), github=StubGitHub(), openchoreo=StubOpenChoreo(),
                           packages=StubPackageRegistry(), diagrams={}, trackers={})
 

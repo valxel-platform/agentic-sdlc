@@ -7,10 +7,13 @@ environment details (working directory, platform) move to the first message
 (`exclude_dynamic_sections`), so the appended layers cache the same way from any checkout.
 
 Settings come from the repository only (`setting_sources=["project"]`): the checkout's CLAUDE.md
-and `.claude/skills/` load, nothing from the container's home directory. The plugins installed in
-VRIXEL_SKILLS_DIR load too, so the agent can pull in a skill beyond the ones the phase pastes into
-L2 (it sees their names and descriptions; a body loads only when used), and the plugins'
-subagents, hooks and MCP servers are available.
+and `.claude/skills/` load, nothing from the container's home directory. The plugins in the
+config's skills folder (VRIXEL_SKILLS_DIR, or a copy at the config's pin: vrixel_sdlc.plugins)
+load too, unless config/plugins.yaml turns `on_demand` off for the role: the agent then sees every
+installed skill by name and description and can load one beyond those the phase pastes into L2.
+Each skill it loads that way is recorded (`extra_skills`). The plugins carry skills and commands
+only: plugins/prepare.sh removes their connectors (.mcp.json) and hooks, so a plugin gives the
+agent no outside tool and runs nothing on its own.
 
 Live mode only (`pip install .[live]`). Usage is written to the ledger from the SDK's
 result message; per the SDK docs, its cost fields are client-side estimates and billing
@@ -26,6 +29,7 @@ import os
 import time
 from pathlib import Path
 
+from .. import plugins
 from ..gateway import ModelGateway, ModelResponse, PolicyViolation, ProviderUnavailable, is_transient
 from .base import AgentResult, AgentTask
 
@@ -78,7 +82,14 @@ class ClaudeCodeRuntime:
     def __init__(self, gateway: ModelGateway, *, cwd: str | None = None, plugin_dirs: list[str] | None = None):
         self.gateway = gateway
         self.cwd = cwd
-        self.plugin_dirs = plugin_dirs if plugin_dirs is not None else plugin_dirs_from(os.environ.get("VRIXEL_SKILLS_DIR"))
+        settings = gateway.settings
+        base = getattr(settings, "skills_dir", "") or os.environ.get("VRIXEL_SKILLS_DIR")
+        self.plugin_dirs = plugin_dirs if plugin_dirs is not None else plugin_dirs_from(base)
+
+    def plugins_for(self, role: str) -> list[str]:
+        """Every installed plugin, or none when the role gets only its phase's skills."""
+        cfg = getattr(self.gateway.settings, "plugins", None)
+        return self.plugin_dirs if cfg is None or cfg.on_demand(role) else []
 
     def run(self, task: AgentTask) -> AgentResult:
         role = self.gateway.settings.role(task.role)
@@ -97,10 +108,12 @@ class ClaudeCodeRuntime:
         from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query  # lazy import
 
         role = self.gateway.settings.role(task.role)
-        options = ClaudeAgentOptions(**session_options(task, role, model, cwd=self.cwd, plugin_dirs=self.plugin_dirs))
-        text, result = "", None
+        options = ClaudeAgentOptions(**session_options(task, role, model, cwd=self.cwd,
+                                                       plugin_dirs=self.plugins_for(task.role)))
+        text, result, loaded = "", None, set()
         started = time.monotonic()
         async for message in query(prompt=task.layers.tail, options=options):
+            loaded |= skills_used(message)
             if getattr(message, "subtype", None) == "init":
                 data = getattr(message, "data", {}) or {}
                 for err in data.get("plugin_errors") or []:
@@ -119,9 +132,12 @@ class ClaudeCodeRuntime:
             cache_read_input_tokens=int(usage.get("cache_read_input_tokens", 0)),
             output_tokens=int(usage.get("output_tokens", 0)),
         )
+        extra = plugins.extra(loaded, task.skills)
+        if extra:
+            log.info("%s/%s loaded skills beyond its phase's: %s", task.phase, task.role, ", ".join(extra))
         rec = self.gateway.record_external(
             task.tags, runtime=self.name, model=model, layers=task.layers, response=resp,
-            duration_s=time.monotonic() - started,
+            duration_s=time.monotonic() - started, extra_skills=extra,
         )
         sdk_cost = getattr(result, "total_cost_usd", None) if result else None
         return AgentResult(
@@ -129,7 +145,19 @@ class ClaudeCodeRuntime:
             tokens=rec.total_tokens,
             cost_usd=float(sdk_cost) if sdk_cost is not None else rec.cost_usd,
             request_ids=[resp.request_id],
+            extra_skills=extra,
         )
+
+
+def skills_used(message) -> set[str]:
+    """The skills an assistant message invokes through Claude Code's Skill tool."""
+    out = set()
+    for block in getattr(message, "content", None) or []:
+        if getattr(block, "name", None) == "Skill":
+            name = (getattr(block, "input", None) or {}).get("skill") or (getattr(block, "input", None) or {}).get("command")
+            if name:
+                out.add(str(name).lstrip("/"))
+    return out
 
 
 def session_cap(task: AgentTask, role) -> float:

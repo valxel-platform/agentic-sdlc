@@ -101,14 +101,15 @@ class ModelGateway:
 
     def record_external(
         self, tags: CallTags, *, runtime: str, model: str, layers: PromptLayers, response: ModelResponse,
-        duration_s: float = 0.0,
+        duration_s: float = 0.0, extra_skills: tuple[str, ...] = (),
     ) -> GatewayResult:
         """Ledger entry for a call made outside the gateway (e.g. the Claude Agent SDK)."""
         provider = model.split("/", 1)[0]
         return self._record(tags, runtime, provider, model, self.settings.role(tags.role).ttl, layers, response,
-                            duration_s=duration_s)
+                            duration_s=duration_s, extra_skills=extra_skills)
 
-    def _record(self, tags, runtime, provider, model, ttl, layers, resp, duration_s: float = 0.0) -> GatewayResult:
+    def _record(self, tags, runtime, provider, model, ttl, layers, resp, duration_s: float = 0.0,
+                extra_skills: tuple[str, ...] = ()) -> GatewayResult:
         usd, basis = estimate_cost(
             model,
             input_tokens=resp.input_tokens,
@@ -140,6 +141,7 @@ class ModelGateway:
             request_id=resp.request_id,
             config_version=self.config_version,
             duration_s=round(float(duration_s), 3),
+            extra_skills=",".join(extra_skills),
             **_trace_fields(),
         )
         self.ledger.record(rec)
