@@ -21,7 +21,12 @@ services:
       VRIXEL_STRICT: ${VRIXEL_STRICT:-0}
       VRIXEL_OTEL_ENDPOINT: ${VRIXEL_OTEL_ENDPOINT:-}   # OTLP/HTTP collector for agent session traces
       VRIXEL_OTEL_HEADERS: ${VRIXEL_OTEL_HEADERS:-}
-      VRIXEL_TRACE_URL: ${VRIXEL_TRACE_URL:-}           # e.g. https://langfuse.example.com/project/vrixel/traces/{trace_id}   # 1 in production: refuse to start while anything runs as a stand-in
+      VRIXEL_TRACE_URL: ${VRIXEL_TRACE_URL:-}           # e.g. https://langfuse.example.com/project/vrixel/traces/{trace_id}
+      VRIXEL_CONFIG_REPO: ${VRIXEL_CONFIG_REPO:-}       # config PRs are evaluated against past work (vrixel / evals)
+      VRIXEL_EVAL_APPROVERS: ${VRIXEL_EVAL_APPROVERS:-}
+      VRIXEL_LANGFUSE_URL: ${VRIXEL_LANGFUSE_URL:-}
+      VRIXEL_LANGFUSE_PUBLIC_KEY: ${VRIXEL_LANGFUSE_PUBLIC_KEY:-}
+      VRIXEL_LANGFUSE_SECRET_KEY: ${VRIXEL_LANGFUSE_SECRET_KEY:-}   # 1 in production: refuse to start while anything runs as a stand-in
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # local reads examples/governance; github reads each product org's governance repo.
       VRIXEL_GOVERNANCE_SOURCE: ${VRIXEL_GOVERNANCE_SOURCE:-local}

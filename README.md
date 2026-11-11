@@ -1549,6 +1549,43 @@ template, e.g. `https://langfuse.example.com/project/vrixel/traces/{trace_id}`. 
 or without the OpenTelemetry SDK (`pip install '.[telemetry]'`, included in `live`), nothing is
 exported and strict mode warns.
 
+## Evals of the tool's own agents
+
+A change to the models, prompts or settings the agents run with is checked against past work
+before it merges (`vrixel_sdlc/evals.py`).
+
+**Cases come from history.** When a document phase (discovery, spec, design, architecture, plan)
+finishes, the tool keeps an eval case: what the agent was given (the request, the parent
+documents, the product's knowledge), what it wrote, and the critic's verdict. The gate that
+follows labels it with what people decided (approved, sent back and why, taken over, or at an
+escalation accepted as it was or rewritten), and the version people approved becomes its reference.
+The plan has no gate: its cases are replayed but have no decision to agree with.
+
+**A run replays cases** under a config, with its own ledger and stand-ins for GitHub and
+OpenChoreo, so nothing real changes and no feature's cost moves. For each case it measures whether
+the new document passes the checks and the checklist critic, the share of must-have items met,
+whether the config's critic agrees with people about the document they decided on, optionally a
+pairwise judgment against the approved version, and cost and time. The comparison runs the same
+cases under the config in use and the candidate and fails when a rate drops by more than
+`max_drop` (5 points by default) or, if set, cost rises more than `max_cost_increase`.
+
+- **Pull requests to the config repo** (`VRIXEL_CONFIG_REPO`, e.g. `vrixel-tools/sdlc-config`): the
+  GitHub App's `pull_request` webhook makes the tool replay the newest labelled cases (5 per phase,
+  `VRIXEL_EVAL_CASES_PER_PHASE`; up to `VRIXEL_EVAL_BUDGET_USD`, 20 by default, per config) under
+  the PR's config and its base, and post `vrixel / evals` on the head commit. Make it a required
+  check. The run happens where the cases and the model keys are, never in the config repo's CI.
+  `GET /api/evals/runs/{id}` has the full comparison; `POST /api/evals/runs` starts one for the
+  teams in `VRIXEL_EVAL_APPROVERS`.
+- **From the command line:** `vrixel eval export --product FARM --out cases.jsonl` and
+  `vrixel eval run --config path/to/candidate/config [--baseline-config ...] [--pairwise]` (cases
+  from the database, `DATABASE_URL`, or `--cases FILE`; exits 1 on a regression).
+- **Data classes.** Only `general` cases are used unless you ask for others
+  (`--data-class`, `VRIXEL_EVAL_DATA_CLASSES`); a regulated case still reaches only the providers its
+  data class allows.
+- **Langfuse.** With `VRIXEL_LANGFUSE_URL`, `VRIXEL_LANGFUSE_PUBLIC_KEY` and
+  `VRIXEL_LANGFUSE_SECRET_KEY`, each run writes one dataset per phase (`vrixel/<phase>`), links the
+  run's traces to the items and scores them; documents go to Langfuse only for `general` cases.
+
 ## Predictable results
 
 The pipeline reads agents' work by machine, so the shapes are fixed and every reply is checked:

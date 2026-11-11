@@ -75,6 +75,7 @@ class Services:
 
     available_roles: frozenset = frozenset()  # roles whose provider is configured, set by build_services
     telemetry: object = None  # vrixel_sdlc.telemetry.Telemetry: each agent session as a span, set by build_services
+    evals: object = None  # vrixel_sdlc.evals store: eval cases from finished document phases, labelled at the gates
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
@@ -196,6 +197,9 @@ def build_services(
     svc.provisioner = default_provisioner(settings, github, openchoreo)
     svc.available_roles = frozenset(available)
     svc.telemetry = default_telemetry(settings)
+    from .evals import InMemoryEvalStore
+
+    svc.evals = InMemoryEvalStore()
     return svc
 
 

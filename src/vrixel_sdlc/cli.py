@@ -140,6 +140,49 @@ def _pilot_report(args, engine=None) -> int:
     return 0
 
 
+def _eval(args: argparse.Namespace) -> int:
+    """Export eval cases, or replay them under the config in use and a candidate and compare."""
+    import os
+    from pathlib import Path
+
+    from . import evals
+
+    settings = load_settings(mode=args.mode)
+    phases = tuple(args.phase or ())
+    classes = tuple(args.data_class or ("general",))
+    if args.cases:
+        cases = [c for c in evals.load_jsonl(args.cases)
+                 if (not phases or c.phase in phases) and c.data_class in classes and (not args.product or c.product_id == args.product)]
+        cases = evals._select(cases, args.product, phases, classes, True, args.limit)
+    else:
+        if not os.environ.get("DATABASE_URL"):
+            raise SystemExit("vrixel eval reads cases from the tool's database (DATABASE_URL), or give --cases FILE")
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+
+        pool = ConnectionPool(os.environ["DATABASE_URL"], max_size=2, kwargs={"autocommit": True, "row_factory": dict_row})
+        cases = evals.PostgresEvalStore(pool).cases(product_id=args.product, phases=phases, data_classes=classes,
+                                                     limit_per_phase=args.limit)
+    if args.action == "export":
+        evals.dump_jsonl(cases, args.out or "cases.jsonl")
+        print(f"{len(cases)} cases written to {args.out or 'cases.jsonl'} (data classes: {', '.join(classes)})")
+        return 0
+    if not cases:
+        print("No labelled cases to run.", file=sys.stderr)
+        return 2
+    base = evals.run(evals.services_for(settings, args.baseline_config), cases, pairwise=args.pairwise,
+                     budget_usd=args.budget)
+    cand = evals.run(evals.services_for(settings, args.config), cases, pairwise=args.pairwise, budget_usd=args.budget)
+    cmp = evals.compare(base, cand, max_drop=args.max_drop, max_cost_increase=args.max_cost_increase)
+    if args.out:
+        Path(args.out).write_text(json.dumps({"comparison": cmp, "baseline": base, "candidate": cand}, indent=2, default=str))
+    lf = evals.Langfuse.from_env()
+    if lf is not None:
+        lf.sync(cases, f"candidate-{Path(args.config).name}", cand["results"], content_classes=classes)
+    print(evals.markdown(cmp, base, cand))
+    return 0 if cmp["ok"] else 1
+
+
 def main(argv: list[str] | None = None, *, github=None) -> int:
     p = argparse.ArgumentParser(prog="vrixel")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -170,7 +213,25 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     pr.add_argument("--all", action="store_true", help="Every feature, not only those created as pilot features")
     pr.add_argument("--since", default="", help="Only features started on or after this date (YYYY-MM-DD)")
     pr.add_argument("--json", action="store_true")
+    e = sub.add_parser("eval", help="Export eval cases, or replay them under a candidate config and compare")
+    e.add_argument("action", choices=["export", "run"])
+    e.add_argument("--cases", help="A JSONL file of cases (default: the tool's database, DATABASE_URL)")
+    e.add_argument("--product", help="Only this product's cases")
+    e.add_argument("--phase", action="append", help="Only these phases (repeatable)")
+    e.add_argument("--data-class", action="append",
+                   help="Data classes to include (default general; regulated cases only go to their allowed providers)")
+    e.add_argument("--limit", type=int, default=20, help="Newest cases per phase (default 20)")
+    e.add_argument("--config", default="config", help="The candidate config directory")
+    e.add_argument("--baseline-config", default=None, help="The config to compare with (default: the one in use)")
+    e.add_argument("--pairwise", action="store_true", help="Also judge each new document against the approved one")
+    e.add_argument("--max-drop", type=float, default=0.05, help="Largest drop in a rate that isn't a regression")
+    e.add_argument("--max-cost-increase", type=float, default=None, help="e.g. 0.25 fails a run that costs 25%% more")
+    e.add_argument("--budget", type=float, default=None, help="Dollars each config's run may spend")
+    e.add_argument("--mode", default="live", choices=["live", "stub"])
+    e.add_argument("--out", help="Write cases (export) or the full results (run) here")
     args = p.parse_args(argv)
+    if args.cmd == "eval":
+        return _eval(args)
     if args.cmd == "pilot-report":
         return _pilot_report(args)
     if args.cmd == "changes":
