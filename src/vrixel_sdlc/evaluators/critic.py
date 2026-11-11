@@ -87,7 +87,7 @@ def critique(services, *, phase: str, rubric_skills: tuple[str, ...], content: s
     snap = services.snapshot(ctx["product_id"], ctx.get("governance"))
     product = snap.product
     # The phase's checklist, plus the product's approved lessons marked to be checked.
-    items = rubrics.for_phase(phase) + lessons.checklist(snap.lessons, phase)
+    items = rubrics.for_request(phase, ctx.get("description", "")) + lessons.checklist(snap.lessons, phase)
     ask = (f"Check this {phase} document against the checklist below and the constitution. Try to refute it: "
            "assume an item isn't met until the document's own words show it is, and look for what is missing as "
            "hard as for what is wrong. For each item, say whether it is met; when it is, copy a short exact quote "

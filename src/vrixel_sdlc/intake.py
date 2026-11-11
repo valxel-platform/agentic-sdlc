@@ -28,6 +28,32 @@ _WORD = re.compile(r"[a-z0-9]+")
 _JSON = re.compile(r"\{.*\}", re.S)
 _TITLE_EDIT = re.compile(r"^\s*(?:change\s+(?:the\s+)?)?title\s*(?:to|:)\s*(.+)$", re.I)
 
+# The experience round: asked only when the intent changes what people see, so the design agent
+# works from what the person wants instead of deciding everything itself. Each answer is optional;
+# "you decide" leaves that part (or the rest) to the design agent, and the brief says so.
+EXPERIENCE = (
+    ("where", "Screen or flow"),
+    ("main_task", "Main task"),
+    ("context", "Where they use it"),
+    ("look", "Look"),
+)
+EXPERIENCE_QUESTIONS = {
+    "where": ("This changes what people see in {product}. Which screen or flow should change, or is it a new one? "
+              "A screenshot helps: attach it with the paperclip.", ["A new screen", "You decide the rest"]),
+    "main_task": ("On that screen, what's the one thing a person must be able to do or see first?",
+                  ["You decide the rest"]),
+    "context": ("Where are they when they use it?", ["On a phone, on the move", "At a desk", "Both", "You decide the rest"]),
+    "look": ("Should it follow {product}'s current design, or do you want something different? Name anything to "
+             "mirror or avoid.", ["Follow the current design", "You decide"]),
+}
+DELEGATED = "Left to the design agent"
+_DELEGATE = re.compile(r"\b(you decide|up to you|no preference|don'?t mind|not sure|skip|whatever works|your call)\b", re.I)
+_DELEGATE_REST = re.compile(r"\b(the rest|everything|all of (it|them)|rest)\b", re.I)
+_UI_WORDS = re.compile(r"\b(screens?|pages?|forms?|buttons?|dashboards?|views?|displays?|shows?|see|sees|alerts?|"
+                       r"notif\w*|menus?|layouts?|ui|ux|design|tablets?|phones?|mobile|tap|click|"
+                       r"report|chart|list|search|sign[- ]?in|onboarding|checkout)\b", re.I)
+UI_ROLES = ("consumer", "bff", "mobile")
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -43,9 +69,29 @@ class Draft:
     related_capability: str = ""  # the closest related feature or capability, noted in the description
     similar: list = field(default_factory=list)  # matches from vrixel_sdlc.duplicates
     not_duplicate_reason: str = ""
+    ui: bool = False  # the intent changes what people see: the experience round applies
+    experience: dict = field(default_factory=dict)  # EXPERIENCE keys -> the person's answer, or DELEGATED
+
+    @property
+    def experience_done(self) -> bool:
+        return all(self.experience.get(k) for k, _ in EXPERIENCE)
 
     def missing(self) -> list[str]:
-        return [f for f in FIELDS if not getattr(self, f)]
+        out = [f for f in FIELDS if not getattr(self, f)]
+        if self.ui and not self.experience_done:
+            out.append("experience")
+        return out
+
+    def brief(self) -> str:
+        """The experience brief, for the description the agents and approvers read."""
+        if not self.ui:
+            return ""
+        if self.experience and all(self.experience.get(k) == DELEGATED for k, _ in EXPERIENCE):
+            return "Experience brief: left to the design agent, within the product's current design."
+        lines = ["Experience brief:"]
+        for k, label in EXPERIENCE:
+            lines.append(f"- {label}: {self.experience.get(k) or 'not said'}")
+        return "\n".join(lines)
 
     def description(self) -> str:
         parts = [self.problem.strip(), "", f"Users: {self.users.strip()}", f"Success measure: {self.success_metric.strip()}"]
@@ -53,6 +99,8 @@ class Draft:
             parts.append(f"Related: {self.related_capability}")
         if self.not_duplicate_reason:
             parts.append(f"Not a duplicate because: {self.not_duplicate_reason}")
+        if self.brief():
+            parts += ["", self.brief()]
         return "\n".join(parts).strip()
 
 
@@ -64,7 +112,9 @@ class IntakeSession:
     messages: list[dict] = field(default_factory=list)
     draft: Draft = field(default_factory=Draft)
     awaiting: str = ""
+    options: list = field(default_factory=list)  # quick replies offered with the agent's last question
     overlap_checked: bool = False
+    ui_checked: bool = False  # whether the experience round applies has been decided (people can change it)
     feature_id: str = ""
     created_at: str = field(default_factory=now)
     attachments: list = field(default_factory=list)  # vrixel_sdlc.attachments: names and checks, never contents
@@ -218,8 +268,45 @@ class IntakeAgent:
                 s.awaiting = f
                 names = self.lane_names(s.lanes)
                 return QUESTIONS[f].format(lanes=", ".join(f"{n} ({k})" for k, n in names.items()))
+        if s.draft.ui:
+            for k, _ in EXPERIENCE:
+                if not s.draft.experience.get(k):
+                    s.awaiting = f"experience:{k}"
+                    question, options = EXPERIENCE_QUESTIONS[k]
+                    s.options = list(options)
+                    name = self.lane_names([s.draft.product_id]).get(s.draft.product_id, "the product")
+                    return question.format(product=name)
         s.awaiting = ""
         return ""
+
+    def touches_ui(self, d: Draft) -> bool:
+        """Whether the intent changes what people see: the product has a web or mobile app, and the
+        request talks about something people look at or do."""
+        if not d.product_id:
+            return False
+        try:
+            repos = self.services.snapshot(d.product_id).product.repos
+        except Exception:
+            return False
+        if not any(r.role in UI_ROLES for r in repos):
+            return False
+        # The product's own name ("Farm app", "Clinic records") says nothing about the change.
+        text = f"{d.title} {d.problem} {d.users}".lower()
+        for w in self._lane_words(d.product_id):
+            text = re.sub(rf"\b{re.escape(w)}\b", " ", text)
+        return bool(_UI_WORDS.search(text))
+
+    def _answer_experience(self, s: IntakeSession, key: str, text: str) -> None:
+        exp = dict(s.draft.experience)
+        if _DELEGATE.search(text):
+            exp[key] = DELEGATED
+            if _DELEGATE_REST.search(text) or key == "look":
+                for k, _ in EXPERIENCE:
+                    exp.setdefault(k, DELEGATED)
+                    exp[k] = exp[k] or DELEGATED
+        else:
+            exp[key] = text.strip()
+        s.draft.experience = exp
 
     def _summary(self, s: IntakeSession) -> str:
         d = s.draft
@@ -229,6 +316,10 @@ class IntakeAgent:
             lines.append(f"It looks related to {d.related_capability}; I've noted that so the agents build on it.")
         if d.not_duplicate_reason:
             lines.append(f"I've noted why it's different: {d.not_duplicate_reason}")
+        if d.ui:
+            said = [label.lower() for k, label in EXPERIENCE if d.experience.get(k) not in ("", None, DELEGATED)]
+            lines.append("The design agent will work from what you said about " + ", ".join(said) + "." if said else
+                         "You've left the design to the design agent; G3 approvers will see that.")
         lines.append("Submit it when it looks right, or tell me what to change.")
         return "\n".join(lines)
 
@@ -236,6 +327,7 @@ class IntakeAgent:
         if s.feature_id:
             return f"This intent was submitted as {s.feature_id}. Start a new conversation for another one."
         s.messages.append({"role": "user", "text": text, "at": now()})
+        s.options = []
         if s.awaiting == "not_duplicate_reason":  # the creator's answer to "this looks like X"
             s.draft.not_duplicate_reason = text.strip()
             s.awaiting = ""
@@ -246,7 +338,10 @@ class IntakeAgent:
             reply = self._respond_live(s)
         else:
             reply = self._respond_stub(s, text)
-        s.messages.append({"role": "agent", "text": reply, "at": now()})
+        msg = {"role": "agent", "text": reply, "at": now()}
+        if s.options:
+            msg["options"] = list(s.options)[:4]
+        s.messages.append(msg)
         return reply
 
     def _respond_stub(self, s: IntakeSession, text: str) -> str:
@@ -261,6 +356,8 @@ class IntakeAgent:
                     f"{n} ({k})" for k, n in names.items()) + "."
         elif s.awaiting in ("users", "success_metric"):
             setattr(d, s.awaiting, text.strip())
+        elif s.awaiting.startswith("experience:"):
+            self._answer_experience(s, s.awaiting.split(":", 1)[1], text)
         elif not d.problem:
             d.problem, d.title = text.strip(), _title_from(text)
             if lane:
@@ -274,6 +371,9 @@ class IntakeAgent:
             d.problem = f"{d.problem.rstrip()}\n\n{text.strip()}"
             return "Added that to the problem statement. " + (self._summary(s) if not d.missing() else self._next_question(s))
 
+        if not [f for f in FIELDS if not getattr(d, f)] and not s.ui_checked:
+            s.ui_checked = True
+            d.ui = self.touches_ui(d)
         if not d.missing() and not s.overlap_checked:
             s.overlap_checked = True
             d.related_capability = self._overlap(d)
@@ -291,7 +391,16 @@ class IntakeAgent:
             "You help a product person turn an idea into a feature intent for an agentic SDLC. "
             "Collect: product_id (one of " + json.dumps(names) + "), problem, users, success_metric, and a short title. "
             "Ask one question at a time, in plain language. Do not invent facts. "
-            'Reply with JSON only: {"reply": str, "draft": {"product_id", "title", "problem", "users", "success_metric"}}.\n\n'
+            + (f"This intent changes what people see, so once those are in, also ask about the experience, one "
+               f"question at a time: {', '.join(k for k, _ in EXPERIENCE)} (which screen or flow; the one thing a "
+               f"person must do or see first; where they use it; the look, following the product's current design "
+               f"unless they want something else). When the person isn't sure, offer two or three concrete "
+               f"directions as options to pick from. If they say you decide, set that part, or the rest, to "
+               f"{json.dumps(DELEGATED)}. " if s.draft.ui else "")
+            + 'Reply with JSON only: {"reply": str, "options": [short quick replies, at most 4, may be empty], '
+            '"draft": {"product_id", "title", "problem", "users", "success_metric"'
+            + (', "experience": {' + ", ".join(f'"{k}"' for k, _ in EXPERIENCE) + "}" if s.draft.ui else "")
+            + "}}.\n\n"
             f"Current draft: {json.dumps(asdict(s.draft))}\n\n"
             + (f"Files attached (you see names only; the feature's agents read them after submit): "
                f"{', '.join(a['name'] for a in s.attachments)}\n\n" if s.attachments else "")
@@ -313,16 +422,32 @@ class IntakeAgent:
                 continue
             if k in ("product_id", "title", "problem", "users", "success_metric") and isinstance(v, str) and v.strip():
                 setattr(s.draft, k, v.strip())
+        exp = (data.get("draft") or {}).get("experience")
+        if s.draft.ui and isinstance(exp, dict):
+            s.draft.experience = {**s.draft.experience, **{k: str(v).strip()[:500] for k, v in exp.items()
+                                                           if k in dict(EXPERIENCE) and isinstance(v, str) and v.strip()}}
+        if not [f for f in FIELDS if not getattr(s.draft, f)] and not s.ui_checked:
+            s.ui_checked = True
+            s.draft.ui = self.touches_ui(s.draft)
+        s.options = [str(o)[:80] for o in (data.get("options") or []) if isinstance(o, str) and o.strip()][:4]
         if not s.draft.missing() and not s.overlap_checked:
             s.overlap_checked = True
             s.draft.related_capability = self._overlap(s.draft)
         if not s.draft.missing() and s.duplicate:
+            s.options = []
             return self._duplicate_question(s)
         return str(data.get("reply") or "Could you say a bit more about what you need?")
 
     def update_draft(self, s: IntakeSession, changes: dict) -> None:
         if s.feature_id:
             raise ValueError("This intent was already submitted")
+        if "ui" in changes:
+            s.draft.ui, s.ui_checked = bool(changes.pop("ui")), True
+        if "experience" in changes:
+            exp = changes.pop("experience") or {}
+            if not isinstance(exp, dict) or set(exp) - dict(EXPERIENCE).keys():
+                raise ValueError(f"experience takes {', '.join(k for k, _ in EXPERIENCE)}")
+            s.draft.experience = {**s.draft.experience, **{k: str(v).strip()[:500] for k, v in exp.items()}}
         for k, v in changes.items():
             if k not in ("product_id", "title", "problem", "users", "success_metric"):
                 raise ValueError(f"Unknown field {k}")

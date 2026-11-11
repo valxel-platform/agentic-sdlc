@@ -112,6 +112,10 @@ def test_guided_intake_conversation_submits_a_feature(client, engine):
     assert early.status_code == 422 and "success_metric" in early.json()["detail"]
 
     s = client.post(f"/api/intake/{s['id']}/messages", json={"text": "60% of field visits logged within a week"}).json()
+    # Farm app has a mobile app and the request is about people on phones: the experience round.
+    assert not s["ready"] and s["missing"] == ["experience"] and "Which screen or flow" in s["messages"][-1]["text"]
+    assert "You decide the rest" in s["messages"][-1]["options"]
+    s = client.post(f"/api/intake/{s['id']}/messages", json={"text": "You decide the rest"}).json()
     assert s["ready"] and "Submit it when it looks right" in s["messages"][-1]["text"]
 
     s = client.patch(f"/api/intake/{s['id']}/draft", json={"title": "Offline field observations"}).json()

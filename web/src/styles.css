@@ -578,3 +578,18 @@ table.quality tfoot td { padding: 8px; font-weight: 600; }
 .ifield.attached { gap: 4px; }
 .ifield.attached > p { margin-top: 6px; }
 .turn.user .said.attached-note { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-1); padding: 6px 12px 6px 8px; border-style: dashed; }
+
+/* The experience round: quick replies in the conversation, the brief on the intent */
+.turn.quick { flex-direction: row; flex-wrap: wrap; gap: 8px; padding-left: 26px; margin-top: 8px; max-width: none; }
+.turn.quick .starter { border-style: solid; background: var(--raised); color: var(--ink); }
+.turn.quick .starter:hover { border-color: var(--ink); }
+.needs.n5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.needs.n5::before { left: 10%; right: 10%; }
+.experience { margin-top: 14px; border: 1px solid var(--rule-soft); border-radius: var(--r-m); padding: 4px 14px 10px; background: var(--panel); }
+.experience.off { padding-bottom: 4px; }
+.experience-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0 4px; }
+.experience-head > span { font-weight: 600; }
+.experience .ifield:last-of-type { border-bottom: 0; }
+.ifield.delegated input { color: var(--ink-3); font-style: italic; }
+.linkish.leave { color: var(--act); font-size: var(--fs-0); text-decoration: underline; text-underline-offset: 3px; margin-top: 4px; }
+.linkish.leave:hover { color: var(--act-hover); }

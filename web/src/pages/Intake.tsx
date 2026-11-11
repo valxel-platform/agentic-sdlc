@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, ATTACH_ACCEPT, PROFILE_HELP, PROFILE_LABEL, type Attachment, type Draft, type IntakeSession, type Me, type Profile } from "../api";
+import { api, ATTACH_ACCEPT, EXPERIENCE_DELEGATED, PROFILE_HELP, PROFILE_LABEL, type Attachment, type Draft, type ExperienceKey, type IntakeSession, type Me, type Profile } from "../api";
 import { AttachmentList } from "../components/Attachments";
 import { SimilarList } from "../components/External";
 import { Mark } from "../components/Mark";
@@ -12,7 +12,14 @@ const NEEDS: { key: keyof Draft; label: string; hint: string }[] = [
   { key: "users", label: "Users", hint: "Who uses it, and in what situation" },
   { key: "success_metric", label: "Success measure", hint: "A number or a change you could observe" },
 ];
-const FIELD_LABEL: Record<string, string> = Object.fromEntries(NEEDS.map((n) => [n.key, n.label]));
+/** The experience brief: asked only when the intent changes what people see. */
+const EXPERIENCE: { key: ExperienceKey; label: string; hint: string }[] = [
+  { key: "where", label: "Screen or flow", hint: "Which screen changes, or a new one" },
+  { key: "main_task", label: "Main task", hint: "What a person must do or see first" },
+  { key: "context", label: "Where they use it", hint: "On a phone in the field, at a desk…" },
+  { key: "look", label: "Look", hint: "Follow the current design, or what to mirror or avoid" },
+];
+const FIELD_LABEL: Record<string, string> = { ...Object.fromEntries(NEEDS.map((n) => [n.key, n.label])), experience: "Experience" };
 
 /** Openings people can start from; they only fill the message box. */
 const STARTERS = [
@@ -65,8 +72,13 @@ export function Intake({ me }: { me: Me }) {
     try {
       const next = await p;
       if (fromAgent && s) {
-        const changed = NEEDS.map((n) => n.key).filter((k) => next.draft[k] && next.draft[k] !== s.draft[k]);
+        const changed: string[] = NEEDS.map((n) => n.key).filter((k) => next.draft[k] && next.draft[k] !== s.draft[k]);
         if (next.draft.title !== s.draft.title) changed.push("title");
+        EXPERIENCE.forEach((e) => {
+          if (next.draft.experience?.[e.key] && next.draft.experience[e.key] !== s.draft.experience?.[e.key]) changed.push(`x:${e.key}`);
+        });
+        if (next.draft.ui && EXPERIENCE.every((e) => next.draft.experience?.[e.key]) &&
+            !EXPERIENCE.every((e) => s.draft.experience?.[e.key])) changed.push("experience");
         if (changed.length) {
           setLit(new Set(changed));
           window.setTimeout(() => setLit(new Set()), 1800);
@@ -122,6 +134,22 @@ export function Intake({ me }: { me: Me }) {
     run(api.intakeDraft(s.id, { [field]: s.draft[field] }));
   }
 
+  function editExperience(key: ExperienceKey, value: string) {
+    if (!s) return;
+    setS({ ...s, draft: { ...s.draft, experience: { ...s.draft.experience, [key]: value } } });
+  }
+
+  function saveExperience(key: ExperienceKey) {
+    if (!s) return;
+    run(api.intakeDraft(s.id, { experience: { [key]: s.draft.experience?.[key] ?? "" } }));
+  }
+
+  function quick(text: string) {
+    if (!s || busy) return;
+    setS({ ...s, messages: [...s.messages, { role: "user", text, at: new Date().toISOString() }] });
+    run(api.intakeSay(s.id, text), true);
+  }
+
   if (!me.lanes.length) {
     return <div className="panel empty"><h2>You can't submit intents yet</h2><p>Ask an owner to add you to a product's GitHub organization.</p></div>;
   }
@@ -129,7 +157,10 @@ export function Intake({ me }: { me: Me }) {
 
   const submitted = Boolean(s.feature_id);
   const names = Object.fromEntries(me.lanes.map((l) => [l.id, l.name]));
-  const have = NEEDS.filter((n) => !s.missing.includes(n.key)).length;
+  const needs: { key: string; label: string }[] = s.draft.ui ? [...NEEDS, { key: "experience", label: "Experience" }] : NEEDS;
+  const have = needs.filter((n) => !s.missing.includes(n.key)).length;
+  const last = s.messages[s.messages.length - 1];
+  const options = !submitted && !busy && last?.role === "agent" ? last.options ?? [] : [];
   const fresh = s.messages.filter((m) => m.role === "user").length === 0;
   const dup = (s.draft.similar ?? []).some((m) => m.duplicate) && !s.draft.not_duplicate_reason;
   const chosen = s.draft.product_id ? profiles[s.draft.product_id] : undefined;
@@ -172,6 +203,11 @@ export function Intake({ me }: { me: Me }) {
                 </li>
               );
             })}
+            {options.length > 0 && (
+              <li className="turn quick" aria-label="Quick replies">
+                {options.map((o) => <button key={o} type="button" className="starter" onClick={() => quick(o)}>{o}</button>)}
+              </li>
+            )}
             {busy && (
               <li className="turn agent first thinking">
                 <div className="who-said"><Mark size={18} /> Intake agent</div>
@@ -223,7 +259,7 @@ export function Intake({ me }: { me: Me }) {
           </form>
           <p className="mobile-ready">
             <span className={s.ready || submitted ? "faint" : "need"}>
-              {submitted ? "Submitted" : s.ready ? "Ready to submit" : `${have} of ${NEEDS.length} in place`}
+              {submitted ? "Submitted" : s.ready ? "Ready to submit" : `${have} of ${needs.length} in place`}
             </span>
             <a href="#h-intent">Review the intent</a>
           </p>
@@ -233,10 +269,10 @@ export function Intake({ me }: { me: Me }) {
           <header className="intent-head">
             <h2 id="h-intent">The intent</h2>
             <p className={`readiness ${submitted ? "done" : s.ready ? "ready" : "waiting"}`}>
-              {submitted ? "Submitted" : s.ready ? "Ready to submit" : `${have} of ${NEEDS.length} in place`}
+              {submitted ? "Submitted" : s.ready ? "Ready to submit" : `${have} of ${needs.length} in place`}
             </p>
-            <ol className="needs" aria-label="What G1 needs">
-              {NEEDS.map((n) => {
+            <ol className={`needs n${needs.length}`} aria-label="What G1 needs">
+              {needs.map((n) => {
                 const ok = !s.missing.includes(n.key);
                 return <li key={n.key} className={`${ok ? "ok" : ""}${lit.has(n.key) ? " lit" : ""}`}>
                   <i aria-hidden="true" />{n.label}<span className="visually-hidden">{ok ? ": in place" : ": still needed"}</span>
@@ -272,6 +308,35 @@ export function Intake({ me }: { me: Me }) {
                 </label>
               );
             })}
+
+            {s.draft.product_id && (
+              <div className={`experience${s.draft.ui ? "" : " off"}`}>
+                <div className="experience-head">
+                  <span>Experience</span>
+                  <label className="check small">
+                    <input type="checkbox" checked={s.draft.ui} disabled={submitted}
+                      onChange={(e) => run(api.intakeDraft(s.id, { ui: e.target.checked }))} />
+                    Changes what people see
+                  </label>
+                </div>
+                {s.draft.ui && EXPERIENCE.map((e) => {
+                  const v = s.draft.experience?.[e.key] ?? "";
+                  const delegated = v === EXPERIENCE_DELEGATED;
+                  return (
+                    <label key={e.key} className={`ifield${lit.has(`x:${e.key}`) ? " lit" : ""}${!v ? " missing" : ""}${delegated ? " delegated" : ""}`}>
+                      <span>{e.label}</span>
+                      <input value={v} disabled={submitted} placeholder={e.hint}
+                        onChange={(ev) => editExperience(e.key, ev.target.value)} onBlur={() => saveExperience(e.key)} />
+                    </label>
+                  );
+                })}
+                {s.draft.ui && !submitted && !EXPERIENCE.every((e) => s.draft.experience?.[e.key]) && (
+                  <button type="button" className="linkish leave" onClick={() => run(api.intakeDraft(s.id, {
+                    experience: Object.fromEntries(EXPERIENCE.filter((e) => !s.draft.experience?.[e.key]).map((e) => [e.key, EXPERIENCE_DELEGATED])),
+                  }), true)}>Leave the rest to the design agent</button>
+                )}
+              </div>
+            )}
 
             {(s.attachments ?? []).length > 0 && (
               <div className="ifield attached">

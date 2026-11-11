@@ -69,6 +69,18 @@ Three screens, all updated live over server-sent events (`/api/events`):
   product already has (see [Duplicate requests](#duplicate-requests)). You can edit the draft
   directly and submit it when it is complete. Submitting starts discovery.
 
+  When the intent changes what people see (the product has a web or mobile app and the request
+  talks about screens, alerts, forms and the like), the agent also asks about the experience, one
+  question at a time: which screen or flow, the one thing a person must do or see first, where they
+  use it, and the look (the product's current design unless they want something else). It offers
+  choices to tap, and "you decide" leaves a part, or the rest, to the design agent, which the brief
+  says. The answers become an experience brief in the intent: G1 approvers see it, the design agent
+  follows it and lists each choice it made itself, and the G3 critic checks the design against it.
+  People can turn the round off ("Changes what people see") or fill the brief in directly.
+
+  Files can be attached (screenshots, PDFs, text): see `vrixel_sdlc/attachments.py`. Until the intent
+  is submitted they count as the strictest data class, and the intake agent sees only their names.
+
 ### Sign-in and who can decide
 
 GitHub sign-in uses an OAuth app owned by `vrixel-tools`:

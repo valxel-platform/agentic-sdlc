@@ -347,6 +347,10 @@ def document_tail(phase: str, ctx: dict, previous: str = "") -> str:
             "Request:\n" + untrusted.wrap("request", ctx.get("description", "")), formats.contract(phase)]
     if ctx.get("attachments_text"):
         tail.insert(2, ctx["attachments_text"])
+    if phase == "design" and "Experience brief:" in (ctx.get("description") or ""):
+        tail.append("The request has an experience brief from the person who asked. Follow it: the screen or flow "
+                    "it names, the main task first, the look it asks for. Where it leaves a part to you, stay within "
+                    "the product's current design, and list each such choice under Agent notes as 'Traded off:'.")
     if ctx.get("feedback"):
         tail.append(f"Human feedback to address: {ctx['feedback']}")
     if ctx.get("prior_findings"):
