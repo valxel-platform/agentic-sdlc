@@ -433,6 +433,42 @@ entirely different words gets through to G1, where the approver sees the closest
 the pipeline opens a pull request in the governance repo that adds the feature's ADRs (accepted),
 marks superseded ones, and logs the change in the overview. People merge it.
 
+## Product inception: from a vision to a roadmap
+
+A new product, or an existing one that never had a product-level design, starts with three
+documents, each written by an agent, checked by machine and by the critic, and revised until both
+pass (`vrixel_sdlc/inception/`):
+
+1. **Product brief** (strategist): the problem, users, goals with numeric measures, non-goals, scope,
+   the data class with its reason, compliance, risks, and the product's id, org, repo prefix and
+   budget. The org must already exist; the person names it.
+2. **Product architecture** (architect): components with their repo roles and repos, AWS resources
+   from the platform catalog (checked against it and against the data class), shared services, NFRs
+   with numbers, and founding ADRs with their alternatives. The tool prices the resources per
+   environment from the catalog and adds a `## Monthly cost` table. An existing product also writes
+   `## Current state` and `## Gap`.
+3. **Roadmap** (strategist): initiatives in order, each with its horizon, budget, goals, what must come
+   first and its candidate features, and which components each feature builds. The checks make sure
+   every goal is served, every component is built, budgets fit the brief's, and (for a new product)
+   the first initiative is a thin working version through at least two components.
+
+The product council decides twice: on the brief before any architecture is written (the brief
+gate), then on the architecture and roadmap together (the product gate). Until the brief is
+approved every call runs as PHI, so only models under a BAA see the vision.
+
+From the command line, in stub mode by default (`--mode live` for real models):
+
+```bash
+vrixel inception --vision vision.md --org acme-water --out out            # the brief, for the brief gate
+vrixel inception --vision vision.md --org acme-water --brief out/BRIEF.md --out out   # architecture and roadmap
+vrixel inception --product FARM --vision next.md --out farm               # an existing product
+```
+
+A vision is Markdown: `# Name`, the idea, then optional `## Goals` (`- <outcome> (measure: <metric>)`),
+`## Users`, `## Constraints` and `## Budget`. The documents and `report.json` (status, attempts,
+findings, the critic's checklist, cost) land in `--out`. The gates in the web app, and the setup that
+turns approved documents into a governance repo, registry entry and repos, come next.
+
 ## Roadmap: goals, initiatives and releases
 
 Above features sit a product's goals and the initiatives that serve them; beside them, releases
