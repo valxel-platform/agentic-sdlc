@@ -66,6 +66,7 @@ class Services:
     signals: object = None  # vrixel_sdlc.ops.signals.SignalStore
     incident_signals: object = None  # incident id -> its signals, set by the engine
     suspects: object = None  # (product, repo) -> released features that changed it, set by the engine
+    feature_state: object = None  # feature id -> its state, set by the engine
     flag_of: object = None  # feature id -> its flag key, set by the engine
     start_hotfix: object = None  # starts an expedited fix feature, set by the engine
     start_intent_change: object = None  # starts a feature or initiative from an incident, set by the engine

@@ -330,6 +330,15 @@ responses); after a deploy to dev the agent's post-deploy job runs the same eval
 real model and reports `integration / report`. Platform articles VX-12 to VX-14 make these
 rules: models only through the gateway, people approve changes, evals gate every PR.
 
+**Evals at release, and variants.** A product can let its agents' live evals miss a case by chance
+but not more (`min_pass_rate: 0.95` on the `integration` suite in `product.yaml`, never below the
+platform's floor). G6 shows each agent repo the change set ships: its evals on recorded responses (PR)
+and against the real model (dev), with the same numbers from the last release that changed that
+agent, so a release that makes the agent worse is visible before production. A prompt or model
+change in the agent can go to a share of people first: the template's reviewed variants
+(`variants.toml`) are rolled out through the product's Flipt (`<agent>.variant`), the post-deploy
+evals run every variant, and the gateway's spans show each variant's tokens and cost.
+
 Models are reached through `ss-llm-gateway`, a shared-services package each product deploys in
 its own OpenChoreo project (runtime stays with the product). Its policy follows the product's
 data class: PHI only to providers under a BAA, payments with card data blocked, per-caller keys,
