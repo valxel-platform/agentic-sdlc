@@ -606,6 +606,7 @@ def build_build_subgraph(services):
             if not r["tests_passed"] or (earlier and earlier.get("attempt") == r.get("attempt")):
                 continue  # not ready for review, or this attempt has been reviewed
             token = telemetry.push_labels(task=tid, attempt=r.get("attempt"), repo=r["repo"])
+            catalog_entry(services, ctx, r)
             # The change note puts the task's trace (ACs, files, tests) in the repo, on the branch the
             # PR merges; with stub agents it is also the commit that makes the PR possible.
             services.github.put_file(
@@ -887,6 +888,23 @@ def make_phase_node(phase: str, services):
         return delta
 
     return node
+
+
+def catalog_entry(services, ctx: dict, r: dict) -> None:
+    """The repo's catalog-info.yaml on the feature branch, with this feature's capability: Git is the
+    Backstage catalog's source (vrixel_sdlc.catalog_info). Best effort: never fails the build."""
+    from .. import catalog_info
+
+    try:
+        snap = services.snapshot(ctx["product_id"], ctx.get("governance"))
+        lane = snap.lane_of_repo().get(r["repo"], snap.product)
+        rt = lane.runtime or {}
+        catalog_info.write(services, repo=r["repo"], branch=r["branch"], role=r.get("role", ""), product=lane,
+                           component=(rt.get("components") or {}).get(r["repo"], r["repo"]),
+                           project=rt.get("openchoreo_project"), capability=capability_id(ctx),
+                           feature_id=ctx["feature_id"])
+    except Exception:
+        log.warning("catalog-info.yaml not written for %s", r["repo"], exc_info=True)
 
 
 def capability_id(state: FeatureState) -> str:
