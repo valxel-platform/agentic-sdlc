@@ -92,6 +92,7 @@ class FeatureState(TypedDict, total=False):
     fix_retries: Annotated[int, last]  # agents' fixes for failures after merge, before production (since staging last passed)
     fix_branch: Annotated[str, last]  # the branch the current fix goes on ('' before merge)
     performance: Annotated[dict, last]  # repo -> the performance test it needs (vrixel_sdlc.performance)
+    instrumentation_check: Annotated[dict, last]  # the feature's product events counted in staging (outcomes)
     rerun_repos: Annotated[list[str], last]  # repos whose CI failed: the build retry redoes only their tasks
 
     artifacts: Annotated[dict[str, ArtifactRef], merge_dict]  # kind -> latest ref

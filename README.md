@@ -555,6 +555,18 @@ vrixel outcomes read CLN GOAL-CLN-1 --days 30     # one reading, recorded (--dry
 vrixel outcomes record CLN GOAL-CLN-2 --value 3.1 --n 812 --start 2026-10-01 --end 2026-11-01
 ```
 
+**Features that say what they move.** The brief names the product goal a feature moves
+(`## Product goal`: `- GOAL-CLN-1: <how>`, or `- None: <why>` for work no goal covers); the check
+holds it to the goals in goals.yaml and to its initiative's goal. The PRD then lists the events that
+show it (`## Instrumentation`: `- checkin_completed (GOAL-CLN-1): fires when ...; properties: ...`):
+every goal the brief names is fed by an event, and properties are categories and numbers, never a
+person's name, contact details or ids (PHI and payments events carry no person-level ids at all).
+The HLD names the repo that records each event, the coder records it (the OpenTelemetry counter
+`vrixel.events`, attribute `event=<name>`) and says so in the patch summary, and after staging passes
+the tool counts the events from the templates' per-minute summary line
+(`vrixel.events {"checkin_completed": 12}`, read through the OpenChoreo observer). G6 shows which
+fired and which never did: a goal fed only by silent events can't be measured once it ships.
+
 **Initiatives have their own gate, G0.** A strategist agent drafts the initiative from a request:
 the goal it serves (or a proposed new goal with a measure), outcome, success measure, horizon,
 budget envelope (at most `max_initiative_budget_usd`), the lanes that must change, the release

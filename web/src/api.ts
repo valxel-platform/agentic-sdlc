@@ -80,6 +80,8 @@ export interface PendingItem {
   constitution_version?: string;
   /** G5 and G6: the performance test each repo of the change needed, and why. */
   performance?: PerformanceDecision[] | null;
+  // G6: the feature's product events, counted in staging (outcome loop)
+  instrumentation?: InstrumentationCheck | null;
   /** People's earlier corrections to this phase in this feature, oldest first. */
   history?: Correction[];
   /** How many times this phase was sent back. */
@@ -616,4 +618,13 @@ export interface ReleaseCandidate {
   rc: string;
   status: "published" | "missing" | "unknown";
   package: { type: string; name: string } | null;
+}
+
+export interface InstrumentationCheck {
+  checked: boolean;
+  environment: string;
+  fired: Record<string, number>;
+  missing: string[];
+  events: { event: string; goals: string[]; repo: string }[];
+  why?: string;
 }

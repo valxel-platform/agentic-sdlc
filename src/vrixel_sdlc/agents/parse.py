@@ -134,6 +134,54 @@ def parse_events(hld: str) -> list[dict]:
     return [{"type": t, "about": a} for t, a in _EVENT.findall(section(hld, "Events"))]
 
 
+_GOAL_LINE = re.compile(r"^(GOAL-[A-Za-z0-9-]*[A-Za-z0-9])\s*:\s*(.*)$")
+_INSTR = re.compile(r"^([A-Za-z][\w.]*)\s*\(([^)]*)\)\s*:\s*(.*)$")
+_EMITS = re.compile(r"^([A-Za-z][\w.]*)\s*:\s*([\w.-]+/[\w.-]+)")
+
+
+def parse_product_goal(brief: str) -> tuple[list[str], str]:
+    """'## Product goal' bullets: '- GOAL-CLN-1: <how this feature moves it>' -> the goal ids, and the
+    reason when the brief says '- None: <why>'."""
+    ids, none = [], ""
+    for b in bullets(section(brief, "Product goal")):
+        m = _GOAL_LINE.match(b)
+        if m:
+            ids.append(m.group(1))
+        elif b.lower().startswith("none"):
+            none = b.split(":", 1)[1].strip() if ":" in b else "none"
+    return ids, none
+
+
+def parse_instrumentation(prd: str) -> list[dict]:
+    """'## Instrumentation' bullets: '- alert_opened (GOAL-AW-1): fires when a manager opens an alert;
+    properties: farm_size, minutes_since_sent' -> event, the goals it feeds, when, properties."""
+    out = []
+    for b in bullets(section(prd, "Instrumentation")):
+        m = _INSTR.match(b)
+        if not m:
+            continue
+        body = m.group(3)
+        props: list[str] = []
+        pm = re.search(r"propert(?:y|ies)\s*:\s*(.+)$", body, re.I)
+        if pm:
+            props = [x.strip().strip("`") for x in re.split(r"[,;]", pm.group(1)) if x.strip()]
+            props = [] if [x.lower() for x in props] == ["none"] else props
+            body = body[:pm.start()].rstrip(" ;,")
+        out.append({"event": m.group(1), "goals": re.findall(r"GOAL-[A-Za-z0-9-]*[A-Za-z0-9]", m.group(2)),
+                    "when": body.strip(), "properties": props})
+    return out
+
+
+def parse_emitters(hld: str) -> dict[str, str]:
+    """The HLD's '## Instrumentation' bullets: '- alert_opened: acme-farm/farm-api' -> event -> repo."""
+    out = {}
+    for b in bullets(section(hld, "Instrumentation")):
+        m = _EMITS.match(b)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
 def parse_trace(plan: str) -> list[tuple[str, str, str]]:
     return _TRACE.findall(section(plan, "Traceability"))
 

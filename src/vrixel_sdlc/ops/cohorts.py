@@ -171,11 +171,11 @@ class ObserverLogs:
         self.auth = auth or (lambda: {})
         self.opener = opener or build_opener()
 
-    def _query(self, scope: dict, start: datetime, end: datetime) -> list[tuple[str, str]]:
+    def _query(self, scope: dict, start: datetime, end: datetime, phrase: str = MARKER) -> list[tuple[str, str]]:
         from urllib.request import Request
 
         body = {"startTime": start.isoformat(), "endTime": end.isoformat(), "limit": 1000, "sortOrder": "asc",
-                "searchScope": scope, "searchPhrase": MARKER}
+                "searchScope": scope, "searchPhrase": phrase}
         req = Request(f"{self.url}/api/v1/logs/query", data=json.dumps(body).encode(), method="POST",
                       headers={"Content-Type": "application/json", "Accept": "application/json", **self.auth()})
         with self.opener.open(req, timeout=20) as resp:
@@ -184,19 +184,20 @@ class ObserverLogs:
                 for x in got.get("logs") or [] if isinstance(x, dict)]
 
     def entries(self, *, namespace: str, project: str, environment: str, since: datetime, until: datetime,
-                depth: int = 0) -> list[tuple[str, str]]:
+                depth: int = 0, phrase: str = MARKER) -> list[tuple[str, str]]:
         """Every summary line in the project's environment, from any component: [(component, line)].
+        `phrase` picks the kind: flag cohorts (the default) or product events (outcomes.instrumentation).
         Watching the whole project catches a component that checks the flag though the feature
         didn't change it."""
         scope = {"namespace": namespace, "project": project, "environment": environment}
-        got = self._query(scope, since, until)
+        got = self._query(scope, since, until, phrase)
         if len(got) < 1000 or depth >= 5 or until - since < timedelta(minutes=2):
             return got
         mid = since + (until - since) / 2
         return (self.entries(namespace=namespace, project=project, environment=environment, since=since, until=mid,
-                             depth=depth + 1)
+                             depth=depth + 1, phrase=phrase)
                 + self.entries(namespace=namespace, project=project, environment=environment, since=mid, until=until,
-                               depth=depth + 1))
+                               depth=depth + 1, phrase=phrase))
 
 
 class StubLogs:

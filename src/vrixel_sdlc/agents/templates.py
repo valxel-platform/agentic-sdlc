@@ -41,6 +41,7 @@ def discovery(ctx: dict, defective: bool) -> str:
         f"Feature: {ctx['feature_id']} · Product: {ctx['product_name']}",
         "", "## Problem", ctx.get("description") or ctx["title"],
         "", "## Capability", cap,
+        "", "## Product goal", _goal_line(ctx),
     ]
     if not defective:
         lines += ["", "## Success metrics",
@@ -48,6 +49,28 @@ def discovery(ctx: dict, defective: bool) -> str:
                   "- M2: Support tickets for this workflow fall by [target]%"]
     lines += ["", "## Constitution articles", "- VX-6"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _goal_line(ctx: dict) -> str:
+    """Stub judgement: the initiative's goal, else the product's first; a live agent picks the one
+    the request moves."""
+    goals = [g["id"] for g in ctx.get("product_goals") or []]
+    goal = ctx.get("initiative_goal") if ctx.get("initiative_goal") in goals else (goals[0] if goals else "")
+    if not goal:
+        return "- None: the product has no goals in roadmap/goals.yaml yet"
+    return f"- {goal}: {ctx['title']} takes a step out of the work this goal measures"
+
+
+def _instrumentation_lines(ctx: dict) -> list[str]:
+    from .parse import parse_product_goal
+
+    goals, _ = parse_product_goal((ctx.get("parent_texts") or {}).get("OPP", ""))
+    if not goals:
+        return ["- None: the brief names no product goal"]
+    base = _slug(ctx["title"])[:32].strip("_") or "feature"
+    event = ("f_" + base if not base[0].isalpha() else base) + "_completed"
+    return [f"- {event} ({', '.join(goals)}): fires when someone completes {ctx['title'].lower()}; "
+            "properties: source, duration_ms"]
 
 
 def spec(ctx: dict, defective: bool) -> str:
@@ -69,6 +92,7 @@ def spec(ctx: dict, defective: bool) -> str:
         "", "## Non-functional requirements",
         f"- NFR-1 (performance, G1): {title} answers 95% of requests within 500 ms at the expected peak",
         f"- NFR-2 (accessibility, G1): {title} meets WCAG 2.1 AA (keyboard path, labels, 4.5:1 contrast)",
+        "", "## Instrumentation", *_instrumentation_lines(ctx),
         "", "## Constitution articles", "- VX-5", f"- {product_article}",
     ]
     if not defective:
@@ -175,6 +199,11 @@ def architecture(ctx: dict, defective: bool) -> str:
         workers = ", ".join(r["name"].split("/", 1)[-1] for r in repos if r["role"] == "event-worker")
         lines += ["", "## Events",
                   f"- vrixel.{record}.changed.v1: published by {provider.split('/', 1)[-1]}, applied by {workers}"]
+    from .parse import parse_instrumentation
+
+    wanted = parse_instrumentation((ctx.get("parent_texts") or {}).get("PRD", ""))
+    if wanted:
+        lines += ["", "## Instrumentation"] + [f"- {e['event']}: {provider}" for e in wanted]
     lines += ["", "## Performance",
               "- Expected load: as today's peak for this product",
               "- New traffic: yes: a new endpoint that people will call" if not ctx["repos"] or new else
@@ -386,6 +415,9 @@ def code_task(ctx: dict, task: dict, passed: bool) -> str:
            + ("(published to Kafka first; no database write)" if task.get("role") == "provider"
               else "(applied once, in order)")]
           if ctx.get("events") and task.get("role") in ("provider", "event-worker") else []),
+        *([f"Instrumentation: {', '.join(e['event'] for e in ctx['instrumentation'] if e.get('repo') == task['repo'])}"
+           " (vrixel.events counter; no personal attributes)"]
+          if any(e.get("repo") == task["repo"] for e in ctx.get("instrumentation") or []) else []),
         *([f"Acceptance: {', '.join(task['acs'])} (tagged @{ctx['feature_id']}, covers declared)"]
           if task.get("role") == "acceptance" else []),
         f"Tests: {'passed' if passed else 'failed: test_' + _slug(task['id'])}",
