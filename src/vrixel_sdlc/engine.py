@@ -1319,7 +1319,9 @@ class FeatureEngine:
                "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins,
                "related_features": similar, "not_duplicate_reason": not_duplicate_reason.strip(),
                "initiative_id": initiative_id, "track": track, "hotfix": dict(hotfix or {}), "pilot": bool(pilot),
-               "profile": profile}
+               "profile": profile,
+               # A share of new features runs on the candidate config, when one is set (VRIXEL_CANARY_*).
+               "config_variant": self.services.canary_variant(feature_id, snap.product.data_class, track)}
         if budget_usd:
             inp["token_budget_usd"] = float(budget_usd)
         self.bus.publish({"type": "feature.created", "feature_id": feature_id, "product_id": product_id})
@@ -1411,6 +1413,7 @@ class FeatureEngine:
             "created_by": s.get("created_by", ""),
             "status": s.get("status"),
             "profile": s.get("profile", "feature"),
+            "config_variant": s.get("config_variant", ""),
             "track": s.get("track", "standard"),
             "running": (running := self.is_running(feature_id)),
             "error": self.errors.get(feature_id),

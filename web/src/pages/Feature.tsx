@@ -163,6 +163,10 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
               <dt></dt><dd><div className="budget" aria-hidden="true"><i style={{ width: `${spentPct}%` }} /></div></dd>
               <dt>Model calls</dt><dd>{f.usage.calls}</dd>
               <dt>Cache hit rate</dt><dd>{Math.round(f.usage.cache_hit_rate * 100)}%</dd>
+              {f.config_variant === "canary" && <>
+                <dt>Agents' config</dt>
+                <dd>Candidate (canary): compared with the config in use in the pilot report</dd>
+              </>}
               <dt>Human time</dt><dd>{f.human_active_minutes.toFixed(1)} min across {f.gate_decisions.length} decisions</dd>
               {f.run_cost && <>
                 <dt>AWS approved</dt>

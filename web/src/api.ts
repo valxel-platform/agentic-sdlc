@@ -195,6 +195,8 @@ export interface AgentSession {
 export interface Feature extends FeatureSummary {
   description: string;
   agent_sessions?: AgentSession[];
+  // "canary": the feature's agents run with the candidate config.
+  config_variant?: string;
   profile?: Profile;
   track?: string;
   constitution_version: string;

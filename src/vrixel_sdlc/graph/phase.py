@@ -113,6 +113,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         # After the change set merged, a fix for a failure in dev or staging goes on a branch of its own.
         "branch": state.get("fix_branch") or f"feature/{state['feature_id']}",
         "pilot": bool(state.get("pilot")),
+        "config_variant": state.get("config_variant", ""),
         "simulate_faults": dict(state.get("simulate_faults") or {}),
         "tasks": list(state.get("tasks") or []),
         "cases": list(state.get("cases") or []),
@@ -207,9 +208,10 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
         design_knowledge=ctx.get("knowledge_text", ""),
     )
     left = budget_usd if budget_usd is not None else ctx.get("budget_remaining_usd")
-    candidates = services.roles_for(role, product.data_class)
+    variant = ctx.get("config_variant", "")  # a canary feature's agents run with the candidate config
+    candidates = services.roles_for(role, product.data_class, variant) if variant else services.roles_for(role, product.data_class)
     for i, who in enumerate(candidates):
-        runtime = services.runtime_for(who)
+        runtime = services.runtime_for(who, variant) if variant else services.runtime_for(who)
         missing = PHASE_SPECS[phase].required_capabilities - runtime.capabilities
         if missing:
             if i == 0:

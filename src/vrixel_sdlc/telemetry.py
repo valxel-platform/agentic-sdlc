@@ -156,22 +156,23 @@ class Telemetry:
     def enabled(self) -> bool:
         return self._tracer is not None
 
-    def attributes(self, task, runtime: str) -> dict:
+    def attributes(self, task, runtime: str, config_version: str = "") -> dict:
         t = task.tags
         out = {"vrixel.feature_id": t.feature_id, "vrixel.product_id": t.product_id, "vrixel.phase": t.phase,
                "vrixel.role": t.role, "vrixel.data_class": t.data_class, "vrixel.runtime": runtime,
-               "vrixel.prompt_version": t.prompt_version, "vrixel.config_version": self.config_version,
+               "vrixel.prompt_version": t.prompt_version,
+               "vrixel.config_version": config_version or self.config_version,
                "gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": t.role}
         out.update({f"vrixel.{k}": v for k, v in current_labels().items()})
         return {k: v for k, v in out.items() if v not in (None, "")}
 
     @contextmanager
-    def agent_span(self, task, runtime: str, *, model: str = "", provider: str = ""):
+    def agent_span(self, task, runtime: str, *, model: str = "", provider: str = "", config_version: str = ""):
         """The span for one agent session; yields it (None when tracing is off)."""
         if not self.enabled:
             yield None
             return
-        attrs = self.attributes(task, runtime)
+        attrs = self.attributes(task, runtime, config_version)
         if model:
             attrs["gen_ai.request.model"] = model.split("/", 1)[-1]
         if provider:
@@ -264,10 +265,13 @@ class TracedRuntime:
         return getattr(self.inner, item)
 
     def run(self, task):
-        settings = getattr(getattr(self.inner, "gateway", None), "settings", None)
+        gateway = getattr(self.inner, "gateway", None)
+        settings = getattr(gateway, "settings", None)
         role = settings.role(task.role) if settings is not None else None
+        # The config this runtime's gateway runs (the canary's, for a canary feature).
         with self.telemetry.agent_span(task, self.name, model=getattr(role, "model", ""),
-                                       provider=getattr(role, "provider", "")) as span:
+                                       provider=getattr(role, "provider", ""),
+                                       config_version=getattr(gateway, "config_version", "")) as span:
             task.telemetry = {"env": self.telemetry.subprocess_env(task, self.name),
                               "codex_config": self.telemetry.codex_config(task) if self.name == "codex" else ""}
             try:

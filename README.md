@@ -1572,6 +1572,20 @@ cases under the config in use and the candidate and fails when a rate drops by m
   `VRIXEL_LANGFUSE_SECRET_KEY`, each run writes one dataset per phase (`vrixel/<phase>`), links the
   run's traces to the items and scores them; documents go to Langfuse only for `general` cases.
 
+### Trying a config on some features first: the canary
+
+A model, prompt or setting change that passed its evals can run on a share of new features before it
+replaces the config in use. Point `VRIXEL_CANARY_CONFIG_DIR` at the candidate config directory (laid
+out like `config/`) and set `VRIXEL_CANARY_PERCENT` (1 to 50). Each new feature is assigned once, by
+its id, and keeps its config to the end; hotfixes, and lanes outside `VRIXEL_CANARY_DATA_CLASSES`
+(`general` by default), always use the config in use. A canary feature's agents, critic and
+fallbacks all run under the candidate, and every model call, ledger row and trace carries its config
+version, so the pilot report's **By configuration** table compares the canary with the rest on
+first-time approvals, loops, the critic's false passes, fixes before and after merge, incidents,
+cost and the human share. The feature page says when a feature is on the canary. To roll the change
+out, merge it into the config and drop the canary; to stop it, set the percent to 0. The candidate
+must define every role the config in use has, or the tool refuses to start.
+
 ## Predictable results
 
 The pipeline reads agents' work by machine, so the shapes are fixed and every reply is checked:

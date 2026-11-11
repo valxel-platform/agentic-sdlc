@@ -241,6 +241,7 @@ def feature_report(engine, feature_id: str) -> dict:
     verdicts = critic_outcomes(s)
     return {
         "config_version": main_config(records),
+        "config_variant": s.get("config_variant", "") or "main",
         "critic_outcomes": verdicts,
         "outcomes": outcomes(engine, feature_id, s),
         "feature_id": feature_id, "title": v.get("title"), "status": v.get("status"), "pilot": bool(s.get("pilot")),
@@ -371,6 +372,7 @@ def by_config(rows: list[dict]) -> dict:
         passed = [v for v in verdicts if v["outcome"].startswith("passed")]
         o = [r.get("outcomes") or {} for r in rs]
         out[cfg] = {
+            "variant": ",".join(sorted({r.get("config_variant", "main") for r in rs})),
             "features": len(rs), "done": sum(1 for r in rs if r["status"] == "done"),
             "first_time_approval_rate": _rate(sum(r["first_time_approvals"] for r in rs), gates),
             "loops_per_feature": round(sum(sum(r["loops"].values()) for r in rs) / len(rs), 2),
