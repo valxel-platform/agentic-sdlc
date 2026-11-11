@@ -192,6 +192,7 @@ class FeatureEngine:
 
             services.aws_tags = aws_tags_from_env()
         self._inventory_day = ""
+        self._outcomes_day = ""
         self._envs_swept = 0.0
         if getattr(services, "agents", None) is None:
             from .integrations.openchoreo_agents import from_env as agents_from_env
@@ -349,6 +350,12 @@ class FeatureEngine:
                         self.snapshot_inventories()
                     except Exception:
                         pass
+                if today != self._outcomes_day:  # readouts and goal trends move daily at most
+                    self._outcomes_day = today
+                    try:
+                        self.collect_outcomes()
+                    except Exception:
+                        pass
                 if time.time() - self._envs_swept > 900:  # change-set environments left behind
                     self._envs_swept = time.time()
                     try:
@@ -369,6 +376,12 @@ class FeatureEngine:
 
         self._watcher = threading.Thread(target=loop, name="vrixel-watcher", daemon=True)
         self._watcher.start()
+
+    def collect_outcomes(self, product_id: str | None = None) -> list[dict]:
+        """Readouts that are due and each goal's weekly trend reading (vrixel_sdlc.outcomes.readouts)."""
+        from .outcomes import readouts
+
+        return readouts.run(self, product_id)
 
     def trace_link(self, trace_id: str) -> str:
         tel = getattr(self.services, "telemetry", None)

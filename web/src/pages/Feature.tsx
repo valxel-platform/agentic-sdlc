@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, ApiError, PROFILE_HELP, PROFILE_LABEL, type Feature, type FeatureCost, type FeatureEvent } from "../api";
+import { api, ApiError, PROFILE_HELP, PROFILE_LABEL, type Feature, type FeatureCost, type FeatureEvent, type FeatureOutcome } from "../api";
 import { CostTable } from "../components/Costs";
 import { AgentSessions } from "../components/AgentSessions";
 import { useLive } from "../live";
@@ -9,6 +9,7 @@ import { ArtifactBody } from "../components/Artifact";
 import { DecisionPanel } from "../components/Decision";
 import { Delivery, Diagrams, NewRepos, WorkItems } from "../components/External";
 import { QualityTable } from "../components/Quality";
+import { ReadoutTable } from "../components/Outcome";
 import { TracePanel } from "../components/Trace";
 import { AttachmentList } from "../components/Attachments";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money, threadPath } from "../vocab";
@@ -30,7 +31,7 @@ const WAIT_EVENTS: Record<string, Record<string, string>> = {
   deploy_dev: { deployed: "Deployed to dev" },
   dev_wait: { passed: "Ready in dev", retry: "Dev deployment retried", resolved: "Dev failure waved through", aborted: "Stopped after a failed dev deployment" },
   deploy_staging: { deployed: "Deployed to staging" },
-  staging_wait: { passed: "Ready in staging", retry: "Staging deployment retried", resolved: "Staging failure waved through", aborted: "Stopped after a failed staging deployment" },
+  staging_wait: { instrumentation: "Goal events counted in staging", passed: "Ready in staging", retry: "Staging deployment retried", resolved: "Staging failure waved through", aborted: "Stopped after a failed staging deployment" },
   production_wait: { passed: "Ready in production", retry: "Production deployment sent back to G6", resolved: "Production failure waved through", aborted: "Stopped after a failed production deployment" },
 };
 
@@ -49,6 +50,34 @@ function BuildCost({ featureId, version }: { featureId: string; version: number 
         </p>
       )}
     </>
+  );
+}
+
+// Whether the feature moved its product goal: its events in staging, then readouts after release.
+function Outcome({ featureId, version }: { featureId: string; version: number }) {
+  const [o, setO] = useState<FeatureOutcome | null>(null);
+  useEffect(() => { api.featureOutcome(featureId).then(setO).catch(() => setO(null)); }, [featureId, version]);
+  if (!o || o.goals.length === 0) return null;
+  const check = o.instrumentation;
+  return (
+    <section className="panel" aria-labelledby="h-outcome">
+      <h2 id="h-outcome" className="section-title">Outcome</h2>
+      <div className="pad small">
+        <p>Moves {o.goals.join(", ")}.
+          {check && check.checked && (check.missing.length > 0
+            ? ` In staging, ${check.missing.join(", ")} never fired.`
+            : ` All ${check.events.length} of its events fired in staging.`)}
+        </p>
+        {!o.released_at && <p className="muted">Readouts start once the feature reaches everyone.</p>}
+      </div>
+      <ReadoutTable readouts={o.readouts} metrics={o.metrics} />
+      {o.readouts.length > 0 && <p className="small faint pad">{o.readouts[0].caveat}</p>}
+      {o.upcoming.length > 0 && (
+        <p className="small muted pad">
+          Next: {o.upcoming.slice(0, 3).map((u) => `${u.window_days}-day readout ${u.due}`).join(", ")}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -196,6 +225,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
         </div>
 
         <div className="stack">
+          <Outcome featureId={f.feature_id} version={f.events.length} />
           {(f.attachments ?? []).length > 0 && (
             <section className="panel" aria-labelledby="h-attached">
               <h2 id="h-attached" className="section-title">Attached at intake</h2>

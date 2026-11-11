@@ -101,6 +101,14 @@ def product_roadmap(engine, product_id: str) -> dict:
                                        "target_date": v["target_date"], "features": [f["feature_id"] for f in v["features"]],
                                        "initiative": v["initiative"],
                                        "record": releases.get(row["feature_id"], {}).get("record", "pull request")}
+    from ..outcomes.readouts import product_outcomes
+
+    outcomes = product_outcomes(engine, product_id, {"initiatives": initiatives})
+    for i in initiatives:
+        i["outcome"] = outcomes["initiatives"].get(i["id"])
     return {"product_id": product_id, "record": {"repo": record["repo"], "sha": record["sha"], "error": error},
-            "goals": record["goals"], "initiatives": initiatives, "releases": list(releases.values()),
+            "goals": [{**g, "outcome": outcomes["goals"].get(g["id"])} for g in record["goals"]],
+            "outcomes": {"wanted": outcomes["wanted"], "windows": outcomes["windows"],
+                         "readouts": outcomes["features"], "min_cell": outcomes.get("min_cell")},
+            "initiatives": initiatives, "releases": list(releases.values()),
             "unplanned": [f for f in feats if not f.get("initiative_id") and f["status"] == "in_progress"]}

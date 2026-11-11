@@ -567,6 +567,31 @@ the tool counts the events from the templates' per-minute summary line
 (`vrixel.events {"checkin_completed": 12}`, read through the OpenChoreo observer). G6 shows which
 fired and which never did: a goal fed only by silent events can't be measured once it ships.
 
+**Readouts after release.** Once a feature reaches everyone (the pipeline's finalize step), the
+tool reads its goal after each window the product sets (`tools.metrics.windows`, default
+`[7, 30, 90]` days): the metric over the window after release against the same length of time just
+before it (or the goal's baseline when there is no reading before), the change, and whether it went
+toward the target. A before-and-after readout says it isn't proof the feature caused the change;
+flag cohorts are the comparison. Each goal also gets a reading of the last 30 days once a week: its
+trend. The watcher takes both daily (`engine.collect_outcomes`).
+
+The Roadmap shows each goal's latest reading, baseline, target, trend and status, and each
+approved initiative's status since its approval:
+
+| Status | When |
+| --- | --- |
+| On track | moved toward the target by at least a quarter of the share of time gone to `by` (and at least 5% of the gap) |
+| Flat | moved less than that either way |
+| Off track | moved away from the target by more than 5% of the gap |
+| No data | no reading yet, a suppressed one, or no baseline |
+
+A goal entered by hand asks for its number when a readout is due: the Roadmap's "Numbers to enter"
+lists each period, and the product's owners (G1 and G0 approvers) enter it
+(`POST /api/products/{id}/goals/{goal}/readings`), which retakes the waiting readouts. A PHI rate
+also returns `k`, the count on top, so 2% of 300 (6 people) is suppressed like any small count. The
+feature page's Outcome panel shows the goals it moves, its events in staging, its readouts and the
+windows still to come.
+
 **Initiatives have their own gate, G0.** A strategist agent drafts the initiative from a request:
 the goal it serves (or a proposed new goal with a measure), outcome, success measure, horizon,
 budget envelope (at most `max_initiative_budget_usd`), the lanes that must change, the release

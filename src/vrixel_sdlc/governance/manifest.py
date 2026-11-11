@@ -285,11 +285,12 @@ def _metrics(spec, entry: RegistryEntry, tools: ToolsConfig, problems: list[str]
           sql: {}                                    # read replica; DSN is VRIXEL_METRICS_DSN_<ID>
           prometheus: { url: https://prometheus.cln.example.com }
           posthog: { url: https://posthog.example.com, project: 12 }
+          windows: [7, 30, 90]                       # readouts after a feature reaches all users (days)
           min_cell: 11                               # counts under this show as "under 11"; fixed at
                                                      # 11 or more for PHI, off (1) by default otherwise
 
     Manual entry needs no source. Credentials stay platform secrets, never in this file."""
-    from ..outcomes import min_cell_for
+    from ..outcomes import DEFAULT_WINDOWS, min_cell_for
 
     if not isinstance(spec, dict):
         problems.append("tools.metrics must be a mapping of sources (sql, prometheus, posthog) and min_cell")
@@ -297,7 +298,7 @@ def _metrics(spec, entry: RegistryEntry, tools: ToolsConfig, problems: list[str]
     known = tools.providers.get("metrics", {})
     sources: dict[str, dict] = {}
     for name, cfg in spec.items():
-        if name == "min_cell":
+        if name in ("min_cell", "windows"):
             continue
         cfg = dict(cfg or {}) if isinstance(cfg, dict) or cfg is None else None
         if name not in known:
@@ -333,7 +334,14 @@ def _metrics(spec, entry: RegistryEntry, tools: ToolsConfig, problems: list[str]
     if min_cell < floor:
         problems.append(f"tools.metrics.min_cell must be at least {floor} for {entry.data_class} data")
         return None
-    return {"sources": sources, "min_cell": min_cell}
+    windows = spec.get("windows", list(DEFAULT_WINDOWS))
+    if (not isinstance(windows, list) or not windows or len(windows) > 5
+            or not all(isinstance(w, int) and not isinstance(w, bool) and 1 <= w <= 365 for w in windows)
+            or windows != sorted(set(windows))):
+        problems.append("tools.metrics.windows must be 1 to 5 whole numbers of days, ascending, at most 365 "
+                        "(the readouts after a feature reaches all users; default [7, 30, 90])")
+        return None
+    return {"sources": sources, "min_cell": min_cell, "windows": windows}
 
 
 def _change_management(spec: dict, problems: list[str]) -> dict | None:

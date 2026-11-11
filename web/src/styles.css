@@ -593,3 +593,16 @@ table.quality tfoot td { padding: 8px; font-weight: 600; }
 .ifield.delegated input { color: var(--ink-3); font-style: italic; }
 .linkish.leave { color: var(--act); font-size: var(--fs-0); text-decoration: underline; text-underline-offset: 3px; margin-top: 4px; }
 .linkish.leave:hover { color: var(--act-hover); }
+
+/* ---------- outcomes: goals measured, readouts after release ---------- */
+.goal-outcome { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 4px; }
+.trend { flex: none; overflow: visible; }
+.trend-line { fill: none; stroke: var(--lamp); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.trend-dot { fill: var(--lamp); }
+.trend-target { stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 3 3; }
+.wanted { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 8px 12px; align-items: end; }
+.wanted > div:first-child, .wanted > .error-note { grid-column: 1 / -1; }
+.wanted label { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wanted input { width: 100%; }
+@media (max-width: 640px) { .wanted { grid-template-columns: 1fr; } }
+.roadmap > .panel { margin-bottom: 20px; }

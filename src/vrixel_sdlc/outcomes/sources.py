@@ -36,7 +36,7 @@ _WRITE = re.compile(r"\b(insert|update|delete|merge|drop|alter|create|grant|revo
 _AGG = re.compile(r"\b(count|sum|avg|min|max|percentile_cont|percentile_disc|median|quantile\w*|uniq\w*|"
                   r"stddev\w*)\s*\(", re.I)
 _PROM_AGG = re.compile(r"^\s*(sum|avg|min|max|count|quantile|histogram_quantile|scalar)\s*\(", re.I)
-ALLOWED_COLUMNS = {"value", "n"}
+ALLOWED_COLUMNS = {"value", "n", "k"}
 
 
 def now() -> str:
@@ -84,7 +84,18 @@ def select_problems(metric: Metric, data_class: str, *, dialect: str = "SQL") ->
     if data_class in SUPPRESSED_CLASSES and not re.search(r"\bas\s+n\b", q, re.I):
         out.append(f"{gid}: a {data_class} product's query must also return `n`, the count behind the value "
                    "(… count(*) AS n), so small counts can be suppressed")
+    if data_class in SUPPRESSED_CLASSES and is_rate(metric) and not re.search(r"\bas\s+k\b", q, re.I):
+        out.append(f"{gid}: a {data_class} rate must also return `k`, the count on top (… count(*) FILTER (WHERE …) "
+                   "AS k): 2% of 300 is 6 people, so it is suppressed like any small count")
     return out
+
+
+def is_rate(metric: Metric) -> bool:
+    """A share of a whole: its numerator can be a small count even when its denominator isn't."""
+    unit = (metric.unit or "").lower()
+    return "%" in unit or bool(re.search(r"\b(rate|share|ratio|percent|proportion)\b", unit)) or bool(
+        re.search(r"\bcount(if)?\s*\([^()]*\)\s*(::\s*\w+\s*)?/|/\s*(nullif\s*\()?\s*count\s*\(",
+                  metric.query, re.I))
 
 
 def _strip_strings(q: str) -> str:
@@ -111,11 +122,11 @@ def one_row(product_id: str, metric: Metric, start: str, end: str, columns: list
                         note=f"the query must return one row; it returned {len(rows)}")
     row = dict(zip(cols, rows[0]))
     value = row.get("value")
-    n = row.get("n")
+    n = int(row["n"]) if row.get("n") is not None else None
+    k = int(row["k"]) if row.get("k") is not None else None
     if value is None:
-        return _reading(product_id, metric, start, end, "no_data", n=int(n) if n is not None else None,
-                        note="nothing in this window")
-    return _reading(product_id, metric, start, end, "ok", value=float(value), n=int(n) if n is not None else None)
+        return _reading(product_id, metric, start, end, "no_data", n=n, k=k, note="nothing in this window")
+    return _reading(product_id, metric, start, end, "ok", value=float(value), n=n, k=k)
 
 
 # ------------------------------------------------------------------------------------- sources
@@ -255,7 +266,7 @@ class ManualSource:
         t0, t1 = _ts(start), _ts(end)
         for r in reversed(self.store.history(product_id, metric.goal_id)):
             if r.get("source") == "manual" and r.get("status") == "ok" and t0 < _ts(r["end"]) <= t1:
-                return _reading(product_id, metric, r["start"], r["end"], "ok", value=r["value"], n=r.get("n"),
+                return _reading(product_id, metric, r["start"], r["end"], "ok", value=r["value"], n=r.get("n"), k=r.get("k"),
                                 entered_by=r.get("entered_by", ""), note="entered by hand")
         return _reading(product_id, metric, start, end, "no_data", note="waiting for someone to enter it")
 
