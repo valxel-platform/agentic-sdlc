@@ -1,7 +1,31 @@
 # Sample goals for the tool's demo and tests. A product's goals: outcomes for a period, each with
-# a measure. Initiatives name the goal they serve; `parent` is reserved for a portfolio goal.
+# a measure (the sentence people read) and a metric (how the tool reads it: vrixel_sdlc.outcomes).
+# Initiatives name the goal they serve; `parent` is reserved for a portfolio goal.
 goals:
   - id: GOAL-CLN-1
     title: Clinics check patients in faster
     measure: Median front-desk check-in time under 3 minutes
     period: 2027-H1
+    metric:
+      source: sql
+      # One aggregate row from the clinic's read replica; n lets small counts be suppressed (PHI).
+      query: |
+        SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM checked_in_at - arrived_at) / 60) AS value,
+               count(*) AS n
+        FROM visits
+        WHERE arrived_at >= :start AND arrived_at < :end AND checked_in_at IS NOT NULL
+      unit: minutes
+      direction: down
+      baseline: 6.5
+      target: 3
+      by: 2027-06-30
+  - id: GOAL-CLN-2
+    title: Fewer patients leave before they're seen
+    measure: Walk-outs under 2% of arrivals
+    period: 2027-H1
+    metric:
+      source: manual            # the front desk's monthly count, until the visit records carry it
+      unit: "% of arrivals"
+      direction: down
+      baseline: 5
+      target: 2

@@ -122,6 +122,10 @@ class FeatureEngine:
                        "inception": build_inception_graph(services, checkpointer=checkpointer)}
         if getattr(services, "signals", None) is None:
             services.signals = InMemorySignalStore()
+        if getattr(services, "readings", None) is None:
+            from .outcomes.store import InMemoryReadingStore
+
+            services.readings = InMemoryReadingStore()
         if getattr(services, "effort", None) is None:
             from .pilot import InMemoryEffortStore
 

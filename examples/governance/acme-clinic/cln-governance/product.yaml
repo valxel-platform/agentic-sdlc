@@ -20,6 +20,9 @@ tools:
   work_tracking:
     provider: openproject
     project: cln
+  metrics:
+    sql: {}                   # the read replica; DSN is the platform secret VRIXEL_METRICS_DSN_CLN
+    min_cell: 11              # PHI: counts under 11 show as "under 11"
 budget_usd: 150
 critic_threshold: 0.8
 max_loops: 3

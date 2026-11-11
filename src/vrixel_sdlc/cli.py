@@ -12,6 +12,7 @@ capability already has, from a product's catalog.json, so they can be merged or 
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import sys
 import tempfile
@@ -225,6 +226,71 @@ def _inception(args) -> int:
     return 0 if all(d.status == "passed" for d in drafts) else 1
 
 
+def _outcomes(args, services=None) -> int:
+    """Check a product's goal metrics, read one, or record a number typed in by hand."""
+    import json
+
+    from .config import load_settings
+    from .outcomes import DEFAULT_MIN_CELL
+    from .outcomes import read as outcomes
+    from .services import build_services
+
+    if services is None:
+        settings = load_settings()
+        services = build_services(settings)
+        if settings.database_url:
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+
+            from .outcomes.store import PostgresReadingStore
+
+            pool = ConnectionPool(settings.database_url, max_size=2,
+                                  kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
+            services.readings = PostgresReadingStore(pool)
+        elif args.action == "record":
+            print("Recording needs the tool's database: set DATABASE_URL.", file=sys.stderr)
+            return 2
+    if args.action == "check":
+        rows = outcomes.check(services, args.product)
+        if args.json:
+            print(json.dumps(rows, indent=2))
+        for r in rows if not args.json else []:
+            m = r["metric"]
+            print(f"{r['goal_id']} {r['title']}: " + (f"{m['source']}, {m['direction']} is better" if m else "no metric"))
+            for problem in r["problems"]:
+                print(f"  - {problem}")
+        return 1 if any(r["problems"] for r in rows) else 0
+    if not args.goal:
+        print("Name the goal, e.g. GOAL-CLN-1.", file=sys.stderr)
+        return 2
+    if args.start and args.end:
+        start, end = args.start, args.end
+    else:
+        start, end = outcomes.window(args.days, args.end)
+    try:
+        if args.action == "record":
+            if args.value is None:
+                print("Give --value.", file=sys.stderr)
+                return 2
+            reading = outcomes.record_manual(services, args.product, args.goal, value=args.value, n=args.n,
+                                             start=start, end=end, entered_by=args.by)
+        else:
+            reading = outcomes.read(services, args.product, args.goal, start=start, end=end, record=not args.dry_run)
+    except (KeyError, ValueError) as exc:
+        print(str(exc).strip("'\""), file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(reading.as_dict(), indent=2))
+    else:
+        cfg, _ = outcomes.product_metrics(services, args.product)
+        metric = next(r["metric"] for r in outcomes.check(services, args.product) if r["goal_id"] == args.goal)
+        print(f"{args.goal} {start[:10]} to {end[:10]} ({reading.source}): "
+              f"{reading.shown((metric or {}).get('unit', ''), cfg.get('min_cell', DEFAULT_MIN_CELL))}")
+        if reading.note and reading.status == "ok":
+            print(f"  {reading.note}")
+    return 0 if reading.status in ("ok", "suppressed", "no_data") else 1
+
+
 def main(argv: list[str] | None = None, *, github=None) -> int:
     p = argparse.ArgumentParser(prog="vrixel")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -281,7 +347,22 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     inc.add_argument("--through", choices=["architecture", "roadmap"], default="roadmap")
     inc.add_argument("--out", default="inception", help="Directory for the documents and report.json")
     inc.add_argument("--mode", default="stub", choices=["live", "stub"])
+    oc = sub.add_parser("outcomes", help="Check a product's goal metrics, read one for a window, or record a "
+                                         "number typed in by hand")
+    oc.add_argument("action", choices=["check", "read", "record"])
+    oc.add_argument("product")
+    oc.add_argument("goal", nargs="?", default="", help="e.g. GOAL-CLN-1 (read, record)")
+    oc.add_argument("--days", type=int, default=30, help="The window: the last N days (default 30)")
+    oc.add_argument("--start", default="", help="Window start (ISO date or time); with --end instead of --days")
+    oc.add_argument("--end", default="", help="Window end (default now)")
+    oc.add_argument("--value", type=float, help="record: the number")
+    oc.add_argument("--n", type=int, help="record: how many it counts (required for PHI and payments products)")
+    oc.add_argument("--by", default=os.environ.get("USER", ""), help="record: who entered it")
+    oc.add_argument("--dry-run", action="store_true", help="read: don't record the reading")
+    oc.add_argument("--json", action="store_true")
     args = p.parse_args(argv)
+    if args.cmd == "outcomes":
+        return _outcomes(args)
     if args.cmd == "inception":
         return _inception(args)
     if args.cmd == "eval":

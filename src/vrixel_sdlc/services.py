@@ -87,6 +87,8 @@ class Services:
     remediation_record: object = None  # (product, window_days) -> the tool's own fixes' track record, set by the engine
     feature_info: object = None  # feature id -> {risk_tier, components}, set by the engine
     cohort_logs: object = None  # vrixel_sdlc.ops.cohorts log source: users with a flag on against off
+    readings: object = None  # vrixel_sdlc.outcomes.store: goal metric readings, taken and typed in
+    metric_sources: object = None  # provider -> vrixel_sdlc.outcomes.sources.MetricSource
 
     available_roles: frozenset = frozenset()  # roles whose provider is configured, set by build_services
     telemetry: object = None  # vrixel_sdlc.telemetry.Telemetry: each agent session as a span, set by build_services
@@ -395,6 +397,12 @@ def integration_modes(services: Services) -> dict[str, str]:
         modes[name] = "stub" if isinstance(pub, StubLucidPublisher) else "live"
     for name, tr in services.trackers.items():
         modes[name] = "stub" if isinstance(tr, StubTracker) else "live"
+    from .outcomes.read import sources
+    from .outcomes.sources import StubSource
+
+    for name, src in sources(services).items():
+        if name != "manual":
+            modes[name] = "stub" if isinstance(src, StubSource) else "live"
     return modes
 
 
