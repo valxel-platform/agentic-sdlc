@@ -172,9 +172,10 @@ def test_product_metric_sources_are_checked(services):
     assert "not approved for phi" in manifest(services, {"posthog": {"url": "https://ph", "project": 1}})[1]
     assert "platform secrets" in manifest(services, {"sql": {"dsn": "postgres://x"}})[1]
     assert "at least 11" in manifest(services, {"sql": {}, "min_cell": 5})[1]
-    got, err = manifest(services, {"posthog": {"url": "https://ph.example", "project": 7}, "min_cell": 1},
-                        pid="FARM")
-    assert not err and got["min_cell"] == 1
+    got, err = manifest(services, {"posthog": {"url": "https://ph.example", "project": 7}}, pid="FARM")
+    assert not err and got["min_cell"] == 1  # suppression is off outside PHI unless the product sets it
+    got, _ = manifest(services, {"sql": {}, "min_cell": 5}, pid="FARM")
+    assert got["min_cell"] == 5
 
 
 # ------------------------------------------------------------------------- reading goals
@@ -194,6 +195,8 @@ def test_small_counts_never_leave_as_numbers(services):
     r = outcomes.read(services, "CLN", "GOAL-CLN-1", start="2026-10-01", end="2026-11-01")
     assert r.status == "ok" and r.shown("minutes") == "4 minutes"
     assert [h["status"] for h in services.readings.history("CLN", "GOAL-CLN-1")] == ["suppressed", "ok"]
+    services.metric_sources["sql"], _ = sql_source(["value", "n"], [(0.0, 0)])
+    assert outcomes.read(services, "CLN", "GOAL-CLN-1", start="2026-10-01", end="2026-11-01").shown() == "0"
     services.metric_sources["sql"], _ = sql_source(["value"], [(4.0,)])
     assert outcomes.read(services, "CLN", "GOAL-CLN-1", start="2026-10-01", end="2026-11-01").status == "error"
 

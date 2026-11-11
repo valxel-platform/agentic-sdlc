@@ -3,7 +3,7 @@ one aggregate for a window; none of them ever hands the tool rows about people.
 
     sql          the product's own database, through a read-only role on its read replica. The
                  query is one SELECT with :start and :end, returning one row: `value`, and `n`
-                 (the count behind it; required for PHI and payments products). Runs read-only
+                 (the count behind it; required for PHI products). Runs read-only
                  with a statement timeout. DSN: platform secret VRIXEL_METRICS_DSN_<PRODUCT_ID>.
     prometheus   the product's Prometheus (behaviour events as OpenTelemetry counters, through the
                  collector the product already runs). One aggregation, no `by`/`without`, so the
@@ -26,7 +26,7 @@ import re
 from datetime import datetime, timezone
 from typing import Protocol
 
-from . import REGULATED, Metric, Reading
+from . import SUPPRESSED_CLASSES, Metric, Reading
 
 SECRET_PREFIX = {"sql": "VRIXEL_METRICS_DSN_", "prometheus": "VRIXEL_PROMETHEUS_TOKEN_",
                  "posthog": "VRIXEL_POSTHOG_KEY_"}
@@ -81,7 +81,7 @@ def select_problems(metric: Metric, data_class: str, *, dialect: str = "SQL") ->
         out.append(f"{gid}: the {dialect} query must name its result column `value` (… AS value)")
     if re.search(r"\bgroup\s+by\b", _outer(q), re.I):
         out.append(f"{gid}: the {dialect} query must return one row; GROUP BY belongs in a subquery")
-    if data_class in REGULATED and not re.search(r"\bas\s+n\b", q, re.I):
+    if data_class in SUPPRESSED_CLASSES and not re.search(r"\bas\s+n\b", q, re.I):
         out.append(f"{gid}: a {data_class} product's query must also return `n`, the count behind the value "
                    "(… count(*) AS n), so small counts can be suppressed")
     return out

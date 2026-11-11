@@ -537,14 +537,15 @@ tools:
   metrics:
     sql: {}                       # DSN: platform secret VRIXEL_METRICS_DSN_<PRODUCT_ID>
     prometheus: { url: https://prometheus.cln.example.com }   # token: VRIXEL_PROMETHEUS_TOKEN_<ID>
-    min_cell: 11                  # counts under this show as "under 11" (at least 11 for PHI, payments)
+    min_cell: 11                  # counts 1-10 show as "under 11": fixed at 11+ for PHI, off by default otherwise
 ```
 
 The tool only ever holds aggregates. A query is checked when it is defined: one read-only SELECT
 (or one PromQL aggregation with no `by`), filtered on `:start` and `:end`, returning one row named
-`value` (plus `n`, the count behind it, for PHI and payments products). It runs read-only with a
+`value` (plus `n`, the count behind it, for PHI products). It runs read-only with a
 statement timeout, and a result with more than one row or any column but `value` and `n` is
-refused. Credentials are platform secrets, never product.yaml; PostHog isn't approved for PHI or
+refused. PHI products follow the CMS cell-size convention: no count from 1 to 10 is shown (zero
+is); other products can switch suppression on with `min_cell`. Credentials are platform secrets, never product.yaml; PostHog isn't approved for PHI or
 payments data (config/tools.yaml). Inception writes every goal with a `manual` metric from its
 brief's measure, so a new product is measurable from day one.
 

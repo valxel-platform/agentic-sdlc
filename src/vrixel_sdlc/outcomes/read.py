@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from . import DEFAULT_MIN_CELL, REGULATED, Metric, Reading, parse_metric
+from . import SUPPRESSED_CLASSES, Metric, Reading, min_cell_for, parse_metric
 from .sources import default_sources, now
 
 
@@ -27,8 +27,8 @@ def product_metrics(services, product_id: str) -> tuple[dict, str]:
     except Exception:
         tools = {}
     cfg = tools.get("metrics") or {}
-    return {"sources": dict(cfg.get("sources") or {}), "min_cell": int(cfg.get("min_cell") or DEFAULT_MIN_CELL)}, \
-        entry.data_class
+    return {"sources": dict(cfg.get("sources") or {}),
+            "min_cell": int(cfg.get("min_cell") or min_cell_for(entry.data_class))}, entry.data_class
 
 
 def goals(services, product_id: str) -> list[dict]:
@@ -75,11 +75,11 @@ def window(days: int, end: str = "") -> tuple[str, str]:
 
 
 def suppress(reading: Reading, data_class: str, min_cell: int) -> Reading:
-    """Small counts never leave as numbers: the reading says 'under <min_cell>' instead."""
-    if reading.status == "ok" and reading.n is not None and reading.n < min_cell:
+    """Small counts never leave as numbers: the reading says 'under <min_cell>' instead. Zero is shown."""
+    if reading.status == "ok" and reading.n is not None and 0 < reading.n < min_cell:
         reading.status, reading.value, reading.n = "suppressed", None, None
         reading.note = f"fewer than {min_cell} behind it"
-    elif reading.status == "ok" and reading.n is None and data_class in REGULATED and reading.source in ("sql", "posthog"):
+    elif reading.status == "ok" and reading.n is None and data_class in SUPPRESSED_CLASSES and reading.source in ("sql", "posthog"):
         reading.status, reading.value = "error", None
         reading.note = "a regulated product's reading must say how many it counts (n)"
     return reading
@@ -116,7 +116,7 @@ def record_manual(services, product_id: str, goal_id: str, *, value: float, star
     if metric.source != "manual":
         raise ValueError(f"{goal_id} is read from {metric.source}; only manual goals take typed-in numbers")
     _, data_class = product_metrics(services, product_id)
-    if data_class in REGULATED and n is None:
+    if data_class in SUPPRESSED_CLASSES and n is None:
         raise ValueError(f"{product_id} holds {data_class} data: say how many the number counts (n)")
     if not entered_by:
         raise ValueError("Say who entered it")

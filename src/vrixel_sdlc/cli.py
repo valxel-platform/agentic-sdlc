@@ -231,7 +231,6 @@ def _outcomes(args, services=None) -> int:
     import json
 
     from .config import load_settings
-    from .outcomes import DEFAULT_MIN_CELL
     from .outcomes import read as outcomes
     from .services import build_services
 
@@ -285,7 +284,7 @@ def _outcomes(args, services=None) -> int:
         cfg, _ = outcomes.product_metrics(services, args.product)
         metric = next(r["metric"] for r in outcomes.check(services, args.product) if r["goal_id"] == args.goal)
         print(f"{args.goal} {start[:10]} to {end[:10]} ({reading.source}): "
-              f"{reading.shown((metric or {}).get('unit', ''), cfg.get('min_cell', DEFAULT_MIN_CELL))}")
+              f"{reading.shown((metric or {}).get('unit', ''), cfg['min_cell'])}")
         if reading.note and reading.status == "ok":
             print(f"  {reading.note}")
     return 0 if reading.status in ("ok", "suppressed", "no_data") else 1

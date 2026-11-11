@@ -35,6 +35,15 @@ DIRECTIONS = ("up", "down")
 STATUSES = ("ok", "suppressed", "no_data", "error")
 DEFAULT_MIN_CELL = 11
 REGULATED = ("phi", "payments")
+# Health data follows the CMS cell-size convention: no count from 1 to 10 is shown (zero is). Other
+# classes have no such rule (PCI protects card data, which never reaches a metric), so suppression is
+# off unless the product sets tools.metrics.min_cell.
+SUPPRESSED_CLASSES = ("phi",)
+
+
+def min_cell_for(data_class: str) -> int:
+    """The default and the floor for tools.metrics.min_cell: 11 for PHI, 1 (off) otherwise."""
+    return DEFAULT_MIN_CELL if data_class in SUPPRESSED_CLASSES else 1
 
 
 @dataclass(frozen=True)
@@ -72,7 +81,7 @@ class Reading:
 
     def shown(self, unit: str = "", min_cell: int = DEFAULT_MIN_CELL) -> str:
         """The reading as people see it."""
-        if self.status == "suppressed":
+        if self.status == "suppressed" and min_cell > 1:
             return f"under {min_cell}"
         if self.status != "ok" or self.value is None:
             return "no data" + (f" ({self.note})" if self.note else "")

@@ -285,10 +285,11 @@ def _metrics(spec, entry: RegistryEntry, tools: ToolsConfig, problems: list[str]
           sql: {}                                    # read replica; DSN is VRIXEL_METRICS_DSN_<ID>
           prometheus: { url: https://prometheus.cln.example.com }
           posthog: { url: https://posthog.example.com, project: 12 }
-          min_cell: 11                               # counts under this show as "under 11"
+          min_cell: 11                               # counts under this show as "under 11"; fixed at
+                                                     # 11 or more for PHI, off (1) by default otherwise
 
     Manual entry needs no source. Credentials stay platform secrets, never in this file."""
-    from ..outcomes import DEFAULT_MIN_CELL, REGULATED
+    from ..outcomes import min_cell_for
 
     if not isinstance(spec, dict):
         problems.append("tools.metrics must be a mapping of sources (sql, prometheus, posthog) and min_cell")
@@ -324,11 +325,11 @@ def _metrics(spec, entry: RegistryEntry, tools: ToolsConfig, problems: list[str]
             cfg["url"] = str(cfg["url"]).rstrip("/")
         sources[name] = cfg
     try:
-        min_cell = int(spec.get("min_cell", DEFAULT_MIN_CELL))
+        min_cell = int(spec.get("min_cell", min_cell_for(entry.data_class)))
     except (TypeError, ValueError):
         problems.append("tools.metrics.min_cell must be a whole number")
         return None
-    floor = DEFAULT_MIN_CELL if entry.data_class in REGULATED else 1
+    floor = min_cell_for(entry.data_class)
     if min_cell < floor:
         problems.append(f"tools.metrics.min_cell must be at least {floor} for {entry.data_class} data")
         return None
