@@ -140,3 +140,59 @@ def test_the_roadmap_shows_outcomes_and_owners_enter_numbers(client, engine):
     got = client.post("/api/products/CLN/goals/GOAL-CLN-2/readings", json=body)
     assert got.status_code == 201 and got.json()["readouts"][0]["after"]["value"] == 4.1
     assert client.get("/api/roadmap/CLN").json()["outcomes"]["wanted"] == []
+
+
+# ------------------------------------------------------------------ step 4: flag comparisons
+
+def test_goal_events_are_compared_on_against_off():
+    from vrixel_sdlc.ops import cohorts
+
+    def side(req, n):
+        return {"requests": req, "errors": 0, "slow": 0, "events": {"checkin_completed": n}}
+
+    groups = {"api": {"on": side(2000, 300), "off": side(20000, 2000), "lines": 3, "timed": 0},
+              "bff": {"on": side(500, 70), "off": side(5000, 500), "lines": 3, "timed": 0}}
+    r = cohorts.goal_events(groups, ["checkin_completed", "never_sent"])
+    c = r["checkin_completed"]
+    assert c["verdict"] == "higher" and c["on_rate"] == 0.148 and c["off_rate"] == 0.1 and c["z"] > 2
+    assert r["never_sent"]["verdict"] == "too_few"
+    assert "more often" in cohorts.describe_goal({"checkin_completed": c})
+    even = {"api": {"on": side(2000, 200), "off": side(20000, 2010), "lines": 1, "timed": 0}}
+    assert cohorts.goal_events(even, ["checkin_completed"])["checkin_completed"]["verdict"] == "no_difference"
+
+
+def test_each_rollout_step_reports_the_goal_events_and_never_stops_for_them(tmp_path, monkeypatch):
+    import json
+    import shutil
+    from pathlib import Path
+
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from vrixel_sdlc.config import load_settings
+    from vrixel_sdlc.engine import FeatureEngine
+    from vrixel_sdlc.ops import cohorts, rollout
+    from vrixel_sdlc.services import build_services
+
+    monkeypatch.setattr(rollout, "COMPRESS_IN_STUB", False)
+    clock = {"t": datetime.now(timezone.utc)}
+    monkeypatch.setattr(rollout, "_clock", lambda: clock["t"])
+    root = tmp_path / "g"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "examples" / "governance", root)
+    s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",
+                      governance_root=root)
+    eng = FeatureEngine(build_services(s), InMemorySaver())
+    eng.services.cohort_logs = cohorts.StubLogs()
+    fid = eng.create(product_id="CLN", title="Kiosk check-in")
+    eng.auto_drive(fid)
+    key = eng.view(fid)["release"]["flag"]
+    event = "kiosk_check_in_completed"
+    rec = {"flag": key, "on": {"requests": 2000, "errors": 0, "events": {event: 120}},
+           "off": {"requests": 20000, "errors": 3, "events": {event: 2000}}}
+    eng.services.cohort_logs.by_component["cln-intake-api"] = [f"{cohorts.MARKER} {json.dumps(rec)}"]
+    clock["t"] += timedelta(minutes=eng.view(fid)["release"]["rollout_plan"]["bake_minutes"] + 1)
+    eng.poke_now(fid)
+    [h] = eng.view(fid)["release"]["rollout_plan"]["history"]
+    assert h["goal_cohorts"][event]["verdict"] == "lower" and "less often" in h["goal"]
+    assert eng.services.flags.percent("CLN", key) > 5.0  # fewer goal events is reported, not a reason to stop
+    out = ro.feature_outcome(eng, fid)
+    assert out["rollout"][0]["percent"] == 5.0 and event in out["rollout"][0]["goal"]

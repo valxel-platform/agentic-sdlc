@@ -1602,6 +1602,15 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
     return env_wait, (ok, retry, f"{stage}_wait", "build", END)
 
 
+def _goal_events(services, state: FeatureState) -> list[dict]:
+    from .phase import instrumentation_events
+
+    try:
+        return instrumentation_events(services, state.get("artifacts") or {})
+    except Exception:
+        return []
+
+
 def instrumentation_staging(services, state: FeatureState) -> dict:
     """The feature's product events, counted in staging (vrixel_sdlc.outcomes.instrumentation)."""
     from ..outcomes.instrumentation import staging_check
@@ -1704,6 +1713,8 @@ def make_flag_rollout(services):
                          "product_id": state["product_id"], "title": state["title"], "flag": key,
                          "percent": steps[step], "components": components, "since": plan.get("at") or ro._clock().isoformat(),
                          "bake_minutes": plan["bake_minutes"], "compare": plan.get("compare") or {},
+                         # The events that measure the feature's goal: compared on against off, reported only.
+                         "goal_events": [e["event"] for e in _goal_events(services, state)],
                          "label": f"Gradual release: on for {ro.percent_label(steps[step])}, watching"})
         approved = [a for a in str(plan.get("approved_by") or release.get("promoted_by") or "").split(", ") if a]
         history = list(plan.get("history") or [])
@@ -1714,11 +1725,13 @@ def make_flag_rollout(services):
             except Exception as exc:
                 res = {"status": "failure", "reason": f"couldn't widen {key}: {type(exc).__name__}: {exc}"}
             else:
-                from ..ops.cohorts import describe_groups
+                from ..ops.cohorts import describe_goal, describe_groups
 
                 cmp_ = (res.get("cohorts") or {}).get(key)
+                goal = res.get("goal_cohorts") or {}
                 history.append({"percent": steps[step], "until": res.get("at", now()), "quiet_since": res.get("quiet_since", ""),
-                                "cohorts": describe_groups(key, cmp_) if cmp_ else "no comparison (no summary lines): time alone"})
+                                "cohorts": describe_groups(key, cmp_) if cmp_ else "no comparison (no summary lines): time alone",
+                                **({"goal": describe_goal(goal), "goal_cohorts": goal} if goal else {})})
                 plan |= {"step": step + 1, "at": ro._clock().isoformat(), "history": history}
                 release |= {"rollout_plan": plan, "flag_percent": nxt, "flag_on": True}
                 events = [event("flag_rollout", "widened", f"{key} on for {ro.percent_label(nxt)}")]

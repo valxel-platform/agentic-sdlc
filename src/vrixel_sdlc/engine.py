@@ -21,7 +21,8 @@ from .waits import WaitChecker
 from .worksync import InMemoryLinkStore, WorkSync
 
 
-KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release", "INC": "incident", "PRD": "inception"}
+KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release", "INC": "incident", "PRD": "inception",
+         "REV": "review"}
 
 
 def kind_of(thread_id: str) -> str:
@@ -112,6 +113,7 @@ class FeatureEngine:
         from .ops.incident import build_incident_graph
         from .ops.signals import InMemorySignalStore
         from .inception.graph import build_inception_graph
+        from .outcomes.review import build_review_graph
         from .roadmap.graphs import build_initiative_graph, build_release_graph
 
         self.graph = build_pipeline(services, checkpointer=checkpointer)
@@ -119,7 +121,8 @@ class FeatureEngine:
                        "initiative": build_initiative_graph(services, checkpointer=checkpointer),
                        "release": build_release_graph(services, checkpointer=checkpointer),
                        "incident": build_incident_graph(services, checkpointer=checkpointer),
-                       "inception": build_inception_graph(services, checkpointer=checkpointer)}
+                       "inception": build_inception_graph(services, checkpointer=checkpointer),
+                       "review": build_review_graph(services, checkpointer=checkpointer)}
         if getattr(services, "signals", None) is None:
             services.signals = InMemorySignalStore()
         if getattr(services, "readings", None) is None:
@@ -166,6 +169,7 @@ class FeatureEngine:
         services.feature_state = self._state
         services.flag_of = lambda fid: (self._state(fid).get("release") or {}).get("flag", "")
         services.start_hotfix = self.start_hotfix
+        services.create_feature = self.create  # an initiative review opens intents (outcomes/review.py)
         services.start_intent_change = self.start_intent_change
         services.close_incident = lambda iid: services.signals.close(iid)
         self.merged: dict[str, str] = {}  # incident -> the one it was merged into
@@ -378,10 +382,52 @@ class FeatureEngine:
         self._watcher.start()
 
     def collect_outcomes(self, product_id: str | None = None) -> list[dict]:
-        """Readouts that are due and each goal's weekly trend reading (vrixel_sdlc.outcomes.readouts)."""
+        """Readouts that are due, each goal's weekly trend reading (vrixel_sdlc.outcomes.readouts),
+        then the initiative reviews that are due (outcomes/review.py)."""
         from .outcomes import readouts
 
-        return readouts.run(self, product_id)
+        taken = readouts.run(self, product_id)
+        for pid in [product_id] if product_id else sorted({r["product_id"] for r in self.index.all()}):
+            try:
+                self.start_due_reviews(pid)
+            except Exception:
+                continue
+        return taken
+
+    def review_summaries(self, product_id: str) -> list[dict]:
+        out = []
+        for row in self._rows(product_id, "review"):
+            s = self._state(row["feature_id"])
+            out.append({"id": row["feature_id"], "initiative_id": s.get("initiative_id", ""), "title": s.get("title") or row["title"],
+                        "status": s.get("status", "preparing"), "why": s.get("why", ""), "opened": s.get("opened") or []})
+        return out
+
+    def create_review(self, *, product_id: str, initiative_id: str, why: str, created_by: str = "vrixel",
+                      background: bool = False) -> str:
+        """Ask the product council whether an initiative should continue, change course or stop."""
+        open_ = [r["id"] for r in self.review_summaries(product_id)
+                 if r["initiative_id"] == initiative_id and r["status"] in ("preparing", "waiting")]
+        if open_:
+            return open_[0]
+        from .outcomes.review import initiative_of
+
+        i = initiative_of(self.services, product_id, initiative_id)
+        tid = self._new_id(product_id, "review", f"Review: {i['title']}")
+        inp = {"review_id": tid, "product_id": product_id, "initiative_id": initiative_id,
+               "title": f"Review: {i['title']}", "why": why, "created_by": created_by, "status": "preparing"}
+        self.bus.publish({"type": "feature.created", "feature_id": tid, "product_id": product_id})
+        (self._submit if background else self._execute)(tid, inp)
+        return tid
+
+    def start_due_reviews(self, product_id: str, today=None) -> list[str]:
+        from .outcomes import review
+        from .outcomes.readouts import product_outcomes
+        from .roadmap import read_roadmap
+
+        road = read_roadmap(self.services, product_id)
+        outcomes = product_outcomes(self, product_id, road)
+        return [self.create_review(product_id=product_id, initiative_id=i["id"], why=why, background=True)
+                for i, why in review.due(self.services, product_id, road, outcomes, today)]
 
     def trace_link(self, trace_id: str) -> str:
         tel = getattr(self.services, "telemetry", None)
@@ -1197,10 +1243,16 @@ class FeatureEngine:
         except Exception:
             return {}
         out: dict[str, dict] = {}
-        for k, groups in co.parse_entries(entries, flags).items():
+        parsed = co.parse_entries(entries, flags)
+        for k, groups in parsed.items():
             got = {g: {**co.compare(c, packet.get("compare")), "group": g} for g, c in groups.items() if c["lines"]}
             if got:
                 out[k] = got
+        # The feature's goal events, per side (outcome loop, step 4): reported, never a reason to stop.
+        events = list(packet.get("goal_events") or [])
+        key = packet.get("flag")
+        if events and key in parsed and any(c["lines"] for c in parsed[key].values()):
+            out["__goal__"] = co.goal_events(parsed[key], events, packet.get("goal_compare"))
         return out
 
     def _touching(self, product_id: str, components) -> list[dict]:
@@ -1255,6 +1307,7 @@ class FeatureEngine:
             if off:
                 return {"status": "failure", "reason": f"{', '.join(off)} {'was' if len(off) == 1 else 'were'} turned off"}
             cohorts = self._cohorts(pid, keys, packet)
+            goal = cohorts.pop("__goal__", None)
             # Any one component (or app) where its users fail more stops the step: the worst one per flag.
             worse = {}
             for k, groups in cohorts.items():
@@ -1272,6 +1325,8 @@ class FeatureEngine:
                            stub=self.services.settings.mode == "stub")
             if res and res.get("status") == "success":
                 res["cohorts"] = cohorts
+                if goal:
+                    res["goal_cohorts"] = goal
             return res
         if packet["wait"] == "analysis_report":
             agents = self.services.agents

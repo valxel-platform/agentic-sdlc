@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api, ApiError, type InitiativeView, type PendingItem, type ReleaseView } from "../api";
+import { api, ApiError, type InitiativeView, type PendingItem, type ReleaseView, type ReviewView } from "../api";
 import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
 import { HORIZONS, MODELS, money, threadPath, waitingLabel } from "../vocab";
@@ -170,6 +170,55 @@ export function ReleasePage() {
           </div>
         </section>
       </div>
+    </>
+  );
+}
+
+const REVIEW_STATUS: Record<string, string> = {
+  preparing: "Gathering the evidence", waiting: "Waiting for the product council", continued: "Continued",
+  changed: "Changing course", stopped: "Stopped",
+};
+
+export function ReviewPage() {
+  const { id = "" } = useParams();
+  const [v, setV] = useState<ReviewView | null>(null);
+  const [err, setErr] = useState("");
+  const load = useCallback(() => {
+    api.review(id).then((x) => { setV(x); setErr(""); })
+      .catch((e) => setErr(e instanceof ApiError && e.status === 404 ? "This review doesn't exist, or it's still starting." : e.message));
+  }, [id]);
+  useEffect(load, [load]);
+  useLive(load, (e) => e.feature_id === id || e.type === "feature.updated");
+  if (err && !v) return <p className="error-note" role="alert">{err}</p>;
+  if (!v) return <p className="faint">Loading…</p>;
+  const done = ["continued", "changed", "stopped"].includes(v.status);
+  return (
+    <>
+      <div className="feature-head">
+        <p className="muted small"><Link to={`/roadmap?product=${v.product_id}`}>Roadmap</Link> / <Link to={threadPath(v.initiative_id)}>{v.initiative_id}</Link> / {v.feature_id}</p>
+        <h1>{v.title}</h1>
+        <div className="meta">
+          <span className={`chip ${done ? (v.status === "stopped" ? "stop" : "go") : "wait"}`}>{REVIEW_STATUS[v.status] ?? v.status}</span>
+          <span>Why now: {v.why}</span>
+        </div>
+      </div>
+      <Pending items={v.pending} id={v.feature_id} title={v.title} onDone={load} />
+      {done && (
+        <section className="panel" aria-labelledby="h-decided" style={{ marginBottom: 20 }}>
+          <h2 id="h-decided" className="section-title">Decided</h2>
+          <div className="pad small">
+            <p><strong>{REVIEW_STATUS[v.status]}</strong> by {v.decision.approver}{v.decision.feedback ? `: ${v.decision.feedback}` : ""}</p>
+            {v.opened.length > 0 && <p>Opened {v.opened.map((f, n) => <span key={f}>{n ? ", " : ""}<Link to={threadPath(f)}>{f}</Link></span>)}</p>}
+            <p><Record pr={v.record_pr} /></p>
+          </div>
+        </section>
+      )}
+      {v.preview && (done || v.pending.every((p) => !p.can_decide)) && (
+        <section className="panel" aria-labelledby="h-evidence">
+          <h2 id="h-evidence" className="section-title">The evidence</h2>
+          <div className="pad md"><Markdown remarkPlugins={[remarkGfm]}>{v.preview}</Markdown></div>
+        </section>
+      )}
     </>
   );
 }

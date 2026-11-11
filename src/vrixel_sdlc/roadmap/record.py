@@ -83,13 +83,16 @@ def parse_initiative(text: str, path: str = "") -> dict | None:
         "release_model": model if model in RELEASE_MODELS else "launch",
         "measure": str(meta.get("measure") or ""), "owner": str(meta.get("owner") or ""),
         "scope": str(meta.get("scope") or "product"),
+        "approved_by": str(meta.get("approved_by") or ""), "approved_at": str(meta.get("approved_at") or ""),
+        # When the product council reviews whether its goal is moving (outcome loop, step 5).
+        "review_by": str(meta.get("review_by") or ""),
         "outcome": section(body, "Outcome"), "candidates": candidates(body), "path": path,
     }
 
 
 def render_initiative(i: dict, *, body: str = "") -> str:
     meta = {k: i.get(k) for k in ("id", "title", "goal", "horizon", "status", "budget_usd", "lanes", "release_model",
-                                  "measure", "owner", "scope", "approved_by", "approved_at")}
+                                  "measure", "owner", "scope", "approved_by", "approved_at", "review_by")}
     meta = {k: v for k, v in meta.items() if v not in (None, "", [])}
     front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
     if not body:
@@ -125,3 +128,26 @@ def render_release(r: dict, *, notes: str = "", evidence: str = "") -> str:
     return (f"---\n{front}\n---\n# {r['id']}: {r['title']}\n\n{kind}.\n\n"
             f"## Release notes\n\n{notes.strip() or 'Written when the release is approved.'}\n"
             + (f"\n## Evidence\n\n{evidence.strip()}\n" if evidence.strip() else ""))
+
+
+def update_initiative(text: str, changes: dict, review_line: str = "") -> str:
+    """The initiative file with front-matter fields changed and a line added under '## Reviews'.
+    Everything else in it stays as written."""
+    m = _FRONT.match((text or "").replace("\r\n", "\n"))
+    if not m:
+        raise ValueError("The initiative record has no front matter")
+    meta = yaml.safe_load(m.group(1)) or {}
+    meta.update({k: v for k, v in changes.items() if v not in (None, "")})
+    body = m.group(2).rstrip("\n")
+    if review_line:
+        if re.search(r"^## Reviews\s*$", body, re.M):
+            head, _, rest = body.partition("## Reviews")
+            nxt = re.search(r"^## ", rest, re.M)
+            if nxt:
+                body = head + "## Reviews" + rest[:nxt.start()].rstrip("\n") + f"\n- {review_line}\n\n" + rest[nxt.start():]
+            else:
+                body = head + "## Reviews" + rest.rstrip("\n") + f"\n- {review_line}"
+        else:
+            body += f"\n\n## Reviews\n\n- {review_line}"
+    front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
+    return f"---\n{front}\n---\n{body}\n"

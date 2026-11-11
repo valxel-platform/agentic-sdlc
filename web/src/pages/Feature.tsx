@@ -72,6 +72,14 @@ function Outcome({ featureId, version }: { featureId: string; version: number })
       </div>
       <ReadoutTable readouts={o.readouts} metrics={o.metrics} />
       {o.readouts.length > 0 && <p className="small faint pad">{o.readouts[0].caveat}</p>}
+      {o.rollout.length > 0 && (
+        <div className="pad small">
+          <p className="muted">During the gradual release, users with it on against users with it off:</p>
+          <ul className="plain-list">
+            {o.rollout.map((r) => <li key={r.percent}><strong>At {r.percent}%</strong>: {r.goal}</li>)}
+          </ul>
+        </div>
+      )}
       {o.upcoming.length > 0 && (
         <p className="small muted pad">
           Next: {o.upcoming.slice(0, 3).map((u) => `${u.window_days}-day readout ${u.due}`).join(", ")}

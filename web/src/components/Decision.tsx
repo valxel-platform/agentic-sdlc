@@ -16,7 +16,7 @@ const DELIVERY_FAILED: Record<string, string> = {
   production: "The production deployment failed",
 };
 
-type Mode = null | "revise" | "takeover" | "abort" | "resolve" | "retry" | "accept";
+type Mode = null | "revise" | "takeover" | "abort" | "resolve" | "retry" | "accept" | "continue" | "change" | "stop";
 
 /** Why work is sent back, so repeated corrections can be found and fixed at their source. */
 const REASONS: [string, string][] = [
@@ -152,6 +152,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   const [days, setDays] = useState("");
   const [content, setContent] = useState("");
   const [picked, setPicked] = useState<string[] | null>(null);
+  const [retire, setRetire] = useState<string[]>([]);
+  const [nextReview, setNextReview] = useState("");
   const [reason, setReason] = useState("");
   const [override, setOverride] = useState("");
   const [remember, setRemember] = useState(false);
@@ -162,7 +164,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   useEffect(() => {
     opened.current = Date.now();
     setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(item.content ?? ""); setErr(""); setPicked(null);
-    setReason(""); setRemember(false); setLesson(""); setOverride("");
+    setReason(""); setRemember(false); setLesson(""); setOverride(""); setRetire([]); setNextReview(item.next_review ?? "");
   }, [item.interrupt_id, item.content]);
 
   async function send(decision: string, extra: Record<string, unknown> = {}) {
@@ -190,7 +192,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     : item.gate ? GATES[item.gate] : undefined;
   const incidentGate = item.gate === "incident" || item.gate === "postmortem";
   const inceptionGate = item.gate === "brief" || item.gate === "product";
-  const roadmapGate = item.gate === "g0" || item.gate === "release" || incidentGate || inceptionGate;
+  const reviewGate = item.gate === "review";
+  const roadmapGate = item.gate === "g0" || item.gate === "release" || incidentGate || inceptionGate || reviewGate;
   const stopLabel = item.gate === "g0" ? "Drop initiative" : item.gate === "release" ? "Cancel release"
     : inceptionGate ? "Stop this product" : "Stop feature";
   const chosen = picked ?? (item.actions ?? []).map((a) => a.id);
@@ -200,6 +203,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     : item.type === "escalation" && item.phase === "provisioning" ? "Setting up a new repository failed"
     : item.type === "escalation" ? `${PHASES[item.phase ?? ""] ?? item.phase} needs a person`
     : item.type === "handback" ? `You took over ${gateLabel(item.gate)}`
+    : reviewGate ? "Is this initiative moving its goal?"
     : gate?.question ?? "Decision";
   const kind = item.artifact?.kind;
   const delivery = item.phase === "delivery";
@@ -389,7 +393,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
           )}
           <h3 style={{ marginBottom: 8 }}>{item.gate === "g0" ? "Initiative draft" : item.gate === "incident" ? "Triage"
             : item.gate === "postmortem" ? "Postmortem" : item.gate === "brief" ? "Product brief"
-            : item.gate === "product" ? "Product architecture and roadmap" : "Release notes"}</h3>
+            : item.gate === "product" ? "Product architecture and roadmap" : reviewGate ? "The evidence" : "Release notes"}</h3>
           <div className="evidence md"><Markdown remarkPlugins={[remarkGfm]}>{item.preview}</Markdown></div>
         </div>
       )}
@@ -583,12 +587,53 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
               </label>
             </>
           )}
+          {reviewGate && mode === "continue" && (
+            <label className="field">Next review
+              <input type="date" value={nextReview} onChange={(e) => setNextReview(e.target.value)} />
+            </label>
+          )}
+          {reviewGate && (mode === "continue" || mode === "change" || mode === "stop") && (
+            <label className="field">{mode === "change" ? "What should change? (it becomes the new intent's request)" : "Why (recorded on the initiative)"}
+              <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} autoFocus={mode === "change"} />
+            </label>
+          )}
+          {reviewGate && mode === "stop" && (item.retire_candidates ?? []).length > 0 && (
+            <fieldset className="field">
+              <legend>Retire these features too (each opens a retire intent)</legend>
+              {item.retire_candidates!.map((r) => (
+                <label key={r.feature_id} className="check">
+                  <input type="checkbox" checked={retire.includes(r.feature_id)}
+                    onChange={(e) => setRetire(e.target.checked ? [...retire, r.feature_id] : retire.filter((x) => x !== r.feature_id))} />
+                  <span><strong>{r.feature_id}</strong> {r.title} <span className="small muted">{r.why}</span></span>
+                </label>
+              ))}
+            </fieldset>
+          )}
           {learnable && ((item.type === "handback" && mode === null) || mode === "revise" || mode === "retry" || mode === "resolve") && (
             <RememberField on={remember} setOn={setRemember} lesson={lesson} setLesson={setLesson} />
           )}
           {err && <p className="error-note" role="alert">{err}</p>}
           <div className="actions">
-            {item.type === "gate" && mode === null && (
+            {reviewGate && mode === null && (
+              <>
+                <button className="btn go" disabled={busy} onClick={() => setMode("continue")}>Continue</button>
+                <button className="btn secondary" disabled={busy} onClick={() => setMode("change")}>Change course</button>
+                <span className="spacer" />
+                <button className="btn danger" disabled={busy} onClick={() => setMode("stop")}>Stop the initiative</button>
+              </>
+            )}
+            {reviewGate && mode === "continue" && (
+              <button className="btn go" disabled={busy} onClick={() => send("continue", nextReview ? { review_by: nextReview } : {})}>
+                Continue to {nextReview || "the next review"}</button>
+            )}
+            {reviewGate && mode === "change" && (
+              <button className="btn" disabled={busy || !feedback.trim()} onClick={() => send("change")}>Open the change as an intent</button>
+            )}
+            {reviewGate && mode === "stop" && (
+              <button className="btn danger" disabled={busy} onClick={() => send("stop", { retire })}>
+                {retire.length ? `Stop and retire ${retire.length} feature${retire.length === 1 ? "" : "s"}` : "Stop, keep its features"}</button>
+            )}
+            {item.type === "gate" && !reviewGate && mode === null && (
               <>
                 {item.traceability?.blocks && (
                   <label className="field" style={{ width: "100%" }}>

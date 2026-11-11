@@ -50,6 +50,10 @@ def thread_view(engine, thread_id: str) -> dict:
         return out | {"vision": s.get("vision") or {}, "brief": s.get("brief", ""), "architecture": s.get("architecture", ""),
                       "roadmap": s.get("roadmap", ""), "reports": s.get("reports") or {}, "setup": s.get("setup") or {},
                       "council": list((engine.services.settings.inception or {}).get("council") or [])}
+    if kind == "review":
+        return out | {"initiative_id": s.get("initiative_id", ""), "why": s.get("why", ""), "preview": s.get("preview", ""),
+                      "evidence": s.get("evidence") or {}, "decision": s.get("decision") or {},
+                      "opened": s.get("opened") or []}
     feats = engine.feature_summaries(s["product_id"])
     if kind == "initiative":
         d = s.get("draft") or {}
@@ -104,8 +108,16 @@ def product_roadmap(engine, product_id: str) -> dict:
     from ..outcomes.readouts import product_outcomes
 
     outcomes = product_outcomes(engine, product_id, {"initiatives": initiatives})
+    reviews = {}
+    for r in engine.review_summaries(product_id):
+        reviews.setdefault(r["initiative_id"], []).append(r)
+    from ..outcomes.review import review_date
+
     for i in initiatives:
         i["outcome"] = outcomes["initiatives"].get(i["id"])
+        when = review_date(i)
+        i["review_by"] = when.isoformat() if when else ""
+        i["reviews"] = reviews.get(i["id"], [])
     return {"product_id": product_id, "record": {"repo": record["repo"], "sha": record["sha"], "error": error},
             "goals": [{**g, "outcome": outcomes["goals"].get(g["id"])} for g in record["goals"]],
             "outcomes": {"wanted": outcomes["wanted"], "windows": outcomes["windows"],
