@@ -105,13 +105,13 @@ def load_quality(path: Path) -> QualityConfig:
 
 
 _KEYS = {"kind", "stage", "source", "match", "required", "block_on", "min_coverage", "min_repos", "budget_s",
-         "applies_to", "level"}
+         "applies_to", "level", "min_pass_rate"}
 PERF_LEVELS = ("none", "smoke", "full")
 
 
 def _stricter(a: dict, b: dict) -> dict:
     """Combine two specs keeping the stricter value of each limit."""
-    out = {**a, **{k: v for k, v in b.items() if k not in ("required", "block_on", "min_coverage")}}
+    out = {**a, **{k: v for k, v in b.items() if k not in ("required", "block_on", "min_coverage", "min_pass_rate")}}
     if "required" in b:
         out["required"] = bool(a.get("required")) or bool(b["required"])
     if "block_on" in b:
@@ -119,6 +119,8 @@ def _stricter(a: dict, b: dict) -> dict:
             else a.get("block_on", b["block_on"])
     if "min_coverage" in b:
         out["min_coverage"] = max(float(a.get("min_coverage") or 0), float(b["min_coverage"]))
+    if "min_pass_rate" in b:
+        out["min_pass_rate"] = max(float(a.get("min_pass_rate") or 0), float(b["min_pass_rate"]))
     return out
 
 
@@ -152,6 +154,12 @@ def effective_policy(cfg: QualityConfig, data_class: str, overrides: dict | None
             problems.append(f"quality.{name}.block_on {raw['block_on']} is looser than the platform's {floor.get('block_on')}")
         if "min_coverage" in raw and float(raw["min_coverage"]) < float(floor.get("min_coverage") or 0):
             problems.append(f"quality.{name}.min_coverage {raw['min_coverage']} is below the platform's {float(floor.get('min_coverage')):g}%")
+        if "min_pass_rate" in raw:
+            rate = raw["min_pass_rate"]
+            if not isinstance(rate, (int, float)) or not 0 < float(rate) <= 1:
+                problems.append(f"quality.{name}.min_pass_rate must be a share between 0 and 1, e.g. 0.95")
+            elif float(rate) < float(floor.get("min_pass_rate") or 0):
+                problems.append(f"quality.{name}.min_pass_rate {rate} is below the platform's {float(floor['min_pass_rate']):g}")
         merged = {**base, **{k: v for k, v in raw.items() if k in _KEYS}}
         if "required" in raw:
             merged["required"] = bool(raw["required"]) or bool(floor.get("required"))
@@ -227,6 +235,11 @@ def evaluate(stage: str, policy: dict[str, dict], results: list[SuiteResult], wa
                 if r.state == "failed":
                     reasons.append(f"{name} tests failed{' in ' + r.repo if r.repo else ''}"
                                    + (f": {r.message}" if r.message else ""))
+                ran = (r.passed or 0) + (r.failed or 0)
+                if spec.get("min_pass_rate") and ran and (r.passed or 0) / ran < float(spec["min_pass_rate"]):
+                    # Agents' evals against a real model: a case may miss by chance, a share may not.
+                    reasons.append(f"{name} passed {(r.passed or 0) / ran:.0%} of its cases, below "
+                                   f"{float(spec['min_pass_rate']):.0%}" + (f" in {r.repo}" if r.repo else ""))
                 if spec.get("min_coverage") and r.coverage is not None and r.coverage < float(spec["min_coverage"]):
                     reasons.append(f"{name} coverage {r.coverage:.1f}% is below {float(spec['min_coverage']):.0f}%"
                                    + (f" in {r.repo}" if r.repo else ""))

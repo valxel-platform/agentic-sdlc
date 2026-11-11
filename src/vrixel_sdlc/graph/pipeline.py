@@ -347,6 +347,9 @@ def make_gate(gate: str, services):
                 "design_review": review,
                 # G6 sees the CloudWatch alarms firing before production on what the feature touches.
                 "alarms_firing": _alarms_firing(services, state) if gate == "g6" else [],
+                # G6 sees how the change's own agents (repos with the agent role) did in their evals, by
+                # stage, against the last release of the same agent.
+                "agent_evals": agent_evals(services, state) if gate == "g6" and lane_id == state["product_id"] else None,
                 # G5 and G6 can open each build session's trace: what the coder and reviewer did, step by step.
                 "agent_sessions": (build_sessions(services, state) if gate in ("g5", "g6") else None),
                 # G6: the traceability matrix must be complete, or a named person overrides it with a reason.
@@ -575,6 +578,45 @@ def make_gate(gate: str, services):
 
     dest = ("production_wait",) if gate == "g6" else (tuple(target) if isinstance(target, list) else (target,))
     return gate_node, (*dest, phase, END)
+
+
+# The suites that run an agent's evals: replayed on every PR, against the real model after dev.
+AGENT_EVAL_SUITES = {"pr": "evals", "dev": "integration"}
+
+
+def _eval_rows(state: dict, repo: str) -> dict[str, dict]:
+    out = {}
+    for stage, suite in AGENT_EVAL_SUITES.items():
+        for r in ((state.get("quality") or {}).get(stage) or {}).get("suites") or []:
+            if r.get("suite") == suite and r.get("repo") == repo and r.get("passed") is not None:
+                ran = int(r.get("passed") or 0) + int(r.get("failed") or 0)
+                out[stage] = {"suite": suite, "passed": int(r.get("passed") or 0), "failed": int(r.get("failed") or 0),
+                              "rate": round(int(r.get("passed") or 0) / ran, 4) if ran else None, "state": r.get("state")}
+    return out
+
+
+def agent_evals(services, state: FeatureState) -> list[dict]:
+    """For each agent repo the change set changes: its evals by stage (replayed on the PR, live in
+    dev) and the same numbers from the last release that changed it, so G6 sees the trend."""
+    roles = {t["repo"]: t.get("role") for t in state.get("tasks") or []}
+    out = []
+    for repo in sorted(r for r, role in roles.items() if role == "agent"):
+        previous, prev_id = {}, ""
+        suspects = getattr(services, "suspects", None)
+        if callable(suspects):
+            try:
+                for f in suspects(state["product_id"], repo):
+                    if f.get("feature_id") and f["feature_id"] != state["feature_id"] and not f.get("via"):
+                        prev_state = services.feature_state(f["feature_id"]) if callable(getattr(services, "feature_state", None)) else {}
+                        previous, prev_id = _eval_rows(prev_state or {}, repo), f["feature_id"]
+                        break
+            except Exception:
+                previous = {}
+        now_rows = _eval_rows(state, repo)
+        trend = {st: round(now_rows[st]["rate"] - previous[st]["rate"], 4)
+                 for st in now_rows if st in previous and now_rows[st]["rate"] is not None and previous[st]["rate"] is not None}
+        out.append({"repo": repo, "stages": now_rows, "previous": previous, "previous_feature": prev_id, "change": trend})
+    return out
 
 
 def build_sessions(services, state: FeatureState) -> list[dict]:

@@ -157,6 +157,7 @@ class FeatureEngine:
         services.roadmap_fit = self.roadmap_fit
         services.incident_signals = lambda iid: services.signals.for_incident(iid)
         services.suspects = self.suspects
+        services.feature_state = self._state
         services.flag_of = lambda fid: (self._state(fid).get("release") or {}).get("flag", "")
         services.start_hotfix = self.start_hotfix
         services.start_intent_change = self.start_intent_change
