@@ -363,6 +363,10 @@ class FeatureEngine:
         self._watcher = threading.Thread(target=loop, name="vrixel-watcher", daemon=True)
         self._watcher.start()
 
+    def trace_link(self, trace_id: str) -> str:
+        tel = getattr(self.services, "telemetry", None)
+        return tel.cfg.link(trace_id) if tel is not None else ""
+
     def sweep_change_set_envs(self) -> list[str]:
         """Delete change-set environments whose feature stopped, finished or outlived the product's
         time to live (vrixel_sdlc.changeset_env). The merge train deletes them in the normal case."""
@@ -1397,6 +1401,7 @@ class FeatureEngine:
             raise KeyError(f"Unknown feature {feature_id}")
         records = self.services.ledger.records(feature_id)
         human = sum(g.get("active_minutes", 0.0) for g in s.get("gate_decisions", []))
+        from .telemetry import sessions as agent_sessions
         pending = [{"interrupt_id": i.id, **i.value} for i in snap.interrupts]
         return {
             "feature_id": feature_id,
@@ -1410,6 +1415,8 @@ class FeatureEngine:
             "running": (running := self.is_running(feature_id)),
             "error": self.errors.get(feature_id),
             "rail": rail(s, pending, running=running),
+            # Each agent session: what it was for, its cost, and a link to its trace (vrixel_sdlc.telemetry).
+            "agent_sessions": agent_sessions(records, self.trace_link),
             "constitution_version": s.get("constitution_version"),
             "governance": s.get("governance"),
             "phase_status": s.get("phase_status", {}),

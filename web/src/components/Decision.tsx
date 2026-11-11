@@ -5,6 +5,7 @@ import Markdown from "react-markdown";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
+import { AgentSessions } from "./AgentSessions";
 import { AlarmsFiring, AwsResourcesTable } from "./AwsResources";
 import { DesignReviewPanel, RepoPlans, SimilarList } from "./External";
 
@@ -390,6 +391,13 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       {item.traceability && <ReleaseTrace t={item.traceability} />}
 
       {item.packages && item.packages.length > 0 && <ReleaseCandidates items={item.packages} />}
+
+      {item.agent_sessions && item.agent_sessions.length > 0 && (
+        <details>
+          <summary className="small">How the agents built it ({item.agent_sessions.length} sessions)</summary>
+          <AgentSessions sessions={item.agent_sessions} caption="Coder and reviewer sessions, with their traces" />
+        </details>
+      )}
 
       {item.alarms_firing && item.alarms_firing.length > 0 && (
         <div role="status">

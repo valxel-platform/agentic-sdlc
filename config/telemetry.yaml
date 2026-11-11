@@ -1,0 +1,25 @@
+# Traces of agents' work (vrixel_sdlc.telemetry). Every agent session becomes an OpenTelemetry
+# span tagged with its feature, product, phase, role, task and attempt; Claude Code and Codex
+# sessions nest their own spans (model requests, tool calls, subagents) under it. Spans go to one
+# OTLP collector, which routes them: structure to OpenChoreo's observability plane, and to the
+# platform's Langfuse for session views and evals (see platform-foundation).
+
+endpoint_env: VRIXEL_OTEL_ENDPOINT      # OTLP/HTTP base URL, e.g. http://otel-collector.observability:4318
+headers_env: VRIXEL_OTEL_HEADERS        # optional, e.g. "Authorization=Bearer <token>"
+service_name: vrixel-sdlc
+
+# What traces may carry beyond structure (tool names, timings, tokens, cost, outcome), by the
+# product's data class:
+#   none          structure only
+#   tool_details  plus tool arguments: file paths, shell commands, search patterns
+#   full          plus prompts and tool output (file contents, command output); needs an approved store
+# Content stays off everywhere until the trace store is approved for it. PHI and payments may go
+# above `none` only when `content_store_baa` is true (the store is covered by a BAA).
+content:
+  general: none
+  phi: none
+  payments: none
+content_store_baa: false
+
+# Links from the feature page and the G5/G6 decisions to a session's trace. {trace_id} is filled in.
+trace_url_env: VRIXEL_TRACE_URL         # e.g. https://langfuse.example.com/project/vrixel/traces/{trace_id}

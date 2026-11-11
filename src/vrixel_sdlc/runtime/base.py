@@ -22,6 +22,8 @@ class AgentTask:
     # A JSON schema the reply must match. Claude Code enforces it (structured output); callers
     # validate every reply against it either way (agents/structured.py).
     schema: dict | None = None
+    # Set by the tracing wrapper (vrixel_sdlc.telemetry): {"env": ..., "codex_config": ...} for the session.
+    telemetry: dict | None = None
 
 
 @dataclass

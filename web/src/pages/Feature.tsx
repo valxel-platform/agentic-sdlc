@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, ApiError, PROFILE_HELP, PROFILE_LABEL, type Feature, type FeatureCost, type FeatureEvent } from "../api";
 import { CostTable } from "../components/Costs";
+import { AgentSessions } from "../components/AgentSessions";
 import { useLive } from "../live";
 import { Rail } from "../components/Rail";
 import { ArtifactBody } from "../components/Artifact";
@@ -174,6 +175,12 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
               </>}
             </dl>
             <BuildCost featureId={f.feature_id} version={f.events.length} />
+            {f.agent_sessions && f.agent_sessions.length > 0 && (
+              <details style={{ padding: "0 16px 16px" }}>
+                <summary className="small">Agent sessions ({f.agent_sessions.length})</summary>
+                <AgentSessions sessions={f.agent_sessions} caption="What each agent session worked on, and its trace" />
+              </details>
+            )}
             {f.run_cost && f.run_cost.findings.length > 0 && (
               <div className="small" role="status" style={{ padding: "0 16px 16px" }}>
                 {f.run_cost.findings.map((t) => <p key={t}>{t}</p>)}

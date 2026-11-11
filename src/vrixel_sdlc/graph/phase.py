@@ -21,7 +21,7 @@ from ..agents import templates
 from ..agents.context import build_layers
 from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
 from .. import diary, performance
-from .. import lessons
+from .. import lessons, telemetry
 from ..config import ProductConfig
 from ..provisioning import naming_policy
 from ..evaluators import critique, run_checks, weakening
@@ -351,13 +351,18 @@ def build_phase_subgraph(phase: str, services):
                 tail.append("AWS resources the product already has (reuse them; never change their keys): " + ", ".join(
                     f"{r['name']} ({r.get('type', '')})" for r in ctx["aws_existing"]))
         left = s["budget_remaining_usd"] - float((s.get("usage") or {}).get("cost_usd", 0.0))
-        res = call_agent(services, role=spec.role, phase=phase, ctx=ctx, skills=spec.skills,
-                         tail="\n".join(t for t in tail if t), stub_text=template(ctx, defective), budget_usd=left)
+        with telemetry.labels(attempt=attempt):
+            res = call_agent(services, role=spec.role, phase=phase, ctx=ctx, skills=spec.skills,
+                             tail="\n".join(t for t in tail if t), stub_text=template(ctx, defective), budget_usd=left)
         content = merge_sections(previous, res.text) if previous else res.text
         return {"attempt": attempt, "draft": {"kind": spec.kind, "content": content},
                 "usage": {"tokens": res.tokens, "cost_usd": res.cost_usd}}
 
     def evaluate(s: PhaseState) -> dict:
+        with telemetry.labels(attempt=s.get("attempt", 0)):
+            return _evaluate(s)
+
+    def _evaluate(s: PhaseState) -> dict:
         content, ctx = s["draft"]["content"], s["ctx"]
         findings = run_checks(phase, content, ctx)  # deterministic checks first
         usage, score, verdict = {}, 0.0, {}
@@ -541,7 +546,12 @@ def build_build_subgraph(services):
         mine = [c for c in ctx.get("cases") or [] if c.get("via") == "test" and c.get("task") == task["id"]]
         first = ctx["tasks"][0]["id"] if ctx["tasks"] else None
         fail = attempt <= int(ctx["simulate_faults"].get("build", 0)) and task["id"] == first
-        res = call_agent(
+        with telemetry.labels(task=task["id"], attempt=attempt, repo=task["repo"]):
+            res = _code(task, ctx, mine, fail, payload)
+        return _coded(task, ctx, attempt, mine, fail, res)
+
+    def _code(task, ctx, mine, fail, payload):
+        return call_agent(
             services, role="coder", phase="build", ctx=ctx, skills=spec.skills,
             tail=(f"Implement {task['id']} in {task['repo']} on branch {ctx.get('branch') or 'feature/' + ctx['feature_id']}. "
                   f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run the tests and report what they said."
@@ -557,6 +567,8 @@ def build_build_subgraph(services):
             stub_text=templates.code_result(ctx, task, passed=not fail),
             schema=structured.schema(structured.CoderReply),
         )
+
+    def _coded(task, ctx, attempt, mine, fail, res):
         # The coder's own test run gates review; CI on the pull request is the final word (ci_wait).
         reply, error = structured.parse(res.text, structured.CoderReply)
         branch = ctx.get("branch") or f"feature/{ctx['feature_id']}"
@@ -579,10 +591,14 @@ def build_build_subgraph(services):
 
     def review(s: PhaseState) -> dict:
         ctx, reviews, tokens, cost = s["ctx"], {}, 0, 0.0
+        token = None  # the reviewer's sessions are labelled with the task and attempt they review
         for tid, r in sorted((s.get("task_results") or {}).items()):
+            telemetry.pop_labels(token)
+            token = None
             earlier = (s.get("reviews") or {}).get(tid)
             if not r["tests_passed"] or (earlier and earlier.get("attempt") == r.get("attempt")):
                 continue  # not ready for review, or this attempt has been reviewed
+            token = telemetry.push_labels(task=tid, attempt=r.get("attempt"), repo=r["repo"])
             catalog_entry(services, ctx, r)
             # The change note puts the task's trace (ACs, files, tests) in the repo, on the branch the
             # PR merges; with stub agents it is also the commit that makes the PR possible.
@@ -676,6 +692,7 @@ def build_build_subgraph(services):
                 reviews[tid]["shadow"] = {"model": services.settings.role("reviewer_shadow").model, "approve": approve,
                                           "agree": approve == reviews[tid]["approve"], "cost_usd": round(sres.cost_usd, 4)}
             tokens, cost = tokens + res.tokens, cost + res.cost_usd
+        telemetry.pop_labels(token)
         return {"reviews": reviews, "usage": {"tokens": tokens, "cost_usd": cost}}
 
     def evaluate(s: PhaseState) -> dict:

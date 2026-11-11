@@ -74,10 +74,16 @@ class Services:
     cohort_logs: object = None  # vrixel_sdlc.ops.cohorts log source: users with a flag on against off
 
     available_roles: frozenset = frozenset()  # roles whose provider is configured, set by build_services
+    telemetry: object = None  # vrixel_sdlc.telemetry.Telemetry: each agent session as a span, set by build_services
 
     def runtime_for(self, role: str) -> AgentRuntime:
         kind = self.settings.role(role).runtime
-        return self.runtimes.get(kind) or self.runtimes["generic"]
+        runtime = self.runtimes.get(kind) or self.runtimes["generic"]
+        if self.telemetry is not None and self.telemetry.enabled:
+            from .telemetry import TracedRuntime
+
+            return TracedRuntime(runtime, self.telemetry)
+        return runtime
 
     def roles_for(self, role: str, data_class: str) -> list[str]:
         """The role, then its fallbacks for when its provider is unavailable."""
@@ -189,7 +195,16 @@ def build_services(
     svc.flags = default_flags(settings, svc)
     svc.provisioner = default_provisioner(settings, github, openchoreo)
     svc.available_roles = frozenset(available)
+    svc.telemetry = default_telemetry(settings)
     return svc
+
+
+def default_telemetry(settings: Settings):
+    """Agent sessions as OpenTelemetry spans when VRIXEL_OTEL_ENDPOINT is set (config/telemetry.yaml)."""
+    from .pilot import config_version
+    from .telemetry import Telemetry, load_config
+
+    return Telemetry(load_config(settings.config_dir), config_version=config_version(settings))
 
 
 def default_packages(github):

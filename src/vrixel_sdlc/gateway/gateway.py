@@ -14,6 +14,15 @@ from .prompt import PromptLayers
 from .providers import ModelRequest, ModelResponse, Provider
 
 
+def _trace_fields() -> dict:
+    """The active agent session's trace, and its task and attempt (vrixel_sdlc.telemetry)."""
+    from ..telemetry import current_ids, current_labels
+
+    trace_id, span_id = current_ids()
+    lab = current_labels()
+    return {"trace_id": trace_id, "span_id": span_id, "task_id": lab.get("task", ""), "attempt": lab.get("attempt", "")}
+
+
 class PolicyViolation(RuntimeError):
     """A request would send a data class to a provider it is not allowed to reach."""
 
@@ -131,6 +140,7 @@ class ModelGateway:
             request_id=resp.request_id,
             config_version=self.config_version,
             duration_s=round(float(duration_s), 3),
+            **_trace_fields(),
         )
         self.ledger.record(rec)
         return GatewayResult(text=resp.text, response=resp, cost_usd=usd, record=rec)
