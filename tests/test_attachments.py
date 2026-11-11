@@ -75,6 +75,8 @@ def _ready(client, sid):
     for text in ("Farm managers miss dry fields because they only check soil when they visit.",
                  "It's for Farm app", "Managers of farms with irrigation sensors", "Fewer than 2 dry fields a month"):
         s = client.post(f"/api/intake/{sid}/messages", json={"text": text}).json()
+    if "experience" in s["missing"]:  # the experience round, left to the design agent
+        s = client.post(f"/api/intake/{sid}/messages", json={"text": "You decide the rest"}).json()
     assert s["ready"]
     return s
 

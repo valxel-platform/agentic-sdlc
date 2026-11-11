@@ -166,6 +166,9 @@ class DraftIn(BaseModel):
     problem: str | None = None
     users: str | None = None
     success_metric: str | None = None
+    ui: bool | None = Field(default=None, description="Whether the intent changes what people see")
+    experience: dict[str, str] | None = Field(default=None, description="The experience brief: where, main_task, "
+                                              "context, look")
 
 
 class EvalRunIn(BaseModel):

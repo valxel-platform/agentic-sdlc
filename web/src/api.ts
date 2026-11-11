@@ -421,7 +421,11 @@ export interface SimilarItem {
 export interface Draft {
   product_id: string; title: string; problem: string; users: string; success_metric: string;
   related_capability: string; similar: SimilarItem[]; not_duplicate_reason: string;
+  // The intent changes what people see: the experience round applies, and its brief.
+  ui: boolean; experience: Partial<Record<ExperienceKey, string>>;
 }
+export type ExperienceKey = "where" | "main_task" | "context" | "look";
+export const EXPERIENCE_DELEGATED = "Left to the design agent";
 /** A file attached to an intent: kept as the strictest data class until the intent is submitted. */
 export interface Attachment {
   id: string; name: string; kind: "image" | "pdf" | "text"; size: number; read_by_agents: boolean;
@@ -431,7 +435,7 @@ export const ATTACH_ACCEPT = ".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,.csv,.jso
 export interface IntakeSession {
   id: string; owner: string; lanes: string[]; draft: Draft; ready: boolean; missing: string[]; attachments: Attachment[];
   feature_id: string; created_at: string;
-  messages: { role: "user" | "agent"; text: string; at: string; attachment?: string }[];
+  messages: { role: "user" | "agent"; text: string; at: string; attachment?: string; options?: string[] }[];
 }
 
 export class ApiError extends Error {
@@ -556,7 +560,7 @@ export const api = {
   intakeList: () => request<IntakeSession[]>("GET", "/intake"),
   intake: (id: string) => request<IntakeSession>("GET", `/intake/${id}`),
   intakeSay: (id: string, text: string) => request<IntakeSession>("POST", `/intake/${id}/messages`, { text }),
-  intakeDraft: (id: string, changes: Partial<Draft>) => request<IntakeSession>("PATCH", `/intake/${id}/draft`, changes),
+  intakeDraft: (id: string, changes: Partial<Omit<Draft, "experience">> & { experience?: Partial<Record<ExperienceKey, string>> }) => request<IntakeSession>("PATCH", `/intake/${id}/draft`, changes),
   intakeAttach: async (id: string, file: File): Promise<IntakeSession> => {
     const res = await fetch(`/api/intake/${id}/attachments?name=${encodeURIComponent(file.name)}`, {
       method: "POST", credentials: "same-origin", body: file,

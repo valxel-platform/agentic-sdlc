@@ -74,5 +74,18 @@ def for_phase(phase: str) -> tuple[Item, ...]:
     return RUBRICS.get(phase, ())
 
 
+BRIEF = Item("brief", "Follows the request's experience brief: the screen or flow it names, the main task shown "
+                     "first, and the look it asks for; any part it leaves to the design agent is listed under Agent "
+                     "notes as a choice made")
+
+
+def for_request(phase: str, description: str) -> tuple[Item, ...]:
+    """The phase's items, plus the experience brief's when the person gave one (intake)."""
+    items = for_phase(phase)
+    if phase == "design" and "Experience brief:" in (description or ""):
+        items = items + (BRIEF,)
+    return items
+
+
 def as_text(items: tuple[Item, ...]) -> str:
     return "\n".join(f"- {i.id} ({'must' if i.must else 'should'}): {i.text}" for i in items)
