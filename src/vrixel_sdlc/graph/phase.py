@@ -599,6 +599,7 @@ def build_build_subgraph(services):
             if not r["tests_passed"] or (earlier and earlier.get("attempt") == r.get("attempt")):
                 continue  # not ready for review, or this attempt has been reviewed
             token = telemetry.push_labels(task=tid, attempt=r.get("attempt"), repo=r["repo"])
+            catalog_entry(services, ctx, r)
             # The change note puts the task's trace (ACs, files, tests) in the repo, on the branch the
             # PR merges; with stub agents it is also the commit that makes the PR possible.
             services.github.put_file(
