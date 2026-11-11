@@ -74,6 +74,7 @@ class FeatureState(TypedDict, total=False):
     profile: str  # feature | express: which phases and gates the work goes through (vrixel_sdlc.profiles)
     hotfix: dict  # {incident_id, repo, change, severity, approved_by} for the hotfix track
     pilot: bool  # measured in the pilot report, with the shadow modes on
+    config_variant: str  # "canary": the feature's agents run with the candidate config (services.default_canary)
 
     # Written by single nodes or by parallel branches through reducers
     token_budget_usd: Annotated[float, last]  # an escalation can raise it

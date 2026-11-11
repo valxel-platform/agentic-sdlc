@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 
 from ..agents import structured, untrusted
-from ..agents.context import build_layers
+from ..agents.context import build_layers, skills_dir_of
 from ..gateway import CallTags
 from ..runtime import AgentTask
 from .. import lessons
@@ -103,10 +103,13 @@ def critique(services, *, phase: str, rubric_skills: tuple[str, ...], content: s
     tokens, cost, reply, error = 0, 0.0, None, ""
     for attempt in range(2):  # one more try when the reply doesn't fit the shape
         tail = ask if not attempt else ask + f"\n\nYour last reply didn't fit the schema ({error}). Reply again."
+        variant = ctx.get("config_variant", "")
         layers = build_layers(role="critic", skills=rubric_skills, constitution=snap.constitution, product=product,
-                              product_context=snap.product_context, parent_texts=ctx.get("parent_texts", {}), tail=tail)
-        res = services.runtime_for(role).run(AgentTask(
-            role=role, phase=phase, tags=tags, layers=layers, stub_text=stub_verdict(content, phase, items), max_tokens=1024,
+                              product_context=snap.product_context, parent_texts=ctx.get("parent_texts", {}), tail=tail,
+                              skills_dir=skills_dir_of(services, variant))
+        runtime = services.runtime_for(role, variant) if variant else services.runtime_for(role)
+        res = runtime.run(AgentTask(
+            role=role, phase=phase, tags=tags, layers=layers, skills=tuple(rubric_skills), stub_text=stub_verdict(content, phase, items), max_tokens=1024,
             schema=structured.schema(structured.CriticReply)))
         tokens, cost = tokens + res.tokens, cost + res.cost_usd
         reply, error = structured.parse(res.text, structured.CriticReply)

@@ -39,6 +39,8 @@ class UsageRecord:
     span_id: str = ""
     task_id: str = ""
     attempt: str = ""
+    # Installed skills the session loaded by itself, beyond its phase's ("plugin:skill,...").
+    extra_skills: str = ""
 
     @property
     def total_input(self) -> int:
@@ -82,6 +84,7 @@ class PostgresLedger:
     ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS span_id TEXT NOT NULL DEFAULT '';
     ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS task_id TEXT NOT NULL DEFAULT '';
     ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS attempt TEXT NOT NULL DEFAULT '';
+    ALTER TABLE vrixel_usage ADD COLUMN IF NOT EXISTS extra_skills TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS vrixel_usage_feature ON vrixel_usage (feature_id);
     CREATE INDEX IF NOT EXISTS vrixel_usage_product_ts ON vrixel_usage (product_id, ts);
     """

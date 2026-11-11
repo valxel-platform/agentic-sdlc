@@ -6,7 +6,9 @@ repository's AGENTS.md as Codex always does, and replies with the stage's JSON s
 (`--output-schema`). Each session gets its own Codex home (CODEX_HOME), copied from the image's
 template (VRIXEL_CODEX_HOME), in which the same skills-only plugins Claude Code loads are
 installed: the agent sees every plugin skill by name and description and reads one when it needs
-it. Nothing from a user's own Codex configuration applies. Codex keeps its own built-in instructions; our layers L2-L5 (the phase's
+it, unless config/plugins.yaml turns `on_demand` off for the role (or the config pins plugins other
+than the image's: the template has the image's). Each skill file a session reads beyond its
+phase's is recorded (`extra_skills`). Nothing from a user's own Codex configuration applies. Codex keeps its own built-in instructions; our layers L2-L5 (the phase's
 skills, the constitution, the product, the feature) go first in the prompt, then the task, so
 providers that cache prompt prefixes reuse them. The prompt goes through stdin, so its size is
 not limited by the process-argument cap.
@@ -35,6 +37,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from .. import plugins
 from ..gateway import (
     ModelGateway,
     ModelResponse,
@@ -151,12 +154,13 @@ def failure_from(events: str) -> str:
     return ""
 
 
-def session_home(template: str, target: Path) -> str:
+def session_home(template: str, target: Path, *, with_plugins: bool = True) -> str:
     """A Codex home for one session: a copy of the template (the installed plugins and the config
     that enables them), or an empty one. Sessions never share state or see a user's config."""
     if template and Path(template).is_dir():
         target.mkdir(parents=True)
-        for part in ("config.toml", "plugins"):  # what the template is for; never its scratch state
+        parts = ("config.toml", "plugins") if with_plugins else ("config.toml",)
+        for part in parts:  # what the template is for; never its scratch state
             src = Path(template) / part
             if src.is_dir():
                 shutil.copytree(src, target / part, symlinks=True)
@@ -177,6 +181,9 @@ def add_otel(home: Path, section: str) -> None:
         log.warning("the Codex home template configures [otel] itself; the tool's export is left out")
         return
     cfg.write_text(text + section)
+
+
+PLUGIN_NAMES = {*plugins.UPSTREAM, "vrixel"}
 
 
 class CodexRuntime:
@@ -206,7 +213,8 @@ class CodexRuntime:
             provider = (role.provider, pc.url(), pc.api_key_env)
         started = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="vrixel-codex-") as tmp:
-            env["CODEX_HOME"] = session_home(self.home_template, Path(tmp) / "home")
+            env["CODEX_HOME"] = session_home(self.home_template, Path(tmp) / "home",
+                                             with_plugins=self.on_demand(task.role))
             add_otel(Path(env["CODEX_HOME"]), (task.telemetry or {}).get("codex_config", ""))
             env.update((task.telemetry or {}).get("env") or {})
             schema_path = None
@@ -237,10 +245,24 @@ class CodexRuntime:
             cache_read_input_tokens=u["cached_input_tokens"],
             output_tokens=u["output_tokens"],
         )
+        extra = plugins.extra(plugins.skills_in_paths(events, PLUGIN_NAMES), task.skills)
         rec = self.gateway.record_external(task.tags, runtime=self.name, model=role.model, layers=task.layers,
-                                           response=resp, duration_s=time.monotonic() - started)
+                                           response=resp, duration_s=time.monotonic() - started,
+                                           extra_skills=extra)
         cap = session_cap(task, role)
         if rec.cost_usd > cap:
             log.warning("%s/%s: the codex session cost $%.2f, over its $%.2f cap", task.phase, task.role,
                         rec.cost_usd, cap)
-        return AgentResult(text=text, tokens=rec.total_tokens, cost_usd=rec.cost_usd, request_ids=[resp.request_id])
+        return AgentResult(text=text, tokens=rec.total_tokens, cost_usd=rec.cost_usd, request_ids=[resp.request_id],
+                           extra_skills=extra)
+
+    def on_demand(self, role: str) -> bool:
+        """Whether the session gets the template's plugins: the role may load skills by itself, and
+        the config's plugins are the image's (the ones installed in the template)."""
+        settings = self.gateway.settings
+        cfg = getattr(settings, "plugins", None)
+        if cfg is not None and not cfg.on_demand(role):
+            return False
+        installed = os.environ.get("VRIXEL_SKILLS_DIR", "")
+        mine = getattr(settings, "skills_dir", "") or installed
+        return not installed or Path(mine).resolve() == Path(installed).resolve()

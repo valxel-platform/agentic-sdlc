@@ -18,7 +18,7 @@ from langgraph.types import Send
 
 from ..agents import PHASE_SPECS
 from ..agents import templates
-from ..agents.context import build_layers
+from ..agents.context import build_layers, skills_dir_of
 from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
 from .. import diary, performance
 from .. import evals, lessons, telemetry
@@ -113,6 +113,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         # After the change set merged, a fix for a failure in dev or staging goes on a branch of its own.
         "branch": state.get("fix_branch") or f"feature/{state['feature_id']}",
         "pilot": bool(state.get("pilot")),
+        "config_variant": state.get("config_variant", ""),
         "simulate_faults": dict(state.get("simulate_faults") or {}),
         "tasks": list(state.get("tasks") or []),
         "cases": list(state.get("cases") or []),
@@ -201,15 +202,16 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
     learned = lessons.instruction(snap.lessons, phase) if role not in NO_LESSON_ROLES else ""
     if learned:  # what people taught earlier features of this product, for this phase
         tail = f"{tail}\n\n{learned}"
+    variant = ctx.get("config_variant", "")  # a canary feature's agents run with the candidate config
     layers = build_layers(
         role=role, skills=skills, constitution=snap.constitution, product=product,
         parent_texts=ctx.get("parent_texts", {}), tail=tail, product_context=snap.product_context,
-        design_knowledge=ctx.get("knowledge_text", ""),
+        design_knowledge=ctx.get("knowledge_text", ""), skills_dir=skills_dir_of(services, variant),
     )
     left = budget_usd if budget_usd is not None else ctx.get("budget_remaining_usd")
-    candidates = services.roles_for(role, product.data_class)
+    candidates = services.roles_for(role, product.data_class, variant) if variant else services.roles_for(role, product.data_class)
     for i, who in enumerate(candidates):
-        runtime = services.runtime_for(who)
+        runtime = services.runtime_for(who, variant) if variant else services.runtime_for(who)
         missing = PHASE_SPECS[phase].required_capabilities - runtime.capabilities
         if missing:
             if i == 0:
@@ -220,7 +222,7 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
             data_class=product.data_class, workspace=product.workspace, prompt_version=f"{phase}@1",
         )
         try:
-            res = runtime.run(AgentTask(role=who, phase=phase, tags=tags, layers=layers,
+            res = runtime.run(AgentTask(role=who, phase=phase, tags=tags, layers=layers, skills=tuple(skills),
                                         stub_text=stub_text, max_tokens=max_tokens, schema=schema,
                                         max_budget_usd=None if left is None else max(0.0, float(left))))
         except ProviderUnavailable as exc:

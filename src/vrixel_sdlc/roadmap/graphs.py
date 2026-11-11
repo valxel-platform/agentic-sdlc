@@ -18,7 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from ..agents import untrusted
-from ..agents.context import build_layers
+from ..agents.context import build_layers, skills_dir_of
 from ..gateway import CallTags
 from ..runtime import AgentTask
 from ..state import last, merge_dict
@@ -48,10 +48,11 @@ def run_agent(services, *, role: str, product_id: str, thread_id: str, phase: st
               tail: str, stub_text: str, max_tokens: int = 3000):
     snap = services.snapshot(product_id)
     layers = build_layers(role=role, skills=skills, constitution=snap.constitution, product=snap.product,
-                          parent_texts={}, tail=tail, product_context=snap.product_context)
+                          parent_texts={}, tail=tail, product_context=snap.product_context,
+                          skills_dir=skills_dir_of(services))
     tags = CallTags(product_id=product_id, feature_id=thread_id, phase=phase, role=role,
                     data_class=snap.product.data_class, workspace=snap.product.workspace, prompt_version=f"{phase}@1")
-    return services.runtime_for(role).run(AgentTask(role=role, phase=phase, tags=tags, layers=layers,
+    return services.runtime_for(role).run(AgentTask(role=role, phase=phase, tags=tags, layers=layers, skills=tuple(skills),
                                                     stub_text=stub_text, max_tokens=max_tokens))
 
 
