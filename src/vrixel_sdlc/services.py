@@ -26,6 +26,20 @@ from .runtime import AgentRuntime, ClaudeCodeRuntime, CodexRuntime, GatewayRunti
 
 
 @dataclass
+class AgentStack:
+    """A config's agents: its settings, gateway (tagging each call with its config version), runtimes
+    and the roles it can run. The canary is a second stack that a share of new features uses."""
+
+    settings: Settings
+    gateway: ModelGateway
+    runtimes: dict
+    available_roles: frozenset
+    percent: int = 0
+    data_classes: tuple = ("general",)
+    config_dir: str = ""
+
+
+@dataclass
 class Services:
     settings: Settings
     ledger: Ledger
@@ -76,21 +90,36 @@ class Services:
     available_roles: frozenset = frozenset()  # roles whose provider is configured, set by build_services
     telemetry: object = None  # vrixel_sdlc.telemetry.Telemetry: each agent session as a span, set by build_services
     evals: object = None  # vrixel_sdlc.evals store: eval cases from finished document phases, labelled at the gates
+    canary: object = None  # AgentStack: a candidate config a share of new features runs with (VRIXEL_CANARY_*)
 
-    def runtime_for(self, role: str) -> AgentRuntime:
-        kind = self.settings.role(role).runtime
-        runtime = self.runtimes.get(kind) or self.runtimes["generic"]
+    def _stack(self, variant: str = ""):
+        return self.canary if variant == "canary" and self.canary is not None else self
+
+    def canary_variant(self, feature_id: str, data_class: str, track: str = "standard") -> str:
+        """"canary" for the share of new features the candidate config runs; "" for the rest."""
+        import hashlib
+
+        c = self.canary
+        if c is None or not c.percent or track == "hotfix" or data_class not in c.data_classes:
+            return ""
+        return "canary" if int(hashlib.sha1(feature_id.encode()).hexdigest(), 16) % 100 < c.percent else ""
+
+    def runtime_for(self, role: str, variant: str = "") -> AgentRuntime:
+        stack = self._stack(variant)
+        kind = stack.settings.role(role).runtime
+        runtime = stack.runtimes.get(kind) or stack.runtimes["generic"]
         if self.telemetry is not None and self.telemetry.enabled:
             from .telemetry import TracedRuntime
 
             return TracedRuntime(runtime, self.telemetry)
         return runtime
 
-    def roles_for(self, role: str, data_class: str) -> list[str]:
+    def roles_for(self, role: str, data_class: str, variant: str = "") -> list[str]:
         """The role, then its fallbacks for when its provider is unavailable."""
         from .models import chain
 
-        return chain(self.settings, set(self.available_roles or self.settings.roles), role, data_class)
+        stack = self._stack(variant)
+        return chain(stack.settings, set(stack.available_roles or stack.settings.roles), role, data_class)
 
     def second_opinion(self, role: str, data_class: str, reviewed_by: str | None = None):
         """Another model to review the same work, if the role has one that can run here."""
@@ -136,20 +165,8 @@ def check_skills(base: str | None = None) -> None:
         raise RuntimeError(f"Skills missing from {base}: {', '.join(missing)}")
 
 
-def build_services(
-    settings: Settings | None = None,
-    *,
-    ledger: Ledger | None = None,
-    github: GitHub | None = None,
-    openchoreo: OpenChoreo | None = None,
-    catalog: CapabilityCatalog | None = None,
-    governance_source: GovernanceSource | None = None,
-    packages: PackageRegistry | None = None,
-    diagrams: dict[str, DiagramPublisher] | None = None,
-    trackers: dict[str, WorkTracker] | None = None,
-) -> Services:
-    settings = settings or load_settings()
-    ledger = ledger or InMemoryLedger()
+def agent_stack(settings: Settings, ledger: Ledger):
+    """The gateway, runtimes and runnable roles for one config."""
     from .models import available_roles
 
     available = available_roles(settings)
@@ -174,6 +191,47 @@ def build_services(
             gateway, name="claude_code", capabilities=frozenset({"text", "native_plugins", "subagents"})
         )
         runtimes["codex"] = GatewayRuntime(gateway, name="codex", capabilities=frozenset({"text", "code_execution"}))
+    return gateway, runtimes, available
+
+
+def default_canary(settings: Settings, ledger: Ledger, env=None):
+    """A second config a share of new features runs with: VRIXEL_CANARY_CONFIG_DIR (a config
+    directory like config/), VRIXEL_CANARY_PERCENT (1-50) and VRIXEL_CANARY_DATA_CLASSES (general by
+    default). Its roles must cover every role the config in use has."""
+    import os
+
+    env = env if env is not None else os.environ
+    path, percent = env.get("VRIXEL_CANARY_CONFIG_DIR", ""), int(env.get("VRIXEL_CANARY_PERCENT", "0") or 0)
+    if not path or percent <= 0:
+        return None
+    if percent > 50:
+        raise ValueError("VRIXEL_CANARY_PERCENT is at most 50: a canary is the smaller share")
+    canary = load_settings(mode=settings.mode, database_url="", config_dir=path, artifact_dir=settings.artifact_dir,
+                           governance_source=settings.governance_source, governance_root=settings.governance_root)
+    missing = sorted(set(settings.roles) - set(canary.roles))
+    if missing:
+        raise ValueError(f"The canary config at {path} lacks roles {', '.join(missing)}")
+    gateway, runtimes, available = agent_stack(canary, ledger)
+    classes = tuple(c for c in env.get("VRIXEL_CANARY_DATA_CLASSES", "general").split(",") if c)
+    return AgentStack(settings=canary, gateway=gateway, runtimes=runtimes, available_roles=frozenset(available),
+                      percent=percent, data_classes=classes, config_dir=str(path))
+
+
+def build_services(
+    settings: Settings | None = None,
+    *,
+    ledger: Ledger | None = None,
+    github: GitHub | None = None,
+    openchoreo: OpenChoreo | None = None,
+    catalog: CapabilityCatalog | None = None,
+    governance_source: GovernanceSource | None = None,
+    packages: PackageRegistry | None = None,
+    diagrams: dict[str, DiagramPublisher] | None = None,
+    trackers: dict[str, WorkTracker] | None = None,
+) -> Services:
+    settings = settings or load_settings()
+    ledger = ledger or InMemoryLedger()
+    gateway, runtimes, available = agent_stack(settings, ledger)
     if github is None or openchoreo is None:
         live_github, live_oc = default_delivery(settings)
         github, openchoreo = github or live_github, openchoreo or live_oc
@@ -197,6 +255,7 @@ def build_services(
     svc.provisioner = default_provisioner(settings, github, openchoreo)
     svc.available_roles = frozenset(available)
     svc.telemetry = default_telemetry(settings)
+    svc.canary = default_canary(settings, ledger)
     from .evals import InMemoryEvalStore
 
     svc.evals = InMemoryEvalStore()

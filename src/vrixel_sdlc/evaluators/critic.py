@@ -105,7 +105,9 @@ def critique(services, *, phase: str, rubric_skills: tuple[str, ...], content: s
         tail = ask if not attempt else ask + f"\n\nYour last reply didn't fit the schema ({error}). Reply again."
         layers = build_layers(role="critic", skills=rubric_skills, constitution=snap.constitution, product=product,
                               product_context=snap.product_context, parent_texts=ctx.get("parent_texts", {}), tail=tail)
-        res = services.runtime_for(role).run(AgentTask(
+        variant = ctx.get("config_variant", "")
+        runtime = services.runtime_for(role, variant) if variant else services.runtime_for(role)
+        res = runtime.run(AgentTask(
             role=role, phase=phase, tags=tags, layers=layers, stub_text=stub_verdict(content, phase, items), max_tokens=1024,
             schema=structured.schema(structured.CriticReply)))
         tokens, cost = tokens + res.tokens, cost + res.cost_usd
