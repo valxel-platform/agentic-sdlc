@@ -11,7 +11,7 @@ import { Board } from "./pages/Board";
 import { FeaturePage } from "./pages/Feature";
 import { Intake } from "./pages/Intake";
 import { RoadmapPage } from "./pages/Roadmap";
-import { InitiativePage, ReleasePage } from "./pages/Thread";
+import { InitiativePage, ReleasePage, ReviewPage } from "./pages/Thread";
 import { IncidentPage, IncidentsPage } from "./pages/Incidents";
 import { CostsPage } from "./pages/Costs";
 import { ChangesPage } from "./pages/Changes";
@@ -66,6 +66,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <Route path="/products/:id" element={<InceptionPage />} />
           <Route path="/initiatives/:id" element={<InitiativePage />} />
           <Route path="/releases/:id" element={<ReleasePage />} />
+          <Route path="/reviews/:id" element={<ReviewPage />} />
           <Route path="/incidents" element={<IncidentsPage me={me} />} />
           <Route path="/costs" element={<CostsPage me={me} />} />
           <Route path="/lessons" element={<LessonsPage me={me} />} />

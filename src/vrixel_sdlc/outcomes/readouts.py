@@ -274,7 +274,10 @@ def feature_outcome(engine, feature_id: str) -> dict:
     have = {(r["goal_id"], int(r["window_days"])) for r in rows}
     upcoming = [{"goal_id": g, "window_days": w, "due": (released + timedelta(days=w)).date().isoformat()}
                 for g in goals if g in ms for w in cfg["windows"] if released and (g, w) not in have]
-    return {"feature_id": feature_id, "product_id": pid, "goals": goals,
+    plan = ((state.get("release") or {}).get("rollout_plan") or {})
+    rollout = [{"percent": h.get("percent"), "goal": h["goal"], "goal_cohorts": h.get("goal_cohorts") or {}}
+               for h in plan.get("history") or [] if h.get("goal")]
+    return {"feature_id": feature_id, "product_id": pid, "goals": goals, "rollout": rollout,
             "metrics": {g: ms[g].as_dict() for g in goals if g in ms},
             "released_at": released.isoformat() if released else "",
             "instrumentation": state.get("instrumentation_check") or None,

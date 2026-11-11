@@ -206,8 +206,8 @@ def test_the_summary_lines_add_up_and_the_test_is_conservative():
              '{"message": "vrixel.flag_cohorts {\\"flag\\": \\"cln.f\\", \\"on\\": {\\"requests\\": 10, \\"errors\\": 0}, '
              '\\"off\\": {\\"requests\\": 10, \\"errors\\": 0}}"}', "unrelated", "vrixel.flag_cohorts {not json"]
     got = cohorts.parse(lines, [f])[f]
-    assert got == {"on": {"requests": 230, "errors": 1, "slow": 0}, "off": {"requests": 1790, "errors": 9, "slow": 0},
-                   "lines": 3, "timed": 0}
+    assert got == {"on": {"requests": 230, "errors": 1, "slow": 0, "events": {}},
+                   "off": {"requests": 1790, "errors": 9, "slow": 0, "events": {}}, "lines": 3, "timed": 0}
     assert cohorts.compare(got)["verdict"] == "ok"
     bad = {"on": {"requests": 400, "errors": 24}, "off": {"requests": 4000, "errors": 20}}
     r = cohorts.compare(bad)

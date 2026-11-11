@@ -56,6 +56,7 @@ export const MODELS: Record<string, string> = { launch: "Launch group", train: "
 export function threadPath(id: string): string {
   const kind = id.split("-")[1];
   return kind === "INI" ? `/initiatives/${id}` : kind === "REL" ? `/releases/${id}` : kind === "PRD" ? `/products/${id}`
+    : kind === "REV" ? `/reviews/${id}`
     : kind === "INC" ? `/incidents/${id}` : `/features/${id}`;
 }
 
@@ -67,6 +68,7 @@ export function gateLabel(gate?: string): string {
   if (gate === "postmortem") return "Postmortem";
   if (gate === "brief") return "Brief";
   if (gate === "product") return "Product";
+  if (gate === "review") return "Initiative review";
   return g ? `${gate.toUpperCase()} ${g.name}` : gate.toUpperCase();
 }
 

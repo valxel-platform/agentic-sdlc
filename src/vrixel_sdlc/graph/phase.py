@@ -559,16 +559,27 @@ def events_instruction(ctx: dict, task: dict) -> str:
             + " List the event types after 'Events:' in the patch summary.")
 
 
+# How each template records a product event (vrixel-tools/template-*: counter, summary line, cohorts).
+EVENT_APIS = {
+    "provider": 'ProductEvents.record("<name>") or record("<name>", Map.of("<category>", "<value>")) in Java',
+    "event-worker": 'ProductEvents.record("<name>") in the handler',
+    "agent": 'events.record("<name>", <category>="<value>") from agent.events',
+    "mcp-server": 'events.record("<name>") from mcp_server.events',
+    "consumer": 'track("<name>") from src/events.ts; names only, no attributes',
+    "mobile": 'track("<name>") from src/events.ts; names only, no attributes',
+}
+
+
 def instrumentation_instruction(ctx: dict, task: dict) -> str:
     mine = [e for e in ctx.get("instrumentation") or [] if e.get("repo") == task.get("repo")]
     if not mine:
         return ""
     named = "; ".join(f"{e['event']} ({e['when']}"
                       + (f"; attributes {', '.join(e['properties'])}" if e["properties"] else "") + ")" for e in mine)
-    return (f" Record these product events with the repo's product-events module (the OpenTelemetry counter"
-            f" vrixel.events, attribute event=<name>; the template logs the per-minute summary): {named}."
-            " Never a person's name, contact details or ids as attributes. Tests prove each is recorded."
-            " List the event names after 'Instrumentation:' in the patch summary.")
+    how = EVENT_APIS.get(task.get("role") or "", EVENT_APIS["provider"])
+    return (f" Record these product events where they happen, with the template's product-events API ({how}):"
+            f" {named}. Never a person's name, contact details or ids as attributes. Tests prove each is"
+            " recorded. List the event names after 'Instrumentation:' in the patch summary.")
 
 
 def instrumentation_findings(ctx: dict, results: dict) -> list[str]:

@@ -38,6 +38,14 @@ function InitiativeCard({ i }: { i: RoadmapInitiative }) {
       {i.outcome && ["approved", "active"].includes(i.status) && (
         <p className="small"><StatusChip status={i.outcome.status} why={i.outcome.why} /> <span className="muted">goal since approval</span></p>
       )}
+      {["approved", "active"].includes(i.status) && (i.review_by || (i.reviews ?? []).length > 0) && (
+        <p className="small muted">
+          {(i.reviews ?? []).filter((r) => r.status === "waiting").map((r) => (
+            <span key={r.id}><Link to={threadPath(r.id)}>Review waiting</Link>: {r.why}. </span>
+          ))}
+          {i.review_by && !(i.reviews ?? []).some((r) => r.status === "waiting") && `Next review ${i.review_by}`}
+        </p>
+      )}
       {["approved", "active", "done"].includes(i.status) && <Progress i={i} />}
       <p className="small faint">
         {MODELS[i.release_model] ?? i.release_model}

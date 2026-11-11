@@ -17,6 +17,10 @@ export interface PendingItem {
   interrupt_id: string;
   // At the product gate: the architecture's AWS resources priced per environment.
   monthly_usd?: Record<string, number>;
+  // At an initiative review: the features less effort to remove than keep, and the default next review.
+  retire_candidates?: { feature_id: string; title: string; flag: string; why: string }[];
+  next_review?: string;
+  goal_status?: OutcomeStatus;
   type: "gate" | "handback" | "escalation" | "external";
   gate?: string;
   wait?: string;
@@ -393,7 +397,7 @@ export interface FeatureRow {
   initiative_id: string; cost_usd: number; flag_on: boolean | null;
 }
 export interface ThreadBase {
-  feature_id: string; kind: "initiative" | "release"; product_id: string; title: string; created_by: string;
+  feature_id: string; kind: "initiative" | "release" | "review"; product_id: string; title: string; created_by: string;
   status: string; running: boolean; error: string | null; pending: PendingItem[]; events: FeatureEvent[];
   cost_usd: number; record_pr: { url?: string; error?: string };
 }
@@ -436,6 +440,12 @@ export interface RoadmapInitiative {
   release_model: string; record: string; spent_usd: number; features: FeatureRow[];
   progress: { released: number; total: number; planned: number };
   outcome?: { goal_id: string; status: OutcomeStatus; why?: string; progress?: number; expected?: number | null } | null;
+  review_by?: string;
+  reviews?: { id: string; status: string; why: string; opened: string[] }[];
+}
+export interface ReviewView extends ThreadBase {
+  initiative_id: string; why: string; preview: string; decision: { decision?: string; feedback?: string; approver?: string };
+  opened: string[];
 }
 export interface GoalMetric {
   goal_id: string; source: "sql" | "prometheus" | "posthog" | "manual"; unit: string; direction: "up" | "down";
@@ -454,6 +464,7 @@ export interface Readout {
 export interface WantedNumber { goal_id: string; feature_id: string; window_days: number; start: string; end: string; unit: string }
 export interface FeatureOutcome {
   feature_id: string; product_id: string; goals: string[]; metrics: Record<string, GoalMetric>; released_at: string;
+  rollout: { percent: number; goal: string }[];
   instrumentation: InstrumentationCheck | null; readouts: Readout[];
   upcoming: { goal_id: string; window_days: number; due: string }[];
 }
@@ -589,6 +600,7 @@ export const api = {
   inceptions: () => request<InceptionSummary[]>("GET", "/inceptions"),
   createInception: (body: InceptionIn) => request<{ feature_id: string }>("POST", "/inceptions", body),
   release: (id: string) => request<ReleaseView>("GET", `/features/${encodeURIComponent(id)}`),
+  review: (id: string) => request<ReviewView>("GET", `/features/${encodeURIComponent(id)}`),
   incident: (id: string) => request<IncidentView>("GET", `/features/${encodeURIComponent(id)}`),
   mergeIncident: (id: string, into: string, reason: string) =>
     request<{ merged: string; into: string }>("POST", `/incidents/${encodeURIComponent(id)}/merge`, { into, reason }),

@@ -28,6 +28,13 @@ over 5% means the 95th percentile is over the budget; the step's history says so
 
 A feature with no such lines (UI only, or a component on an older template) falls back to time
 alone, and the step's history says so.
+
+The feature's goal events (outcome loop, step 4) ride on the same lines, per side, so the step can
+also say whether users with it on do the things its goal counts more or less often. That is
+reported on each step and never stops the release: a flat goal is a person's call.
+
+    vrixel.flag_cohorts {"flag": "...", "on": {"requests": 40, "errors": 0, "events": {"checkin_completed": 9}},
+                         "off": {"requests": 760, "errors": 2, "events": {"checkin_completed": 120}}}
 """
 
 from __future__ import annotations
@@ -56,8 +63,8 @@ def _record(text: str) -> dict | None:
 
 
 def _empty() -> dict:
-    return {"on": {"requests": 0, "errors": 0, "slow": 0}, "off": {"requests": 0, "errors": 0, "slow": 0},
-            "lines": 0, "timed": 0}
+    return {"on": {"requests": 0, "errors": 0, "slow": 0, "events": {}},
+            "off": {"requests": 0, "errors": 0, "slow": 0, "events": {}}, "lines": 0, "timed": 0}
 
 
 def _add(into: dict, rec: dict) -> None:
@@ -70,6 +77,9 @@ def _add(into: dict, rec: dict) -> None:
             into[side]["slow"] += max(0, int(s.get("slow", 0)))
         except (TypeError, ValueError):
             continue
+        for name, n in (s.get("events") or {}).items() if isinstance(s.get("events"), dict) else ():
+            if isinstance(n, (int, float)) and n >= 0:
+                into[side]["events"][str(name)] = into[side]["events"].get(str(name), 0) + int(n)
     into["lines"] += 1
     into["timed"] += 1 if timed else 0
 
@@ -141,6 +151,46 @@ def compare(counts: dict, cfg: dict | None = None) -> dict:
             out["worse"].append("latency")
     out["verdict"] = "regression" if out["worse"] else "ok"
     return out
+
+
+GOAL_DEFAULTS = {"min_requests": 200, "z": 2.0}
+
+
+def goal_events(groups: dict[str, dict], events: list[str], cfg: dict | None = None) -> dict[str, dict]:
+    """Per goal event, across every component: how often it happens per request for users with the
+    flag on against users with it off. {event: {verdict: higher | lower | no_difference | too_few,
+    on_rate, off_rate, z, on_events, off_events, on_requests, off_requests}}. Events are counts, so
+    the test compares two Poisson rates (z of the difference over its standard error)."""
+    c = {**GOAL_DEFAULTS, **(cfg or {})}
+    n1 = sum(g["on"]["requests"] for g in groups.values())
+    n0 = sum(g["off"]["requests"] for g in groups.values())
+    out = {}
+    for e in events:
+        k1 = sum(g["on"].get("events", {}).get(e, 0) for g in groups.values())
+        k0 = sum(g["off"].get("events", {}).get(e, 0) for g in groups.values())
+        base = {"on_events": k1, "off_events": k0, "on_requests": n1, "off_requests": n0}
+        if n1 < c["min_requests"] or n0 < c["min_requests"] or k1 + k0 == 0:
+            out[e] = {**base, "verdict": "too_few", "on_rate": None, "off_rate": None, "z": None}
+            continue
+        r1, r0 = k1 / n1, k0 / n0
+        se = math.sqrt((k1 + k0) / (n1 + n0) * (1 / n1 + 1 / n0))
+        z = (r1 - r0) / se if se > 0 else 0.0
+        verdict = "higher" if z >= c["z"] else "lower" if z <= -c["z"] else "no_difference"
+        out[e] = {**base, "verdict": verdict, "on_rate": round(r1, 5), "off_rate": round(r0, 5), "z": round(z, 2)}
+    return out
+
+
+def describe_goal(r: dict[str, dict]) -> str:
+    """The goal events' comparison, for a step's history."""
+    parts = []
+    for e, x in sorted(r.items()):
+        if x["verdict"] == "too_few":
+            parts.append(f"{e}: too few to compare yet ({x['on_events']} with it on, {x['off_events']} off)")
+            continue
+        word = {"higher": "more often", "lower": "less often", "no_difference": "about as often"}[x["verdict"]]
+        parts.append(f"{e}: {x['on_rate'] * 100:.2f} per 100 requests with it on against {x['off_rate'] * 100:.2f} "
+                     f"with it off ({word}, z {x['z']})")
+    return "; ".join(parts)
 
 
 def describe(flag: str, r: dict) -> str:

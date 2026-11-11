@@ -561,8 +561,9 @@ holds it to the goals in goals.yaml and to its initiative's goal. The PRD then l
 show it (`## Instrumentation`: `- checkin_completed (GOAL-CLN-1): fires when ...; properties: ...`):
 every goal the brief names is fed by an event, and properties are categories and numbers, never a
 person's name, contact details or ids (PHI and payments events carry no person-level ids at all).
-The HLD names the repo that records each event, the coder records it (the OpenTelemetry counter
-`vrixel.events`, attribute `event=<name>`) and says so in the patch summary, and after staging passes
+The HLD names the repo that records each event, the coder records it with its template's API
+(`ProductEvents.record` in the Java service and worker, `events.record` in the Python agent and
+MCP server, `track` in the web and mobile apps, relayed by the BFF) and says so in the patch summary, and after staging passes
 the tool counts the events from the templates' per-minute summary line
 (`vrixel.events {"checkin_completed": 12}`, read through the OpenChoreo observer). G6 shows which
 fired and which never did: a goal fed only by silent events can't be measured once it ships.
@@ -591,6 +592,29 @@ lists each period, and the product's owners (G1 and G0 approvers) enter it
 also returns `k`, the count on top, so 2% of 300 (6 people) is suppressed like any small count. The
 feature page's Outcome panel shows the goals it moves, its events in staging, its readouts and the
 windows still to come.
+
+**Flag comparisons.** During a gradual release, the backend templates count the feature's goal
+events per side on the same per-minute line as its requests and errors
+(`"on": {"requests": 40, "errors": 0, "events": {"checkin_completed": 9}}`). Each step's history
+then says how often users with it on do what the goal counts against users with it off, per 100
+requests, with a z score: the one comparison that controls for everything else going on. It is
+reported, never a reason to stop; errors and latency still stop a release.
+
+**Initiative reviews.** On an initiative's review date (`review_by` in its record, else 90 days
+after approval), or as soon as its goal reads off track at two readings in a row, the tool opens a
+review thread (`CLN-REV-1`) for the product council (registry.yaml `inception.council`, else the
+product's G0 approvers). The council sees the goal's status and recent readings, each feature's
+readouts, spend against budget, and the features that would be less effort to remove than to keep
+(released but still behind a flag that isn't fully on). They decide:
+
+| Decision | What happens |
+| --- | --- |
+| Continue | the next review date is set (90 days on unless they pick one) |
+| Change course | a feature intent opens under the initiative, with their words and the evidence |
+| Stop | the initiative is dropped and its features stay; each feature they tick opens a retire intent (remove the flag and its code, migrate the data, draft a customer notice) |
+
+Every decision is recorded on the initiative's file by pull request: its status, its next review
+date and a line under `## Reviews`.
 
 **Initiatives have their own gate, G0.** A strategist agent drafts the initiative from a request:
 the goal it serves (or a proposed new goal with a measure), outcome, success measure, horizon,

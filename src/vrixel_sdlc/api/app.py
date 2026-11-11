@@ -162,6 +162,10 @@ class DecisionIn(BaseModel):
     override_reason: str | None = Field(default=None, max_length=1000, description="G6 only: release although the "
                                         "traceability matrix has gaps (or tracker drift that blocks), and why. "
                                         "Only the product's traceability approvers may.")
+    retire: list[str] | None = Field(default=None, description="Initiative reviews, stop: the proposed features to "
+                                     "retire (each opens a retire intent)")
+    review_by: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$",
+                                  description="Initiative reviews, continue: the next review date")
 
 
 class SubmitIn(BaseModel):
