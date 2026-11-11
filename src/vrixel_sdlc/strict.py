@@ -74,6 +74,16 @@ def known_gaps(services) -> list[str]:
     if not env_value("VRIXEL_CONFIG_REPO"):
         out.append("VRIXEL_CONFIG_REPO is not set: changes to models and settings aren't evaluated against past "
                    "work before they merge")
+    s = services.settings
+    pinned = getattr(getattr(s, "plugins", None), "ref", "")
+    if pinned and s.mode == "live":
+        from .plugins import installed_ref
+
+        have = installed_ref(s.skills_dir or env_value("VRIXEL_SKILLS_DIR"))
+        if have != pinned:
+            out.append(f"config/plugins.yaml pins knowledge-work-plugins at {pinned[:12]}, but the installed plugins "
+                       f"are {'at ' + have[:12] if have else 'unmarked'}: the agents follow the installed ones until the "
+                       "image is rebuilt from the config's pin")
     tel = getattr(services, "telemetry", None)
     if tel is None or not tel.enabled:
         out.append("VRIXEL_OTEL_ENDPOINT is not set: agent sessions aren't traced, so a session can't be "

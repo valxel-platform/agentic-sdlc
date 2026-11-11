@@ -44,15 +44,22 @@ def skill_path(name: str, base: str | None = None) -> Path | None:
     return None
 
 
+def skills_dir_of(services, variant: str = "") -> str:
+    """The plugins folder the config's agents use (the canary's may pin another commit)."""
+    stack = services._stack(variant) if variant and hasattr(services, "_stack") else services
+    settings = getattr(stack, "settings", None)
+    return getattr(settings, "skills_dir", "") or ""
+
+
 def missing_skills(names, base: str | None = None) -> list[str]:
     return sorted(n for n in names if skill_path(n, base) is None)
 
 
-@lru_cache(maxsize=256)
-def load_skill(name: str) -> str:
-    """The skill's instructions from VRIXEL_SKILLS_DIR, or a stable placeholder (stub mode; live
-    mode refuses to start while a skill is missing, see services.check_skills)."""
-    path = skill_path(name)
+@lru_cache(maxsize=512)
+def load_skill(name: str, base: str | None = None) -> str:
+    """The skill's instructions from `base` (VRIXEL_SKILLS_DIR when None), or a stable placeholder
+    (stub mode; live mode refuses to start while a skill is missing, see services.check_skills)."""
+    path = skill_path(name, base or None)
     if path:
         return path.read_text(encoding="utf-8")
     plugin = name.partition(":")[0]
@@ -119,9 +126,10 @@ def build_layers(
     tail: str,
     product_context: str = "",
     design_knowledge: str = "",
+    skills_dir: str = "",
 ) -> PromptLayers:
     tools = serialize_tools(_BASE_TOOLS + _ROLE_TOOLS.get(role, []))
-    skill_text = "\n\n".join(load_skill(s) for s in sorted(skills))
+    skill_text = "\n\n".join(load_skill(s, skills_dir or None) for s in sorted(skills))
     feature = "\n\n".join(f"<artifact kind=\"{k}\">\n{parent_texts[k]}\n</artifact>" for k in sorted(parent_texts))
     return PromptLayers(
         tools=tools,

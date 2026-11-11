@@ -1465,7 +1465,8 @@ layers, its JSON reply, its caps) is the same whichever vendor runs it.
   the prompt (through stdin), then the task. Codex reads Claude-format plugins, so the same
   skills-only plugins are installed for it in the image (`/opt/vrixel/codex-home`, a plugin
   marketplace over `/opt/vrixel/plugins`); each session starts from a copy of that home, sees every
-  plugin skill by name and reads one when it needs it (plugin commands, such as
+  plugin skill by name and reads one when it needs it, unless `on_demand` is off for the role or
+  the config pins plugins other than the image's (plugin commands, such as
   `product-management:brainstorm`, reach it only through the pasted skills). Sessions reply with the stage's JSON schema
   (`--output-schema`), run sandboxed to the checkout with no approvals, stop at the role's
   `max_minutes`, and are costed from their token usage. Codex has no dollar cap of its own: a session
@@ -1896,20 +1897,37 @@ effect once the other is also decided. An earlier approval of the other gate sti
   the gateway. Skills come from the plugins in `VRIXEL_SKILLS_DIR` (`<plugin>/skills/<skill>/SKILL.md`,
   or `<plugin>/commands/<skill>.md`). The image installs Anthropic's Product Management,
   Engineering and Design plugins ([knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins),
-  pinned by commit in the Dockerfile) and ours, `plugins/vrixel` (the critics' skills), at
+  pinned by commit in `config/plugins.yaml`) and ours, `plugins/vrixel` (the critics' skills), at
   `/opt/vrixel/plugins`, skills and commands only: `plugins/prepare.sh` leaves out each plugin's
   connectors (`.mcp.json`: Slack, Linear, Atlassian and others) and hooks, so an agent working on
   product code reaches no outside tool through a plugin. Live mode refuses to start while a skill a
   phase uses is missing; CI checks the pinned commit has them all. Live mode is not covered by the
   offline tests. Run it against a sandbox product first.
 
+  **The plugin pin is config.** Moving `knowledge_work_plugins.ref` in `config/plugins.yaml`
+  changes every agent's instructions, so it goes the way a model or prompt change does: a pull
+  request to the config repo, replayed against past documents (`vrixel / evals`), and if wanted
+  the canary. A config that pins a commit other than the image's (an eval run's candidate, the
+  canary) gets its own copy at that commit, fetched once from GitHub and laid out by
+  `plugins/prepare.sh` like the image's. The Dockerfile's `KNOWLEDGE_WORK_PLUGINS_REF` names the
+  same commit (a test checks; CI builds with the config's), the image records it in
+  `/opt/vrixel/plugins/REF`, and strict mode warns when the two differ. The ref must be a full
+  commit sha. Changes to our own plugin (`plugins/vrixel`) ship with the tool and are not replayed.
+
+  **Skills a session loads by itself.** Besides the skills its phase pastes in, a session sees
+  every installed skill by name and may load one. `on_demand` in `config/plugins.yaml` turns that
+  off for the roles you list (for example the critic, so it judges against its checklist only).
+  Whatever a session does load is recorded as `extra_skills`: on its ledger rows, on its trace
+  (`vrixel.extra_skills`), and in the feature's agent sessions, which G5 and G6 show.
+
   A Claude Code session starts from Claude Code's own system prompt (the `claude_code` preset:
   tool use, safety) with the layers L2-L5 appended: the phase's skills in full, the
   constitution, the product and the feature. It reads settings from the repository only
   (`setting_sources=["project"]`: the checkout's CLAUDE.md and `.claude/skills/`, nothing from
-  the container's home), and loads every plugin in `VRIXEL_SKILLS_DIR`, so the agent can also
-  pull in a skill the phase didn't list (it sees only names and descriptions until it uses one)
-  and use the plugins' subagents, hooks and MCP servers. Keep the appended layers under about
+  the container's home), and loads every installed plugin unless `on_demand` is off for the role,
+  so the agent can also pull in a skill the phase didn't list (it sees only names and descriptions
+  until it uses one). The plugins carry skills and commands only, so they give the agent no
+  connector, hook or other outside tool. Keep the appended layers under about
   120 KB: the SDK passes them as one process argument, and the runtime warns before the limit.
 
 - **strict**: set `VRIXEL_STRICT=1` in production. The switches above are independent, and some

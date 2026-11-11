@@ -1,0 +1,18 @@
+# The plugins the agents' skills come from (vrixel_sdlc.plugins).
+#
+# Anthropic's Product Management, Engineering and Design plugins, pinned to one commit. Moving the
+# pin changes how every agent works, so it is a config change: a pull request to the config repo,
+# replayed against past documents (`vrixel / evals`) before it merges. The Dockerfile's
+# KNOWLEDGE_WORK_PLUGINS_REF must name the same commit (a test checks); a config that pins another
+# commit gets its own copy at that commit.
+knowledge_work_plugins:
+  repo: anthropics/knowledge-work-plugins
+  ref: e605d8ddbfb688da57dfaaceebd93f12a64ef1d3
+
+# Whether a role's sessions also see every other installed skill and may load one by themselves,
+# beyond the skills their phase gives them. What a session loads that way is recorded on its trace
+# and on the feature's agent sessions (G5/G6 packets show it). Set a role to false to give it only
+# its phase's skills: for example the critic, so it judges against its checklist and nothing else.
+on_demand:
+  default: true
+  roles: {}

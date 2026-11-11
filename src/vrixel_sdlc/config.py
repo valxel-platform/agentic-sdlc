@@ -219,6 +219,9 @@ class Settings:
     quality: Any = None  # vrixel_sdlc.quality.QualityConfig
     repos: Any = None  # vrixel_sdlc.provisioning.RepoStandards
     knowledge: Any = None  # vrixel_sdlc.knowledge.KnowledgeConfig
+    plugins: Any = None  # vrixel_sdlc.plugins.PluginsConfig
+    # The installed plugins the agents' skills come from (VRIXEL_SKILLS_DIR, or a copy at this config's pin).
+    skills_dir: str = ""
     # The platform's default alert rules; unset, alert-rules.yaml next to the AWS catalog.
     platform_alert_rules_path: str = ""
     # Where error reports may go; unset, error-tracking.yaml next to the AWS catalog.
@@ -309,6 +312,8 @@ def load_settings(
         quality=_load_quality(cfg_dir / "quality.yaml"),
         knowledge=_load_knowledge(cfg_dir / "knowledge.yaml"),
         repos=_load_repos(cfg_dir / "repos.yaml"),
+        plugins=_load_plugins(cfg_dir / "plugins.yaml"),
+        skills_dir=os.environ.get("VRIXEL_SKILLS_DIR", ""),
     )
     from .models import validate
 
@@ -320,6 +325,12 @@ def _load_repos(path: Path):
     from .provisioning import load_standards
 
     return load_standards(path)
+
+
+def _load_plugins(path: Path):
+    from .plugins import load_plugins
+
+    return load_plugins(path)
 
 
 def _load_knowledge(path: Path):

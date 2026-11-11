@@ -166,6 +166,16 @@ def check_skills(base: str | None = None) -> None:
         raise RuntimeError(f"Skills missing from {base}: {', '.join(missing)}")
 
 
+def use_own_plugins(settings: Settings) -> None:
+    """A config other than the one in use (an eval run's, the canary's) gets the plugins it pins:
+    the image's when the pins agree, otherwise a copy at its commit (vrixel_sdlc.plugins)."""
+    if settings.mode != "live" or settings.plugins is None:
+        return
+    from .plugins import skills_dir_for
+
+    settings.skills_dir = skills_dir_for(settings)
+
+
 def agent_stack(settings: Settings, ledger: Ledger):
     """The gateway, runtimes and runnable roles for one config."""
     from .models import available_roles
@@ -184,7 +194,7 @@ def agent_stack(settings: Settings, ledger: Ledger):
     generic = GatewayRuntime(gateway)
     runtimes: dict[str, AgentRuntime] = {"generic": generic}
     if settings.mode == "live":
-        check_skills()
+        check_skills(settings.skills_dir or None)
         runtimes["claude_code"] = ClaudeCodeRuntime(gateway)
         runtimes["codex"] = CodexRuntime(gateway)
     else:
@@ -212,6 +222,7 @@ def default_canary(settings: Settings, ledger: Ledger, env=None):
     missing = sorted(set(settings.roles) - set(canary.roles))
     if missing:
         raise ValueError(f"The canary config at {path} lacks roles {', '.join(missing)}")
+    use_own_plugins(canary)
     gateway, runtimes, available = agent_stack(canary, ledger)
     classes = tuple(c for c in env.get("VRIXEL_CANARY_DATA_CLASSES", "general").split(",") if c)
     return AgentStack(settings=canary, gateway=gateway, runtimes=runtimes, available_roles=frozenset(available),

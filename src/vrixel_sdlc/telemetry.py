@@ -237,6 +237,8 @@ class Telemetry:
             span.set_attribute("vrixel.cost_usd", float(result.cost_usd or 0.0))
             if result.role and result.role != task.role:
                 span.set_attribute("vrixel.fallback_role", result.role)
+            if getattr(result, "extra_skills", ()):
+                span.set_attribute("vrixel.extra_skills", list(result.extra_skills))
         if error is not None:
             from opentelemetry.trace import Status, StatusCode
 
@@ -301,6 +303,7 @@ def sessions(records, link=None, *, phases: tuple[str, ...] = ()) -> list[dict]:
             "at": first.ts, "phase": first.phase, "role": first.role, "runtime": first.runtime,
             "model": first.model, "task": first.task_id, "attempt": first.attempt,
             "calls": len(rows), "duration_s": round(sum(r.duration_s for r in rows), 2),
+            "extra_skills": sorted({s for r in rows for s in (getattr(r, "extra_skills", "") or "").split(",") if s}),
             "tokens": sum(r.total_input + r.output_tokens for r in rows),
             "cost_usd": round(sum(r.est_cost_usd for r in rows), 4)})
     return sorted(out, key=lambda x: x["at"])
