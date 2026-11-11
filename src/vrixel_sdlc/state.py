@@ -53,6 +53,7 @@ class GateDecision(TypedDict, total=False):
     reason: str  # why it was sent back (pilot.REVISE_REASONS), for revise, retry and abort
     waited_minutes: float  # how long the question waited for this decision
     shadow_auto: dict  # pilot: whether the trial rule would have approved it without a person
+    changed: bool  # an escalation resolved with the person's own version of the document
 
 
 class FeatureState(TypedDict, total=False):
