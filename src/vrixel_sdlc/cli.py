@@ -183,6 +183,48 @@ def _eval(args: argparse.Namespace) -> int:
     return 0 if cmp["ok"] else 1
 
 
+def _inception(args) -> int:
+    """Write the next inception documents to --out; exit 1 when one couldn't pass its checks."""
+    import json
+    from pathlib import Path
+
+    from .config import load_settings
+    from .inception import KIND, Vision
+    from .inception.run import run
+    from .services import build_services
+
+    settings = load_settings(mode=args.mode)
+    services = build_services(settings)
+    existing = bool(args.product and args.product in settings.registry)
+    if not args.vision and not existing:
+        print("Give --vision (a new product) or --product with a registered product id.", file=sys.stderr)
+        return 2
+    text = Path(args.vision).read_text(encoding="utf-8") if args.vision else f"# {args.product}\n"
+    org = args.org or (settings.entry(args.product).governance.org if existing else "")
+    if not org:
+        print("Give --org: the GitHub org the product will live in.", file=sys.stderr)
+        return 2
+    vision = Vision.from_markdown(text, org=org, product_id=args.product, existing=existing)
+    brief = Path(args.brief).read_text(encoding="utf-8") if args.brief else ""
+    drafts = run(services, vision, brief=brief, through=args.through)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    report = []
+    for d in drafts:
+        path = out / f"{KIND[d.doc]}.md"
+        path.write_text(d.text, encoding="utf-8")
+        report.append({k: v for k, v in d.as_dict().items() if k != "text"} | {"file": str(path)})
+        print(f"{d.doc}: {d.status} after {d.attempts} attempt(s), ${d.cost_usd:.2f} -> {path}")
+        for f in d.findings:
+            print(f"  - {f}")
+        if d.monthly_usd:
+            print("  monthly cost: " + ", ".join(f"{e} ${v:,.0f}" for e, v in d.monthly_usd.items()))
+    (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    if not brief and drafts and drafts[0].status == "passed":
+        print(f"Next: the brief gate. Once approved, run again with --brief {out / 'BRIEF.md'}")
+    return 0 if all(d.status == "passed" for d in drafts) else 1
+
+
 def main(argv: list[str] | None = None, *, github=None) -> int:
     p = argparse.ArgumentParser(prog="vrixel")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -229,7 +271,19 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     e.add_argument("--budget", type=float, default=None, help="Dollars each config's run may spend")
     e.add_argument("--mode", default="live", choices=["live", "stub"])
     e.add_argument("--out", help="Write cases (export) or the full results (run) here")
+    inc = sub.add_parser("inception", help="Draft a product's brief, then (with the approved brief) its "
+                                           "architecture and roadmap")
+    inc.add_argument("--vision", help="A Markdown vision: '# Name', the idea, then optional '## Goals', '## Users', "
+                                      "'## Constraints' and '## Budget' sections")
+    inc.add_argument("--org", default="", help="The product's GitHub org (it must exist)")
+    inc.add_argument("--product", default="", help="An existing product's id (describe it), or a proposed id")
+    inc.add_argument("--brief", help="The brief approved at the brief gate: drafts the architecture and roadmap")
+    inc.add_argument("--through", choices=["architecture", "roadmap"], default="roadmap")
+    inc.add_argument("--out", default="inception", help="Directory for the documents and report.json")
+    inc.add_argument("--mode", default="stub", choices=["live", "stub"])
     args = p.parse_args(argv)
+    if args.cmd == "inception":
+        return _inception(args)
     if args.cmd == "eval":
         return _eval(args)
     if args.cmd == "pilot-report":
