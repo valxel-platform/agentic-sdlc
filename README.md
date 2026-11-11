@@ -45,7 +45,8 @@ VRIXEL_AUTH=dev VRIXEL_SESSION_SECRET=$(openssl rand -hex 32) \
 ```
 
 For frontend work, run the API as above and `cd web && npm run dev`. Vite serves the app on
-port 5173 and proxies `/api` to port 8080.
+port 5173 and proxies `/api` to port 8080. To fill a fresh stub-mode server with features at different stages, run
+`python web/scripts/seed.py` (it signs in as `demo` through development sign-in).
 
 `vrixel demo` runs one feature through every phase, auto-approving gates. `--fault spec=1` makes
 the first PRD defective, so the evaluator loop fixes it, and `--revise` sends the design back once

@@ -14,6 +14,8 @@ function Status({ f }: { f: FeatureSummary }) {
   return <span className="chip run">Agents working</span>;
 }
 
+const CLASS_NAME: Record<string, string> = { phi: "Health data (PHI)", payments: "Payments data" };
+
 export function Board({ me }: { me: Me }) {
   const [rows, setRows] = useState<FeatureSummary[] | null>(null);
   const [lane, setLane] = useState("");
@@ -37,9 +39,13 @@ export function Board({ me }: { me: Me }) {
 
   const lanes = useMemo(() => [...new Set((rows ?? []).map((r) => r.product_id))].sort(), [rows]);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const [dataClass, setDataClass] = useState<Record<string, string>>({});
   useEffect(() => {
-    api.products().then((p) => setProductNames(Object.fromEntries(
-      Object.entries(p).filter(([, v]) => v.name).map(([k, v]) => [k, v.name as string])))).catch(() => {});
+    api.products().then((p) => {
+      setProductNames(Object.fromEntries(
+        Object.entries(p).filter(([, v]) => v.name).map(([k, v]) => [k, v.name as string])));
+      setDataClass(Object.fromEntries(Object.entries(p).map(([k, v]) => [k, String(v.data_class ?? "general")])));
+    }).catch(() => {});
   }, []);
   const names: Record<string, string> = { ...productNames, ...Object.fromEntries(me.lanes.map((l) => [l.id, l.name])) };
 
@@ -62,8 +68,8 @@ export function Board({ me }: { me: Me }) {
           <button aria-pressed={!needsMe} onClick={() => setNeedsMe(false)}>All</button>
           <button aria-pressed={needsMe} onClick={() => setNeedsMe(true)}>Needs my decision</button>
         </div>
-        <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input type="checkbox" style={{ width: "auto" }} checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
+        <label>
+          <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
           Show released and stopped
         </label>
       </div>
@@ -76,14 +82,18 @@ export function Board({ me }: { me: Me }) {
         </div>
       )}
       {groups.map(([pid, list]) => (
-        <section key={pid} className="lane-group" aria-labelledby={`lane-${pid}`}>
-          <h2 id={`lane-${pid}`}>{names[pid] ?? pid} <span className="faint small">{list.length} in flight</span></h2>
+        <section key={pid} className={`lane-group ${dataClass[pid] ?? "general"}`} aria-labelledby={`lane-${pid}`}>
+          <h2 id={`lane-${pid}`}>
+            {names[pid] ?? pid}
+            {dataClass[pid] && dataClass[pid] !== "general" && <span className="lane-class">{CLASS_NAME[dataClass[pid]] ?? dataClass[pid]}</span>}
+            <span className="faint small">{list.length} in flight</span>
+          </h2>
           <div className="rows">
             {list.map((f) => (
               <Link key={f.feature_id} to={`/features/${f.feature_id}`} className="row">
                 <div>
                   <div className="row-title">{f.title}</div>
-                  <div className="row-id">{f.feature_id}{f.created_by ? `, from ${f.created_by}` : ""}</div>
+                  <div className="row-id"><span className="mono">{f.feature_id}</span>{f.created_by ? ` from ${f.created_by}` : ""}</div>
                 </div>
                 <Rail stations={f.rail} compact />
                 <div className="row-status">
