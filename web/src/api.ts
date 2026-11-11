@@ -516,7 +516,7 @@ export const api = {
   logout: () => request<{ ok: boolean }>("POST", "/auth/logout", {}),
   me: () => request<Me>("GET", "/me"),
   features: () => request<FeatureSummary[]>("GET", "/features"),
-  products: () => request<Record<string, { name?: string; kind: string; ok: boolean; profiles?: Profile[];
+  products: () => request<Record<string, { name?: string; kind: string; ok: boolean; data_class?: string; profiles?: Profile[];
                                             default_profile?: Profile }>>("GET", "/products"),
   syncWork: (id: string) => request<unknown>("POST", `/features/${encodeURIComponent(id)}/sync`, {}),
   feature: (id: string) => request<Feature>("GET", `/features/${encodeURIComponent(id)}`),

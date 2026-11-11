@@ -5,6 +5,7 @@ import "./styles.css";
 import { api, ApiError, type Me } from "./api";
 import { closeLive, useLive, useLiveStatus } from "./live";
 import { SignIn } from "./pages/SignIn";
+import { Mark } from "./components/Mark";
 import { Inbox } from "./pages/Inbox";
 import { Board } from "./pages/Board";
 import { FeaturePage } from "./pages/Feature";
@@ -18,15 +19,6 @@ import { InventoryPage } from "./pages/Inventory";
 import { PilotPage } from "./pages/Pilot";
 import { LessonsPage } from "./pages/Lessons";
 
-function Mark() {
-  return (
-    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
-      <rect width="32" height="32" rx="7" fill="#2a3746" />
-      <path d="M16 7l7 9-7 9-7-9z" fill="#E2A43B" />
-    </svg>
-  );
-}
-
 function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const live = useLiveStatus();
   const [mine, setMine] = useState(0);
@@ -36,7 +28,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
 
   return (
     <div className="shell">
-      <aside className="side">
+      <header className="side">
         <div className="brand"><Mark /> Vrixel SDLC</div>
         <nav className="nav" aria-label="Main">
           <NavLink to="/inbox">Decisions {mine > 0 && <span className="count" aria-label={`${mine} waiting on you`}>{mine}</span>}</NavLink>
@@ -51,14 +43,16 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <NavLink to="/intake">New intent</NavLink>
         </nav>
         <div className="side-foot">
-          <div className={`live ${live ? "on" : ""}`}><i aria-hidden="true" />{live ? "Live updates on" : "Reconnecting…"}</div>
+          <div className={`live ${live ? "on" : ""}`} title={live ? "Live updates on" : "Reconnecting…"}>
+            <i aria-hidden="true" /><span>{live ? "Live" : "Reconnecting…"}</span>
+          </div>
           <div className="who">
             {me.avatar_url ? <img src={me.avatar_url} alt="" /> : <span className="initial" aria-hidden="true">{me.login[0]?.toUpperCase()}</span>}
             <span>{me.name || me.login}</span>
           </div>
           <button className="linkish" onClick={onSignOut}>Sign out</button>
         </div>
-      </aside>
+      </header>
       <main>
         <Routes>
           <Route path="/" element={<Navigate to="/inbox" replace />} />
