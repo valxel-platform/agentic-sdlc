@@ -1294,7 +1294,7 @@ class FeatureEngine:
                simulate_faults: dict[str, int] | None = None, budget_usd: float | None = None,
                background: bool = False, not_duplicate_reason: str = "", initiative_id: str = "",
                track: str = "standard", hotfix: dict | None = None, pilot: bool = False,
-               profile: str = "") -> str:
+               profile: str = "", attachments: tuple[str, list[dict]] | None = None) -> str:
         from . import profiles
         from .duplicates import DuplicateIntent
 
@@ -1325,6 +1325,8 @@ class FeatureEngine:
                "config_variant": self.services.canary_variant(feature_id, snap.product.data_class, track)}
         if budget_usd:
             inp["token_budget_usd"] = float(budget_usd)
+        if attachments and attachments[1]:  # (intake conversation, files): moved under the feature first
+            inp["attachments"] = self.services.attachments.to_feature(attachments[0], feature_id, attachments[1])
         self.bus.publish({"type": "feature.created", "feature_id": feature_id, "product_id": product_id})
         if background:
             self._submit(feature_id, inp)
@@ -1453,6 +1455,8 @@ class FeatureEngine:
             "quality": s.get("quality", {}),
             "new_repos": s.get("new_repos", []),
             "waivers": s.get("waivers", []),
+            "attachments": [{k: a.get(k) for k in ("id", "name", "kind", "size", "read_by_agents")}
+                            for a in s.get("attachments") or []],
             "work_tracking": self._work_view(s),
         }
 

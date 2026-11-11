@@ -67,6 +67,7 @@ class IntakeSession:
     overlap_checked: bool = False
     feature_id: str = ""
     created_at: str = field(default_factory=now)
+    attachments: list = field(default_factory=list)  # vrixel_sdlc.attachments: names and checks, never contents
 
     @property
     def duplicate(self) -> bool:
@@ -291,7 +292,10 @@ class IntakeAgent:
             "Collect: product_id (one of " + json.dumps(names) + "), problem, users, success_metric, and a short title. "
             "Ask one question at a time, in plain language. Do not invent facts. "
             'Reply with JSON only: {"reply": str, "draft": {"product_id", "title", "problem", "users", "success_metric"}}.\n\n'
-            f"Current draft: {json.dumps(asdict(s.draft))}\n\nConversation:\n"
+            f"Current draft: {json.dumps(asdict(s.draft))}\n\n"
+            + (f"Files attached (you see names only; the feature's agents read them after submit): "
+               f"{', '.join(a['name'] for a in s.attachments)}\n\n" if s.attachments else "")
+            + "Conversation:\n"
             + "\n".join(f"{m['role']}: {m['text']}" for m in s.messages)
         )
         layers = PromptLayers(tools="", skills="product-management:write-spec", constitution="",

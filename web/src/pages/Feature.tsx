@@ -10,6 +10,7 @@ import { DecisionPanel } from "../components/Decision";
 import { Delivery, Diagrams, NewRepos, WorkItems } from "../components/External";
 import { QualityTable } from "../components/Quality";
 import { TracePanel } from "../components/Trace";
+import { AttachmentList } from "../components/Attachments";
 import { ARTIFACTS, GATES, PHASES, RISK, gateLabel, money, threadPath } from "../vocab";
 
 const ORDER = ["OPP", "PRD", "UX", "HLD", "PLAN", "BUILD", "REL", "OPS"];
@@ -195,6 +196,15 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
         </div>
 
         <div className="stack">
+          {(f.attachments ?? []).length > 0 && (
+            <section className="panel" aria-labelledby="h-attached">
+              <h2 id="h-attached" className="section-title">Attached at intake</h2>
+              <div className="pad" style={{ paddingTop: 10 }}>
+                <AttachmentList items={f.attachments ?? []}
+                  href={(a) => `/api/features/${encodeURIComponent(f.feature_id)}/attachments/${a.id}`} />
+              </div>
+            </section>
+          )}
           <section className="panel" aria-labelledby="h-art">
             <h2 id="h-art" className="section-title">Artifacts</h2>
             {kinds.length === 0 ? <p className="muted" style={{ padding: 16 }}>Agents haven't produced anything yet.</p> : (

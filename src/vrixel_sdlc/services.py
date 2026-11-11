@@ -90,6 +90,7 @@ class Services:
 
     available_roles: frozenset = frozenset()  # roles whose provider is configured, set by build_services
     telemetry: object = None  # vrixel_sdlc.telemetry.Telemetry: each agent session as a span, set by build_services
+    attachments: object = None  # vrixel_sdlc.attachments.AttachmentStore: files attached at intake
     evals: object = None  # vrixel_sdlc.evals store: eval cases from finished document phases, labelled at the gates
     canary: object = None  # AgentStack: a candidate config a share of new features runs with (VRIXEL_CANARY_*)
 
@@ -267,6 +268,9 @@ def build_services(
     svc.provisioner = default_provisioner(settings, github, openchoreo)
     svc.available_roles = frozenset(available)
     svc.telemetry = default_telemetry(settings)
+    from .attachments import AttachmentStore
+
+    svc.attachments = AttachmentStore(settings.artifact_dir)
     svc.canary = default_canary(settings, ledger)
     from .evals import InMemoryEvalStore
 

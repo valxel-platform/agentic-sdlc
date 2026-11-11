@@ -559,3 +559,22 @@ table.quality tfoot td { padding: 8px; font-weight: 600; }
 .btn.small { padding: 1px 8px; font-size: var(--fs-0); margin-left: 6px; vertical-align: baseline; }
 .table-scroll { overflow-x: auto; }
 .table-scroll > table.quality { min-width: 560px; }
+
+/* Attachments: on the intent, and on the feature page */
+.clip { flex: none; width: 34px; height: 38px; margin-left: -8px; border: 0; background: none; color: var(--ink-3); cursor: pointer; border-radius: 6px; display: grid; place-items: center; }
+.clip:hover { color: var(--ink); background: var(--panel); }
+.clip:disabled { opacity: 0.4; cursor: not-allowed; }
+.chat { position: relative; }
+.chat.dragging { outline: 2px dashed var(--lamp); outline-offset: 6px; border-radius: var(--r-m); }
+.drop-hint { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--ground) 85%, transparent); color: var(--lamp-ink); font-weight: 600; z-index: 2; pointer-events: none; }
+.attachments { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.attachments li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.file-kind { font-family: var(--mono); font-size: 10px; font-weight: 500; line-height: 1; padding: 6px 5px; border-radius: 3px; background: var(--rule-soft); color: var(--ink-2); margin-top: 2px; }
+.file-kind.text { background: var(--lamp-bg); color: var(--lamp-ink); }
+.file-main { display: flex; flex-direction: column; min-width: 0; }
+.file-main a { overflow-wrap: anywhere; }
+.attachments .remove { color: var(--ink-3); font-size: var(--fs-0); text-decoration: underline; text-underline-offset: 3px; }
+.attachments .remove:hover { color: var(--stop-ink); }
+.ifield.attached { gap: 4px; }
+.ifield.attached > p { margin-top: 6px; }
+.turn.user .said.attached-note { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-1); padding: 6px 12px 6px 8px; border-style: dashed; }

@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, PROFILE_HELP, PROFILE_LABEL, type Draft, type IntakeSession, type Me, type Profile } from "../api";
+import { api, ATTACH_ACCEPT, PROFILE_HELP, PROFILE_LABEL, type Attachment, type Draft, type IntakeSession, type Me, type Profile } from "../api";
+import { AttachmentList } from "../components/Attachments";
 import { SimilarList } from "../components/External";
 import { Mark } from "../components/Mark";
 
@@ -33,6 +34,9 @@ export function Intake({ me }: { me: Me }) {
   const [lit, setLit] = useState<Set<string>>(new Set());  // fields the agent just filled
   const end = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState<string[]>([]);
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     setErr("");
@@ -82,6 +86,28 @@ export function Intake({ me }: { me: Me }) {
     run(api.intakeSay(s.id, t), true);
   }
 
+  async function attach(files: FileList | File[] | null) {
+    if (!s || !files || s.feature_id) return;
+    setErr("");
+    for (const file of Array.from(files)) {
+      setUploading((u) => [...u, file.name]);
+      try {
+        const next = await api.intakeAttach(s.id, file);
+        setS((cur) => (cur ? { ...cur, attachments: next.attachments, messages: next.messages } : next));
+      } catch (e) {
+        setErr((e as Error).message);
+      } finally {
+        setUploading((u) => u.filter((n) => n !== file.name));
+      }
+    }
+    if (picker.current) picker.current.value = "";
+  }
+
+  function detach(a: Attachment) {
+    if (!s) return;
+    run(api.intakeDetach(s.id, a.id));
+  }
+
   function onKey(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); say(); }
   }
@@ -119,7 +145,11 @@ export function Intake({ me }: { me: Me }) {
       </div>
 
       <div className="intake">
-        <section className="chat" aria-label="Conversation with the intake agent">
+        <section className={`chat${dragging ? " dragging" : ""}`} aria-label="Conversation with the intake agent"
+          onDragOver={(e) => { if (!submitted && e.dataTransfer.types.includes("Files")) { e.preventDefault(); setDragging(true); } }}
+          onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false); }}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); attach(e.dataTransfer.files); }}>
+          {dragging && <div className="drop-hint" aria-hidden="true">Drop files to attach them to the intent</div>}
           <ol className="messages" aria-live="polite">
             {s.messages.map((m, i) => {
               const first = i === 0 || s.messages[i - 1].role !== m.role;
@@ -130,7 +160,15 @@ export function Intake({ me }: { me: Me }) {
                       {m.role === "agent" ? <><Mark size={18} /> Intake agent</> : "You"}
                     </div>
                   )}
-                  <div className="said">{m.text}</div>
+                  {m.attachment ? (() => {
+                    const a = (s.attachments ?? []).find((x) => x.id === m.attachment);
+                    return (
+                      <div className="said attached-note">
+                        <span className={`file-kind ${a?.kind ?? ""}`} aria-hidden="true">{a?.kind === "image" ? "IMG" : a?.kind === "pdf" ? "PDF" : "TXT"}</span>
+                        {m.text}
+                      </div>
+                    );
+                  })() : <div className="said">{m.text}</div>}
                 </li>
               );
             })}
@@ -166,6 +204,11 @@ export function Intake({ me }: { me: Me }) {
           <form className="composer" onSubmit={say}>
             <label className="visually-hidden" htmlFor="say">Message to the intake agent</label>
             <div className="composer-box">
+              <input ref={picker} type="file" multiple accept={ATTACH_ACCEPT} hidden onChange={(e) => attach(e.target.files)} />
+              <button type="button" className="clip" onClick={() => picker.current?.click()} disabled={submitted}
+                aria-label="Attach files" title="Attach screenshots, PDFs or text files">
+                <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path d="M13.5 6.5l-6 6a2 2 0 0 0 2.8 2.8l6.4-6.4a3.5 3.5 0 0 0-5-5L5.3 10.3a5 5 0 0 0 7 7l5.2-5.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+              </button>
               <textarea id="say" ref={box} rows={1} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
                 placeholder={submitted ? "This intent has been submitted." : fresh ? "Describe the problem" : "Answer, or say what to change"}
                 disabled={submitted} autoFocus />
@@ -173,7 +216,10 @@ export function Intake({ me }: { me: Me }) {
                 <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h12M10 4l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
               </button>
             </div>
-            {!submitted && <p className="composer-hint small faint">Enter sends; Shift+Enter starts a new line.</p>}
+            {uploading.length > 0 && <p className="composer-hint small" role="status">Attaching {uploading.join(", ")}…</p>}
+            {!submitted && !uploading.length && (
+              <p className="composer-hint small faint">Enter sends; Shift+Enter starts a new line. Attach or drop screenshots, PDFs and text files (up to 5).</p>
+            )}
           </form>
           <p className="mobile-ready">
             <span className={s.ready || submitted ? "faint" : "need"}>
@@ -226,6 +272,17 @@ export function Intake({ me }: { me: Me }) {
                 </label>
               );
             })}
+
+            {(s.attachments ?? []).length > 0 && (
+              <div className="ifield attached">
+                <span>Attachments</span>
+                <AttachmentList items={s.attachments}
+                  href={(a) => `/api/intake/${encodeURIComponent(s.id)}/attachments/${a.id}`}
+                  onRemove={submitted ? undefined : detach} />
+                <p className="small faint">Kept private until you submit. Then they're stored with the feature, and only the
+                  agents its product allows ever read them.</p>
+              </div>
+            )}
 
             {(s.draft.similar ?? []).length > 0 && (
               <div className={`related ${dup ? "dup" : ""}`}>
