@@ -56,7 +56,11 @@ def test_a_feature_across_repos_is_tested_end_to_end(engine, services):
     assert ACC not in v["runs"]  # and are not built or deployed
 
     runs = [d for d in services.github.dispatches if d["event_type"] == "vrixel-acceptance"]
-    assert [d["payload"]["stage"] for d in runs] == ["dev", "staging"]
+    # First against the change set's own environment, on the pull request head, before anything merges.
+    assert [d["payload"]["stage"] for d in runs] == ["change_set", "dev", "staging"]
+    pre = runs.pop(0)["payload"]
+    assert pre["check"] == f"acceptance / {fid} / change_set" and pre["sha"] == prs[ACC]["head_sha"]
+    assert set(pre["env"]) == {"farm-field-api", "farm-mobile"}
     dev = runs[0]["payload"]
     assert dev["check"] == f"acceptance / {fid} / dev" and dev["sha"] == prs[ACC]["merge_sha"]
     assert set(dev["env"]) == {"farm-field-api", "farm-mobile"}  # every component's URL
@@ -79,6 +83,9 @@ def test_a_failing_criterion_sends_the_feature_back(engine, services):
     v = engine.auto_drive(engine.start(product_id="FARM", title="Offline crop log")["feature_id"], max_steps=60)
     # The dev wait failed on the criterion and asked people (the helper decided as a person would).
     snap = engine.graph.get_state(engine._config(v["feature_id"])).values
+    # Caught first in the change set's own environment, before anything merged: back to the agents.
+    assert snap["quality"]["change_set"]["status"] == "failed"
+    assert any(e["node"] == "change_set_wait" and e["kind"] == "auto_fix" for e in v["events"])
     dev = snap["quality"]["dev"]
     assert dev["status"] == "failed" and any("failing: AC-2" in f for f in dev["test_failures"])
     assert any(e["node"] == "dev_wait" and e["kind"] != "passed" for e in v["events"])

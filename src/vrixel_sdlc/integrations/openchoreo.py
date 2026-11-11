@@ -39,6 +39,15 @@ class OpenChoreo(Protocol):
     def deployment(self, *, component: str, env: str, project: str | None = None,
                    namespace: str | None = None) -> dict: ...  # {"state": ready|progressing|failed|absent, ...}
     def environment(self, component: str) -> str | None: ...  # furthest environment requested so far
+    # Change-set environments (vrixel_sdlc.changeset_env): one per open change set, on the data plane
+    # of an existing environment, outside the deployment pipeline, deleted when the change set merges.
+    def create_environment(self, *, name: str, like: str, project: str | None = None,
+                           namespace: str | None = None, labels: dict | None = None) -> dict: ...
+    def delete_environment(self, *, name: str, project: str | None = None, namespace: str | None = None) -> None: ...
+    def list_environments(self, *, namespace: str | None = None) -> list[dict]: ...  # [{"name", "created", "labels"}]
+    def bind_latest(self, *, component: str, env: str, actor: str, project: str | None = None,
+                    namespace: str | None = None) -> dict: ...  # the component's newest release, in env
+    def unbind(self, *, component: str, env: str, project: str | None = None, namespace: str | None = None) -> None: ...
     def register_component(self, *, component: str, project: str | None, namespace: str | None,
                            component_type: str, workflow: str | None, repo_url: str, branch: str) -> str: ...
     # Adds the traits a component lacks (by instanceName); never changes or removes one. Returns
@@ -102,6 +111,10 @@ class StubOpenChoreo:
         self.resource_bindings: list[dict] = []
         self.resource_results: dict[tuple[str, str], str] = {}  # (name, env) -> state
         self.traits: dict[str, list[dict]] = {}  # component -> traits
+        self.environments: dict[str, dict] = {}  # change-set environments: name -> {"like", "created", ...}
+        self.env_bindings: dict[tuple[str, str], str] = {}  # (component, change-set env) -> release
+        self.env_results: dict[tuple[str, str], str] = {}  # tests: (component, env) -> state
+        self.refuse_environments = False  # tests: an OpenChoreo that can't create environments
         self._seq = itertools.count(1)
         self._lock = threading.Lock()
 
@@ -153,6 +166,40 @@ class StubOpenChoreo:
                    "release": f"{component.rsplit('/', 1)[-1]}-r1"}
             self.promotions.append(rec)
             return dict(rec)
+
+    def create_environment(self, *, name, like, project=None, namespace=None, labels=None) -> dict:
+        if self.refuse_environments:
+            raise McpError("openchoreo: no tool create_environment")
+        from datetime import datetime, timezone
+
+        with self._lock:
+            env = self.environments.setdefault(name, {"name": name, "like": like, "project": project,
+                                                      "namespace": namespace, "labels": dict(labels or {}),
+                                                      "created": datetime.now(timezone.utc).isoformat()})
+            return dict(env)
+
+    def delete_environment(self, *, name, project=None, namespace=None) -> None:
+        with self._lock:
+            self.environments.pop(name, None)
+            for key in [k for k in self.env_bindings if k[1] == name]:
+                del self.env_bindings[key]
+            self.resource_bindings = [b for b in self.resource_bindings if b["env"] != name]
+
+    def list_environments(self, *, namespace=None) -> list[dict]:
+        with self._lock:
+            return [dict(e) for e in self.environments.values()]
+
+    def bind_latest(self, *, component, env, actor, project=None, namespace=None) -> dict:
+        with self._lock:
+            if env not in self.environments:
+                raise ValueError(f"{env}: no such environment")
+            release = f"{component.rsplit('/', 1)[-1]}-r{next(self._seq)}"
+            self.env_bindings[(component, env)] = release
+        return {"component": component, "env": env, "release": release, "actor": actor, "actor_type": "agent"}
+
+    def unbind(self, *, component, env, project=None, namespace=None) -> None:
+        with self._lock:
+            self.env_bindings.pop((component, env), None)
 
     def observe(self, *, component, env, project=None, namespace=None, minutes=60) -> dict:
         return dict(self.observations.get((component, env)) or {"available": True, "logs": [], "metrics": {}})
@@ -223,6 +270,12 @@ class StubOpenChoreo:
     def deployment(self, *, component, env, project=None, namespace=None) -> dict:
         with self._lock:
             current = self.deployments.get(component)
+            bound = self.env_bindings.get((component, env))
+        if bound:  # a change-set environment
+            return {"state": self.env_results.get((component, env), "ready"), "release": bound,
+                    "url": f"https://{component.rsplit('/', 1)[-1]}.{env}.example.internal"}
+        if env not in PIPELINE:
+            return {"state": "absent"}
         if current is None or PIPELINE.index(current) < PIPELINE.index(env if env in PIPELINE else "dev"):
             return {"state": "absent"}
         return {"state": self.deploy_results.get((component, env), "ready"), "release": "r1", "url": ""}
@@ -418,6 +471,62 @@ class OpenChoreoMcp:
         else:
             state = "progressing"
         return {"state": state, "release": self._release_of(b), "url": _get(b, "status.endpoints.0.url") or ""}
+
+    # -- change-set environments
+    def create_environment(self, *, name, like, project=None, namespace=None, labels=None) -> dict:
+        """An Environment on the same data plane as `like` (dev), marked as a change set's."""
+        ns = self._ns(namespace)
+        have = self._env(name, namespace)
+        if have:
+            return {"name": name, "created": str(_get(have, "metadata.creationTimestamp", "createdAt") or "")}
+        base = self._env(like, namespace) or {}
+        plane = _get(base, "spec.dataPlaneRef.name", "spec.dataPlaneRef", "dataPlaneRef", "data_plane", "dataPlane")
+        self._call(("create_environment",), {
+            **ns, ("name", "environment_name", "environmentName"): name,
+            ("display_name", "displayName"): f"Change set {name}",
+            ("data_plane_ref", "dataPlaneRef", "data_plane", "dataPlane"): plane if isinstance(plane, str) else (plane or {}).get("name", ""),
+            ("is_production", "isProduction", "production"): False,
+            ("labels",): {"vrixel.io/change-set": "true", **(labels or {})}})
+        return {"name": name, "created": ""}
+
+    def _env(self, name, namespace) -> dict | None:
+        try:
+            return self._call(("get_environment",), {**self._ns(namespace), _ENV: name}) or None
+        except McpError:
+            return None
+
+    def delete_environment(self, *, name, project=None, namespace=None) -> None:
+        self._call(("delete_environment",), {**self._ns(namespace), _ENV: name})
+
+    def list_environments(self, *, namespace=None) -> list[dict]:
+        out = []
+        for e in _list(self._call(("list_environments",), self._ns(namespace))):
+            out.append({"name": str(_get(e, "name", "metadata.name") or ""),
+                        "created": str(_get(e, "metadata.creationTimestamp", "createdAt", "created") or ""),
+                        "labels": dict(_get(e, "metadata.labels", "labels") or {})})
+        return out
+
+    def bind_latest(self, *, component, env, actor, project=None, namespace=None) -> dict:
+        """Bind the component's newest release (the build of the change set's head) to `env`,
+        outside the deployment pipeline: a change-set environment is never promoted from."""
+        if env in PIPELINE:
+            raise ValueError(f"{env} is a pipeline environment: promote to it instead")
+        release = self._latest_release(component, project, namespace)
+        scope = self._scope(component, project, namespace)
+        existing = next((b for b in self._bindings(component, project, namespace) if self._env_of(b) == env), None)
+        if existing is None:
+            self._call(("create_release_binding",), {**scope, _ENV: env, _RELEASE: release})
+        elif self._release_of(existing) != release:
+            self._call(("update_release_binding",), {
+                **scope, _ENV: env, ("binding", "release_binding", "name", "binding_name"): _get(existing, "name", "metadata.name"),
+                _RELEASE: release, ("release_state", "state"): "Active"})
+        return {"component": component, "env": env, "release": release, "actor": actor, "actor_type": "agent"}
+
+    def unbind(self, *, component, env, project=None, namespace=None) -> None:
+        b = next((x for x in self._bindings(component, project, namespace) if self._env_of(x) == env), None)
+        if b is not None:
+            self._call(("delete_release_binding",), {**self._scope(component, project, namespace), _ENV: env,
+                                                     ("binding", "release_binding", "name", "binding_name"): _get(b, "name", "metadata.name")})
 
     def environment(self, component: str) -> str | None:
         with self._lock:

@@ -185,6 +185,7 @@ class FeatureEngine:
 
             services.aws_tags = aws_tags_from_env()
         self._inventory_day = ""
+        self._envs_swept = 0.0
         if getattr(services, "agents", None) is None:
             from .integrations.openchoreo_agents import from_env as agents_from_env
 
@@ -341,6 +342,12 @@ class FeatureEngine:
                         self.snapshot_inventories()
                     except Exception:
                         pass
+                if time.time() - self._envs_swept > 900:  # change-set environments left behind
+                    self._envs_swept = time.time()
+                    try:
+                        self.sweep_change_set_envs()
+                    except Exception:
+                        pass
                 if time.time() - self._cost_checked > 3600:  # cost data moves daily; hourly is plenty
                     self._cost_checked = time.time()
                     try:
@@ -355,6 +362,33 @@ class FeatureEngine:
 
         self._watcher = threading.Thread(target=loop, name="vrixel-watcher", daemon=True)
         self._watcher.start()
+
+    def sweep_change_set_envs(self) -> list[str]:
+        """Delete change-set environments whose feature stopped, finished or outlived the product's
+        time to live (vrixel_sdlc.changeset_env). The merge train deletes them in the normal case."""
+        from . import changeset_env
+
+        namespaces, ttl = set(), {}
+        for pid in self.services.settings.registry:
+            try:
+                rt = self.services.snapshot(pid).product.runtime
+            except Exception:
+                continue
+            if rt:
+                namespaces.add(rt.get("namespace"))
+                ttl[pid] = changeset_env.config(rt)["ttl_hours"]
+
+        def is_active(fid: str):
+            pid = fid.rsplit("-FEAT-", 1)[0]
+            try:
+                st = self._state(fid)
+            except Exception:
+                return False, ttl.get(pid, changeset_env.DEFAULTS["ttl_hours"])
+            env = (st.get("change_set") or {}).get("env") or {}
+            active = bool(st) and st.get("status") not in ("done", "aborted") and not env.get("deleted")
+            return active, ttl.get(pid, changeset_env.DEFAULTS["ttl_hours"])
+
+        return changeset_env.sweep(self.services, is_active, sorted(namespaces, key=str))
 
     def stop_watcher(self) -> None:
         self._stop.set()

@@ -133,7 +133,10 @@ def test_builds_run_on_the_merge_commit_and_report_back_to_github(engine, servic
     assert ".vrixel/changes/FARM-FEAT-1/TASK-1.md" in files
 
 
-def test_failed_build_asks_release_managers_and_retry_rebuilds(engine, services, tmp_path):
+def test_failed_build_asks_release_managers_and_retry_rebuilds(engine, services, tmp_path, monkeypatch):
+    from vrixel_sdlc import changeset_env
+
+    monkeypatch.setitem(changeset_env.DEFAULTS, "enabled", False)  # the merge commit's build, not the change set's
     services.openchoreo.run_results["acme-farm/farm-mobile"] = "failed"
     v = to_build(engine)
     fid = v["feature_id"]
@@ -463,8 +466,11 @@ def test_ready_deployments_start_each_repos_post_deploy_suite(engine, services):
     v = to_build(engine)
     sent = [(d["repo"], d["payload"]["stage"]) for d in services.github.dispatches]
     for repo in ("acme-farm/farm-field-api", "acme-farm/farm-mobile"):
-        assert {(repo, "dev"), (repo, "staging"), (repo, "production")} <= set(sent)
-    d = services.github.dispatches[0]
+        assert {(repo, "change_set"), (repo, "dev"), (repo, "staging"), (repo, "production")} <= set(sent)
+    pre, d = services.github.dispatches[0], next(x for x in services.github.dispatches if x["payload"]["stage"] == "dev")
+    heads = {pr["repo"]: pr["head_sha"] for pr in v["pull_requests"].values()}
+    assert pre["payload"]["stage"] == "change_set" and pre["payload"]["sha"] == heads[pre["repo"]]  # before the merge
+    assert pre["payload"]["base_url"].endswith(".cs-farm-feat-1.example.internal")
     assert d["event_type"] == "vrixel-deployed" and d["payload"]["sha"] == v["runs"][d["repo"]]["sha"]
     assert len(sent) == len(set(sent))  # once per stage and repo
 

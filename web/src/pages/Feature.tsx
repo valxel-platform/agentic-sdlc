@@ -18,6 +18,13 @@ const WAIT_EVENTS: Record<string, Record<string, string>> = {
   security: { retry: "Security findings sent back", accepted_risk: "Security risk accepted", aborted: "Stopped over security findings" },
   ci_wait: { passed: "CI checks passed", failed: "CI checks failed" },
   build_wait: { passed: "OpenChoreo builds succeeded", retry: "Rebuild requested", resolved: "Build failure waved through", aborted: "Stopped after a failed build" },
+  cs_env: { building: "Change set's environment created", skipped: "Merged without a change-set environment" },
+  cs_build_wait: { passed: "Pull request heads built" },
+  cs_deploy: { deployed: "Deployed to the change set's environment" },
+  cs_wait: { passed: "The change set works together" },
+  change_set_wait: { auto_fix: "Sent back: failed in the change set's environment", retry: "Change-set environment retried",
+    resolved: "Change-set failure waved through", aborted: "Stopped after the change set failed" },
+  merge_train: { change_set_env_deleted: "Change set's environment deleted" },
   deploy_dev: { deployed: "Deployed to dev" },
   dev_wait: { passed: "Ready in dev", retry: "Dev deployment retried", resolved: "Dev failure waved through", aborted: "Stopped after a failed dev deployment" },
   deploy_staging: { deployed: "Deployed to staging" },
@@ -195,7 +202,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
               <h2 id="h-quality" className="section-title">Tests and security</h2>
               <div style={{ padding: "12px 16px 16px" }}>
                 <QualityTable
-                  suites={["pr", "build", "dev", "staging", "production"].flatMap((st) =>
+                  suites={["pr", "build", "change_set", "dev", "staging", "production"].flatMap((st) =>
                     (f.quality[st]?.suites ?? []).map((x) => ({ ...x, stage: st })))}
                   waivers={f.waivers} />
               </div>

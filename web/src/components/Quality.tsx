@@ -1,6 +1,6 @@
 import type { QualitySuite, Waiver } from "../api";
 
-const STAGE: Record<string, string> = { pr: "Pull requests", build: "Build", dev: "Dev", staging: "Staging", production: "Production" };
+const STAGE: Record<string, string> = { pr: "Pull requests", build: "Build", change_set: "Before merge", dev: "Dev", staging: "Staging", production: "Production" };
 const STATE: Record<string, [string, string]> = {
   passed: ["Passed", "go"], failed: ["Failed", "stop"], pending: ["Running", "run"], missing: ["No result", "plain"],
 };
@@ -34,7 +34,7 @@ function fold(suites: QualitySuite[]) {
     prev.passed = (prev.passed ?? 0) + (s.passed ?? 0);
     prev.failed = (prev.failed ?? 0) + (s.failed ?? 0);
   }
-  const stages = ["pr", "build", "dev", "staging", "production"];
+  const stages = ["pr", "build", "change_set", "dev", "staging", "production"];
   return [...rows.values()].sort((a, b) =>
     stages.indexOf(a.stage ?? "") - stages.indexOf(b.stage ?? "") ||
     (a.kind === b.kind ? 0 : a.kind === "test" ? -1 : 1) || a.suite.localeCompare(b.suite));
