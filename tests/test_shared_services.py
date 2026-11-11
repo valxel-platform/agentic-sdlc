@@ -97,7 +97,12 @@ def test_product_feature_that_changes_a_shared_framework(engine, services):
     order = v["change_set"]["merge_order"]
     assert order[0] == "acme-shared/ss-audit-framework"
     assert v["change_set"]["published"] == ["acme-shared/ss-audit-framework"]
-    assert services.packages.channel("acme-shared/ss-audit-framework", fid) == "stable"
+    # Tagged as a release candidate at the merge, then the same commit as the stable version at G6.
+    rc = v["change_set"]["packages"]["acme-shared/ss-audit-framework"]
+    assert (rc["version"], rc["tag"], rc["channel"]) == ("0.1.0", "v0.1.0-rc.1", "rc")
+    assert services.packages.channel("acme-shared/ss-audit-framework", "0.1.0") == "stable"
+    assert services.packages.tags["acme-shared/ss-audit-framework"] == {"v0.1.0-rc.1": rc["sha"], "v0.1.0": rc["sha"]}
+    assert v["release"]["versions"] == {"acme-shared/ss-audit-framework": "0.1.0"}
     oc = services.openchoreo
     assert "acme-shared/ss-audit-framework" not in oc.deployments
     assert {r["project"] for r in oc.runs if r["kind"] == "main"} == {"farm"}

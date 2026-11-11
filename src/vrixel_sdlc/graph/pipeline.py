@@ -335,6 +335,9 @@ def make_gate(gate: str, services):
                 # G6: the traceability matrix must be complete, or a named person overrides it with a reason.
                 "traceability": (release_traceability(services, state, lane)
                                  if gate == "g6" and lane_id == state["product_id"] else None),
+                # G6 for a shared lane: each release candidate, and whether its workflow published it.
+                "packages": (package_check(services, state, lane)
+                             if gate == "g6" and lane.kind == "shared" else None),
                 # G1 decides whether this intent is new: what the product already has that looks like it.
                 "related_features": list(state.get("related_features") or []) if gate == "g1" else [],
                 # G1 also decides whether the work fits the roadmap: its initiative and what's left of
@@ -361,6 +364,15 @@ def make_gate(gate: str, services):
                 # (the API checks the person may override) or another decision.
                 packet = {**packet, "refused": "The traceability matrix isn't complete: release only with an "
                                               "override and its reason, or send it back."}
+                d = normalize(interrupt(packet), tuple(allowed))
+            while d["decision"] == "approve" and packet.get("packages") is not None:
+                # Stable means the same build consumers tested: a candidate that was never published can't be it.
+                packet = {**packet, "packages": package_check(services, state, lane)}  # look again each time
+                missing = ", ".join(p["rc"] for p in packet["packages"] if p["status"] == "missing")
+                if not missing:
+                    break
+                packet = {**packet, "refused": f"Not in GitHub Packages yet: {missing}. Approve once the release "
+                                              "workflow has published it, or send it back."}
                 d = normalize(interrupt(packet), tuple(allowed))
             records.append(_record(gate, phase, d, lane_id))
             if trace and d["decision"] == "approve":
@@ -525,11 +537,16 @@ def make_gate(gate: str, services):
                                                               "release": rec.get("release", ""),
                                                               "pipeline": list(t["pipeline"])}
             # Shared lanes own no runtime: their packages are marked stable for consumers to adopt.
+            # The same commit as the release candidate, tagged as the stable version.
+            candidates = (state.get("change_set") or {}).get("packages") or {}
+            versions = {}
             for repo in release.get("packages", []):
-                services.packages.publish(repo=repo, version=release.get("version", state["feature_id"]),
-                                          channel="stable", actor=d["approver"])
+                rc = candidates.get(repo) or {}
+                rec = services.packages.publish(repo=repo, version=rc.get("version") or release.get("version", state["feature_id"]),
+                                                channel="stable", actor=d["approver"], sha=rc.get("sha", ""))
+                versions[repo] = rec["version"]
             release |= {"production": bool(release.get("components")), "stable": release.get("packages", []),
-                        "promoted_by": d["approver"]}
+                        "versions": versions, "promoted_by": d["approver"]}
             update["release"] = release
             if release["production"] or release.get("flag_on"):
                 record_change(services, release_record_for(state, update, records, approvers), update, gate)
@@ -537,6 +554,30 @@ def make_gate(gate: str, services):
 
     dest = ("production_wait",) if gate == "g6" else (tuple(target) if isinstance(target, list) else (target,))
     return gate_node, (*dest, phase, END)
+
+
+def bump_for(state: FeatureState, repo: str) -> str:
+    """A hotfix is a patch; a breaking contract change in the repo is a major version; else minor."""
+    if state.get("track") == "hotfix":
+        return "patch"
+    contracts = (state.get("design") or {}).get("contracts") or []
+    return "major" if any(c.get("repo") == repo and c.get("breaking") for c in contracts) else "minor"
+
+
+def package_check(services, state: FeatureState, lane) -> list[dict]:
+    """Each of the lane's release candidates in this change set and whether it is published."""
+    spec = {r.name: r.package for r in lane.repos}
+    out = []
+    for repo, rc in sorted(((state.get("change_set") or {}).get("packages") or {}).items()):
+        if repo not in spec:
+            continue
+        try:
+            status = services.packages.status(repo=repo, version=rc["package_version"], package=spec[repo])
+        except Exception:
+            status = "unknown"
+        out.append({"repo": repo, "version": rc["version"], "rc": rc["tag"], "status": status,
+                    "package": spec[repo]})
+    return out
 
 
 def release_traceability(services, state: FeatureState, lane) -> dict:
@@ -925,6 +966,7 @@ def make_merge_train(services):
         g5 = [g for g in state.get("gate_decisions", []) if g["gate"] == "g5" and g["decision"] in ("approve", "handback")]
         actor = g5[-1]["approver"] if (risk != "low" and g5) else "agent:merge-train"
         merged, published, runs = {}, list(cs.get("published") or []), dict(cs.get("runs") or {})
+        packages = dict(cs.get("packages") or {})
         passed = ", ".join(sorted({g["gate"].upper() for g in state.get("gate_decisions", [])
                                    if g["decision"] in ("approve", "handback")})) or "gates"
         failed_runs = {r for r, v in runs.items() if v.get("state") == "failure"}
@@ -954,8 +996,9 @@ def make_merge_train(services):
                 continue
             if lane is not None and lane.kind == "shared":
                 # No runtime of its own: publish a release candidate that consumers build against.
-                if repo not in published:
-                    services.packages.publish(repo=repo, version=state["feature_id"], channel="rc", actor=actor)
+                if repo not in published:  # tags the merge commit; the repo's workflow publishes it
+                    packages[repo] = services.packages.publish(repo=repo, version=None, channel="rc", actor=actor,
+                                                               sha=sha, bump=bump_for(state, repo))
                     published.append(repo)
             elif repo not in runs or repo in failed_runs:  # build the merge commit in OpenChoreo
                 t = oc_target(lane, repo)
@@ -963,10 +1006,11 @@ def make_merge_train(services):
                                                        project=t["project"], namespace=t["namespace"])
                 runs[repo] = {"repo": repo, "sha": sha, **t, "pipeline": list(t["pipeline"]),
                               "run_id": run["run_id"], "url": run.get("url", "")}
-        cs |= {"merged": True, "published": published, "runs": runs}
+        cs |= {"merged": True, "published": published, "packages": packages, "runs": runs}
         return {"pull_requests": merged, "change_set": cs,
                 "events": [event("merge_train", "merged", f"{len(merged)} PRs by {actor}",
-                                 order=cs.get("merge_order", []), published=published)]}
+                                 order=cs.get("merge_order", []), published=published,
+                                 versions={r: p["tag"] for r, p in packages.items()})]}
 
     return merge_train
 

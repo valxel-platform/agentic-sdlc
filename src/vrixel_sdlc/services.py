@@ -180,7 +180,7 @@ def build_services(
         catalog=catalog or default_catalog(),
         runtimes=runtimes,
         governance=GovernanceLoader(settings, governance_source or build_source(settings)),
-        packages=packages or StubPackageRegistry(),
+        packages=packages or default_packages(github),
         diagrams=diagrams if diagrams is not None else default_diagrams(settings, github),
         trackers=trackers if trackers is not None else default_trackers(settings),
     )
@@ -190,6 +190,17 @@ def build_services(
     svc.provisioner = default_provisioner(settings, github, openchoreo)
     svc.available_roles = frozenset(available)
     return svc
+
+
+def default_packages(github):
+    """Live delivery tags shared-lane releases on GitHub and checks GitHub Packages; else in memory."""
+    import os
+
+    if os.environ.get("VRIXEL_DELIVERY", "stub").lower() == "live":
+        from .integrations.packages import GitHubPackages
+
+        return GitHubPackages(github)
+    return StubPackageRegistry()
 
 
 def default_flags(settings: Settings, svc: Services):

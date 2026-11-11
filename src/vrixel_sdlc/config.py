@@ -21,6 +21,9 @@ def _repo_root() -> Path:
 class RepoSpec:
     name: str  # "<org>/<repo>"
     role: str  # provider | consumer | library
+    # A shared lane's library: what its release workflow publishes to GitHub Packages, so G6 can
+    # check a release candidate exists: {"type": maven|npm|nuget|rubygems|container, "name": ...}.
+    package: dict | None = field(default=None, hash=False, compare=False)
 
     @property
     def org(self) -> str:

@@ -46,7 +46,20 @@ def test_the_default_setup_lists_every_stand_in(services):
 def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services):
     live_ish(services)
     gaps = strict.check(services, auth_mode="github", env=LIVE)
-    assert gaps == ["shared lanes SS record release channels in memory: there is no live package registry yet"]
+    assert gaps == []
+    real = services.snapshot
+
+    def no_packages(pid, pins=None):  # a shared lane whose libraries don't say where they publish
+        snap = real(pid, pins)
+        if pid != "SS":
+            return snap
+        repos = tuple(replace(r, package=None) for r in snap.product.repos)
+        return replace(snap, product=replace(snap.product, repos=repos))
+
+    services.snapshot = no_packages
+    assert strict.check(services, auth_mode="github", env=LIVE) == [
+        "SS: acme-shared/ss-communication, acme-shared/ss-audit-framework, acme-shared/ss-security declare no "
+        "package, so G6 can't check that a release candidate was published to GitHub Packages"]
 
 
 def test_one_missing_token_is_enough_to_refuse(services):
@@ -68,7 +81,7 @@ def test_one_missing_token_is_enough_to_refuse(services):
     services.snapshot = with_servicenow
     with pytest.raises(strict.StrictModeError, match="VRIXEL_SERVICENOW_AUTH_CLN is not set"):
         strict.check(services, auth_mode="github", env={"VRIXEL_DELIVERY": "live"})
-    assert strict.check(services, auth_mode="github", env=LIVE)
+    assert strict.check(services, auth_mode="github", env=LIVE) == []
 
 
 def test_the_server_refuses_to_start_in_strict_mode(monkeypatch, settings, services):

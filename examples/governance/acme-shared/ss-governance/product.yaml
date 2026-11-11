@@ -17,12 +17,17 @@ budget_usd: 150
 critic_threshold: 0.85
 max_loops: 3
 repos:
+# Each library's release workflow publishes to GitHub Packages when the tool tags a release
+# (v1.5.0-rc.1 at the merge, v1.5.0 at G6); `package` says where, so G6 can check it is there.
 - name: acme-shared/ss-communication
   role: library
+  package: {type: maven, name: com.acme.shared.communication}
 - name: acme-shared/ss-audit-framework
   role: library
+  package: {type: maven, name: com.acme.shared.audit-framework}
 - name: acme-shared/ss-security
   role: library
+  package: {type: maven, name: com.acme.shared.security}
 # Approvers are GitHub teams (<org>/<team-slug>) or users (<login>). Only they can decide a gate.
 approvers:
   g1: [acme-shared/platform-owners]
