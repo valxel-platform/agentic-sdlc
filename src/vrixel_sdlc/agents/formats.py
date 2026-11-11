@@ -21,6 +21,8 @@ CONTRACTS: dict[str, str] = {
 <who has which problem>
 ## Capability
 Extends: CAP-<id> (<name>)        or        New capability: <why nothing existing covers it>
+## Product goal                (the goal in roadmap/goals.yaml this feature moves)
+- GOAL-<id>: <how this feature moves it>          or          - None: <why no product goal applies>
 ## Success metrics
 - M1: <metric with a number or threshold>
 ## Constitution articles
@@ -37,6 +39,10 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
                         kinds: performance, availability, reliability, scalability, security, privacy,
                         accessibility, compliance, usability, maintainability, observability, other
                         (or '- None: <why this feature adds no requirement beyond the product's own>')
+## Instrumentation             (the events that show whether the feature moves the brief's product goal)
+- <event_name> (GOAL-<id>): fires when <what happened>; properties: <property>, <property>
+                        lowercase names; properties are categories and numbers, never a person's name,
+                        contact details or ids (or '- None: <why>' when the brief names no product goal)
 ## Constitution articles
 - VX-<n>                (at least one article of the platform or product constitution)""",
     "design": """# UX spec: <title>
@@ -71,6 +77,8 @@ flowchart LR  (one node per affected repo)
 - <org>/<repo>: <none|project|namespace|internal|external>; calls <repo>, <repo>
 ## Events                      (when records change through Kafka)
 - vrixel.<record>.<event>.v<n>: published by <repo>, applied by <repo>
+## Instrumentation             (one line for every event in the PRD's Instrumentation section)
+- <event_name>: <org>/<repo>   (the affected repo that records it)
 ## Resources                   (AWS services, only when needed; each with an ADR)
 - <name>: <type>; <param>=<value>
   writes: <repo>; reads: <repo>

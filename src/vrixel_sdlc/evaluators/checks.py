@@ -29,6 +29,27 @@ def _discovery(text: str, ctx: dict) -> list[str]:
     cap = section(text, "Capability")
     if "Extends:" not in cap and "New capability:" not in cap:
         out.append("Brief must declare 'Extends: CAP-x' or 'New capability: <why>' (VX-6)")
+    return out + _product_goal(text, ctx)
+
+
+def _product_goal(text: str, ctx: dict) -> list[str]:
+    """The brief names the product goal it moves, from roadmap/goals.yaml (outcome loop, step 2)."""
+    if "product_goals" not in ctx:
+        return []
+    from ..agents.parse import parse_product_goal
+
+    known = [g["id"] for g in ctx["product_goals"]]
+    ids, none = parse_product_goal(text)
+    out = [f"Product goal {g} isn't in roadmap/goals.yaml" + (f" (goals: {', '.join(known)})" if known else
+                                                              " (the product has no goals yet: write '- None: <why>')")
+           for g in ids if g not in known]
+    if known and not ids and not none:
+        out.append("Name the product goal this moves under '## Product goal': '- GOAL-...: <how>' (goals: "
+                   f"{', '.join(known)}), or '- None: <why>' for work no goal covers")
+    init = ctx.get("initiative_goal")
+    if init and init in known and ids and init not in ids:
+        out.append(f"The feature's initiative serves {init}; name it under Product goal, or say why this feature "
+                   "moves a different one")
     return out
 
 
@@ -56,7 +77,24 @@ def _spec(text: str, ctx: dict) -> list[str]:
             if goals and g not in goals:
                 out.append(f"{ac_id} serves {g}, which isn't one of the PRD's goals")
     out += _nfrs(text, goals)
+    out += _instrumentation(text, ctx)
     return out
+
+
+def _instrumentation(text: str, ctx: dict) -> list[str]:
+    """The events that show whether the feature moves the brief's product goal (outcome loop, step 2)."""
+    from ..agents.parse import parse_instrumentation, parse_product_goal
+    from ..outcomes.instrumentation import event_problems
+
+    brief = (ctx.get("parent_texts") or {}).get("OPP", "")
+    goals, _ = parse_product_goal(brief)
+    events = parse_instrumentation(text)
+    if not goals:
+        return event_problems(events, [g for e in events for g in e["goals"]], ctx.get("data_class", "")) if events else []
+    if not events:
+        return [f"The brief moves {', '.join(goals)}: list the events that show it under '## Instrumentation' "
+                "as '- <event_name> (GOAL-...): fires when ...; properties: ...'"]
+    return event_problems(events, goals, ctx.get("data_class", ""))
 
 
 _MEASURABLE = re.compile(r"\d|WCAG|OWASP|HIPAA|PCI|SOC ?2|GDPR|ISO ?27001|FIPS", re.I)
@@ -136,6 +174,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
         out.append("HLD has no contracts section (VX-4)")
     out += _audit(text, repos, ctx)
     out += _events(text, repos)
+    out += _emitters(text, repos, ctx)
     out += _acceptance(repos, ctx)
     out += _endpoints(text, repos, ctx)
     from ..resources import check as resources_check
@@ -223,6 +262,23 @@ def _events(text: str, repos: list[dict]) -> list[str]:
         return []
     return ["HLD has event workers but no Events section naming the events, each as "
             "'- vrixel.<entity>.<what happened>.v1: <who publishes it, who applies it>' (VX-16)"]
+
+
+def _emitters(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """Every event in the PRD's Instrumentation is recorded by an affected repo (outcome loop, step 2)."""
+    from ..agents.parse import parse_emitters, parse_instrumentation
+
+    wanted = [e["event"] for e in parse_instrumentation((ctx.get("parent_texts") or {}).get("PRD", ""))]
+    if not wanted:
+        return []
+    emits = parse_emitters(text)
+    names = {r["name"] for r in repos}
+    out = [f"Event {e} from the PRD has no repo under '## Instrumentation' ('- {e}: <org>/<repo>')"
+           for e in wanted if e not in emits]
+    out += [f"Event {e} is recorded by {r}, which isn't an affected repo" for e, r in emits.items()
+            if e in wanted and names and r not in names]
+    out += [f"Event {e} under Instrumentation isn't in the PRD" for e in emits if e not in wanted]
+    return out
 
 
 def _audit(text: str, repos: list[dict], ctx: dict) -> list[str]:

@@ -335,6 +335,8 @@ def make_gate(gate: str, services):
                 "agent_notes": gate_notes(state, gate, phase),
                 # G5 and G6 see the evidence: every suite run so far, and any accepted risks.
                 "quality": quality_summary(state) if gate in ("g5", "g6") else None,
+                # G6 sees whether the events that measure the feature's goal fired in staging.
+                "instrumentation": (state.get("instrumentation_check") or None) if gate == "g6" else None,
                 # G5 and G6 see which performance tests the change needed, and why.
                 "performance": (sorted((state.get("performance") or {}).values(), key=lambda d: d["repo"])
                                 if gate in ("g5", "g6") else None),
@@ -1584,13 +1586,31 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
         if res["status"] == "success":
             # Staging passed: the next failure starts a fresh count of tries.
             reset = {"fix_retries": 0, "fix_branch": ""} if stage == "staging" else {}
-            return Command(goto=ok, update={"delivery": {stage: res}, **_quality_update(res), **reset,
-                                            "events": [event(f"{stage}_wait", "passed",
-                                                             f"{len(targets)} components ready in {stage}")]})
+            evs = [event(f"{stage}_wait", "passed", f"{len(targets)} components ready in {stage}")]
+            if stage == "staging":
+                # Did the events that measure the feature's goal fire? G6 shows the answer.
+                reset["instrumentation_check"] = check = instrumentation_staging(services, state)
+                if check.get("events"):
+                    from ..outcomes.instrumentation import describe
+
+                    evs.append(event("staging_wait", "instrumentation", describe(check),
+                                     missing=list(check.get("missing") or [])))
+            return Command(goto=ok, update={"delivery": {stage: res}, **_quality_update(res), **reset, "events": evs})
         return fix_or_ask(services, state, stage, res, lambda: _people_said(
             state, stage, res, ok=ok, retry=retry, extra=_quality_update(res)))
 
     return env_wait, (ok, retry, f"{stage}_wait", "build", END)
+
+
+def instrumentation_staging(services, state: FeatureState) -> dict:
+    """The feature's product events, counted in staging (vrixel_sdlc.outcomes.instrumentation)."""
+    from ..outcomes.instrumentation import staging_check
+    from .phase import instrumentation_events
+
+    events = instrumentation_events(services, state.get("artifacts") or {})
+    rt = services.feature_snapshot(state).product.runtime or {}
+    env = env_for("staging", tuple(rt.get("pipeline") or PIPELINE)) or "staging"
+    return staging_check(services, state, events, env)
 
 
 def release_store_app(services, state: FeatureState, repo: str, sha: str, stage: str, *, actor: str) -> dict:

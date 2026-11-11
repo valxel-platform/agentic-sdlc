@@ -84,7 +84,12 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
     arts = state.get("artifacts", {})
     parents = {k: services.artifacts.load(arts[k]) for k in spec.parents if k in arts}
     knowledge, knowledge_text = design_knowledge(services, snap) if phase in KNOWLEDGE_PHASES else ({}, "")
+    goal_ctx = {}
+    if phase in GOAL_PHASES:
+        goals, initiative_goal = product_goals(services, state)
+        goal_ctx = {"product_goals": goals, "initiative_goal": initiative_goal}
     return {
+        **goal_ctx,
         "knowledge": knowledge,
         "knowledge_text": knowledge_text,
         "feature_id": state["feature_id"],
@@ -130,6 +135,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "audit": _audit_actions(services, arts),
         # The events the approved design names (VX-16): providers publish them, workers apply them.
         "events": _design_events(services, arts),
+        # The product events that show whether the feature moves its goal, and the repo recording each.
+        "instrumentation": instrumentation_events(services, arts),
         # Product acceptance tests: what exists (so plans extend rather than duplicate) and when needed.
         "acceptance_catalog": _acceptance_catalog(services, product) if phase in ("plan", "build") else [],
         "acceptance_min_repos": int(((product.quality or {}).get("acceptance") or {}).get("min_repos", 2)),
@@ -167,6 +174,34 @@ def _acceptance_catalog(services, product) -> list[dict]:
         return acceptance.load_catalog(services.github.get_file(repo=repo, path="catalog.json", ref=""))
     except Exception:  # an unreadable catalog means no reuse hints, never a stuck plan
         return []
+
+
+GOAL_PHASES = ("discovery",)
+
+
+def product_goals(services, state: dict) -> tuple[list[dict], str]:
+    """The product's goals (roadmap/goals.yaml) and the goal of the feature's initiative, if any."""
+    try:
+        from ..roadmap import read_roadmap
+
+        road = read_roadmap(services, state["product_id"])
+    except Exception:
+        return [], ""
+    goals = [{"id": g["id"], "title": g.get("title", ""), "measure": g.get("measure", "")} for g in road["goals"]]
+    iid = state.get("initiative_id") or ""
+    goal = next((i.get("goal", "") for i in road["initiatives"] if i.get("id") == iid), "") if iid else ""
+    return goals, goal
+
+
+def instrumentation_events(services, arts: dict) -> list[dict]:
+    """The PRD's events, each with the repo the HLD says records it."""
+    from ..agents.parse import parse_emitters, parse_instrumentation
+
+    if "PRD" not in arts:
+        return []
+    events = parse_instrumentation(services.artifacts.load(arts["PRD"]))
+    emits = parse_emitters(services.artifacts.load(arts["HLD"])) if "HLD" in arts else {}
+    return [{**e, "repo": emits.get(e["event"], "")} for e in events]
 
 
 def _design_events(services, arts: dict) -> list[dict]:
@@ -351,6 +386,13 @@ def document_tail(phase: str, ctx: dict, previous: str = "") -> str:
         tail.append("The request has an experience brief from the person who asked. Follow it: the screen or flow "
                     "it names, the main task first, the look it asks for. Where it leaves a part to you, stay within "
                     "the product's current design, and list each such choice under Agent notes as 'Traded off:'.")
+    if phase == "discovery" and "product_goals" in ctx:
+        if ctx["product_goals"]:
+            tail.append("The product's goals (roadmap/goals.yaml); name the one this feature moves under Product goal:\n"
+                        + "\n".join(f"- {g['id']}: {g['title']} (measure: {g['measure']})" for g in ctx["product_goals"])
+                        + (f"\nThe feature's initiative serves {ctx['initiative_goal']}." if ctx.get("initiative_goal") else ""))
+        else:
+            tail.append("The product has no goals in roadmap/goals.yaml yet: write '- None: <why>' under Product goal.")
     if ctx.get("feedback"):
         tail.append(f"Human feedback to address: {ctx['feedback']}")
     if ctx.get("prior_findings"):
@@ -517,6 +559,36 @@ def events_instruction(ctx: dict, task: dict) -> str:
             + " List the event types after 'Events:' in the patch summary.")
 
 
+def instrumentation_instruction(ctx: dict, task: dict) -> str:
+    mine = [e for e in ctx.get("instrumentation") or [] if e.get("repo") == task.get("repo")]
+    if not mine:
+        return ""
+    named = "; ".join(f"{e['event']} ({e['when']}"
+                      + (f"; attributes {', '.join(e['properties'])}" if e["properties"] else "") + ")" for e in mine)
+    return (f" Record these product events with the repo's product-events module (the OpenTelemetry counter"
+            f" vrixel.events, attribute event=<name>; the template logs the per-minute summary): {named}."
+            " Never a person's name, contact details or ids as attributes. Tests prove each is recorded."
+            " List the event names after 'Instrumentation:' in the patch summary.")
+
+
+def instrumentation_findings(ctx: dict, results: dict) -> list[str]:
+    """Deterministic: every event the PRD names is recorded by the repo the HLD gave it."""
+    by_repo: dict[str, list[str]] = {}
+    for e in ctx.get("instrumentation") or []:
+        if e.get("repo"):
+            by_repo.setdefault(e["repo"], []).append(e["event"])
+    out = []
+    for repo, events in sorted(by_repo.items()):
+        built = [r for r in results.values() if r.get("repo") == repo and r.get("tests_passed")]
+        if not built:
+            continue
+        said = " ".join(r.get("summary") or "" for r in built)
+        missing = [e for e in events if e not in said]
+        if missing:
+            out.append(f"{repo} doesn't record the events the PRD names: {', '.join(missing)} (outcome loop)")
+    return out
+
+
 def events_findings(ctx: dict, results: dict) -> list[str]:
     """Deterministic: every event the design names is published or applied somewhere in the build."""
     wanted = [e["type"] for e in ctx.get("events") or []]
@@ -589,6 +661,7 @@ def build_build_subgraph(services):
                      + "; ".join(payload["fix"]) + "." if payload.get("fix") else "")
                   + cases_instruction(mine)
                   + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
+                  + instrumentation_instruction(ctx, task)
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
@@ -740,6 +813,7 @@ def build_build_subgraph(services):
         findings += flag_findings(s["ctx"], results)
         findings += audit_findings(s["ctx"], results)
         findings += events_findings(s["ctx"], results)
+        findings += instrumentation_findings(s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]
         lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}" + second_line(rv)
                   for tid, rv in sorted(reviews.items())]

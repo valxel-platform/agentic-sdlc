@@ -480,6 +480,38 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         </div>
       )}
 
+      {item.instrumentation && item.instrumentation.events.length > 0 && (
+        <div>
+          <h3>Goal measurement</h3>
+          {!item.instrumentation.checked ? (
+            <p className="muted small">Not checked: {item.instrumentation.why}</p>
+          ) : (
+            <>
+              {item.instrumentation.missing.length > 0 && (
+                <p className="small">
+                  Some events never fired in {item.instrumentation.environment}. The goals they feed can't be
+                  measured after release until they do.
+                </p>
+              )}
+              <ul className="plain-list small">
+                {item.instrumentation.events.map((e) => {
+                  const n = item.instrumentation!.fired[e.event] ?? 0;
+                  return (
+                    <li key={e.event}>
+                      <span className={`chip ${n > 0 ? "go" : "stop"}`}>
+                        {n > 0 ? `Fired ${n} time${n === 1 ? "" : "s"}` : "Never fired"}
+                      </span>{" "}
+                      <strong>{e.event}</strong>
+                      <span className="muted"> · feeds {e.goals.join(", ") || "no goal"}{e.repo ? ` · ${e.repo.split("/").pop()}` : ""}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
+
       {item.pull_requests && item.pull_requests.length > 0 && (
         <div>
           <h3>Pull requests in this decision</h3>
