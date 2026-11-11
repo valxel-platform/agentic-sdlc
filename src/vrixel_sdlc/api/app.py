@@ -267,8 +267,11 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         user = user_from_payload(signer.loads(request.cookies.get(SESSION_COOKIE)))
         if user is None:
             raise HTTPException(401, "Sign in to continue")
-        if request.method not in ("GET", "HEAD") and "application/json" not in request.headers.get("content-type", ""):
-            raise HTTPException(415, "Send JSON")  # with SameSite=Lax cookies, blocks cross-site form posts
+        if (request.method not in ("GET", "HEAD") and "application/json" not in request.headers.get("content-type", "")
+                and request.headers.get("x-vrixel-client") != "web"):
+            # With SameSite=Lax cookies this blocks cross-site form posts. A request that isn't JSON (a
+            # file upload, a DELETE) carries X-Vrixel-Client instead, which a cross-site form can't send.
+            raise HTTPException(415, "Send JSON")
         return user
 
     def lanes_for(user: User) -> list[str]:
@@ -1129,6 +1132,80 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         stores["intakes"].save(s)
         return s.to_dict()
 
+    # --- attachments: files for the intent, kept as the strictest data class until it's submitted ---
+    @api.post("/intake/{sid}/attachments", status_code=201)
+    async def intake_attach(sid: str, request: Request, name: str, user: User = Depends(current_user)) -> dict:
+        """The file is the request body (not a form), named by `name`."""
+        from ..attachments import AttachmentError, max_bytes
+
+        s = intake_session(sid, user)
+        if s.feature_id:
+            raise HTTPException(409, f"Already submitted as {s.feature_id}")
+        declared = int(request.headers.get("content-length") or 0)
+        if declared > max_bytes():
+            raise HTTPException(413, f"{name} is larger than {max_bytes() // (1024 * 1024)} MB")
+        data = bytearray()
+        async for chunk in request.stream():
+            data.extend(chunk)
+            if len(data) > max_bytes():
+                raise HTTPException(413, f"{name} is larger than {max_bytes() // (1024 * 1024)} MB")
+        try:
+            meta = eng().services.attachments.add(s.id, s.attachments, name, bytes(data))
+        except AttachmentError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        s.attachments.append(meta)
+        # In the conversation too, by name only: the agent sees what was attached, never what's in it.
+        s.messages.append({"role": "user", "text": f"Attached {meta['name']}", "at": meta["uploaded_at"],
+                           "attachment": meta["id"]})
+        stores["intakes"].save(s)
+        return s.to_dict()
+
+    @api.delete("/intake/{sid}/attachments/{aid}")
+    def intake_detach(sid: str, aid: str, user: User = Depends(current_user)) -> dict:
+        s = intake_session(sid, user)
+        if s.feature_id:
+            raise HTTPException(409, f"Already submitted as {s.feature_id}")
+        meta = next((a for a in s.attachments if a["id"] == aid), None)
+        if meta is None:
+            raise HTTPException(404, f"No attachment {aid}")
+        eng().services.attachments.remove(s.id, meta)
+        s.attachments = [a for a in s.attachments if a["id"] != aid]
+        s.messages = [m for m in s.messages if m.get("attachment") != aid]
+        stores["intakes"].save(s)
+        return s.to_dict()
+
+    def attachment_response(path, meta: dict) -> FileResponse:
+        if not path.exists():
+            raise HTTPException(404, f"{meta['name']} is no longer stored")
+        # Always a download, never rendered by the browser as a page.
+        return FileResponse(path, media_type=meta.get("mime") or "application/octet-stream", filename=meta["name"],
+                            content_disposition_type="attachment",
+                            headers={"X-Content-Type-Options": "nosniff", "Content-Security-Policy": "sandbox"})
+
+    @api.get("/intake/{sid}/attachments/{aid}")
+    def intake_attachment(sid: str, aid: str, user: User = Depends(current_user)) -> FileResponse:
+        s = intake_session(sid, user)
+        meta = next((a for a in s.attachments if a["id"] == aid), None)
+        if meta is None:
+            raise HTTPException(404, f"No attachment {aid}")
+        store = eng().services.attachments
+        return attachment_response(store.path(meta, feature_id=s.feature_id) if s.feature_id else store.path(meta, sid=s.id), meta)
+
+    @api.get("/features/{feature_id}/attachments/{aid}")
+    def feature_attachment(feature_id: str, aid: str, user: User = Depends(current_user)) -> FileResponse:
+        try:
+            state = eng()._state(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if not state:
+            raise HTTPException(404, f"No feature {feature_id}")
+        if state.get("product_id") not in lanes_for(user):
+            raise HTTPException(403, f"You aren't a member of {state.get('product_id')}'s organization")
+        meta = next((a for a in state.get("attachments") or [] if a["id"] == aid), None)
+        if meta is None:
+            raise HTTPException(404, f"No attachment {aid}")
+        return attachment_response(eng().services.attachments.path(meta, feature_id=feature_id), meta)
+
     @api.post("/intake/{sid}/submit", status_code=201)
     def intake_submit(sid: str, body: SubmitIn | None = None, user: User = Depends(current_user)) -> dict:
         s = intake_session(sid, user)
@@ -1145,7 +1222,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             s.feature_id = eng().create(product_id=s.draft.product_id, title=s.draft.title,
                                         description=s.draft.description(), created_by=user.login, background=True,
                                         not_duplicate_reason=s.draft.not_duplicate_reason, pilot=bool(body and body.pilot),
-                                        profile=(body.profile if body else ""))
+                                        profile=(body.profile if body else ""),
+                                        attachments=(s.id, list(s.attachments)))
         except DuplicateIntent as exc:  # a matching feature appeared since the check
             s.draft.similar, s.overlap_checked = exc.matches, True
             stores["intakes"].save(s)

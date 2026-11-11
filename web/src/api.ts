@@ -193,6 +193,7 @@ export interface AgentSession {
 }
 
 export interface Feature extends FeatureSummary {
+  attachments?: Attachment[];
   description: string;
   agent_sessions?: AgentSession[];
   profile?: Profile;
@@ -409,9 +410,16 @@ export interface Draft {
   product_id: string; title: string; problem: string; users: string; success_metric: string;
   related_capability: string; similar: SimilarItem[]; not_duplicate_reason: string;
 }
+/** A file attached to an intent: kept as the strictest data class until the intent is submitted. */
+export interface Attachment {
+  id: string; name: string; kind: "image" | "pdf" | "text"; size: number; read_by_agents: boolean;
+  mime?: string; uploaded_at?: string;
+}
+export const ATTACH_ACCEPT = ".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,.csv,.json";
 export interface IntakeSession {
-  id: string; owner: string; lanes: string[]; draft: Draft; ready: boolean; missing: string[];
-  feature_id: string; created_at: string; messages: { role: "user" | "agent"; text: string; at: string }[];
+  id: string; owner: string; lanes: string[]; draft: Draft; ready: boolean; missing: string[]; attachments: Attachment[];
+  feature_id: string; created_at: string;
+  messages: { role: "user" | "agent"; text: string; at: string; attachment?: string }[];
 }
 
 export class ApiError extends Error {
@@ -422,7 +430,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const res = await fetch(`/api${path}`, {
     method,
     credentials: "same-origin",
-    headers: body !== undefined ? { "Content-Type": "application/json" } : {},
+    headers: body !== undefined ? { "Content-Type": "application/json" } : { "X-Vrixel-Client": "web" },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -537,6 +545,16 @@ export const api = {
   intake: (id: string) => request<IntakeSession>("GET", `/intake/${id}`),
   intakeSay: (id: string, text: string) => request<IntakeSession>("POST", `/intake/${id}/messages`, { text }),
   intakeDraft: (id: string, changes: Partial<Draft>) => request<IntakeSession>("PATCH", `/intake/${id}/draft`, changes),
+  intakeAttach: async (id: string, file: File): Promise<IntakeSession> => {
+    const res = await fetch(`/api/intake/${id}/attachments?name=${encodeURIComponent(file.name)}`, {
+      method: "POST", credentials: "same-origin", body: file,
+      headers: { "Content-Type": "application/octet-stream", "X-Vrixel-Client": "web" },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, typeof data.detail === "string" ? data.detail : `Couldn't attach ${file.name}`);
+    return data as IntakeSession;
+  },
+  intakeDetach: (id: string, aid: string) => request<IntakeSession>("DELETE", `/intake/${id}/attachments/${aid}`),
   intakeSubmit: (id: string, pilot = false, profile = "") =>
     request<IntakeSession>("POST", `/intake/${id}/submit`, { pilot, profile }),
   trace: (id: string) => request<Trace>("GET", `/features/${encodeURIComponent(id)}/trace`),

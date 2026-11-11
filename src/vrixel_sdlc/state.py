@@ -74,6 +74,7 @@ class FeatureState(TypedDict, total=False):
     profile: str  # feature | express: which phases and gates the work goes through (vrixel_sdlc.profiles)
     hotfix: dict  # {incident_id, repo, change, severity, approved_by} for the hotfix track
     pilot: bool  # measured in the pilot report, with the shadow modes on
+    attachments: list  # files attached at intake (vrixel_sdlc.attachments), under the feature's artifacts
 
     # Written by single nodes or by parallel branches through reducers
     token_budget_usd: Annotated[float, last]  # an escalation can raise it

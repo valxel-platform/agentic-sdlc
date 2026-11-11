@@ -102,6 +102,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "org": product.org,
         "related_features": list(state.get("related_features") or []),
         "not_duplicate_reason": state.get("not_duplicate_reason", ""),
+        # What the person attached at intake: the request's evidence, for the phases that read it.
+        "attachments_text": attachments_text(services, state, phase),
         "repo_prefix": product.repo_prefix,
         # Repos of the lanes this product depends on (shared services, PAY): they may join the
         # change set when the architecture needs them.
@@ -323,12 +325,26 @@ def _finish(s: PhaseState, findings: list[str], usage: dict) -> dict:
     return {"status": "retry", "reason": ""}
 
 
+ATTACHMENT_PHASES = ("discovery", "spec")
+
+
+def attachments_text(services, state: dict, phase: str) -> str:
+    """The intake attachments, for discovery and spec (later phases work from their documents)."""
+    store = getattr(services, "attachments", None)
+    metas = state.get("attachments") or []
+    if store is None or not metas or phase not in ATTACHMENT_PHASES:
+        return ""
+    return store.for_agents(state["feature_id"], metas)
+
+
 def document_tail(phase: str, ctx: dict, previous: str = "") -> str:
     """The task for a document phase's agent: the request, the format contract, people's feedback,
     the findings to fix and, on a retry, the previous draft. The evals replay it (vrixel_sdlc.evals)."""
     spec = PHASE_SPECS[phase]
     tail = [f"Produce the {spec.kind} artifact for {ctx['feature_id']}: {ctx['title']}.",
             "Request:\n" + untrusted.wrap("request", ctx.get("description", "")), formats.contract(phase)]
+    if ctx.get("attachments_text"):
+        tail.insert(2, ctx["attachments_text"])
     if ctx.get("feedback"):
         tail.append(f"Human feedback to address: {ctx['feedback']}")
     if ctx.get("prior_findings"):
