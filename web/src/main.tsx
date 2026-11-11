@@ -18,6 +18,7 @@ import { ChangesPage } from "./pages/Changes";
 import { InventoryPage } from "./pages/Inventory";
 import { PilotPage } from "./pages/Pilot";
 import { LessonsPage } from "./pages/Lessons";
+import { InceptionPage, ProductsPage } from "./pages/Products";
 
 function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   const live = useLiveStatus();
@@ -33,6 +34,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         <nav className="nav" aria-label="Main">
           <NavLink to="/inbox">Decisions {mine > 0 && <span className="count" aria-label={`${mine} waiting on you`}>{mine}</span>}</NavLink>
           <NavLink to="/roadmap">Roadmap</NavLink>
+          <NavLink to="/products">Products</NavLink>
           <NavLink to="/board">Features</NavLink>
           <NavLink to="/incidents">Incidents</NavLink>
           <NavLink to="/changes">Changes</NavLink>
@@ -60,6 +62,8 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <Route path="/board" element={<Board me={me} />} />
           <Route path="/features/:id" element={<FeaturePage canSync={(pid) => me.lanes.some((l) => l.id === pid)} />} />
           <Route path="/roadmap" element={<RoadmapPage me={me} />} />
+          <Route path="/products" element={<ProductsPage me={me} />} />
+          <Route path="/products/:id" element={<InceptionPage />} />
           <Route path="/initiatives/:id" element={<InitiativePage />} />
           <Route path="/releases/:id" element={<ReleasePage />} />
           <Route path="/incidents" element={<IncidentsPage me={me} />} />

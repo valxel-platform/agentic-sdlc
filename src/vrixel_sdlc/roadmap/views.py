@@ -46,6 +46,10 @@ def thread_view(engine, thread_id: str) -> dict:
                       "postmortem": s.get("postmortem", ""), "signals": signals, "firing": len(still_firing(signals)),
                       "suspects": engine.suspects(s["product_id"], s.get("component", ""))[:5],
                       "analysis": s.get("analysis") or {}, "escalated": bool(s.get("escalated"))}
+    if kind == "inception":
+        return out | {"vision": s.get("vision") or {}, "brief": s.get("brief", ""), "architecture": s.get("architecture", ""),
+                      "roadmap": s.get("roadmap", ""), "reports": s.get("reports") or {}, "setup": s.get("setup") or {},
+                      "council": list((engine.services.settings.inception or {}).get("council") or [])}
     feats = engine.feature_summaries(s["product_id"])
     if kind == "initiative":
         d = s.get("draft") or {}

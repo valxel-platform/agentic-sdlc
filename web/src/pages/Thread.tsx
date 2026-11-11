@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api, ApiError, type InitiativeView, type PendingItem, type ReleaseView } from "../api";
 import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
@@ -11,7 +12,7 @@ const STATUS: Record<string, string> = {
   planned: "Planned: waiting for its features", ready: "Ready for approval", shipped: "Shipped", cancelled: "Cancelled",
 };
 
-function Pending({ items, id, title, onDone }: { items: PendingItem[]; id: string; title: string; onDone: () => void }) {
+export function Pending({ items, id, title, onDone }: { items: PendingItem[]; id: string; title: string; onDone: () => void }) {
   const mine = items.find((p) => p.can_decide);
   const people = items.filter((p) => p.type !== "external");
   if (mine) return <div style={{ marginBottom: 20 }}><DecisionPanel item={{ ...mine, feature_id: id, title }} featureId={id} onDone={onDone} /></div>;
@@ -102,7 +103,7 @@ export function InitiativePage() {
         {!v.pending.some((p) => p.gate === "g0" && p.can_decide) && (
           <section className="panel" aria-labelledby="h-draft">
             <h2 id="h-draft" className="section-title">The initiative</h2>
-            <div className="md pad">{v.content ? <Markdown>{v.content}</Markdown> : <p className="faint">The agent is drafting it.</p>}</div>
+            <div className="md pad">{v.content ? <Markdown remarkPlugins={[remarkGfm]}>{v.content}</Markdown> : <p className="faint">The agent is drafting it.</p>}</div>
           </section>
         )}
       </div>
@@ -164,8 +165,8 @@ export function ReleasePage() {
         <section className="panel" aria-labelledby="h-notes">
           <h2 id="h-notes" className="section-title">Release notes and evidence</h2>
           <div className="md pad">
-            {v.notes ? <Markdown>{v.notes}</Markdown> : <p className="faint">Written once every feature is ready.</p>}
-            {v.evidence && <><h3>Evidence</h3><Markdown>{v.evidence}</Markdown></>}
+            {v.notes ? <Markdown remarkPlugins={[remarkGfm]}>{v.notes}</Markdown> : <p className="faint">Written once every feature is ready.</p>}
+            {v.evidence && <><h3>Evidence</h3><Markdown remarkPlugins={[remarkGfm]}>{v.evidence}</Markdown></>}
           </div>
         </section>
       </div>

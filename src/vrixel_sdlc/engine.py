@@ -21,7 +21,7 @@ from .waits import WaitChecker
 from .worksync import InMemoryLinkStore, WorkSync
 
 
-KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release", "INC": "incident"}
+KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release", "INC": "incident", "PRD": "inception"}
 
 
 def kind_of(thread_id: str) -> str:
@@ -111,13 +111,15 @@ class FeatureEngine:
         self.cluster: Cluster = cluster or MemoryCluster()
         from .ops.incident import build_incident_graph
         from .ops.signals import InMemorySignalStore
+        from .inception.graph import build_inception_graph
         from .roadmap.graphs import build_initiative_graph, build_release_graph
 
         self.graph = build_pipeline(services, checkpointer=checkpointer)
         self.graphs = {"feature": self.graph,
                        "initiative": build_initiative_graph(services, checkpointer=checkpointer),
                        "release": build_release_graph(services, checkpointer=checkpointer),
-                       "incident": build_incident_graph(services, checkpointer=checkpointer)}
+                       "incident": build_incident_graph(services, checkpointer=checkpointer),
+                       "inception": build_inception_graph(services, checkpointer=checkpointer)}
         if getattr(services, "signals", None) is None:
             services.signals = InMemorySignalStore()
         if getattr(services, "effort", None) is None:
@@ -540,6 +542,33 @@ class FeatureEngine:
         self.bus.publish({"type": "feature.created", "feature_id": iid, "product_id": product_id})
         (self._submit if background else self._execute)(iid, inp)
         return iid
+
+    def create_inception(self, vision, *, created_by: str = "", background: bool = False) -> str:
+        """Start a product inception: the brief first, then the product council's brief gate."""
+        from dataclasses import asdict
+
+        from .inception.graph import PRODUCT_ID
+
+        tid = self._new_id(PRODUCT_ID, "inception", vision.name)
+        inp = {"inception_id": tid, "product_id": PRODUCT_ID, "title": vision.name, "vision": asdict(vision),
+               "created_by": created_by, "status": "drafting_brief"}
+        self.bus.publish({"type": "feature.created", "feature_id": tid, "product_id": PRODUCT_ID})
+        (self._submit if background else self._execute)(tid, inp)
+        return tid
+
+    def inception_summaries(self) -> list[dict]:
+        from .inception.graph import PRODUCT_ID
+
+        out = []
+        for row in self._rows(PRODUCT_ID, "inception"):
+            s = self._state(row["feature_id"])
+            v = s.get("vision") or {}
+            out.append({"id": row["feature_id"], "title": s.get("title") or row["title"], "org": v.get("org", ""),
+                        "existing": bool(v.get("existing")), "product_id": v.get("product_id", ""),
+                        "status": s.get("status", "drafting_brief"), "created_by": s.get("created_by", ""),
+                        "cost_usd": round(float(s.get("cost_usd", 0.0)), 4),
+                        "running": self.is_running(row["feature_id"])})
+        return out
 
     def approved_initiative(self, product_id: str, initiative_id: str) -> dict | None:
         """An initiative features may link to: approved at G0 (record merged or still a PR)."""

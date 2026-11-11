@@ -222,6 +222,8 @@ class Settings:
     plugins: Any = None  # vrixel_sdlc.plugins.PluginsConfig
     # The installed plugins the agents' skills come from (VRIXEL_SKILLS_DIR, or a copy at this config's pin).
     skills_dir: str = ""
+    # Product inception: {starters: [...], council: [...], budget_usd} (registry.yaml `inception`).
+    inception: dict = field(default_factory=dict)
     # The platform's default alert rules; unset, alert-rules.yaml next to the AWS catalog.
     platform_alert_rules_path: str = ""
     # Where error reports may go; unset, error-tracking.yaml next to the AWS catalog.
@@ -314,6 +316,7 @@ def load_settings(
         repos=_load_repos(cfg_dir / "repos.yaml"),
         plugins=_load_plugins(cfg_dir / "plugins.yaml"),
         skills_dir=os.environ.get("VRIXEL_SKILLS_DIR", ""),
+        inception=dict(reg.get("inception") or {}),
     )
     from .models import validate
 

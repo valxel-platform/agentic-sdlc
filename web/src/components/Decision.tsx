@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type AgentEvals, type PendingItem, type ReleaseCandidate, type ReleaseTraceability } from "../api";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
@@ -188,8 +189,10 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       : { name: "Release", question: "Ship this release train?", approve: "Approve release" })
     : item.gate ? GATES[item.gate] : undefined;
   const incidentGate = item.gate === "incident" || item.gate === "postmortem";
-  const roadmapGate = item.gate === "g0" || item.gate === "release" || incidentGate;
-  const stopLabel = item.gate === "g0" ? "Drop initiative" : item.gate === "release" ? "Cancel release" : "Stop feature";
+  const inceptionGate = item.gate === "brief" || item.gate === "product";
+  const roadmapGate = item.gate === "g0" || item.gate === "release" || incidentGate || inceptionGate;
+  const stopLabel = item.gate === "g0" ? "Drop initiative" : item.gate === "release" ? "Cancel release"
+    : inceptionGate ? "Stop this product" : "Stop feature";
   const chosen = picked ?? (item.actions ?? []).map((a) => a.id);
   const heading =
     item.type === "escalation" && item.phase === "delivery" ? (DELIVERY_FAILED[item.wait ?? ""] ?? "Delivery failed")
@@ -293,7 +296,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       {item.spec_preview && (
         <details open>
           <summary>The spec you approve with this design (express: no separate spec gate)</summary>
-          <div className="evidence md"><Markdown>{item.spec_preview}</Markdown></div>
+          <div className="evidence md"><Markdown remarkPlugins={[remarkGfm]}>{item.spec_preview}</Markdown></div>
         </details>
       )}
 
@@ -374,15 +377,20 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             <dt>Features</dt><dd>{(item.features ?? []).map((f, n) => <span key={f}>{n > 0 && ", "}<Link to={threadPath(f)}>{f}</Link></span>)}</dd>
             {(item.dropped ?? []).length > 0 && (<><dt>Dropped</dt><dd>{item.dropped!.join(", ")} (stopped before the release)</dd></>)}
           </dl>
-          {item.evidence && (<><h3>Evidence</h3><div className="md small"><Markdown>{item.evidence}</Markdown></div></>)}
+          {item.evidence && (<><h3>Evidence</h3><div className="md small"><Markdown remarkPlugins={[remarkGfm]}>{item.evidence}</Markdown></div></>)}
         </div>
       )}
 
       {roadmapGate && item.preview && (
         <div>
+          {item.gate === "product" && item.monthly_usd && Object.keys(item.monthly_usd).length > 0 && (
+            <p className="small" style={{ marginBottom: 8 }}>AWS resources, per month (planning figures from the platform catalog):{" "}
+              {Object.entries(item.monthly_usd).map(([env, usd]) => `${env} ${money(usd)}`).join(", ")}.</p>
+          )}
           <h3 style={{ marginBottom: 8 }}>{item.gate === "g0" ? "Initiative draft" : item.gate === "incident" ? "Triage"
-            : item.gate === "postmortem" ? "Postmortem" : "Release notes"}</h3>
-          <div className="evidence md"><Markdown>{item.preview}</Markdown></div>
+            : item.gate === "postmortem" ? "Postmortem" : item.gate === "brief" ? "Product brief"
+            : item.gate === "product" ? "Product architecture and roadmap" : "Release notes"}</h3>
+          <div className="evidence md"><Markdown remarkPlugins={[remarkGfm]}>{item.preview}</Markdown></div>
         </div>
       )}
 
@@ -492,7 +500,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         <>
           {mode === "revise" || mode === "retry" || mode === "abort" ? (
             <label className="field">
-              {mode === "revise" ? (item.gate === "incident" ? "What should triage look at?" : "What should the agents change?") : mode === "retry" ? "Guidance for the next attempt (optional)" : item.gate === "incident" ? "Why is no action needed?" : item.gate === "g0" ? "Why drop this initiative?" : item.gate === "release" ? "Why cancel this release?" : "Why stop this feature?"}
+              {mode === "revise" ? (item.gate === "incident" ? "What should triage look at?" : "What should the agents change?") : mode === "retry" ? "Guidance for the next attempt (optional)" : item.gate === "incident" ? "Why is no action needed?" : item.gate === "g0" ? "Why drop this initiative?" : inceptionGate ? "Why stop this product?" : item.gate === "release" ? "Why cancel this release?" : "Why stop this feature?"}
               <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} autoFocus />
             </label>
           ) : null}

@@ -40,6 +40,13 @@ limits:
 #                them in its own runtime, so a shared lane owns no environments.
 # A shared lane serves regulated products, so its data class is phi: changes to it always go
 # through G5, and only providers approved for PHI see its code.
+# Product inception (vrixel_sdlc.inception): who may start one, and the fixed product council that
+# decides both of its gates (the brief gate, then the product gate). GitHub teams or logins.
+inception:
+  starters: [vrixel-tools/product-council]
+  council: [vrixel-tools/product-council]
+  budget_usd: 50        # what agents may spend writing one product's three documents
+
 products:
   CLN: { kind: product, org: acme-clinic,             repo: cln-governance, ref: main, data_class: phi,      workspace: wrkspc-clinic }
   FARM:  { kind: product, org: acme-farm,          repo: farm-governance, ref: main, data_class: general,  workspace: wrkspc-shared }

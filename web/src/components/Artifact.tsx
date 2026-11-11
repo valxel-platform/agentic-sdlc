@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api } from "../api";
 
 /** An agent-written artifact, rendered as Markdown (raw HTML is never rendered). */
@@ -15,5 +16,5 @@ export function ArtifactBody({ featureId, kind }: { featureId: string; kind: str
   }, [featureId, kind]);
   if (err) return <p className="error-note">{err}</p>;
   if (text === null) return <p className="faint small">Loading…</p>;
-  return <div className="md"><Markdown>{text}</Markdown></div>;
+  return <div className="md"><Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown></div>;
 }

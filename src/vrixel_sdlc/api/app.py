@@ -117,6 +117,17 @@ class StartCandidateIn(BaseModel):
     not_duplicate_reason: str = Field("", max_length=1000)
 
 
+class InceptionIn(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    org: str = Field("", max_length=100, pattern=r"^$|^[A-Za-z0-9][A-Za-z0-9-]*$")
+    vision: str = Field(min_length=20, max_length=8000, description="The idea: the problem, for whom, and what changes")
+    goals: list[str] = Field(default_factory=list, description="'<outcome> (measure: <metric with a number>)'")
+    users: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    budget_usd: float = Field(0.0, ge=0)
+    product_id: str = Field("", pattern=r"^$|^[A-Z]{2,6}$", description="An existing product to describe, or a proposed id")
+
+
 class ReleaseIn(BaseModel):
     product_id: str
     title: str = Field(min_length=3, max_length=200)
@@ -955,6 +966,32 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except DuplicateIntent as exc:
             raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
         return {"feature_id": fid}
+
+    # --- product inception: a vision to a brief, an architecture and a roadmap ---
+    @api.post("/inceptions", status_code=201)
+    def create_inception(body: InceptionIn, user: User = Depends(current_user)) -> dict:
+        from ..inception import Vision
+
+        settings = eng().services.settings
+        starters = list((settings.inception or {}).get("starters") or [])
+        if not can_decide(user, {"approvers": starters}):
+            raise HTTPException(403, f"Only {', '.join(starters) or 'the inception starters'} can start a product inception")
+        existing = bool(body.product_id) and body.product_id in settings.registry
+        if existing:
+            member_of(user, body.product_id)
+            org = settings.entry(body.product_id).governance.org
+        else:
+            if not body.org:
+                raise HTTPException(422, "Name the GitHub org the product will live in")
+            org = body.org
+        v = Vision(name=body.name, org=org, vision=body.vision, goals=body.goals, users=body.users,
+                   constraints=body.constraints, budget_usd=body.budget_usd, product_id=body.product_id,
+                   existing=existing)
+        return {"feature_id": eng().create_inception(v, created_by=user.login, background=True)}
+
+    @api.get("/inceptions")
+    def inceptions(user: User = Depends(current_user)) -> list[dict]:
+        return eng().inception_summaries()
 
     @api.post("/releases", status_code=201)
     def create_release(body: ReleaseIn, user: User = Depends(current_user)) -> dict:

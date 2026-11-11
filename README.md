@@ -466,8 +466,25 @@ vrixel inception --product FARM --vision next.md --out farm               # an e
 
 A vision is Markdown: `# Name`, the idea, then optional `## Goals` (`- <outcome> (measure: <metric>)`),
 `## Users`, `## Constraints` and `## Budget`. The documents and `report.json` (status, attempts,
-findings, the critic's checklist, cost) land in `--out`. The gates in the web app, and the setup that
-turns approved documents into a governance repo, registry entry and repos, come next.
+findings, the critic's checklist, cost) land in `--out`.
+
+**In the web app**, **Products** starts one (for the teams in `inception.starters` in
+`config/registry.yaml`): the agents write the brief, and the **brief gate** waits in Decisions for
+the product council (`inception.council`). Approving it starts the architecture and roadmap; the
+**product gate** shows both, with the monthly cost. Sending a gate back redrafts with the feedback;
+stopping writes nothing. Approving the product gate runs setup (`vrixel_sdlc/inception/setup.py`):
+
+- creates `<org>/<prefix>governance` and opens a pull request with `product.yaml` (approver teams per
+  gate, `repo_prefix`, a per-feature budget), a starter constitution, `context.md`, `CODEOWNERS`,
+  `architecture/brief.md`, `architecture/product-architecture.md`, `roadmap/goals.yaml` and one file
+  per initiative with its candidate features;
+- opens a pull request on the config repo (`VRIXEL_CONFIG_REPO`) adding the product to
+  `config/registry.yaml` (without one, the line to add is shown);
+- lists the approver teams an org admin needs to create.
+
+When both merge and the tool reloads its config, the initiatives are on the Roadmap page ready to
+start, and each feature creates the repos the architecture names at G4. An existing product gets one
+pull request to its own governance repo with the architecture, brief and roadmap.
 
 ## Roadmap: goals, initiatives and releases
 
