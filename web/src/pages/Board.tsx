@@ -56,7 +56,7 @@ export function Board({ me }: { me: Me }) {
           <h1>Features</h1>
           <p className="muted">Where every feature is on its way to production, and what it's waiting for.</p>
         </div>
-        <Link className="btn" to="/intake">New intent</Link>
+        <Link className="btn" to="/intake">New request</Link>
       </div>
       <div className="board-filters">
         <label className="visually-hidden" htmlFor="lane">Product</label>
@@ -78,7 +78,7 @@ export function Board({ me }: { me: Me }) {
         <div className="panel empty" style={{ marginTop: 24 }}>
           <h2>No features here yet</h2>
           <p>Describe what you want to build and agents will start on discovery.</p>
-          <Link className="btn" to="/intake">New intent</Link>
+          <Link className="btn" to="/intake">New request</Link>
         </div>
       )}
       {groups.map(([pid, list]) => (

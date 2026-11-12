@@ -1,4 +1,14 @@
-"""Guided intake: a chat that turns an intent creator's idea into a feature.
+"""Guided intake: the one front door. A chat that turns someone's idea into a feature, an
+initiative or a new product, whichever it is.
+
+After the first message the agent sizes the request (vrixel_sdlc.intake.size_of): one change is a
+feature, several features toward a goal is an initiative, new users or a new business is a new
+product. The person confirms or picks another size, and can switch at any time; each size asks for
+what its flow needs, one question at a time, with quick replies and "leave the rest to the agent":
+
+    feature      product, problem, users, success measure (+ the experience round)  -> a feature
+    initiative   product, the outcome, the number that shows it worked, when, research -> G0
+    product      name, GitHub org, the idea, users, the first goal, research          -> inception
 
 The agent asks for what the pipeline needs (lane, problem, users, success measure), drafts the
 title and description, checks what the product already has (features in flight, released or
@@ -19,6 +29,87 @@ from datetime import datetime, timezone
 from .gateway import CallTags, PromptLayers
 
 FIELDS = ("product_id", "problem", "users", "success_metric")
+SIZES = ("feature", "initiative", "product")
+# What each size needs before it can be submitted, in the order the agent asks.
+NEEDS = {
+    "feature": FIELDS,
+    "initiative": ("product_id", "problem", "success_metric", "horizon", "research"),
+    "product": ("name", "org", "problem", "users", "success_metric", "research"),
+}
+AGENT_PROPOSES = "Proposed by the agent"  # a field the person left to the agent
+SIZE_OPTIONS = {"initiative": "Plan it as an initiative", "feature": "Just one feature for now",
+                "product": "It's a new product"}
+SIZE_QUESTIONS = {
+    "initiative": ("This sounds like an initiative: {why} It becomes a goal you can measure and the features that "
+                   "move it, on {product}'s roadmap."),
+    "product": ("This sounds like a new product: {why} It starts with research, then a brief, an architecture and a "
+                "first roadmap, each approved by the product council."),
+    "feature": "I'll treat this as one feature. If it's bigger than that, say so and I'll plan it as an initiative.",
+}
+SIZED_QUESTIONS = {
+    "initiative": {
+        "product_id": ("Which product's roadmap is it for? You can plan for: {lanes}.", []),
+        "success_metric": ("Which number would tell you it worked? Name it and, if you can, where it should get to "
+                           "and by when.", ["Leave it to the agent"]),
+        "horizon": ("When should it start?", ["Now", "Next", "Later", "You decide"]),
+        "research": ("Before the plan, an agent researches the problem and the alternatives. How deep?",
+                     ["Quick web research", "Thorough research", "I've done my own"]),
+    },
+    "product": {
+        "name": ("What's the product called? A working name is fine.", []),
+        "org": ("Which GitHub org will it live in? It must already exist.", []),
+        "users": ("Who is it for, and in what situation do they use it?", []),
+        "success_metric": ("What's the first goal, with a number? For example: 50 paying farms by June.",
+                           ["Leave it to the agent"]),
+        "research": ("Before the brief, an agent researches the problem, the alternatives and the market. How deep?",
+                     ["Quick web research", "Thorough research", "I've done my own"]),
+    },
+}
+_SIZE_PRODUCT = re.compile(r"\b(new product|new app|new business|new company|an? (?:[\w-]+ ){0,3}(?:app|platform|"
+                           r"service|marketplace|saas) for|"
+                           r"a marketplace|a saas|start(?:ing)? an? (?:business|company|product|startup)|"
+                           r"launch an? (?:product|app|service)|build an? (?:new )?(?:product|app|platform|marketplace))\b",
+                           re.I)
+_SIZE_GOAL = re.compile(r"\b(reduce|cut|increase|grow|halve|double|fewer|faster|improve|lower|raise)\b[^.]*\d|"
+                        r"\b(by|within) (q[1-4]|end of|\d+ (weeks|months))\b", re.I)
+_SIZE_SAY = re.compile(r"\b(?:make|plan|treat|turn|start)\b.{0,20}\b(initiative|feature|new product|product)\b|"
+                       r"^\s*(plan it as an initiative|just one feature|it'?s a new product)", re.I)
+
+
+def size_of(text: str, lane: str = "") -> tuple[str, str]:
+    """A first guess at the request's size, and why, from what the person wrote."""
+    if _SIZE_PRODUCT.search(text) and not lane:
+        return "product", "it describes new users or a new business rather than a change to a product you have."
+    parts = [p for p in re.split(r";|\n|\. |, and | and also ", text) if len(p.strip()) > 12]
+    if len(parts) >= 3:
+        return "initiative", f"it has {len(parts)} parts, which is probably several features working toward one goal."
+    if _SIZE_GOAL.search(text):
+        return "initiative", "it names an outcome to move, which usually takes more than one feature."
+    return "feature", "it reads as one change."
+
+
+def size_said(text: str) -> str:
+    """The size the person picked or asked to switch to, if any."""
+    m = _SIZE_SAY.search(text)
+    if not m:
+        return ""
+    said = (m.group(1) or m.group(2) or "").lower()
+    return "initiative" if "initiative" in said else "feature" if "feature" in said else "product"
+
+
+RESEARCH_SAID = {"quick": "quick", "thorough": "thorough", "own": "own", "my own": "own", "done": "own"}
+
+
+def research_said(text: str) -> str:
+    t = text.lower()
+    if re.search(r"\b(my own|done (my|our) own|i'?ve done|own research|own)\b", t):
+        return "own"
+    if "thorough" in t or "deep" in t:
+        return "thorough"
+    if re.search(r"\b(quick|light|yes|ok|sure|you decide)\b", t):
+        return "quick"
+    return ""
+
 QUESTIONS = {
     "product_id": "Which product is this for? You can work in: {lanes}.",
     "users": "Who will use this, and in what situation?",
@@ -71,16 +162,35 @@ class Draft:
     not_duplicate_reason: str = ""
     ui: bool = False  # the intent changes what people see: the experience round applies
     experience: dict = field(default_factory=dict)  # EXPERIENCE keys -> the person's answer, or DELEGATED
+    size: str = ""  # feature | initiative | product (SIZES); "" until the person confirms one
+    size_suggested: str = ""  # the agent's guess, and why
+    size_why: str = ""
+    horizon: str = ""  # initiative: now | next | later | AGENT_PROPOSES
+    research: str = ""  # initiative and product: quick | thorough | own (vrixel_sdlc.research)
+    name: str = ""  # product: its name
+    org: str = ""  # product: the GitHub org it will live in
+    budget_usd: float = 0.0  # product: the first year's features (optional)
 
     @property
     def experience_done(self) -> bool:
         return all(self.experience.get(k) for k, _ in EXPERIENCE)
 
     def missing(self) -> list[str]:
+        if self.size in ("initiative", "product"):
+            return [f for f in NEEDS[self.size] if not getattr(self, f)]
         out = [f for f in FIELDS if not getattr(self, f)]
         if self.ui and not self.experience_done:
             out.append("experience")
-        return out
+        return out if self.size else ["size", *out]
+
+    def request(self) -> str:
+        """An initiative's request: the outcome, then who it's for."""
+        parts = [self.problem.strip()]
+        if self.users:
+            parts += ["", f"Users: {self.users.strip()}"]
+        if self.not_duplicate_reason:
+            parts.append(f"Not a duplicate because: {self.not_duplicate_reason}")
+        return "\n".join(parts).strip()
 
     def brief(self) -> str:
         """The experience brief, for the description the agents and approvers read."""
@@ -118,6 +228,8 @@ class IntakeSession:
     feature_id: str = ""
     created_at: str = field(default_factory=now)
     attachments: list = field(default_factory=list)  # vrixel_sdlc.attachments: names and checks, never contents
+    starter: bool = False  # may start a new product (registry inception.starters)
+    kind: str = ""  # what was submitted: feature | initiative | inception
 
     @property
     def duplicate(self) -> bool:
@@ -126,6 +238,8 @@ class IntakeSession:
 
     @property
     def ready(self) -> bool:
+        if self.draft.size == "product" and not self.starter:
+            return False
         return not self.draft.missing() and not self.feature_id and not self.duplicate
 
     def to_dict(self) -> dict:
@@ -149,8 +263,8 @@ class IntakeStore:
         self._s: dict[str, IntakeSession] = {}
         self._lock = threading.Lock()
 
-    def create(self, owner: str, lanes: list[str]) -> IntakeSession:
-        s = IntakeSession(id=uuid.uuid4().hex[:12], owner=owner, lanes=lanes)
+    def create(self, owner: str, lanes: list[str], starter: bool = False) -> IntakeSession:
+        s = IntakeSession(id=uuid.uuid4().hex[:12], owner=owner, lanes=lanes, starter=starter)
         with self._lock:
             self._s[s.id] = s
         return s
@@ -179,8 +293,8 @@ class PostgresIntakeStore:
             conn.execute("create table if not exists vrixel_intake (id text primary key, owner text not null,"
                          " data jsonb not null, created_at timestamptz not null default now())")
 
-    def create(self, owner: str, lanes: list[str]) -> IntakeSession:
-        s = IntakeSession(id=uuid.uuid4().hex[:12], owner=owner, lanes=lanes)
+    def create(self, owner: str, lanes: list[str], starter: bool = False) -> IntakeSession:
+        s = IntakeSession(id=uuid.uuid4().hex[:12], owner=owner, lanes=lanes, starter=starter)
         self.save(s)
         return s
 
@@ -263,6 +377,24 @@ class IntakeAgent:
                 "G1 approver.")
 
     def _next_question(self, s: IntakeSession) -> str:
+        if s.draft.size in SIZED_QUESTIONS:
+            names = self.lane_names(s.lanes)
+            for f in NEEDS[s.draft.size]:
+                if getattr(s.draft, f):
+                    continue
+                if f == "product_id" and len(s.lanes) == 1:
+                    s.draft.product_id = s.lanes[0]
+                    continue
+                if f == "problem":
+                    s.awaiting = "problem"
+                    return "What outcome do you want, and for whom?"
+                question, options = SIZED_QUESTIONS[s.draft.size][f]
+                s.awaiting, s.options = f, list(options)
+                if f in ("success_metric", "horizon", "research") and not s.options[-1].startswith("Leave"):
+                    s.options.append("Leave the rest to the agent")
+                return question.format(lanes=", ".join(f"{n} ({k})" for k, n in names.items()))
+            s.awaiting = ""
+            return ""
         for f in FIELDS:
             if not getattr(s.draft, f) and f in QUESTIONS:
                 s.awaiting = f
@@ -310,6 +442,18 @@ class IntakeAgent:
 
     def _summary(self, s: IntakeSession) -> str:
         d = s.draft
+        if d.size == "initiative":
+            name = self.lane_names([d.product_id]).get(d.product_id, d.product_id)
+            return "\n".join([f"Here's the initiative for {name}: “{d.title}”.",
+                              f"Research: {d.research}. The agent drafts the goal, budget and features from it; product "
+                              "owners approve it at G0.", "Draft it when it looks right, or tell me what to change."])
+        if d.size == "product":
+            if not s.starter:
+                return ("Starting a new product is for the inception starters. I can plan it as an initiative of a "
+                        "product you work on instead: say 'plan it as an initiative'.")
+            return "\n".join([f"Here's the new product: {d.name}, in {d.org}.",
+                              f"Research: {d.research}. Then agents write the brief for the product council.",
+                              "Start it when it looks right, or tell me what to change."])
         name = self.lane_names([d.product_id]).get(d.product_id, d.product_id)
         lines = [f"Here's the intent for {name}:", f"“{d.title}”"]
         if d.related_capability:
@@ -334,7 +478,9 @@ class IntakeAgent:
             reply = self._summary(s)
             s.messages.append({"role": "agent", "text": reply, "at": now()})
             return reply
-        if self.services.settings.mode == "live":
+        # Initiatives and products ask a fixed set of questions; switching size is a fixed step too.
+        structured = s.draft.size in SIZED_QUESTIONS or s.awaiting == "size" or bool(s.draft.problem and size_said(text))
+        if self.services.settings.mode == "live" and not structured:
             reply = self._respond_live(s)
         else:
             reply = self._respond_stub(s, text)
@@ -344,9 +490,105 @@ class IntakeAgent:
         s.messages.append(msg)
         return reply
 
+    def set_size(self, s: IntakeSession, size: str) -> None:
+        """Switch the request to another size, keeping everything said so far."""
+        if size not in SIZES:
+            raise ValueError(f"Size is one of {', '.join(SIZES)}")
+        d = s.draft
+        if size == d.size:
+            return
+        d.size = size
+        if size == "product":
+            d.product_id = ""
+        elif not d.product_id and len(s.lanes) == 1:
+            d.product_id = s.lanes[0]
+        s.overlap_checked = False
+
+    def _delegate_rest(self, s: IntakeSession) -> None:
+        """'Leave the rest to the agent': what the agent can propose, it proposes."""
+        d = s.draft
+        if not d.success_metric:
+            d.success_metric = AGENT_PROPOSES
+        if d.size == "initiative" and not d.horizon:
+            d.horizon = AGENT_PROPOSES
+        if not d.research:
+            d.research = "quick"
+        if d.size == "product" and not d.users:
+            d.users = AGENT_PROPOSES
+
+    def _answer_sized(self, s: IntakeSession, text: str, lane: str) -> str:
+        """An answer in an initiative or product conversation; returns a reply to stop at, or ''."""
+        d, f = s.draft, s.awaiting
+        delegate_rest = bool(_DELEGATE.search(text) or re.search(r"\bleave (it|the rest)\b", text, re.I)) and \
+            bool(_DELEGATE_REST.search(text) or "leave the rest" in text.lower())
+        if delegate_rest:
+            self._delegate_rest(s)
+            return ""
+        if f == "product_id":
+            if not lane:
+                names = self.lane_names(s.lanes)
+                return "I couldn't tell which product. Reply with one of: " + ", ".join(
+                    f"{n} ({k})" for k, n in names.items()) + "."
+            d.product_id = lane
+        elif f == "success_metric":
+            d.success_metric = AGENT_PROPOSES if re.search(r"\bleave it\b|agent", text, re.I) else text.strip()
+        elif f == "horizon":
+            t = text.strip().lower()
+            d.horizon = next((h for h in ("now", "next", "later") if h in t), AGENT_PROPOSES)
+        elif f == "research":
+            d.research = research_said(text) or "quick"
+        elif f == "org":
+            org = re.sub(r"^https?://github\.com/", "", text.strip()).strip("/ ")
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", org):
+                return "That doesn't look like a GitHub org name (letters, digits and dashes). Which org?"
+            d.org = org
+        elif f == "name":
+            d.name = text.strip().strip("\"'“”")[:120]
+            d.title = d.title or d.name
+        elif f in ("users", "problem"):
+            setattr(d, f, text.strip())
+        else:
+            d.problem = f"{d.problem.rstrip()}\n\n{text.strip()}"
+        return ""
+
+    def _named(self, text: str, lane: str) -> str:
+        """The lane, if the text names it by id or full name (a shared word like 'app' doesn't count)."""
+        if not lane:
+            return ""
+        name = self.lane_names([lane]).get(lane, lane)
+        t = text.lower()
+        return lane if re.search(rf"\b{re.escape(lane.lower())}\b", t) or name.lower() in t else ""
+
+    def _size_reply(self, s: IntakeSession) -> str:
+        d = s.draft
+        name = self.lane_names([d.product_id]).get(d.product_id, "the product") if d.product_id else "a product"
+        s.awaiting = "size"
+        first = [d.size_suggested] + [k for k in SIZES if k != d.size_suggested]
+        s.options = [SIZE_OPTIONS[k] for k in first]
+        return SIZE_QUESTIONS[d.size_suggested].format(why=d.size_why[:1].upper() + d.size_why[1:], product=name)
+
     def _respond_stub(self, s: IntakeSession, text: str) -> str:
         d = s.draft
         lane = self.detect_lane(text, s.lanes)
+        said = size_said(text) if d.problem else ""
+        if said and (s.awaiting == "size" or said != d.size):
+            self.set_size(s, said)
+            s.awaiting = ""
+            if said == "product" and not s.starter:
+                return self._summary(s)
+            q = self._next_question(s)
+            lead = {"initiative": "Planning it as an initiative.", "feature": "One feature, then.",
+                    "product": "A new product, then."}[said]
+            return f"{lead} {q}" if q else f"{lead} " + self._summary(s)
+        if s.awaiting == "size":  # anything else: take the suggestion and treat the text as more detail
+            self.set_size(s, d.size_suggested)
+            s.awaiting = ""
+        if d.size in SIZED_QUESTIONS and d.problem:
+            stop = self._answer_sized(s, text, lane)
+            if stop:
+                return stop
+            q = self._next_question(s)
+            return ("Got it. " + q) if q else self._summary(s)
         if s.awaiting == "product_id":
             if lane:
                 d.product_id = lane
@@ -364,6 +606,11 @@ class IntakeAgent:
                 d.product_id = lane
             elif len(s.lanes) == 1:  # only one lane this person can submit to: no need to ask
                 d.product_id = s.lanes[0]
+            if not d.size:
+                d.size_suggested, d.size_why = size_of(text, self._named(text, lane))
+                if d.size_suggested != "feature":
+                    return self._size_reply(s)
+                d.size = "feature"
         elif m := _TITLE_EDIT.match(text):
             d.title = m.group(1).strip().rstrip(".")
             return "Title updated. " + self._summary(s)
@@ -381,7 +628,8 @@ class IntakeAgent:
             return self._duplicate_question(s)
         question = self._next_question(s)
         if question:
-            lead = "Got it. " if len(s.messages) > 1 else "Thanks. I'll draft this as we go. "
+            lead = ("Got it. " if len([m for m in s.messages if m["role"] == "user"]) > 1 else
+                    "Thanks. I'll draft this as one feature as we go; if it's bigger than that, say so. ")
             return lead + question
         return self._summary(s)
 
@@ -397,8 +645,11 @@ class IntakeAgent:
                f"unless they want something else). When the person isn't sure, offer two or three concrete "
                f"directions as options to pick from. If they say you decide, set that part, or the rest, to "
                f"{json.dumps(DELEGATED)}. " if s.draft.ui else "")
+            + ("First decide the request's size: 'feature' (one change), 'initiative' (several features toward one "
+               "goal you can measure) or 'product' (new users or a new business). " if not s.draft.size else "")
             + 'Reply with JSON only: {"reply": str, "options": [short quick replies, at most 4, may be empty], '
-            '"draft": {"product_id", "title", "problem", "users", "success_metric"'
+            + ('"size": "feature|initiative|product", "size_why": "one short sentence", ' if not s.draft.size else "")
+            + '"draft": {"product_id", "title", "problem", "users", "success_metric"'
             + (', "experience": {' + ", ".join(f'"{k}"' for k, _ in EXPERIENCE) + "}" if s.draft.ui else "")
             + "}}.\n\n"
             f"Current draft: {json.dumps(asdict(s.draft))}\n\n"
@@ -422,6 +673,15 @@ class IntakeAgent:
                 continue
             if k in ("product_id", "title", "problem", "users", "success_metric") and isinstance(v, str) and v.strip():
                 setattr(s.draft, k, v.strip())
+        if not s.draft.size and s.draft.problem:
+            size = str(data.get("size") or "").lower()
+            s.draft.size_suggested, s.draft.size_why = size_of(s.draft.problem, self._named(s.draft.problem, s.draft.product_id))
+            if size in SIZES:
+                s.draft.size_suggested = size
+                s.draft.size_why = str(data.get("size_why") or s.draft.size_why)[:300]
+            if s.draft.size_suggested != "feature":
+                return self._size_reply(s)
+            s.draft.size = "feature"
         exp = (data.get("draft") or {}).get("experience")
         if s.draft.ui and isinstance(exp, dict):
             s.draft.experience = {**s.draft.experience, **{k: str(v).strip()[:500] for k, v in exp.items()
@@ -448,6 +708,29 @@ class IntakeAgent:
             if not isinstance(exp, dict) or set(exp) - dict(EXPERIENCE).keys():
                 raise ValueError(f"experience takes {', '.join(k for k, _ in EXPERIENCE)}")
             s.draft.experience = {**s.draft.experience, **{k: str(v).strip()[:500] for k, v in exp.items()}}
+        if "size" in changes:
+            self.set_size(s, str(changes.pop("size")))
+            if s.awaiting == "size":
+                s.awaiting = ""
+        if "research" in changes:
+            r = str(changes.pop("research") or "")
+            if r not in ("", "quick", "thorough", "own"):
+                raise ValueError("research is quick, thorough or own")
+            s.draft.research = r
+        if "horizon" in changes:
+            h = str(changes.pop("horizon") or "")
+            if h not in ("", "now", "next", "later", AGENT_PROPOSES):
+                raise ValueError("horizon is now, next or later")
+            s.draft.horizon = h
+        if "org" in changes:
+            org = str(changes.pop("org") or "").strip()
+            if org and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", org):
+                raise ValueError("A GitHub org is letters, digits and dashes")
+            s.draft.org = org
+        if "name" in changes:
+            s.draft.name = str(changes.pop("name") or "").strip()[:120]
+        if "budget_usd" in changes:
+            s.draft.budget_usd = max(0.0, float(changes.pop("budget_usd") or 0))
         for k, v in changes.items():
             if k not in ("product_id", "title", "problem", "users", "success_metric"):
                 raise ValueError(f"Unknown field {k}")

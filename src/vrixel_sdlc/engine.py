@@ -608,6 +608,31 @@ class FeatureEngine:
         (self._submit if background else self._execute)(iid, inp)
         return iid
 
+    def resize(self, thread_id: str, *, by: str, background: bool = False) -> str:
+        """A feature still at its first gate becomes an initiative, or an initiative not yet approved
+        becomes one feature. What was written carries over; the old thread stops, saying where it went."""
+        state = self._state(thread_id)
+        kind = kind_of(thread_id)
+        gate = {"feature": "g1", "initiative": "g0"}.get(kind)
+        if gate is None:
+            raise ValueError("Only a feature or an initiative can change size")
+        waiting = [p for p in self.pending(thread_id) if p.get("gate") == gate]
+        if not waiting:
+            raise ValueError(f"{thread_id} can change size only while it waits at {gate.upper()}, before it's approved")
+        if kind == "feature":
+            new = self.create_initiative(product_id=state["product_id"], title=state["title"],
+                                         request=state.get("description") or state["title"], created_by=by,
+                                         background=background, research="quick")
+        else:
+            new = self.create(product_id=state["product_id"], title=state["title"], description=state.get("request", ""),
+                              created_by=by, background=background,
+                              not_duplicate_reason=f"Was initiative {thread_id}")
+        self.decide(thread_id, waiting[0]["interrupt_id"],
+                    {"decision": "abort", "approver": by,
+                     "feedback": f"Became {'initiative' if kind == 'feature' else 'feature'} {new}"},
+                    background=background)
+        return new
+
     def create_inception(self, vision, *, created_by: str = "", background: bool = False) -> str:
         """Start a product inception: the brief first, then the product council's brief gate."""
         from dataclasses import asdict
