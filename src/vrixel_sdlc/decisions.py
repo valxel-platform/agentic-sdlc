@@ -35,6 +35,8 @@ def _skim(text: str) -> list[str]:
         head, sec = m.group(1).strip(), m.group(2)
         if re.match(r"(agent notes|changes from review|monthly cost|sources)", head, re.I):
             continue
+        if sec.strip().startswith("```"):
+            continue  # a diagram, not a sentence: it's on the page below
         items = [ln.strip()[2:].strip() for ln in sec.splitlines() if ln.strip().startswith(("- ", "* "))]
         if len(items) > 2:
             out.append(f"{head}: {len(items)} items, starting with “{items[0][:90]}”")

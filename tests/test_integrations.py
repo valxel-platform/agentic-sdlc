@@ -165,7 +165,7 @@ def test_tracker_follows_the_feature_from_intent_to_release(tmp_path, gov_root):
     v = eng.auto_drive(fid, approver="maria")
     items = v["work_tracking"]["items"]
     assert sorted(i["item"] for i in items) == sorted(
-        ["epic", "AC-1", "AC-2", "AC-3", "NFR-1", "NFR-2", "TASK-1", "TASK-2"] + [f"TC-{n}" for n in range(1, 9)])
+        ["epic", "AC-1", "AC-2", "AC-3", "NFR-1", "NFR-2", "TASK-1", "TASK-2"] + [f"TC-{n}" for n in range(1, 11)])
     assert all(i["status"] == "done" for i in items)
     epic = next(x for x in jira.items.values() if x["kind"] == "epic")
     stories = [x for x in jira.items.values() if x["kind"] in ("story", "task")]
@@ -173,7 +173,7 @@ def test_tracker_follows_the_feature_from_intent_to_release(tmp_path, gov_root):
     by_key = {x["key"]: x for x in jira.items.values()}
     story_of = {x["summary"].split("]")[0].split("/")[-1]: x["id"] for x in jira.items.values() if x["kind"] == "story"}
     subtasks = [x for x in jira.items.values() if x["kind"] == "subtask"]
-    assert len(subtasks) == 8 and by_key  # one per test case, each under its requirement's story
+    assert len(subtasks) == 10 and by_key  # one per test case, each under its requirement's story
     assert all(x["parent"] == story_of[x["summary"].split("(")[1].split(",")[0]] for x in subtasks)
     assert eng.work.reconcile(eng._state(fid)) == {"drift": [], "block": False}
     assert epic["comments"][0] == "G1 Intent approved by maria."
@@ -274,14 +274,14 @@ def test_jira_over_the_atlassian_mcp_tools(tmp_path, gov_root):
     stories = [i for i in issues.values() if i["type"] == "Story"]
     assert len(stories) == 5 and all(s["parent"] == "FARM-1" for s in stories)  # 3 criteria, 2 NFRs
     subtasks = [i for i in issues.values() if i["type"] == "Sub-task"]
-    assert len(subtasks) == 8 and all(s["parent"] != "FARM-1" for s in subtasks)  # test cases, under their story
+    assert len(subtasks) == 10 and all(s["parent"] != "FARM-1" for s in subtasks)  # test cases, under their story
     assert all(i["status"] == "Done" for i in issues.values())
     assert ("FARM-1", "G1 Intent approved by maria.") in store["comments"]
 
     # Lost link store (e.g. a restore): the markers find the existing issues instead of duplicating.
     eng.work.links = type(eng.work.links)()
     eng.sync_work(v["feature_id"])
-    assert len(issues) == 16
+    assert len(issues) == 18
 
 
 def fake_openproject():

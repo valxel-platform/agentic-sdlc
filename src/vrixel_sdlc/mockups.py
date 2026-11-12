@@ -86,8 +86,8 @@ STYLE = """
 *{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,sans-serif;color:#1b1f1d;background:#f5f6f4}
 main{max-width:720px;margin:0 auto;padding:24px 20px}h1{font-size:24px;margin:8px 0 16px}
 .states{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;font-size:13px}
-.states label{border:1px solid #b8c0ba;border-radius:6px;padding:4px 10px;background:#fff;cursor:pointer}
-.states input{position:absolute;opacity:0}.state{display:none}
+.states>label{border:1px solid #b8c0ba;border-radius:6px;padding:4px 10px;background:#fff;cursor:pointer}
+.states>input{position:absolute;opacity:0}.state{display:none}
 .card{background:#fff;border:1px solid #d5dbd6;border-radius:8px;padding:16px;margin-bottom:12px}
 .field{display:flex;flex-direction:column;gap:4px;margin-bottom:12px}.field input{padding:8px;border:1px solid #9aa39c;border-radius:6px;font:inherit}
 .btn{font:inherit;padding:8px 16px;border-radius:6px;border:1px solid #1b1f1d;background:#1b1f1d;color:#fff}
