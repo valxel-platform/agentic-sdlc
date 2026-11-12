@@ -337,9 +337,32 @@ def _plan(text: str, ctx: dict) -> list[str]:
     for t in tasks:
         if affected and t.get("repo") not in affected:
             out.append(f"{t.get('id')} targets {t.get('repo')}, which is not in the HLD's affected repos")
+    out += _screens(tasks, ctx)
     from .. import acceptance
 
     out += acceptance.check_plan(text, {**ctx, "plan_tasks": tasks})
+    return out
+
+
+def _screens(tasks: list[dict], ctx: dict) -> list[str]:
+    """The approved UX spec reaches the build: each web or mobile task names the screens it builds,
+    and every screen is built by one."""
+    from ..agents.parse import SCREEN_ROLES, parse_screens
+
+    screens = parse_screens((ctx.get("parent_texts") or {}).get("UX", ""))
+    ui = [t for t in tasks if t.get("role") in SCREEN_ROLES]
+    if not screens or not ui:
+        return []
+    out = []
+    for t in ui:
+        named = [str(x) for x in t.get("screens") or []]
+        if not named:
+            out.append(f"{t.get('id')} changes {t.get('repo')} but names no screen from the UX spec "
+                       f"(\"screens\": [{', '.join(repr(k) for k in list(screens)[:3])}])")
+        out += [f"{t.get('id')} names screen {x}, which the UX spec doesn't have" for x in named if x not in screens]
+    built = {str(x) for t in ui for x in t.get("screens") or []}
+    out += [f"Screen {k} ({v}) from the UX spec isn't built by any web or mobile task" for k, v in screens.items()
+            if k not in built]
     return out
 
 

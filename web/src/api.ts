@@ -25,6 +25,9 @@ export interface RecordPr { key: string; label: string; url: string; merged: boo
 export interface PendingItem {
   // In the Decisions inbox: grouping, and whether it may be approved with others.
   product_name?: string; initiative_id?: string; low_risk?: boolean; low_risk_why?: string;
+  // G2: whether UX design runs. The fit check: what doesn't fit, and which document should change.
+  ux_design?: { runs: boolean; why: string } | null;
+  fit?: { to: "design" | "architecture"; text: string }[];
   interrupt_id: string;
   // At the product gate: the architecture's AWS resources priced per environment.
   monthly_usd?: Record<string, number>;

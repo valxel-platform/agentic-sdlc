@@ -526,6 +526,21 @@ def security_instruction(ctx: dict, task: dict) -> str:
     return SECURITY.get(task.get("role") or "", "")
 
 
+def ux_instruction(ctx: dict, task: dict) -> str:
+    """A web or mobile task builds the approved UX spec's screens: its states, copy and accessibility."""
+    from ..agents.parse import SCREEN_ROLES, parse_screens
+
+    ux = (ctx.get("parent_texts") or {}).get("UX", "")
+    if task.get("role") not in SCREEN_ROLES or not ux:
+        return ""
+    screens = parse_screens(ux)
+    mine = [f"{k} ({screens[k]})" for k in task.get("screens") or [] if k in screens] or \
+        [f"{k} ({v})" for k, v in screens.items()]
+    return (f" Build {', '.join(mine)} as the approved UX spec (the UX artifact) says: every state it lists, its copy"
+            " word for word, and its accessibility notes. Where you must differ from it, say why under Agent notes"
+            " as 'Changed:'.")
+
+
 def acceptance_instruction(ctx: dict, task: dict) -> str:
     if task.get("role") != "acceptance":
         return ""
@@ -673,6 +688,7 @@ def build_build_subgraph(services):
                   + cases_instruction(mine)
                   + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
                   + instrumentation_instruction(ctx, task)
+                  + ux_instruction(ctx, task)
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
@@ -751,6 +767,9 @@ def build_build_subgraph(services):
                       + (" Check VX-19: AWS services reached only behind a port, names from the environment variables"
                          " workload.yaml binds, the SDK's default credentials (no keys), and only the access the HLD's"
                          " Resources section gives this component." if resources_instruction(ctx, r) else "")
+                      + (" Check that the screens match the approved UX spec: the states it lists, its copy and its"
+                         " accessibility notes; a difference the coder didn't explain under Agent notes is blocking."
+                         if ux_instruction(ctx, r) else "")
                       + (" Check that the acceptance tests follow the plan (extend before adding), carry the feature,"
                          " criterion, capability and component tags, declare what they cover, and use synthetic"
                          " data only." if r.get("role") == "acceptance" else "")

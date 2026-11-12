@@ -204,6 +204,7 @@ class DecisionIn(BaseModel):
                                      "retire (each opens a retire intent)")
     review_by: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$",
                                   description="Initiative reviews, continue: the next review date")
+    ui: bool | None = Field(default=None, description="G2 only: whether UX design runs (it changes what people see)")
     comments: list[LineComment] | None = Field(default=None, max_length=50,
                                                description="Revise: comments on specific lines of the document")
 
@@ -359,6 +360,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     def item_approvers(fid: str, item: dict) -> list[str]:
         """Approvers for an inbox item: the gate's own list, or for an escalation the approvers of
         the gate that phase leads to."""
+        if item.get("phase") == "fit" and item.get("approvers"):  # the design's and the architecture's approvers
+            return list(item["approvers"])
         if item["type"] in ("gate", "handback") and item.get("approvers") is not None:
             return list(item["approvers"])
         if item["type"] == "handback":  # handback packets carry no approvers: use the lane's gate list
@@ -1593,7 +1596,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                                         description=s.draft.description(), created_by=user.login, background=True,
                                         not_duplicate_reason=s.draft.not_duplicate_reason, pilot=bool(body and body.pilot),
                                         profile=(body.profile if body else ""),
-                                        attachments=(s.id, list(s.attachments)))
+                                        attachments=(s.id, list(s.attachments)),
+                                        ui=s.draft.ui if s.ui_checked else None)
         except DuplicateIntent as exc:  # a matching feature appeared since the check
             s.draft.similar, s.overlap_checked = exc.matches, True
             stores["intakes"].save(s)

@@ -131,7 +131,9 @@ def approve_target(gate: str, state: FeatureState):
     """Where an approved gate sends the work: G2 skips UX design when the profile does."""
     target = GATE_APPROVE_TARGET[gate]
     if isinstance(target, list):
-        skipped = profiles.get(state.get("profile")).skips
+        skipped = set(profiles.get(state.get("profile")).skips)
+        if state.get("ui") is False:  # nothing people see changes: no UX design, no G3
+            skipped.add("design")
         target = [t for t in target if t not in skipped]
         return target[0] if len(target) == 1 else target
     return target
@@ -362,6 +364,9 @@ def make_gate(gate: str, services):
                              if gate == "g6" and lane.kind == "shared" else None),
                 # G1 decides whether this intent is new: what the product already has that looks like it.
                 "related_features": list(state.get("related_features") or []) if gate == "g1" else [],
+                # G2 decides whether UX design runs: it does unless nothing people see changes.
+                "ux_design": ({"runs": state.get("ui", True) is not False, "why": state.get("ui_why", "")}
+                              if gate == "g2" and "design" not in profiles.get(state.get("profile")).skips else None),
                 # G1 also decides whether the work fits the roadmap: its initiative and what's left of
                 # the initiative's budget, or that it is unplanned.
                 "roadmap_fit": (services.roadmap_fit(state) if gate == "g1" and callable(getattr(services, "roadmap_fit", None))
@@ -468,6 +473,20 @@ def make_gate(gate: str, services):
         approvers = ", ".join(r["approver"] for r in records if r["decision"] in ("approve", "handback"))
         update: dict = human_update | {"gate_decisions": records, "approvals": {gate: True},
                                        "events": [event(gate, "approved", d["feedback"], approver=approvers, lanes=approving)]}
+        if gate == "g2":
+            # G2 settles whether UX design runs: the creation-time judgement, or what the approver said.
+            said = next((r.get("ui") for r in [d] if r.get("ui") is not None), None)
+            ui = bool(said) if said is not None else state.get("ui", True) is not False
+            update["ui"] = ui
+            if said is not None and said != state.get("ui", True):
+                update["ui_why"] = f"{'Turned on' if ui else 'Turned off'} at G2 by {d['approver']}"
+                update["events"].append(event("g2", "ux_design_" + ("on" if ui else "off"), update["ui_why"],
+                                              approver=d["approver"]))
+            if not ui and "design" not in profiles.get(state.get("profile")).skips:
+                update["approvals"] = {"g2": True, "g3": True}
+                update["phase_status"] = {"design": "skipped"}
+                update["events"].append(event("design", "skipped", "Nothing people see changes"))
+            state = {**state, "ui": ui}
         if trace_decision is not None:
             trace, td = trace_decision
             update["traceability"] = {**trace["snapshot"], "drift": list(trace.get("drift") or []),
@@ -853,8 +872,8 @@ def make_escalation(phase: str, services):
 def join(state: FeatureState) -> Command:
     """Plan starts only when both G3 (design) and G4 (architecture) are approved."""
     a = state.get("approvals", {})
-    if a.get("g3") and a.get("g4"):
-        return Command(goto="provision", update={"events": [event("join", "design_and_architecture_approved")]})
+    if a.get("g3") and a.get("g4"):  # then check they fit together (vrixel_sdlc.fit)
+        return Command(goto="fit", update={"events": [event("join", "design_and_architecture_approved")]})
     return Command(goto=END, update={"events": [event("join", "waiting_for_other_gate")]})
 
 
@@ -1818,7 +1837,13 @@ def build_pipeline(services, checkpointer=None):
     for gate in GATES:
         node, dest = make_gate(gate, services)
         g.add_node(gate, node, destinations=dest)
-    g.add_node("join", join, destinations=("provision", END))
+    g.add_node("join", join, destinations=("fit", END))
+    from ..fit import make_fit, make_fit_gate
+
+    node, dest = make_fit(services)
+    g.add_node("fit", node, destinations=dest)
+    node, dest = make_fit_gate(services)
+    g.add_node("fit_gate", node, destinations=dest)
     node, dest = make_provision(services)
     g.add_node("provision", node, destinations=dest)
     g.add_node("merge_train", make_merge_train(services))

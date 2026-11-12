@@ -42,12 +42,12 @@ PHASE_SPECS: dict[str, PhaseSpec] = {
     "plan": PhaseSpec(
         "plan", "planner", "PLAN",
         ("product-management:sprint-planning", "engineering:testing-strategy"),
-        ("vrixel:coverage-critic",), ("PRD", "HLD"), None,
+        ("vrixel:coverage-critic",), ("PRD", "HLD", "UX"), None,
     ),
     "build": PhaseSpec(
         "build", "coder", "BUILD",
         ("engineering:debug", "engineering:documentation"),
-        ("engineering:code-review",), ("PLAN", "HLD"), "g5",
+        ("engineering:code-review",), ("PLAN", "HLD", "UX"), "g5",
         required_capabilities=frozenset({"text"}),  # code_execution in live deployments
     ),
     "release": PhaseSpec(

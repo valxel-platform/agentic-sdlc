@@ -210,3 +210,12 @@ def parse_new_repos(hld: str) -> list[dict]:
         ok = adr if adr and adr in adrs and name in adrs[adr] else ""
         out.append({"name": name, "role": role, "purpose": purpose.strip(), "adr": ok})
     return out
+
+
+SCREEN_ROLES = ("consumer", "mobile")  # the repos that draw what people see
+_SCREEN = re.compile(r"^-\s*(S\d+)\s*:\s*(.+?)\s*$", re.M)
+
+
+def parse_screens(ux: str) -> dict[str, str]:
+    """The UX spec's screens: {'S1': 'Check-in form', ...}."""
+    return {m.group(1): m.group(2) for m in _SCREEN.finditer(section(ux, "Screens"))}

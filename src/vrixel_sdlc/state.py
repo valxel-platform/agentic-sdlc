@@ -105,6 +105,11 @@ class FeatureState(TypedDict, total=False):
     feedback: Annotated[dict[str, str], merge_dict]  # phase -> latest human feedback
     escalations: Annotated[dict[str, dict], merge_dict]
     approvals: Annotated[dict[str, bool], merge_dict]
+    # Whether the feature changes what people see: when it doesn't, UX design and G3 are skipped.
+    # Decided at creation (the intake's judgement), and G2's approver can change it.
+    ui: Annotated[bool, last]
+    ui_why: Annotated[str, last]
+    fit: Annotated[dict, last]  # whether the approved design and architecture fit together (vrixel_sdlc.fit)
     pull_requests: Annotated[dict[str, dict], merge_dict]
     # Each planned test case's test on its task's branch: {case id: {req, task, file, test, found}}.
     case_evidence: Annotated[dict[str, dict], merge_dict]

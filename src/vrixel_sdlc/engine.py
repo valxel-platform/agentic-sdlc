@@ -1588,7 +1588,7 @@ class FeatureEngine:
                simulate_faults: dict[str, int] | None = None, budget_usd: float | None = None,
                background: bool = False, not_duplicate_reason: str = "", initiative_id: str = "",
                track: str = "standard", hotfix: dict | None = None, pilot: bool = False,
-               profile: str = "", attachments: tuple[str, list[dict]] | None = None) -> str:
+               profile: str = "", attachments: tuple[str, list[dict]] | None = None, ui: bool | None = None) -> str:
         from . import profiles
         from .duplicates import DuplicateIntent
 
@@ -1615,6 +1615,8 @@ class FeatureEngine:
                "related_features": similar, "not_duplicate_reason": not_duplicate_reason.strip(),
                "initiative_id": initiative_id, "track": track, "hotfix": dict(hotfix or {}), "pilot": bool(pilot),
                "profile": profile,
+               # Whether it changes what people see (UX design and G3 run only then); G2 can change it.
+               **self._ui(product_id, title, description, ui),
                # A share of new features runs on the candidate config, when one is set (VRIXEL_CANARY_*).
                "config_variant": self.services.canary_variant(feature_id, snap.product.data_class, track)}
         if budget_usd:
@@ -1644,6 +1646,20 @@ class FeatureEngine:
                 self._path_history = {}
             cached = self._path_history[product_id] = (time.monotonic(), progress.history(states, RAIL))
         return progress.estimate(stations, cached[1])
+
+    def _ui(self, product_id: str, title: str, description: str, said: bool | None) -> dict:
+        """Whether UX design runs. The intake's judgement when there was one; otherwise only a product
+        with no web or mobile app skips it (a guess from words alone is too often wrong). G2 can change it."""
+        if said is not None:
+            return {"ui": bool(said), "ui_why": "The intake conversation found " + (
+                "something people see changes" if said else "nothing people see changes")}
+        from .intake import UI_ROLES
+
+        try:
+            apps = any(r.role in UI_ROLES for r in self.services.snapshot(product_id).product.repos)
+        except Exception:
+            apps = True
+        return {"ui": apps, "ui_why": "" if apps else "The product has no web or mobile app"}
 
     def _note_asked(self, feature_id: str) -> None:
         """When each question to a person was first asked, so its wait can be measured."""
@@ -1905,6 +1921,8 @@ def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
                 st = "done"
             else:
                 st = "todo"
+        if phase_status.get("design") == "skipped" and key in ("design", "g3"):
+            st = "skipped"  # nothing people see changes (or G2 said so)
         if s.get("track") == "hotfix" and key in EXPEDITED:
             st = "skipped"  # an incident's hotfix starts at planning
         elif key in skipped:
