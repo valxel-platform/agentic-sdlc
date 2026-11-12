@@ -323,7 +323,7 @@ export function Intake({ me }: { me: Me }) {
                       onClick={() => resize(k)}>{SIZE[k].label}</button>
                   ))}
                 </div>
-                <p className="small faint">{size ? SIZE[size].what : s.draft.size_why}</p>
+                <p className="small faint">{size ? SIZE[size].what : s.draft.size_why.charAt(0).toUpperCase() + s.draft.size_why.slice(1)}</p>
                 {size === "product" && !s.starter && (
                   <p className="small error-note">Only the inception starters can start a new product. Plan it as an initiative of a product you work on instead.</p>
                 )}

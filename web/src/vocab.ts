@@ -26,12 +26,12 @@ export const GATES: Record<string, { name: string; question: string; approve: st
   release: { name: "Release", question: "Approve this release?", approve: "Approve release" },
   incident: { name: "Incident", question: "What should we do about this incident?", approve: "Approve actions" },
   postmortem: { name: "Postmortem", question: "Close the incident with this postmortem?", approve: "Close incident" },
-  g1: { name: "Idea approval", question: "Is this worth building?", approve: "Approve intent" },
-  g2: { name: "Scope approval", question: "Is the scope right?", approve: "Approve scope" },
-  g3: { name: "Design approval", question: "Is the experience right?", approve: "Approve design" },
-  g4: { name: "Architecture approval", question: "Approve the architecture?", approve: "Approve architecture" },
-  g5: { name: "Code approval", question: "Merge these changes?", approve: "Approve merge" },
-  g6: { name: "Release approval", question: "Release to production?", approve: "Release" },
+  g1: { name: "Idea approval", question: "Is this worth building?", approve: "Approve the idea" },
+  g2: { name: "Scope approval", question: "Is the scope right?", approve: "Approve the scope" },
+  g3: { name: "Design approval", question: "Is the experience right?", approve: "Approve the design" },
+  g4: { name: "Architecture approval", question: "Approve the architecture?", approve: "Approve the architecture" },
+  g5: { name: "Code approval", question: "Merge these changes?", approve: "Approve the code" },
+  g6: { name: "Release approval", question: "Release to production?", approve: "Release to everyone" },
 };
 
 export const ARTIFACTS: Record<string, string> = {

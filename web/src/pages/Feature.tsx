@@ -174,12 +174,6 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
           built={f.rail.some((s) => s.key === "g4" && (s.state === "done" || s.state === "skipped"))} />
       )}
       {f.initiative_id && (f.status === "released" || f.status === "done") && <NextInInitiative initiativeId={f.initiative_id} />}
-      {f.path && (
-        <div className="path-row">
-          <PathPanel path={f.path} />
-          <NotifyPanel threadId={f.feature_id} watching={!!f.watching} />
-        </div>
-      )}
       {f.error && <p className="error-note" role="alert" style={{ marginBottom: 20 }}>The pipeline stopped with an error: {f.error}</p>}
 
       {people.length > 0 && (
@@ -189,6 +183,13 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
           ) : (
             <p className="note">Waiting for {people.map((p) => `${p.gate ? gateLabel(p.gate) : PHASES[p.phase ?? ""]} (${p.approvers.join(", ")})`).join("; ")}.</p>
           )}
+        </div>
+      )}
+
+      {f.path && (
+        <div className="path-row">
+          <PathPanel path={f.path} />
+          <NotifyPanel threadId={f.feature_id} watching={!!f.watching} />
         </div>
       )}
 
