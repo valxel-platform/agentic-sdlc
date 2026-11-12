@@ -1,0 +1,15 @@
+# {name}: the {kind} cluster of product {product} (tier {tier}). The Vrixel SDLC fills this in at the
+# product gate and proposes it to the platform's infrastructure repo; the platform's GitOps creates
+# the cluster and registers it with the shared OpenChoreo control plane. Change the kind and spec
+# to what your infrastructure code provisions (Crossplane, Terraform, eksctl...).
+apiVersion: platform.vrixel.io/v1alpha1
+kind: ProductCluster
+metadata:
+  name: {name}
+  labels: {{ vrixel.io/product: "{product}", vrixel.io/plane: "{kind}" }}
+spec:
+  plane: {kind}
+  zones: {zones}
+  nodes: {{ min: 1, max: 10, architecture: arm64, spot: {spot} }}
+  # Non-production scales its workloads to zero outside these hours (empty: always on).
+  awake: "{awake}"

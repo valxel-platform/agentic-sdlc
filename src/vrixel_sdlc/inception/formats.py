@@ -28,6 +28,15 @@ CONTRACTS = {
 - <what this product won't do, that someone might expect>
 ## Scope
 - <what the first year covers>
+## Scale                    (the volumes the capacity plan is computed from; cite assumptions)
+- launch: <number> <what is counted: clinics, stores, users...> (A2)
+- year one: <number> <the same thing> (A3)
+- busy hour: <n> times the daily average, over a <h>-hour day
+- where: <the countries or regions people use it from>
+## Availability
+- tier: <1 | 2 | 3>: <why: what stops for whom when it's down>
+        tiers (the platform's): 1 = 99.95%, 2 = 99.9%, 3 = 99.5%; phi and payments need 2 or better.
+        Production starts at a pilot stage (tier 3 availability, data protection unchanged) and steps up later.
 ## Data class
 - <general | phi | payments>: <why, from what the product stores>
 ## Compliance
@@ -38,7 +47,8 @@ CONTRACTS = {
 - id: <2 to 6 capital letters>
 - org: <the GitHub org>
 - repo prefix: <lowercase letters, ending in '-'>
-- budget: <US dollars for the first year of features>""",
+- budget: <US dollars for the first year of features>
+- run budget: pilot <USD a month>; growth <USD a month>; scale <USD a month>      (running production)""",
     "architecture": """# Product architecture: <name>
 ## Context
 <who and what the product talks to>
@@ -50,6 +60,15 @@ CONTRACTS = {
     writes: <component>; reads: <component>
 ## Shared services
 - <shared lane or capability>: <what the product uses it for>        or '- None: <why>'
+## Load                       (per user journey; the tool computes replicas, databases and cost from it)
+- J1: <journey> (<the thing the brief's Scale counts>): <n> a day per <that thing>; <component> <n> requests; <component> <n> events
+        every provider, bff, consumer, event worker, MCP server and agent gets requests or events here
+## Scaling
+- <component>: stateless | stateful; scales on cpu; first limit: <what runs out first as it grows, and then what>
+## Failure
+- <component> -> <component, resource or outside service>: timeout <n> ms; retries <n>; idempotency: <key, or none: why it's safe>; when down: <what people see>
+- <resource>: recovery: <how the tier's recovery time and data-loss limit are met: backups, point-in-time recovery, failover>
+        every bff, consumer, event worker, agent and MCP server says what happens when what it calls fails
 ## NFRs
 - NFR-1 (<kind>): <a measurable target: a number, a percentile, a limit or a named standard>
         kinds: performance, availability, reliability, scalability, security, privacy, accessibility,

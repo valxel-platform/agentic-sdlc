@@ -366,6 +366,18 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
                                               "from its web and mobile apps, as a pull request")
     dr.add_argument("--product", required=True)
     dr.add_argument("--mode", default="stub", choices=["live", "stub"])
+    en = sub.add_parser("environments", help="Create a product's OpenChoreo project, environments and pipeline "
+                                             "once the platform has registered its data planes")
+    en.add_argument("--product", required=True)
+    en.add_argument("--approver", required=True, help="Who approved the product gate (production is created for them)")
+    en.add_argument("--mode", default="stub", choices=["live", "stub"])
+    ca = sub.add_parser("capacity", help="Propose a production stage step, or review production against the "
+                                         "capacity plan, as a pull request to runtime/capacity.yaml")
+    ca.add_argument("--product", required=True)
+    ca.add_argument("--step", choices=["pilot", "growth", "scale"], help="Propose moving production to this stage")
+    ca.add_argument("--reason", default="", help="--step: why (a contract's availability promise, a trigger)")
+    ca.add_argument("--observed", default="", help="A JSON file of production's busy hour per component, to review")
+    ca.add_argument("--mode", default="stub", choices=["live", "stub"])
     oc = sub.add_parser("outcomes", help="Check a product's goal metrics, read one for a window, or record a "
                                          "number typed in by hand")
     oc.add_argument("action", choices=["check", "read", "record"])
@@ -384,6 +396,17 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
         return _outcomes(args)
     if args.cmd == "inception":
         return _inception(args)
+    if args.cmd == "environments":
+        from .config import load_settings
+        from .environments import environments
+        from .services import build_services
+
+        out = environments(build_services(load_settings(mode=args.mode)), product_id=args.product,
+                           approver=args.approver)
+        print(out.get("why") or f"Created for {out['approved_by']}: " + ", ".join(f"{k} {v}" for k, v in out["created"].items()))
+        return 0 if not out.get("waiting") else 2
+    if args.cmd == "capacity":
+        return _capacity(args)
     if args.cmd == "design-record":
         from .config import load_settings
         from .design_record import draft_for_existing
@@ -418,3 +441,36 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def _capacity(args) -> int:
+    import json
+
+    from . import capacity
+    from .config import load_settings
+    from .services import build_services
+
+    services = build_services(load_settings(mode=args.mode))
+    cap = services.snapshot(args.product).capacity
+    if not cap:
+        print(f"{args.product} has no runtime/capacity.yaml yet")
+        return 1
+    if args.step:
+        if not args.reason:
+            print("Say why (--reason)")
+            return 1
+        new = capacity.with_stage(cap, args.step)
+        pr = capacity.propose(services, args.product, new, branch=f"vrixel/capacity-{args.step}",
+                              title=f"{args.product}: production to the {args.step} stage",
+                              why=(f"From {cap.get('stage', 'pilot')} to {args.step}: {args.reason}\n\nCompute at the "
+                                   f"stage's minimums: about ${capacity.stage_cost(cap, cap.get('stage', 'pilot')):,.0f} -> "
+                                   f"${capacity.stage_cost(new, args.step):,.0f} a month (databases as the plan sizes them)."))
+        print(pr["url"] if pr else "Already at that stage")
+        return 0
+    observed = json.load(open(args.observed)) if args.observed else {}
+    found = capacity.review(cap, observed)
+    for f in found:
+        print(f"{f['repo']}: {f['kind']}{' to ' + f['to'] if f.get('to') else ''}: {f['why']}")
+    if not found:
+        print("Production fits its stage: nothing to propose")
+    return 0

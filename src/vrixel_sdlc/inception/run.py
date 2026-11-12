@@ -35,6 +35,7 @@ class Draft:
     cost_usd: float = 0.0
     monthly_usd: dict = field(default_factory=dict)  # the architecture's cost per environment
     data_class: str = STRICTEST  # the class its calls ran under
+    capacity: dict = field(default_factory=dict)  # the architecture's capacity plan (vrixel_sdlc.capacity)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -49,7 +50,10 @@ def platform(services) -> dict:
     sha = src.resolve(p.org, p.repo, p.ref)
     constitution = src.read(p.org, p.repo, s.platform_constitution_path, sha) or ""
     catalog = load_catalog(src.read(p.org, p.repo, s.platform_resources_path, sha, optional=True) or "")
-    return {"constitution": constitution, "catalog": catalog, "sha": sha}
+    from .. import capacity
+
+    sizing = capacity.load_platform(src.read(p.org, p.repo, s.platform_capacity_path, sha, optional=True) or "")
+    return {"constitution": constitution, "catalog": catalog, "sha": sha, "capacity": sizing}
 
 
 def existing_context(services, product_id: str) -> str:
@@ -73,7 +77,8 @@ def context_for(services, vision: Vision, doc: str, *, brief: str = "", architec
     ctx = {"existing": vision.existing, "org": vision.org, "registered": set(services.settings.registry),
            "product_id": pb.get("id") or vision.product_id, "prefix": pb.get("prefix", ""),
            "budget_usd": pb.get("budget_usd", 0.0), "data_class": dc, "catalog": plat["catalog"],
-           "research": research if doc == "brief" else ""}
+           "research": research if doc == "brief" else "",
+           "brief": brief if doc == "architecture" else "", "capacity_platform": plat.get("capacity")}
     if vision.existing and vision.product_id:
         ctx["product_id"] = vision.product_id
         try:
@@ -152,9 +157,14 @@ def critique(services, vision: Vision, doc: str, text: str, *, constitution: str
     return passed, judged, findings + list(reply.notes), float(res.cost_usd or 0.0)
 
 
-def monthly_cost(text: str, catalog: dict) -> tuple[dict, str]:
-    """The architecture's resources priced from the catalog, per environment, and as a section."""
+def monthly_cost(text: str, catalog: dict, skip: set[str] | None = None) -> tuple[dict, str]:
+    """The architecture's resources priced from the catalog, per environment, and as a section.
+    `skip`: the databases the capacity plan sizes per stage (its Capacity section prices them)."""
     s = summary(text, catalog, list(ENVIRONMENTS), None)
+    if s and skip:
+        rows = [r for r in s["resources"] if r["name"] not in skip]
+        s = {**s, "resources": rows,
+             "monthly_usd": {e: sum(r["monthly_usd"][e] for r in rows) for e in ENVIRONMENTS}} if rows else None
     if not s:
         return {}, ""
     rows = ["| Resource | Type | " + " | ".join(e.capitalize() for e in ENVIRONMENTS) + " |",
@@ -164,7 +174,8 @@ def monthly_cost(text: str, catalog: dict) -> tuple[dict, str]:
                     + " | ".join(f"${r['monthly_usd'][e]:,.0f} ({r['sizes'][e]})" for e in ENVIRONMENTS) + " |")
     rows.append("| Total | | " + " | ".join(f"${s['monthly_usd'][e]:,.0f}" for e in ENVIRONMENTS) + " |")
     section = ("## Monthly cost\n\nPriced by the tool from the platform's AWS catalog: planning figures per "
-               "environment, not quotes. Compute for the components themselves is the platform's.\n\n" + "\n".join(rows))
+               "environment, not quotes. Compute for the components themselves, and the databases, are in the "
+               "Capacity section.\n\n" + "\n".join(rows))
     return s["monthly_usd"], section
 
 
@@ -199,12 +210,22 @@ def draft(services, vision: Vision, doc: str, *, brief: str = "", architecture: 
                                                 data_class=data_class)
         cost += spent
         if passed:
-            monthly = {}
+            monthly, sized = {}, {}
             if doc == "architecture":
-                monthly, cost_section = monthly_cost(text, plat["catalog"])
+                from .. import capacity
+
+                sized = capacity.plan(brief, text, plat.get("capacity"), plat["catalog"], data_class=ctx["data_class"])
+                section_text = capacity.render(sized)
+                if section_text and "## Capacity" not in text:
+                    text = text.rstrip() + "\n\n" + section_text
+                dbs = sized.get("databases") or []
+                monthly, cost_section = monthly_cost(text, plat["catalog"], {d["name"] for d in dbs})
+                for d in dbs:  # sized by the capacity plan: dev and staging, and production in its pilot
+                    for e in ENVIRONMENTS:
+                        monthly[e] = monthly.get(e, 0.0) + float(d["monthly_usd"].get("pilot" if e == "production" else e, 0.0))
                 if cost_section and "## Monthly cost" not in text:
                     text = text.rstrip() + "\n\n" + cost_section + "\n"
-            return Draft(doc, text, "passed", attempt, [], judged, round(cost, 4), monthly, data_class)
+            return Draft(doc, text, "passed", attempt, [], judged, round(cost, 4), monthly, data_class, capacity=sized)
         findings = notes
     return Draft(doc, text, "escalated", loops, findings, judged, round(cost, 4), {}, data_class)
 

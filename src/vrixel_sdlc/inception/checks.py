@@ -23,7 +23,9 @@ def _needs(text: str, headings: tuple[str, ...]) -> list[str]:
 
 
 def brief(text: str, ctx: dict) -> list[str]:
-    out = _needs(text, ("Problem", "Users", "Goals", "Non-goals", "Scope", "Data class", "Product"))
+    out = _needs(text, ("Problem", "Users", "Goals", "Non-goals", "Scope", "Scale", "Availability", "Data class",
+                        "Product"))
+    out += _scale(text)
     if section(text, "Users") and not formats.users(text):
         out.append("Users: write each as '- U1: <who>: <their job and situation>'")
     gs = formats.goals(text)
@@ -61,8 +63,41 @@ def brief(text: str, ctx: dict) -> list[str]:
     return out
 
 
+def _scale(text: str) -> list[str]:
+    from .. import capacity
+
+    if not section(text, "Scale"):
+        return []
+    sc = capacity.scale(text)
+    out = list(sc["problems"])
+    if not sc["year_one"]:
+        out.append("Scale: say how many after a year ('- year one: <number> <what is counted>')")
+    if not sc["launch"]:
+        out.append("Scale: say how many at launch ('- launch: <number> <what is counted>')")
+    if sc["launch"] and sc["year_one"] and sc["year_one"] < sc["launch"]:
+        out.append("Scale: year one is smaller than launch")
+    if not sc["busy_factor"]:
+        out.append("Scale: say how busy the busiest hour is ('- busy hour: 3 times the daily average, over a 10-hour day')")
+    elif not 0 < sc["day_hours"] <= 24:
+        out.append("Scale: the day is between 1 and 24 hours")
+    if section(text, "Availability"):
+        t, why = capacity.tier(text)
+        if not t:
+            out.append("Availability: write '- tier: 1|2|3: <what stops for whom when it's down>'")
+        elif len(why.split()) < 4:
+            out.append("Availability: say why this tier, in terms of what stops for whom")
+        dc = formats.data_class(text)[0]
+        if t == 3 and dc in ("phi", "payments"):
+            out.append(f"Availability: {dc} products target tier 2 or better (their pilot still starts at tier 3)")
+    budget = capacity.run_budget(text)
+    if section(text, "Product") and set(budget) != {"pilot", "growth", "scale"}:
+        out.append("Product: give the run budget a month for each stage ('- run budget: pilot <USD>; growth <USD>; "
+                   "scale <USD>')")
+    return out
+
+
 def architecture(text: str, ctx: dict) -> list[str]:
-    out = _needs(text, ("Context", "Components", "NFRs", "ADRs"))
+    out = _needs(text, ("Context", "Components", "Load", "Scaling", "Failure", "NFRs", "ADRs"))
     if ctx.get("existing"):
         out += _needs(text, ("Current state", "Gap"))
     prefix, org = ctx.get("prefix", ""), ctx.get("org", "")
@@ -130,6 +165,14 @@ def architecture(text: str, ctx: dict) -> list[str]:
             out.append(f"{a['id']}: number it ADR-{pid}-<n>")
         elif "alternatives:" not in a["text"].lower():
             out.append(f"{a['id']}: say which alternatives were weighed (alternatives: ...)")
+    from .. import capacity
+
+    named = [c for c in comps if c.get("name")]
+    out += capacity.check_doc(text, named, [r for r in parse_resources(text) if r.get("type")])
+    if ctx.get("brief"):
+        p = capacity.plan(ctx["brief"], text, ctx.get("capacity_platform"), catalog, named,
+                          [r for r in parse_resources(text) if r.get("type")], dc)
+        out += p["findings"]
     if dc in ("phi", "payments") and not re.search(r"\baudit", text, re.I):
         out.append(f"{dc} data: say where the audit records go (constitution VX-15)")
     return out

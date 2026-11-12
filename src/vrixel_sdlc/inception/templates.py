@@ -52,11 +52,17 @@ def brief(v: Vision, ctx: dict) -> str:
         *evidence_lines(ctx.get("research", "")),
         "", "## Non-goals", f"- {v.name} doesn't replace the systems its users already rely on for other work",
         "", "## Scope", "- The first year covers the goals above, for the users above",
+        "", "## Scale", "- launch: 50 customers", "- year one: 500 customers",
+        "- busy hour: 3 times the daily average, over a 10-hour day", "- where: the country the vision names",
+        "", "## Availability",
+        f"- tier: {2 if dc in ('phi', 'payments') else 3}: "
+        + ("people can't do their work when it is down, and the data is regulated" if dc in ("phi", "payments")
+           else "people can wait a few hours for it to come back without losing work"),
         "", "## Data class", f"- {dc}: {why}",
         "", "## Compliance", *(comp or ["- None: no regulation was named for this product"]),
         "", "## Risks", "- Scope grows beyond the budget: the product gate reviews each initiative's envelope",
         "", "## Product", f"- id: {pid}", f"- org: {v.org}", f"- repo prefix: {prefix}",
-        f"- budget: {int(v.budget_usd or 1000)}",
+        f"- budget: {int(v.budget_usd or 1000)}", "- run budget: pilot 400; growth 1500; scale 4000",
         "", "## Agent notes", "- Assumed: the goals and users are the ones the person gave, in their words",
     ]
     return "\n".join(lines) + "\n"
@@ -98,8 +104,9 @@ def architecture(v: Vision, ctx: dict) -> str:
              "everything runs on the platform's OpenChoreo, with records in Postgres and events on Kafka.",
              "", "## Components"]
     lines += [f"- {n} ({r}): {d} [repo: {org}/{prefix}{n}]" for n, r, d in comps]
-    lines += ["", "## Resources", f"- records: postgres-crossplane; database={prefix.rstrip('-')}; size production=medium",
+    lines += ["", "## Resources", f"- records: postgres-crossplane; database={prefix.rstrip('-')}",
               "    writes: api; reads: api"]
+    lines += load_lines(comps)
     lines += ["", "## Shared services", "- None: the product starts on the platform's own services",
               "", "## NFRs", "- NFR-1 (performance): 95% of API requests answer within 300 ms at the expected peak",
               "- NFR-2 (availability): 99.9% a month in production",
@@ -144,3 +151,31 @@ def goal_lines(brief_text: str) -> list[str]:
 
 
 TEMPLATES = {"brief": brief, "architecture": architecture, "roadmap": roadmap}
+
+
+def load_lines(comps: list[tuple[str, str, str]]) -> list[str]:
+    """Load, Scaling and Failure for the planned components: one journey through all of them."""
+    from ..capacity import SCALED_ROLES
+
+    demand = []
+    for n, r, _ in comps:
+        if r == "event-worker":
+            demand.append(f"{n} 2 events")
+        elif r in SCALED_ROLES:
+            demand.append(f"{n} {1 if r == 'agent' else 10} requests")
+    lines = ["", "## Load", "- J1: Use the product (customer): 100 a day per customer; " + "; ".join(demand),
+             "", "## Scaling"]
+    lines += [f"- {n}: stateless; scales on cpu; first limit: "
+              + ("the database's connections, then a larger database size" if r == "provider"
+                 else "the API behind it, which scales first") for n, r, _ in comps if r in SCALED_ROLES]
+    lines += ["", "## Failure"]
+    for n, r, _ in comps:
+        if r in ("bff", "consumer", "agent", "mcp-server"):
+            lines.append(f"- {n} -> api: timeout 2000 ms; retries 1; idempotency: request id; when down: people see "
+                         "a message to try again in a minute, and nothing they typed is lost")
+        elif r == "event-worker":
+            lines.append(f"- {n} -> records: timeout 1000 ms; retries 3; idempotency: event id; when down: events "
+                         "wait on Kafka and are applied when it returns")
+    lines.append("- records: recovery: automated backups with point-in-time recovery; Multi-AZ failover from the "
+                 "growth stage")
+    return lines

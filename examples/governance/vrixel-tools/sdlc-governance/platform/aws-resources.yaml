@@ -160,11 +160,17 @@ types:
       version: { type: string, default: "17" }
     access: {}          # the component gets the database's credentials (outputs), not IAM actions
     outputs: { host: DB_HOST, port: DB_PORT, database: DB_NAME, username: DB_USER, password: DB_PASSWORD }
+    # connections: the most open connections the size takes (approximately RDS's default
+    # max_connections for its memory), checked against the components' pools by the capacity plan.
+    # paused: Aurora Serverless v2 at 0 capacity, which pauses when idle (about 15 s to resume);
+    # for dev and staging only. The prices of paused and medium-ha are estimates until billed.
     sizes:
-      small: { capacity: db.t4g.micro, monthly_usd: 15 }
-      medium: { capacity: db.m7g.large, monthly_usd: 140 }
-      large: { capacity: "db.m7g.xlarge, Multi-AZ", monthly_usd: 560 }
-    built_in: [KMS encryption, private subnets only, automated backups, deletion protection]
+      paused: { capacity: "Aurora Serverless v2, 0 to 2 ACU, pauses when idle", monthly_usd: 5, connections: 180, environments: [dev, staging] }
+      small: { capacity: db.t4g.micro, monthly_usd: 15, connections: 80 }
+      medium: { capacity: db.m7g.large, monthly_usd: 140, connections: 900 }
+      medium-ha: { capacity: "db.m7g.large, Multi-AZ", monthly_usd: 280, connections: 900, multi_az: true }
+      large: { capacity: "db.m7g.xlarge, Multi-AZ", monthly_usd: 560, connections: 1800, multi_az: true }
+    built_in: [KMS encryption, private subnets only, automated backups, point-in-time recovery, deletion protection]
     # Built by OpenChoreo's provisioner-crossplane module, which creates no alarms yet.
     alarms: {}
     emulator: "postgres in Testcontainers"

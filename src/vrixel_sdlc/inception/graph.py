@@ -140,8 +140,13 @@ def build_inception_graph(services, checkpointer=None):
     def product_gate(state: InceptionState) -> Command:
         arch = (state.get("reports") or {}).get("architecture") or {}
         preview = state.get("architecture", "") + "\n\n" + (state.get("roadmap") or "")
+        cap = arch.get("capacity") or {}
+        summary = ({"tier": cap.get("tier"), "fixed": cap.get("fixed") or {"monthly_usd": 0, "unpriced": []},
+                    "findings": cap.get("findings") or [],
+                    "stages": {k: {"monthly_usd": v.get("monthly_usd", 0), "monthly_usd_max": v.get("monthly_usd_max", 0)}
+                               for k, v in (cap.get("stages") or {}).items()}} if cap.get("stages") else None)
         d = gate(state, "product", preview, {"docs": ["architecture", "roadmap"],
-                                             "monthly_usd": arch.get("monthly_usd") or {}})
+                                             "monthly_usd": arch.get("monthly_usd") or {}, "capacity": summary})
         rec = {"gate": "product", "at": now(), **d}
         if d["decision"] == "revise":
             return Command(goto="plan", update={"gate_decisions": [rec], "feedback": {"plan": d.get("feedback", "")},

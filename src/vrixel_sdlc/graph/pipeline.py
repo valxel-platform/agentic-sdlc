@@ -353,6 +353,9 @@ def make_gate(gate: str, services):
                 "screens": (__import__("vrixel_sdlc.screens", fromlist=["g6"]).g6(state) if gate == "g6" else None),
                 # G3 looks at a mockup of each screen, with what their checks found.
                 "mockups": (state.get("mockups") or None) if gate == "g3" else None,
+                # G4: what the design's added load does to the product's approved capacity (vrixel_sdlc.capacity).
+                "capacity_change": (_capacity_change(services, state, snap)
+                                    if gate == "g4" and lane_id == state["product_id"] else None),
                 # G4: whether the architect read the code, and which commit of each repo.
                 "code_read": ({"checked": bool(state.get("code_read")), **(state.get("code_read") or {})}
                               if gate == "g4" else None),
@@ -521,6 +524,7 @@ def make_gate(gate: str, services):
             design["adrs"] = _hld_adrs(services.artifacts.load(ref))
             services.catalog.register({**_design_entry(state, design), "status": "in_design"})
             update["design"] = design
+            update["capacity_change"] = _capacity_change(services, state, snap) or []
             update["resources"] = aws_plan(services, state, snap, ref)
             # The approved cost is what the feature is held to after release (ops.cost).
             from ..ops.cost import plan_from_g4
@@ -585,9 +589,11 @@ def make_gate(gate: str, services):
                 rec = services.openchoreo.promote(component=t["component"], env=env, actor=d["approver"],
                                                   actor_type="human", project=t["project"],
                                                   namespace=t["namespace"], pipeline=t["pipeline"])
+                sized = _apply_capacity(services, snap, t, env)
                 update.setdefault("deployments", {})[repo] = {"repo": repo, **t, "env": env,
                                                               "release": rec.get("release", ""),
-                                                              "pipeline": list(t["pipeline"])}
+                                                              "pipeline": list(t["pipeline"]),
+                                                              **({"capacity": sized} if sized else {})}
             # Shared lanes own no runtime: their packages are marked stable for consumers to adopt.
             # The same commit as the release candidate, tagged as the stable version.
             candidates = (state.get("change_set") or {}).get("packages") or {}
@@ -978,6 +984,47 @@ def _resource_owner(snap):
         return rt.get("openchoreo_project"), rt.get("namespace")
 
     return target
+
+
+def _staging_targets(snap) -> dict[str, float]:
+    """Requests or events per second per component for staging's load test: its pods at the plan's headroom."""
+    cap = snap.capacity or {}
+    util = float((cap.get("headroom") or {}).get("utilization", 0.6))
+    out = {}
+    for repo, c in (cap.get("components") or {}).items():
+        pods = int((c.get("staging") or {}).get("min") or 0)
+        per_pod = float(c.get("measured_per_pod") or c.get("per_pod") or 0)
+        ratio = float((c.get("staging") or {}).get("cpu") or 1) / float(((c.get("production") or {}).get("growth") or {}).get("cpu") or 1)
+        if pods and per_pod:
+            out[repo] = round(pods * per_pod * ratio * util, 1)
+    return out
+
+
+def _capacity_change(services, state: FeatureState, snap) -> list[dict]:
+    """The approved maximums the design's added load raises (empty without a capacity plan)."""
+    from ..capacity import change
+
+    ref = (state.get("artifacts") or {}).get("HLD")
+    cap = getattr(snap, "capacity", None) or {}
+    if not ref or not cap:
+        return []
+    try:
+        return change(cap, services.artifacts.load(ref))
+    except Exception:
+        return []
+
+
+def _apply_capacity(services, snap, target: dict, env: str) -> dict | None:
+    """The environment's replicas, CPU, memory and autoscaling from the product's approved capacity
+    plan (runtime/capacity.yaml); the last environment in the pipeline is production."""
+    from ..environments import apply_capacity
+
+    pipeline = list(target.get("pipeline") or [])
+    name = "production" if pipeline and env == pipeline[-1] else env
+    try:
+        return apply_capacity(services, snap, target, name)
+    except Exception:
+        return None
 
 
 def _ensure_alert_rules(services, snap, target: dict) -> list[str]:
@@ -1554,8 +1601,9 @@ def make_deploy(stage: str, services, nxt: str):
                 rec = services.openchoreo.promote(component=t["component"], env=env, actor=f"agent:{stage}",
                                                   actor_type="agent", project=t["project"],
                                                   namespace=t["namespace"], pipeline=t["pipeline"])
+                sized = _apply_capacity(services, snap, t, env)
                 deps[repo] = {"repo": repo, **t, "pipeline": list(t["pipeline"]), "env": env,
-                              "release": rec.get("release", "")}
+                              "release": rec.get("release", ""), **({"capacity": sized} if sized else {})}
             except Exception as exc:
                 failures.append({"repo": repo, "component": t["component"], "state": "failure",
                                  "message": f"{type(exc).__name__}: {exc}"})
@@ -1604,7 +1652,11 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
             s = services.feature_snapshot(state).product.performance or {}
             packet["performance"] = {"perf_settings": {
                 "peak_rps": s.get("peak_rps"), "load_factor": s.get("staging_load_factor"),
-                "regression_pct": s.get("staging_regression_pct"), "budgets": s.get("budgets")}}
+                "regression_pct": s.get("staging_regression_pct"), "budgets": s.get("budgets"),
+                # Staging is a fixed small size: with a capacity plan, each component is loaded to what
+                # its staging pods should take, and the test reports what one pod handled (calibration).
+                **({"staging_rps": _staging_targets(services.feature_snapshot(state))}
+                   if getattr(services.feature_snapshot(state), "capacity", None) else {})}}
         if any(t.get("kind") == "store" for t in targets):
             packet["timeout_s"] = max(packet["timeout_s"], STORE_TIMEOUT_S[stage])
         res = interrupt(packet)

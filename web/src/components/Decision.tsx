@@ -435,6 +435,13 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             <p className="small" style={{ marginBottom: 8 }}>AWS resources, per month (planning figures from the platform catalog):{" "}
               {Object.entries(item.monthly_usd).map(([env, usd]) => `${env} ${money(usd)}`).join(", ")}.</p>
           )}
+          {item.gate === "product" && item.capacity && (
+            <p className="small" style={{ marginBottom: 8 }}>Production at target tier {item.capacity.tier}, per month:
+              pilot {money(item.capacity.stages.pilot?.monthly_usd ?? 0)}, growth {money(item.capacity.stages.growth?.monthly_usd ?? 0)},
+              scale up to {money(item.capacity.stages.scale?.monthly_usd_max ?? 0)}. The product's own clusters add{" "}
+              {money(item.capacity.fixed.monthly_usd)}{item.capacity.fixed.unpriced.length > 0 &&
+                <>; not yet priced: {item.capacity.fixed.unpriced.join(", ")}</>}. The Capacity section has the detail.</p>
+          )}
           <h3 style={{ marginBottom: 8 }}>{item.gate === "g0" ? "Initiative draft" : item.gate === "incident" ? "Triage"
             : item.gate === "postmortem" ? "Postmortem" : item.gate === "brief" ? "Product brief"
             : item.gate === "product" ? "Product architecture and roadmap" : reviewGate ? "The evidence" : "Release notes"}</h3>
@@ -571,6 +578,18 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         onComment={item.can_decide && canRevise ? (quote, text) => setComments((cs) => [...cs, { quote, text }]) : undefined} />}
 
       {item.screens && <ScreensBuilt featureId={featureId} s={item.screens} />}
+
+      {item.capacity_change && item.capacity_change.length > 0 && (
+        <div className="small">
+          <h3>Capacity this design needs</h3>
+          <p className="muted">Approving raises the product's approved maximums; after release, a pull request records them.</p>
+          <ul className="plain-list">{item.capacity_change.map((c) => (
+            <li key={c.repo}>{c.error ? <span className="muted">{c.error}</span> : <>
+              <strong>{c.repo}</strong>: up to {c.max_from} → <strong>{c.max_to}</strong> pods (busy hour after a year{" "}
+              {c.busy_from} → {c.busy_to} {c.unit}/s)</>}</li>
+          ))}</ul>
+        </div>
+      )}
 
       {item.code_read && (
         <div className="small">
