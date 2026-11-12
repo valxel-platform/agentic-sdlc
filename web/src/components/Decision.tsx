@@ -161,6 +161,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   const [remember, setRemember] = useState(false);
   const [lesson, setLesson] = useState("");
   const [comments, setComments] = useState<LineComment[]>([]);
+  const [ux, setUx] = useState<boolean | null>(null);
   const [docView, setDocView] = useState<"read" | "comment">("read");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -169,7 +170,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     opened.current = Date.now();
     setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(item.content ?? ""); setErr(""); setPicked(null);
     setReason(""); setRemember(false); setLesson(""); setOverride(""); setRetire([]); setNextReview(item.next_review ?? "");
-    setComments([]); setDocView("read");
+    setComments([]); setDocView("read"); setUx(null);
   }, [item.interrupt_id, item.content]);
 
   async function send(decision: string, extra: Record<string, unknown> = {}) {
@@ -200,6 +201,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       ? { name: "Release", question: "Launch these features together?", approve: "Launch" }
       : { name: "Release", question: "Ship this release train?", approve: "Approve release" })
     : item.gate ? GATES[item.gate] : undefined;
+  const fitCheck = item.phase === "fit";
   const incidentGate = item.gate === "incident" || item.gate === "postmortem";
   const inceptionGate = item.gate === "brief" || item.gate === "product";
   const reviewGate = item.gate === "review";
@@ -211,6 +213,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     item.type === "escalation" && item.phase === "delivery" ? (DELIVERY_FAILED[item.wait ?? ""] ?? "Delivery failed")
     : item.type === "escalation" && item.phase === "security" ? "Security findings block this change"
     : item.type === "escalation" && item.phase === "provisioning" ? "Setting up a new repository failed"
+    : fitCheck ? "The design and the architecture don't fit together"
     : item.type === "escalation" ? `${PHASES[item.phase ?? ""] ?? item.phase} needs a person`
     : item.type === "handback" ? `You took over ${gateLabel(item.gate)}`
     : reviewGate ? "Is this initiative moving its goal?"
@@ -287,7 +290,29 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         </div>
       )}
 
-      {!security && item.findings && item.findings.length > 0 && (
+      {fitCheck && item.fit && (
+        <div>
+          <h3>What doesn't fit</h3>
+          <ul className="findings">{item.fit.map((f) => (
+            <li key={f.text}><span className="chip plain">{f.to === "design" ? "Design should change" : "Architecture should change"}</span> {f.text}</li>
+          ))}</ul>
+          <p className="small muted">Both were approved separately; this was checked before planning starts. Send one back with these as its feedback, or carry on and say why.</p>
+        </div>
+      )}
+
+      {item.ux_design && (
+        <div className="ux-choice">
+          <h3>UX design</h3>
+          <label className="check">
+            <input type="checkbox" checked={ux ?? item.ux_design.runs} disabled={!item.can_decide} onChange={(e) => setUx(e.target.checked)} />
+            <span>Design the screens (UX design and its approval run before planning)</span>
+          </label>
+          <p className="small muted">{(ux ?? item.ux_design.runs) ? "Runs: the feature changes what people see." : "Skipped: nothing people see changes."}
+            {item.ux_design.why ? ` ${item.ux_design.why}.` : ""}</p>
+        </div>
+      )}
+
+      {!security && !fitCheck && item.findings && item.findings.length > 0 && (
         <div>
           <h3>{delivery ? "What went wrong" : "What the evaluators found"}</h3>
           <ul className="findings">{item.findings.map((f) => (
@@ -606,7 +631,12 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
               </label>
             </>
           )}
-          {mode === "resolve" && (
+          {mode === "resolve" && fitCheck && (
+            <label className="field">Why carry on with them as they are? (recorded on the feature)
+              <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} autoFocus />
+            </label>
+          )}
+          {mode === "resolve" && !fitCheck && (
             <>
               <label className="field">{item.content ? `Finish the ${ARTIFACTS[kind ?? ""]?.toLowerCase() ?? "document"} (the agents' last draft; keep it as it is if it's fine)`
                 : `Your finished ${ARTIFACTS[kind ?? ""]?.toLowerCase() ?? "artifact"} (optional: leave empty to keep the agents' last draft)`}
@@ -686,7 +716,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
                 <button className="btn go"
                   disabled={busy || (item.gate === "incident" && chosen.length === 0) || (!!item.traceability?.blocks && !override.trim())}
                   onClick={() => send("approve", item.gate === "incident" ? { action_ids: chosen }
-                    : item.traceability?.blocks ? { override_reason: override.trim() } : {})}>
+                    : item.traceability?.blocks ? { override_reason: override.trim() }
+                    : item.ux_design && ux !== null && ux !== item.ux_design.runs ? { ui: ux } : {})}>
                   {item.gate === "incident" ? `Approve ${chosen.length} action${chosen.length === 1 ? "" : "s"}` : gate?.approve ?? "Approve"}</button>
                 {item.gate !== "release" && canRevise && <button className="btn secondary" disabled={busy} onClick={() => setMode("revise")}>
                   {item.gate === "incident" ? "Look again" : item.gate === "postmortem" ? "Rewrite"
@@ -725,7 +756,16 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
                 <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>Stop feature</button>
               </>
             )}
-            {item.type === "escalation" && !delivery && !security && mode === null && (
+            {fitCheck && mode === null && (
+              <>
+                <button className="btn" disabled={busy} onClick={() => send("design")}>Send the design back</button>
+                <button className="btn secondary" disabled={busy} onClick={() => send("architecture")}>Send the architecture back</button>
+                <button className="btn secondary" disabled={busy} onClick={() => setMode("resolve")}>Carry on anyway</button>
+                <span className="spacer" />
+                <button className="btn danger" disabled={busy} onClick={() => setMode("abort")}>Stop feature</button>
+              </>
+            )}
+            {item.type === "escalation" && !delivery && !security && !fitCheck && mode === null && (
               <>
                 <button className="btn go" disabled={busy} onClick={() => setMode("resolve")}>{item.content ? "Finish it myself" : "Mark resolved"}</button>
                 <button className="btn secondary" disabled={busy} onClick={() => setMode("retry")}>Let agents retry</button>
@@ -740,7 +780,10 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             {mode === "retry" && (
               <button className="btn" disabled={busy} onClick={() => send("retry", budget ? { budget_usd: Number(budget) } : {})}>Retry with agents</button>
             )}
-            {mode === "resolve" && (
+            {mode === "resolve" && fitCheck && (
+              <button className="btn go" disabled={busy || !feedback.trim()} onClick={() => send("resolved")}>Carry on to planning</button>
+            )}
+            {mode === "resolve" && !fitCheck && (
               <button className="btn go" disabled={busy} onClick={() => send("resolved", (item.content ? edited : content.trim()) ? { artifact_content: content } : {})}>
                 {item.content && edited ? "Resolve with my version" : "Mark resolved"}</button>
             )}

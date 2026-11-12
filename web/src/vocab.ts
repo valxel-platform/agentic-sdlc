@@ -2,6 +2,7 @@
 export const PHASES: Record<string, string> = {
   discovery: "Discovery", spec: "Spec", design: "Design", architecture: "Architecture",
   plan: "Plan", build: "Build", release: "Release", operate: "Operate", delivery: "Delivery", security: "Security", provisioning: "Repository setup",
+  fit: "Design and architecture fit",
   brief: "Product brief", product_plan: "Architecture and roadmap", setup: "Setup",
 };
 

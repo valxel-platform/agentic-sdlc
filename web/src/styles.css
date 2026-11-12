@@ -697,3 +697,4 @@ table.quality tfoot td { padding: 8px; font-weight: 600; }
   .batch-bar .btn { width: 100%; }
 }
 .change-req { margin: -6px 0 16px; } .change-req .linkish { color: var(--act); text-decoration: underline; text-underline-offset: 3px; }
+.ux-choice h3 { margin-bottom: 4px; } .ux-choice p { margin: 4px 0 0; }

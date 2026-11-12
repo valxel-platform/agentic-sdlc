@@ -319,6 +319,11 @@ def plan(ctx: dict, defective: bool) -> str:
             k = builders.index(repo)
             mine = [ac for j, ac in enumerate(acs) if j % len(builders) == k]
         task = {"id": f"TASK-{i}", "repo": repo["name"], "role": repo["role"], "acs": mine, "files": files}
+        from .parse import SCREEN_ROLES, parse_screens
+
+        screens = list(parse_screens(ctx["parent_texts"].get("UX", "")))
+        if screens and repo.get("role") in SCREEN_ROLES:
+            task["screens"] = screens
         if not mine:  # more repos than criteria: this one supports the others
             task["why"] = f"supports {', '.join(acs) or 'the feature'} through {repo['role']} changes the others use"
         tasks.append(task)
