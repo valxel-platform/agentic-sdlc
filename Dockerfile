@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Stage 1: build the web interface (React + Vite) into web/dist.
-FROM node:26-alpine AS web
+FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -12,7 +12,7 @@ RUN npm run build
 # (config/plugins.yaml), so moving it goes through the config repo's evals; this default must name
 # the same commit (tests/test_plugins.py checks), and CI builds with the config's. CI also checks
 # that every skill the phases name is in them.
-FROM alpine:3.22 AS plugins
+FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f AS plugins
 ARG KNOWLEDGE_WORK_PLUGINS_REF=e605d8ddbfb688da57dfaaceebd93f12a64ef1d3
 ADD --keep-git-dir=false https://github.com/anthropics/knowledge-work-plugins.git#${KNOWLEDGE_WORK_PLUGINS_REF} /upstream
 COPY plugins /src/plugins
@@ -22,7 +22,7 @@ RUN /src/plugins/prepare.sh /upstream /src/plugins/vrixel /plugins \
  && echo "${KNOWLEDGE_WORK_PLUGINS_REF}" > /plugins/REF
 
 # Stage 3: OpenAI's Codex CLI, for roles that run on the codex runtime (models.yaml).
-FROM alpine:3.22 AS codex
+FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f AS codex
 ARG CODEX_VERSION=0.167.0
 # The download must match this checksum (moving the version moves both, by pull request).
 ADD --checksum=sha256:9d64836106d5b374e90ee4454c7ebcde7ca7106558bd7e41a34b9f26ebda251a \
@@ -30,7 +30,7 @@ ADD --checksum=sha256:9d64836106d5b374e90ee4454c7ebcde7ca7106558bd7e41a34b9f26eb
 RUN tar -xzf /tmp/codex.tar.gz -C /tmp && install -m 0755 /tmp/codex-x86_64-unknown-linux-musl /codex
 
 # Stage 4: the API, which also serves the built web interface.
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
