@@ -349,6 +349,8 @@ def make_gate(gate: str, services):
                 "aws_resources": (aws_summary(services, state, snap, ref)
                                   if gate in ("g4", "g6") and lane_id == state["product_id"] else None),
                 "design_review": review,
+                # G3 looks at a mockup of each screen, with what their checks found.
+                "mockups": (state.get("mockups") or None) if gate == "g3" else None,
                 # G4: whether the architect read the code, and which commit of each repo.
                 "code_read": ({"checked": bool(state.get("code_read")), **(state.get("code_read") or {})}
                               if gate == "g4" else None),

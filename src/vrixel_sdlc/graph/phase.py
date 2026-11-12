@@ -977,6 +977,20 @@ def make_phase_node(phase: str, services):
             )
             delta["artifacts"] = {spec.kind: ref}
             delta["trace_links"] = [[p, ref["id"]] for p in ctx["parent_ids"]]
+            if phase == "design" and status == "passed":  # what G3 looks at: a mockup per screen (vrixel_sdlc.mockups)
+                from .. import mockups
+
+                try:
+                    m = mockups.make(services, state, ctx, out["draft"]["content"],
+                                     budget_usd=ctx.get("budget_remaining_usd"))
+                    delta["artifacts"] = {**delta["artifacts"], **m["artifacts"]}
+                    delta["cost_usd"] += m["cost_usd"]
+                    delta["tokens_used"] += m["tokens_used"]
+                    delta["mockups"] = m["mockups"]
+                    delta["events"].append(event("design", "mockups", f"{len(m['mockups']['screens'])} screen(s)",
+                                                 findings=m["mockups"]["findings"]))
+                except Exception as exc:  # G3 still has the spec; say why there are no pictures
+                    delta["mockups"] = {"screens": [], "findings": [f"Mockups couldn't be drawn: {type(exc).__name__}"]}
         if phase in evals.DOC_PHASES and out.get("draft") and getattr(services, "evals", None) is not None:
             try:  # an eval case: what the agent was given, what it wrote and the critic's verdict
                 services.evals.capture(evals.case_from(state, phase, ctx, out,

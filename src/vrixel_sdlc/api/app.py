@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
@@ -1380,6 +1380,24 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(422, str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    @api.get("/features/{feature_id}/mockups/{sid}", response_class=HTMLResponse)
+    def mockup(feature_id: str, sid: str, user: User = Depends(current_user)) -> HTMLResponse:
+        """One screen's mockup, for a sandboxed frame: no scripts, nothing loaded from elsewhere."""
+        from .. import mockups
+
+        try:
+            state = eng()._state(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if state.get("product_id") not in lanes_for(user):
+            raise HTTPException(403, f"You aren't a member of {state.get('product_id')}'s organization")
+        page = mockups.page(eng().services, state, sid)
+        if page is None:
+            raise HTTPException(404, f"No mockup {sid}")
+        return HTMLResponse(page, headers={
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
     @api.get("/features/{feature_id}/decisions/{interrupt_id}/brief")
     def decision_brief(feature_id: str, interrupt_id: str, user: User = Depends(current_user)) -> dict:

@@ -3,7 +3,7 @@ import pytest
 from conftest import approve
 from vrixel_sdlc.graph import InvalidDecision
 
-ALL_KINDS = {"OPP", "PRD", "UX", "HLD", "PLAN", "BUILD", "REL", "OPS"}
+ALL_KINDS = {"OPP", "PRD", "UX", "MOCKUPS", "HLD", "PLAN", "BUILD", "REL", "OPS"}
 
 
 def test_low_risk_feature_runs_end_to_end_without_g5(engine, services):

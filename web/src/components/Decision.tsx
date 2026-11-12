@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type AgentEvals, type LineComment, type PendingItem, type ReleaseCandidate, type ReleaseTraceability } from "../api";
 import { CommentableDoc, DecisionBrief } from "./DecisionBrief";
+import { Mockups } from "./Mockups";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
@@ -562,6 +563,21 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         <div>
           <h3>Pull requests in this decision</h3>
           <ul>{item.pull_requests.map((p) => <li key={p}>{p}</li>)}</ul>
+        </div>
+      )}
+
+      {item.mockups && <Mockups featureId={featureId} set={item.mockups}
+        onComment={item.can_decide && canRevise ? (quote, text) => setComments((cs) => [...cs, { quote, text }]) : undefined} />}
+
+      {item.code_read && (
+        <div className="small">
+          <h3>The code the architect read</h3>
+          {item.code_read.checked && item.code_read.repos ? (
+            <ul className="plain-list">{Object.entries(item.code_read.repos).map(([r, v]) => (
+              <li key={r}><span className={`chip ${v.sha ? "go" : "wait"}`}>{v.sha ? "Read" : "Not read"}</span> {r}
+                {v.sha ? <span className="mono faint"> @ {v.sha.slice(0, 7)}</span> : <span className="muted"> ({v.skipped})</span>}</li>
+            ))}</ul>
+          ) : <p className="muted">Not read: this runtime works from the architecture record, not the code.</p>}
         </div>
       )}
 
