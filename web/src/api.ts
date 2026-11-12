@@ -23,6 +23,8 @@ export interface LineComment { quote: string; text: string }
 /** A governance pull request an approval opened, mergeable from the tool. */
 export interface RecordPr { key: string; label: string; url: string; merged: boolean; repo: string; number: number }
 export interface PendingItem {
+  // In the Decisions inbox: grouping, and whether it may be approved with others.
+  product_name?: string; initiative_id?: string; low_risk?: boolean; low_risk_why?: string;
   interrupt_id: string;
   // At the product gate: the architecture's AWS resources priced per environment.
   monthly_usd?: Record<string, number>;
@@ -661,6 +663,10 @@ export const api = {
   notifications: () => request<NotifyPrefs>("GET", "/me/notifications"),
   setNotifications: (body: Partial<Pick<NotifyPrefs, "email" | "needed" | "staging">>) => request<NotifyPrefs>("PUT", "/me/notifications", body),
   watch: (id: string, on: boolean) => request<{ watching: boolean }>("POST", `/threads/${encodeURIComponent(id)}/watch`, { on }),
+  changeRequest: (id: string, description: string) =>
+    request<{ feature_id: string; sent_back: string; note: string }>("PUT", `/features/${encodeURIComponent(id)}/request`, { description }),
+  approveBatch: (items: { feature_id: string; interrupt_id: string }[], active_minutes = 0) =>
+    request<{ approved: string[]; skipped: { feature_id: string; why: string }[] }>("POST", "/inbox/approve", { items, active_minutes }),
   decisionBrief: (featureId: string, interruptId: string) =>
     request<DecisionBriefData>("GET", `/features/${encodeURIComponent(featureId)}/decisions/${interruptId}/brief`),
   decide: (featureId: string, interruptId: string, body: Record<string, unknown>) =>

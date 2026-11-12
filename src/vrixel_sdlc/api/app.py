@@ -160,6 +160,20 @@ class WatchIn(BaseModel):
     on: bool = True
 
 
+class ItemRef(BaseModel):
+    feature_id: str
+    interrupt_id: str
+
+
+class BatchIn(BaseModel):
+    items: list[ItemRef] = Field(min_length=1, max_length=50)
+    active_minutes: float = Field(0.0, ge=0)
+
+
+class RequestIn(BaseModel):
+    description: str = Field(min_length=10, max_length=8000)
+
+
 class StartIn(BaseModel):
     indexes: list[int] = Field(min_length=1, max_length=50)
     order: str = Field("together", pattern="^(together|sequence)$")
@@ -1114,6 +1128,24 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
+    @api.put("/features/{feature_id}/request")
+    def change_request(feature_id: str, body: RequestIn, user: User = Depends(current_user)) -> dict:
+        """Change what was asked for, before the build starts (the person who asked, or a G1 approver)."""
+        try:
+            v = eng().view(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        member_of(user, v["product_id"])
+        g1 = eng().services.snapshot(v["product_id"]).product.approvers.get("g1", [])
+        if v.get("created_by") != user.login and not can_decide(user, {"approvers": g1}):
+            raise HTTPException(403, "Only the person who asked for it, or its idea approvers, can change the request")
+        try:
+            return eng().change_request(feature_id, body.description, by=user.login)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     @api.post("/threads/{thread_id}/resize", status_code=201)
     def resize(thread_id: str, user: User = Depends(current_user)) -> dict:
         """A feature at G1 becomes an initiative; an initiative at G0 becomes one feature."""
@@ -1265,13 +1297,53 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
     @api.get("/inbox")
     def inbox(user: User = Depends(current_user), mine: bool = False, product_id: str | None = None) -> list[dict]:
-        items = []
+        from ..decisions import low_risk
+
+        items, products = [], {}
         for p in eng().inbox(product_id):
             fid = p["feature_id"]
             item = decorate(fid, {**p, "product_id": p.get("product_id") or fid.rsplit("-FEAT-", 1)[0]}, user)
             if not mine or item["can_decide"]:
+                pid = item["product_id"]
+                if pid not in products:
+                    try:
+                        prod = eng().services.snapshot(pid).product
+                        products[pid] = (prod.name, prod.data_class)
+                    except Exception:
+                        products[pid] = (pid, "phi")
+                item["product_name"], dc = products[pid]
+                try:
+                    item["initiative_id"] = eng()._state(fid).get("initiative_id", "") if "-FEAT-" in fid else ""
+                except Exception:
+                    item["initiative_id"] = ""
+                item["low_risk"], item["low_risk_why"] = low_risk(item, dc)
                 items.append(item)
         return items
+
+    @api.post("/inbox/approve")
+    def approve_batch(body: BatchIn, user: User = Depends(current_user)) -> dict:
+        """Approve several low-risk decisions at once. Each is checked again here; any that isn't low risk
+        (any more), or isn't this person's, is left for one-at-a-time."""
+        from ..decisions import low_risk
+
+        approved, skipped = [], []
+        for ref in body.items:
+            try:
+                item = eng().item(ref.feature_id, ref.interrupt_id)
+                pid = eng().view(ref.feature_id)["product_id"]
+                ok, why = low_risk(item, eng().services.snapshot(pid).product.data_class)
+                if ok and not can_decide(user, {"approvers": item_approvers(ref.feature_id, {**item, "product_id": pid})}):
+                    ok, why = False, "not yours to decide"
+                if not ok:
+                    skipped.append({"feature_id": ref.feature_id, "why": why})
+                    continue
+                eng().decide(ref.feature_id, ref.interrupt_id,
+                             {"decision": "approve", "approver": user.login, "active_minutes": body.active_minutes / max(1, len(body.items)),
+                              "feedback": f"Approved with {len(body.items)} low-risk decisions"}, background=True)
+                approved.append(ref.feature_id)
+            except (KeyError, RuntimeError, InvalidDecision) as exc:
+                skipped.append({"feature_id": ref.feature_id, "why": str(exc)[:200]})
+        return {"approved": approved, "skipped": skipped}
 
     @api.post("/features/{feature_id}/decisions/{interrupt_id}", status_code=202)
     def decide(feature_id: str, interrupt_id: str, body: DecisionIn, user: User = Depends(current_user)) -> dict:

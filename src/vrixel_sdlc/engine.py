@@ -637,6 +637,37 @@ class FeatureEngine:
                     background=background)
         return new
 
+    def change_request(self, feature_id: str, description: str, *, by: str) -> dict:
+        """The person who asked changes what they asked for, before the build starts. The new request
+        replaces the old; a gate waiting now goes back to its agents with the change as feedback."""
+        import difflib as _difflib
+
+        s = self._state(feature_id)
+        if (s.get("approvals") or {}).get("g4"):
+            raise ValueError("The build has started: start a follow-up feature for the change instead")
+        if s.get("status") in ("done", "aborted"):
+            raise ValueError("This feature has finished")
+        old = s.get("description", "")
+        if description.strip() == old.strip():
+            raise ValueError("Nothing changed")
+        if self.is_running(feature_id):
+            raise RuntimeError("Agents are working on it right now: try again when it's waiting")
+        added = [ln[2:] for ln in _difflib.ndiff(old.splitlines(), description.splitlines()) if ln.startswith("+ ")]
+        removed = [ln[2:] for ln in _difflib.ndiff(old.splitlines(), description.splitlines()) if ln.startswith("- ")]
+        note = ("The person who asked for this changed the request."
+                + (" Added: " + " / ".join(added) if added else "") + (" Removed: " + " / ".join(removed) if removed else ""))
+        _now = lambda: datetime.now(timezone.utc).isoformat()  # noqa: E731
+
+        change = {"description": description.strip(),
+                  "events": [{"at": _now(), "node": "request", "kind": "changed", "detail": note[:500], "by": by}]}
+        gate = next((p for p in self.pending(feature_id) if p.get("type") == "gate" and "revise" in (p.get("allowed") or [])), None)
+        if gate:  # the new request and the send-back in one step, so the agents revise against it
+            self.decide(feature_id, gate["interrupt_id"], {"decision": "revise", "approver": by, "feedback": note,
+                                                           "reason": "wrong_scope"}, background=True, update=change)
+        else:
+            self._g(feature_id).update_state(self._config(feature_id), change)
+        return {"feature_id": feature_id, "sent_back": gate.get("gate") if gate else "", "note": note}
+
     # ------------------------------------------------------------------ no dead ends after approval
 
     def record_prs(self, thread_id: str) -> list[dict]:
@@ -1658,7 +1689,8 @@ class FeatureEngine:
                 return p
         raise KeyError(f"No pending interrupt {interrupt_id} on {feature_id}")
 
-    def decide(self, feature_id: str, interrupt_id: str, decision: dict, *, background: bool = False) -> dict:
+    def decide(self, feature_id: str, interrupt_id: str, decision: dict, *, background: bool = False,
+               update: dict | None = None) -> dict:
         if self.is_running(feature_id):
             raise RuntimeError(f"{feature_id} is still running; decide once it is waiting")
         item = self.item(feature_id, interrupt_id)
@@ -1682,7 +1714,7 @@ class FeatureEngine:
             self.services.effort.add({"feature_id": feature_id, "product_id": item.get("product_id", ""),
                                       "kind": "incident_decision", "who": d.get("approver", ""),
                                       "ref": interrupt_id, "minutes": d["active_minutes"]})
-        cmd = Command(resume={interrupt_id: d})
+        cmd = Command(resume={interrupt_id: d}, update=update) if update else Command(resume={interrupt_id: d})
         if background:
             self._submit(feature_id, cmd)
             return {"feature_id": feature_id, "accepted": True}

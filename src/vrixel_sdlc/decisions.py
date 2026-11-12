@@ -135,3 +135,32 @@ def with_comments(feedback: str, comments: list[dict] | None) -> str:
     if not lines:
         return feedback
     return (feedback.strip() + "\n\n" if feedback.strip() else "") + "Comments on specific lines:\n" + "\n".join(lines)
+
+
+# ----------------------------------------------------------------------------- batch approval
+
+# Gates a person may approve several of at once, when each is low risk. The initiative, release,
+# production (G6) and product decisions are always made one at a time.
+BATCH_GATES = ("g1", "g2", "g3", "g5")
+MIN_SCORE = 0.8
+
+
+def low_risk(item: dict, data_class: str) -> tuple[bool, str]:
+    """Whether a waiting decision may be approved in a batch, and if not, why."""
+    if item.get("type") != "gate" or item.get("gate") not in BATCH_GATES:
+        return False, "decided one at a time"
+    if data_class != "general":
+        return False, f"{data_class} product"
+    if item.get("risk_tier") not in (None, "", "low"):
+        return False, f"{item['risk_tier']} risk"
+    if item.get("findings"):
+        return False, "the evaluators found something"
+    if item.get("score") is not None and float(item["score"]) < MIN_SCORE:
+        return False, "low evaluator score"
+    if item.get("revisions") or item.get("stuck"):
+        return False, "sent back before"
+    if item.get("new_repos") or ((item.get("aws_resources") or {}).get("resources")):
+        return False, "creates repositories or AWS services"
+    if item.get("design_review") and (item["design_review"].get("conflicts") or item["design_review"].get("issues")):
+        return False, "the design review raised something"
+    return True, "critic passed, general data, low risk"

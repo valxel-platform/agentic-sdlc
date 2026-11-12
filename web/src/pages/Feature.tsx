@@ -7,6 +7,7 @@ import { useLive } from "../live";
 import { Resize } from "../components/Resize";
 import { NotifyPanel, PathPanel } from "../components/Path";
 import { NextInInitiative } from "../components/NextSteps";
+import { ChangeRequest } from "../components/ChangeRequest";
 import { Rail } from "../components/Rail";
 import { ArtifactBody } from "../components/Artifact";
 import { DecisionPanel } from "../components/Decision";
@@ -168,6 +169,10 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
 
       <div className="panel rail-panel"><Rail stations={f.rail} /></div>
       {!f.initiative_id && <Resize id={f.feature_id} kind="feature" pending={f.pending} />}
+      {f.status !== "done" && f.status !== "aborted" && f.status !== "released" && f.status !== "stopped" && (
+        <ChangeRequest id={f.feature_id} description={f.description} onDone={load}
+          built={f.rail.some((s) => s.key === "g4" && (s.state === "done" || s.state === "skipped"))} />
+      )}
       {f.initiative_id && (f.status === "released" || f.status === "done") && <NextInInitiative initiativeId={f.initiative_id} />}
       {f.path && (
         <div className="path-row">
