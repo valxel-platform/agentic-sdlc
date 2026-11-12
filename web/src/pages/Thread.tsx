@@ -5,6 +5,8 @@ import remarkGfm from "remark-gfm";
 import { api, ApiError, type InitiativeView, type PendingItem, type ReleaseView, type ReviewView } from "../api";
 import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
+import { Resize } from "../components/Resize";
+import { RecordPrs, StartFeatures } from "../components/NextSteps";
 import { HORIZONS, MODELS, money, threadPath, waitingLabel } from "../vocab";
 
 const STATUS: Record<string, string> = {
@@ -70,6 +72,9 @@ export function InitiativePage() {
       </div>
       {v.error && <p className="error-note" role="alert">The workflow stopped with an error: {v.error}</p>}
       <Pending items={v.pending} id={v.feature_id} title={v.title} onDone={load} />
+      <Resize id={v.feature_id} kind="initiative" pending={v.pending} />
+      {v.status === "approved" && <RecordPrs id={v.feature_id} />}
+      {v.status === "approved" && <StartFeatures id={v.feature_id} candidates={v.candidates} />}
       {err && <p className="error-note" role="alert">{err}</p>}
 
       <div className="split">

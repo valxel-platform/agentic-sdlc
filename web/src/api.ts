@@ -13,7 +13,18 @@ export interface AwsResources {
   region: string; accounts: Record<string, string>; note: string;
 }
 
+/** The top of a gate (vrixel_sdlc.decisions). */
+export interface DecisionBriefData {
+  summary: { lines: string[]; by: "agent" | "document" };
+  version?: number;
+  changed?: { from_version: number; asked: string; lines: { op: " " | "-" | "+" | "…"; text: string }[] };
+}
+export interface LineComment { quote: string; text: string }
+/** A governance pull request an approval opened, mergeable from the tool. */
+export interface RecordPr { key: string; label: string; url: string; merged: boolean; repo: string; number: number }
 export interface PendingItem {
+  // In the Decisions inbox: grouping, and whether it may be approved with others.
+  product_name?: string; initiative_id?: string; low_risk?: boolean; low_risk_why?: string;
   interrupt_id: string;
   // At the product gate: the architecture's AWS resources priced per environment.
   monthly_usd?: Record<string, number>;
@@ -210,7 +221,17 @@ export interface AgentSession {
   extra_skills?: string[];
 }
 
+/** How long each step usually takes, and when it should be done (vrixel_sdlc.progress). */
+export interface PathStation extends Station { eta_minutes: number; from_history: boolean; mine?: boolean }
+export interface FeaturePath { stations: PathStation[]; expected_done: string | null; minutes_left: number | null }
+export interface NotifyPrefs {
+  email: string; needed: boolean; staging: boolean; watch: string[];
+  channels: { email: boolean; chat: boolean };
+  sent: { at: string; kind: string; ref: string; subject: string }[];
+}
 export interface Feature extends FeatureSummary {
+  path?: FeaturePath;
+  watching?: boolean;
   attachments?: Attachment[];
   description: string;
   agent_sessions?: AgentSession[];
@@ -488,7 +509,13 @@ export interface Draft {
   related_capability: string; similar: SimilarItem[]; not_duplicate_reason: string;
   // The intent changes what people see: the experience round applies, and its brief.
   ui: boolean; experience: Partial<Record<ExperienceKey, string>>;
+  // The front door: what size the request is, and what the bigger sizes need.
+  size: "" | RequestSize; size_suggested: "" | RequestSize; size_why: string;
+  horizon: string; research: "" | ResearchDepth; name: string; org: string; budget_usd: number;
 }
+export type RequestSize = "feature" | "initiative" | "product";
+export type ResearchDepth = "quick" | "thorough" | "own";
+export const AGENT_PROPOSES = "Proposed by the agent";
 export type ExperienceKey = "where" | "main_task" | "context" | "look";
 export const EXPERIENCE_DELEGATED = "Left to the design agent";
 /** A file attached to an intent: kept as the strictest data class until the intent is submitted. */
@@ -499,7 +526,8 @@ export interface Attachment {
 export const ATTACH_ACCEPT = ".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,.csv,.json";
 export interface IntakeSession {
   id: string; owner: string; lanes: string[]; draft: Draft; ready: boolean; missing: string[]; attachments: Attachment[];
-  feature_id: string; created_at: string;
+  feature_id: string; created_at: string; starter: boolean; kind: "" | "feature" | "initiative" | "inception";
+  awaiting: string;
   messages: { role: "user" | "agent"; text: string; at: string; attachment?: string; options?: string[] }[];
 }
 
@@ -619,6 +647,11 @@ export const api = {
   featureOutcome: (id: string) => request<FeatureOutcome>("GET", `/features/${encodeURIComponent(id)}/outcome`),
   createInitiative: (body: { product_id: string; title: string; request: string; measure?: string; horizon?: string; research?: string }) =>
     request<{ feature_id: string }>("POST", "/initiatives", body),
+  records: (id: string) => request<RecordPr[]>("GET", `/threads/${encodeURIComponent(id)}/records`),
+  mergeRecord: (id: string, key: string) => request<RecordPr>("POST", `/threads/${encodeURIComponent(id)}/records/${key}/merge`),
+  startFeatures: (id: string, indexes: number[], order: "together" | "sequence") =>
+    request<{ started: string[]; queued: string[] }>("POST", `/initiatives/${encodeURIComponent(id)}/start`, { indexes, order }),
+  firstFeature: (id: string) => request<{ feature_id: string }>("POST", `/inceptions/${encodeURIComponent(id)}/first-feature`),
   startCandidate: (id: string, index: number, not_duplicate_reason = "") =>
     request<{ feature_id: string }>("POST", `/initiatives/${encodeURIComponent(id)}/features`, { index, not_duplicate_reason }),
   createRelease: (body: { product_id: string; title: string; model: string; features: string[]; target_date?: string; initiative?: string }) =>
@@ -627,6 +660,15 @@ export const api = {
     request<{ id: string; content: string; version: number; constitution_version: string }>(
       "GET", `/features/${encodeURIComponent(id)}/artifacts/${kind}`),
   inbox: (mine: boolean) => request<PendingItem[]>("GET", `/inbox${mine ? "?mine=true" : ""}`),
+  notifications: () => request<NotifyPrefs>("GET", "/me/notifications"),
+  setNotifications: (body: Partial<Pick<NotifyPrefs, "email" | "needed" | "staging">>) => request<NotifyPrefs>("PUT", "/me/notifications", body),
+  watch: (id: string, on: boolean) => request<{ watching: boolean }>("POST", `/threads/${encodeURIComponent(id)}/watch`, { on }),
+  changeRequest: (id: string, description: string) =>
+    request<{ feature_id: string; sent_back: string; note: string }>("PUT", `/features/${encodeURIComponent(id)}/request`, { description }),
+  approveBatch: (items: { feature_id: string; interrupt_id: string }[], active_minutes = 0) =>
+    request<{ approved: string[]; skipped: { feature_id: string; why: string }[] }>("POST", "/inbox/approve", { items, active_minutes }),
+  decisionBrief: (featureId: string, interruptId: string) =>
+    request<DecisionBriefData>("GET", `/features/${encodeURIComponent(featureId)}/decisions/${interruptId}/brief`),
   decide: (featureId: string, interruptId: string, body: Record<string, unknown>) =>
     request<{ accepted: boolean }>("POST", `/features/${encodeURIComponent(featureId)}/decisions/${interruptId}`, body),
   intakeStart: () => request<IntakeSession>("POST", "/intake", {}),
@@ -634,6 +676,7 @@ export const api = {
   intake: (id: string) => request<IntakeSession>("GET", `/intake/${id}`),
   intakeSay: (id: string, text: string) => request<IntakeSession>("POST", `/intake/${id}/messages`, { text }),
   intakeDraft: (id: string, changes: Partial<Omit<Draft, "experience">> & { experience?: Partial<Record<ExperienceKey, string>> }) => request<IntakeSession>("PATCH", `/intake/${id}/draft`, changes),
+  resize: (id: string) => request<{ feature_id: string }>("POST", `/threads/${encodeURIComponent(id)}/resize`),
   intakeAttach: async (id: string, file: File): Promise<IntakeSession> => {
     const res = await fetch(`/api/intake/${id}/attachments?name=${encodeURIComponent(file.name)}`, {
       method: "POST", credentials: "same-origin", body: file,

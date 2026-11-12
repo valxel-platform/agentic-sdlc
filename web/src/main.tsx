@@ -42,7 +42,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <NavLink to="/costs">Costs</NavLink>
           <NavLink to="/lessons">Lessons</NavLink>
           <NavLink to="/pilot">Pilot</NavLink>
-          <NavLink to="/intake">New intent</NavLink>
+          <NavLink to="/intake">New request</NavLink>
         </nav>
         <div className="side-foot">
           <div className={`live ${live ? "on" : ""}`} title={live ? "Live updates on" : "Reconnecting…"}>

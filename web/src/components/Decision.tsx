@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type AgentEvals, type PendingItem, type ReleaseCandidate, type ReleaseTraceability } from "../api";
+import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type AgentEvals, type LineComment, type PendingItem, type ReleaseCandidate, type ReleaseTraceability } from "../api";
+import { CommentableDoc, DecisionBrief } from "./DecisionBrief";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
@@ -54,7 +55,7 @@ const NOTE_LABEL: Record<AgentNote["kind"], string> = {
 };
 
 /** What the agents assumed, changed, traded off and couldn't settle: open questions first. */
-function AgentNotes({ notes }: { notes: AgentNote[] }) {
+function AgentNotes({ notes, onComment }: { notes: AgentNote[]; onComment?: (text: string) => void }) {
   return (
     <div>
       <h3>The agents' notes</h3>
@@ -68,6 +69,7 @@ function AgentNotes({ notes }: { notes: AgentNote[] }) {
             {(n.task || (n.phase && n.phase !== "")) && (
               <span className="faint"> ({n.task ? `${n.task}, ${n.repo?.split("/").pop() ?? ""}` : n.phase})</span>
             )}
+            {onComment && <> <button type="button" className="linkish add-comment" onClick={() => onComment(`${NOTE_LABEL[n.kind]}: ${n.text}`)}>Add as comment</button></>}
           </li>
         ))}
       </ul>
@@ -158,6 +160,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
   const [override, setOverride] = useState("");
   const [remember, setRemember] = useState(false);
   const [lesson, setLesson] = useState("");
+  const [comments, setComments] = useState<LineComment[]>([]);
+  const [docView, setDocView] = useState<"read" | "comment">("read");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
@@ -165,6 +169,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     opened.current = Date.now();
     setMode(null); setFeedback(""); setBudget(""); setDays(""); setContent(item.content ?? ""); setErr(""); setPicked(null);
     setReason(""); setRemember(false); setLesson(""); setOverride(""); setRetire([]); setNextReview(item.next_review ?? "");
+    setComments([]); setDocView("read");
   }, [item.interrupt_id, item.content]);
 
   async function send(decision: string, extra: Record<string, unknown> = {}) {
@@ -175,6 +180,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     try {
       await api.decide(featureId, item.interrupt_id, {
         decision, feedback, active_minutes: minutes, ...(reason ? { reason } : {}),
+        ...(decision === "revise" && comments.length ? { comments } : {}),
         ...(remember ? { remember: true, ...(lesson.trim() ? { lesson: lesson.trim() } : {}) } : {}), ...extra,
       });
       onDone();
@@ -183,6 +189,10 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
     } finally {
       setBusy(false);
     }
+  }
+
+  function addNote(text: string) {
+    setComments((cs) => (cs.some((c) => c.text === text) ? cs : [...cs, { quote: "", text }]));
   }
 
   const gate = item.gate === "release"
@@ -226,7 +236,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
           <p className="muted">
             {item.lanes && item.lanes.length > 1
               ? `${gateLabel(item.gate)}, decided by each lane in turn: ${item.lanes.join(" then ")}. This is ${item.lane}'s decision.`
-              : `${gateLabel(item.gate)} gate, decided by ${item.approvers.join(" or ")}.`}
+              : `${gateLabel(item.gate)}, decided by ${item.approvers.join(" or ")}.`}
           </p>
         )}
         {item.type === "escalation" && <p className="muted">{item.reason}</p>}
@@ -248,6 +258,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
           </p>
         )}
       </div>
+
+      {item.type === "gate" && !reviewGate && item.gate !== "incident" && <DecisionBrief featureId={featureId} interruptId={item.interrupt_id} />}
 
       {item.summary && <p>{item.summary}</p>}
 
@@ -278,7 +290,10 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       {!security && item.findings && item.findings.length > 0 && (
         <div>
           <h3>{delivery ? "What went wrong" : "What the evaluators found"}</h3>
-          <ul className="findings">{item.findings.map((f) => <li key={f}>{f}</li>)}</ul>
+          <ul className="findings">{item.findings.map((f) => (
+            <li key={f}>{f}{item.can_decide && canRevise && item.type === "gate" && (
+              <> <button type="button" className="linkish add-comment" onClick={() => addNote(f)}>Add as comment</button></>)}</li>
+          ))}</ul>
         </div>
       )}
 
@@ -304,7 +319,9 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         </details>
       )}
 
-      {item.agent_notes && item.agent_notes.length > 0 && <AgentNotes notes={item.agent_notes} />}
+      {item.agent_notes && item.agent_notes.length > 0 && (
+        <AgentNotes notes={item.agent_notes} onComment={item.can_decide && canRevise && item.type === "gate" ? addNote : undefined} />
+      )}
 
       {item.history && item.history.length > 0 && (
         <div>
@@ -525,8 +542,33 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
 
       {kind && (
         <div>
-          <h3 style={{ marginBottom: 8 }}>{ARTIFACTS[kind] ?? kind}</h3>
-          <div className="evidence"><ArtifactBody featureId={featureId} kind={kind} /></div>
+          <div className="doc-head">
+            <h3>{ARTIFACTS[kind] ?? kind}</h3>
+            {item.type === "gate" && item.can_decide && canRevise && (
+              <div className="segmented small" role="tablist" aria-label="How to view the document">
+                <button type="button" role="tab" aria-selected={docView === "read"} className={docView === "read" ? "on" : ""} onClick={() => setDocView("read")}>Read</button>
+                <button type="button" role="tab" aria-selected={docView === "comment"} className={docView === "comment" ? "on" : ""} onClick={() => setDocView("comment")}>Comment on lines</button>
+              </div>
+            )}
+          </div>
+          <div className="evidence">{docView === "comment"
+            ? <CommentableDoc featureId={featureId} kind={kind} comments={comments} onAdd={(c) => setComments([...comments, c])} />
+            : <ArtifactBody featureId={featureId} kind={kind} />}</div>
+        </div>
+      )}
+
+      {comments.length > 0 && (
+        <div className="comments-box">
+          <h3>Your comments ({comments.length})</h3>
+          <ol className="plain-ol small">
+            {comments.map((c, i) => (
+              <li key={i}>
+                {c.quote && <span className="muted">On “{c.quote.slice(0, 80)}{c.quote.length > 80 ? "…" : ""}”: </span>}{c.text}{" "}
+                <button type="button" className="linkish" onClick={() => setComments(comments.filter((_, j) => j !== i))}>Remove</button>
+              </li>
+            ))}
+          </ol>
+          <p className="small faint">They go to the agents with “Request changes”, each quoting its line.</p>
         </div>
       )}
 
@@ -536,7 +578,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         <>
           {mode === "revise" || mode === "retry" || mode === "abort" ? (
             <label className="field">
-              {mode === "revise" ? (item.gate === "incident" ? "What should triage look at?" : "What should the agents change?") : mode === "retry" ? "Guidance for the next attempt (optional)" : item.gate === "incident" ? "Why is no action needed?" : item.gate === "g0" ? "Why drop this initiative?" : inceptionGate ? "Why stop this product?" : item.gate === "release" ? "Why cancel this release?" : "Why stop this feature?"}
+              {mode === "revise" ? (item.gate === "incident" ? "What should triage look at?" : comments.length ? "Anything else to tell the agents? (optional: your comments go too)" : "What should the agents change?") : mode === "retry" ? "Guidance for the next attempt (optional)" : item.gate === "incident" ? "Why is no action needed?" : item.gate === "g0" ? "Why drop this initiative?" : inceptionGate ? "Why stop this product?" : item.gate === "release" ? "Why cancel this release?" : "Why stop this feature?"}
               <textarea value={feedback} onChange={(e) => setFeedback(e.target.value)} autoFocus />
             </label>
           ) : null}
@@ -647,7 +689,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
                     : item.traceability?.blocks ? { override_reason: override.trim() } : {})}>
                   {item.gate === "incident" ? `Approve ${chosen.length} action${chosen.length === 1 ? "" : "s"}` : gate?.approve ?? "Approve"}</button>
                 {item.gate !== "release" && canRevise && <button className="btn secondary" disabled={busy} onClick={() => setMode("revise")}>
-                  {item.gate === "incident" ? "Look again" : item.gate === "postmortem" ? "Rewrite" : "Request changes"}</button>}
+                  {item.gate === "incident" ? "Look again" : item.gate === "postmortem" ? "Rewrite"
+                    : comments.length ? `Request changes (${comments.length} comment${comments.length === 1 ? "" : "s"})` : "Request changes"}</button>}
                 {!roadmapGate && <button className={item.stuck ? "btn" : "btn secondary"} disabled={busy} onClick={() => send("takeover")}>Take over</button>}
                 <span className="spacer" />
                 {item.gate === "incident" && <button className="btn secondary" disabled={busy} onClick={() => setMode("abort")}>No action needed</button>}
@@ -691,7 +734,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
               </>
             )}
             {mode === "revise" && (
-              <button className="btn" disabled={busy || !feedback.trim()} onClick={() => send("revise")}>Send back with changes</button>
+              <button className="btn" disabled={busy || (!feedback.trim() && comments.length === 0)} onClick={() => send("revise")}>
+                {comments.length ? `Revise with ${comments.length} comment${comments.length === 1 ? "" : "s"}` : "Send back with changes"}</button>
             )}
             {mode === "retry" && (
               <button className="btn" disabled={busy} onClick={() => send("retry", budget ? { budget_usd: Number(budget) } : {})}>Retry with agents</button>

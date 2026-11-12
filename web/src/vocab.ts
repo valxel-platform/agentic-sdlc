@@ -20,18 +20,18 @@ export const WAITS: Record<string, string> = {
 };
 
 export const GATES: Record<string, { name: string; question: string; approve: string }> = {
-  g0: { name: "Initiative", question: "Commit to this initiative?", approve: "Approve initiative" },
+  g0: { name: "Initiative approval", question: "Commit to this initiative?", approve: "Approve initiative" },
   brief: { name: "Brief", question: "Is this the product we want?", approve: "Approve brief" },
   product: { name: "Product", question: "Approve the architecture and roadmap?", approve: "Approve and set up" },
   release: { name: "Release", question: "Approve this release?", approve: "Approve release" },
   incident: { name: "Incident", question: "What should we do about this incident?", approve: "Approve actions" },
   postmortem: { name: "Postmortem", question: "Close the incident with this postmortem?", approve: "Close incident" },
-  g1: { name: "Intent", question: "Is this worth building?", approve: "Approve intent" },
-  g2: { name: "Scope", question: "Is the scope right?", approve: "Approve scope" },
-  g3: { name: "Experience", question: "Is the experience right?", approve: "Approve design" },
-  g4: { name: "Architecture", question: "Approve the architecture?", approve: "Approve architecture" },
-  g5: { name: "Merge", question: "Merge these changes?", approve: "Approve merge" },
-  g6: { name: "Go-live", question: "Release to production?", approve: "Release" },
+  g1: { name: "Idea approval", question: "Is this worth building?", approve: "Approve the idea" },
+  g2: { name: "Scope approval", question: "Is the scope right?", approve: "Approve the scope" },
+  g3: { name: "Design approval", question: "Is the experience right?", approve: "Approve the design" },
+  g4: { name: "Architecture approval", question: "Approve the architecture?", approve: "Approve the architecture" },
+  g5: { name: "Code approval", question: "Merge these changes?", approve: "Approve the code" },
+  g6: { name: "Release approval", question: "Release to production?", approve: "Release to everyone" },
 };
 
 export const ARTIFACTS: Record<string, string> = {
@@ -69,7 +69,8 @@ export function gateLabel(gate?: string): string {
   if (gate === "brief") return "Brief";
   if (gate === "product") return "Product";
   if (gate === "review") return "Initiative review";
-  return g ? `${gate.toUpperCase()} ${g.name}` : gate.toUpperCase();
+  // Plain names first; the short code stays for people who know it.
+  return g ? `${g.name} (${gate.toUpperCase()})` : gate.toUpperCase();
 }
 
 export function waitingLabel(item: { type: string; gate?: string; phase?: string; lane?: string; wait?: string }, ownLane?: string): string {

@@ -150,6 +150,40 @@ class ReleaseIn(BaseModel):
     initiative: str = ""
 
 
+class NotifyIn(BaseModel):
+    email: str | None = Field(default=None, max_length=200, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    needed: bool | None = None
+    staging: bool | None = None
+
+
+class WatchIn(BaseModel):
+    on: bool = True
+
+
+class ItemRef(BaseModel):
+    feature_id: str
+    interrupt_id: str
+
+
+class BatchIn(BaseModel):
+    items: list[ItemRef] = Field(min_length=1, max_length=50)
+    active_minutes: float = Field(0.0, ge=0)
+
+
+class RequestIn(BaseModel):
+    description: str = Field(min_length=10, max_length=8000)
+
+
+class StartIn(BaseModel):
+    indexes: list[int] = Field(min_length=1, max_length=50)
+    order: str = Field("together", pattern="^(together|sequence)$")
+
+
+class LineComment(BaseModel):
+    quote: str = Field("", max_length=1000, description="The line the comment is about, as written")
+    text: str = Field(min_length=1, max_length=2000)
+
+
 class DecisionIn(BaseModel):
     decision: str = Field(examples=["approve", "revise", "takeover", "handback", "resolved", "retry", "abort"])
     feedback: str = ""
@@ -170,6 +204,8 @@ class DecisionIn(BaseModel):
                                      "retire (each opens a retire intent)")
     review_by: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$",
                                   description="Initiative reviews, continue: the next review date")
+    comments: list[LineComment] | None = Field(default=None, max_length=50,
+                                               description="Revise: comments on specific lines of the document")
 
 
 class SubmitIn(BaseModel):
@@ -197,6 +233,12 @@ class DraftIn(BaseModel):
     ui: bool | None = Field(default=None, description="Whether the intent changes what people see")
     experience: dict[str, str] | None = Field(default=None, description="The experience brief: where, main_task, "
                                               "context, look")
+    size: str | None = Field(default=None, pattern="^(feature|initiative|product)$")
+    horizon: str | None = None
+    research: str | None = None
+    name: str | None = Field(default=None, max_length=120)
+    org: str | None = Field(default=None, max_length=100)
+    budget_usd: float | None = Field(default=None, ge=0)
 
 
 class EvalRunIn(BaseModel):
@@ -1002,6 +1044,125 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
         return {"feature_id": iid}
 
+    @api.get("/me/notifications")
+    def my_notifications(user: User = Depends(current_user)) -> dict:
+        from dataclasses import asdict as _asdict
+
+        n = eng().services.notifier
+        p = _asdict(n.get(user.login, user.teams))
+        return {**{k: p[k] for k in ("email", "needed", "staging", "watch")},
+                "channels": {"email": bool(os.environ.get("VRIXEL_SMTP_HOST")),
+                             "chat": bool(os.environ.get("VRIXEL_NOTIFY_WEBHOOK"))},
+                "sent": [m for m in n.outbox if user.login in m["to"]][-20:]}
+
+    @api.put("/me/notifications")
+    def set_notifications(body: NotifyIn, user: User = Depends(current_user)) -> dict:
+        eng().services.notifier.set(user.login, user.teams, **body.model_dump())
+        return my_notifications(user)
+
+    @api.post("/threads/{thread_id}/watch")
+    def watch(thread_id: str, body: WatchIn, user: User = Depends(current_user)) -> dict:
+        p = eng().services.notifier.watch(user.login, thread_id, body.on)
+        return {"watching": thread_id in p.watch}
+
+    def approvers_of(thread_id: str, v: dict) -> list[str]:
+        """Who approved this kind of thread, so may merge its record: the council, or the lane's G0 approvers."""
+        council = list((eng().services.settings.inception or {}).get("council") or [])
+        if v.get("product_id") == "INCEPTION" or thread_id.split("-")[1] in ("REV",):
+            return council
+        lane = eng().services.snapshot(v["product_id"]).product
+        return list(lane.approvers.get("g0") or lane.approvers.get("g1") or []) + council
+
+    @api.get("/threads/{thread_id}/records")
+    def records(thread_id: str, user: User = Depends(current_user)) -> list[dict]:
+        try:
+            return eng().record_prs(thread_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @api.post("/threads/{thread_id}/records/{key}/merge")
+    def merge_record(thread_id: str, key: str, user: User = Depends(current_user)) -> dict:
+        """Merge an approved roadmap or setup pull request here, instead of a second click on GitHub."""
+        from ..integrations.github import GitHubError
+
+        try:
+            v = eng().view(thread_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        who = approvers_of(thread_id, v)
+        if not can_decide(user, {"approvers": who}):
+            raise HTTPException(403, f"Only {', '.join(who) or 'its approvers'} can merge it")
+        try:
+            return eng().merge_record(thread_id, key, by=user.login)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (GitHubError, RuntimeError) as exc:
+            raise HTTPException(409, f"GitHub didn't merge it ({exc}). Merge it on GitHub instead.") from exc
+
+    @api.post("/initiatives/{initiative_id}/start", status_code=201)
+    def start_features(initiative_id: str, body: StartIn, user: User = Depends(current_user)) -> dict:
+        """Start an approved initiative's features: together, or in order."""
+        try:
+            v = eng().view(initiative_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        member_of(user, v["product_id"])
+        try:
+            return eng().start_candidates(initiative_id, body.indexes, order=body.order, by=user.login)
+        except DuplicateIntent as exc:
+            raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/inceptions/{inception_id}/first-feature", status_code=201)
+    def first_feature(inception_id: str, user: User = Depends(current_user)) -> dict:
+        try:
+            v = eng().view(inception_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        who = approvers_of(inception_id, v)
+        if not can_decide(user, {"approvers": who}):
+            raise HTTPException(403, f"Only {', '.join(who) or 'the product council'} can start it")
+        try:
+            return {"feature_id": eng().start_first_feature(inception_id, by=user.login)}
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @api.put("/features/{feature_id}/request")
+    def change_request(feature_id: str, body: RequestIn, user: User = Depends(current_user)) -> dict:
+        """Change what was asked for, before the build starts (the person who asked, or a G1 approver)."""
+        try:
+            v = eng().view(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        member_of(user, v["product_id"])
+        g1 = eng().services.snapshot(v["product_id"]).product.approvers.get("g1", [])
+        if v.get("created_by") != user.login and not can_decide(user, {"approvers": g1}):
+            raise HTTPException(403, "Only the person who asked for it, or its idea approvers, can change the request")
+        try:
+            return eng().change_request(feature_id, body.description, by=user.login)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/threads/{thread_id}/resize", status_code=201)
+    def resize(thread_id: str, user: User = Depends(current_user)) -> dict:
+        """A feature at G1 becomes an initiative; an initiative at G0 becomes one feature."""
+        try:
+            v = eng().view(thread_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        member_of(user, v["product_id"])
+        waiting = [p for p in v["pending"] if p.get("gate") in ("g1", "g0")]
+        if v.get("created_by") != user.login and not any(can_decide(user, p) for p in waiting):
+            raise HTTPException(403, "Only the person who asked for it, or its approvers, can change its size")
+        try:
+            new = eng().resize(thread_id, by=user.login, background=True)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        return {"feature_id": new}
+
     @api.post("/initiatives/{initiative_id}/features", status_code=201)
     def start_candidate(initiative_id: str, body: StartCandidateIn, user: User = Depends(current_user)) -> dict:
         try:
@@ -1082,6 +1243,15 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         v["pending"] = [decorate(feature_id, {**p, "product_id": v["product_id"]}, user) for p in v["pending"]]
+        try:  # which of the gates ahead are this person's to decide
+            lane = eng().services.snapshot(v["product_id"]).product
+            for st in (v.get("path") or {}).get("stations") or []:
+                if st["kind"] == "gate":
+                    st["mine"] = can_decide(user, {"approvers": lane.approvers.get(st["key"], [])})
+        except Exception:
+            pass
+        n = getattr(eng().services, "notifier", None)
+        v["watching"] = bool(n and feature_id in n.get(user.login).watch)
         return v
 
     @api.get("/features/{feature_id}/trace")
@@ -1127,13 +1297,53 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
     @api.get("/inbox")
     def inbox(user: User = Depends(current_user), mine: bool = False, product_id: str | None = None) -> list[dict]:
-        items = []
+        from ..decisions import low_risk
+
+        items, products = [], {}
         for p in eng().inbox(product_id):
             fid = p["feature_id"]
             item = decorate(fid, {**p, "product_id": p.get("product_id") or fid.rsplit("-FEAT-", 1)[0]}, user)
             if not mine or item["can_decide"]:
+                pid = item["product_id"]
+                if pid not in products:
+                    try:
+                        prod = eng().services.snapshot(pid).product
+                        products[pid] = (prod.name, prod.data_class)
+                    except Exception:
+                        products[pid] = (pid, "phi")
+                item["product_name"], dc = products[pid]
+                try:
+                    item["initiative_id"] = eng()._state(fid).get("initiative_id", "") if "-FEAT-" in fid else ""
+                except Exception:
+                    item["initiative_id"] = ""
+                item["low_risk"], item["low_risk_why"] = low_risk(item, dc)
                 items.append(item)
         return items
+
+    @api.post("/inbox/approve")
+    def approve_batch(body: BatchIn, user: User = Depends(current_user)) -> dict:
+        """Approve several low-risk decisions at once. Each is checked again here; any that isn't low risk
+        (any more), or isn't this person's, is left for one-at-a-time."""
+        from ..decisions import low_risk
+
+        approved, skipped = [], []
+        for ref in body.items:
+            try:
+                item = eng().item(ref.feature_id, ref.interrupt_id)
+                pid = eng().view(ref.feature_id)["product_id"]
+                ok, why = low_risk(item, eng().services.snapshot(pid).product.data_class)
+                if ok and not can_decide(user, {"approvers": item_approvers(ref.feature_id, {**item, "product_id": pid})}):
+                    ok, why = False, "not yours to decide"
+                if not ok:
+                    skipped.append({"feature_id": ref.feature_id, "why": why})
+                    continue
+                eng().decide(ref.feature_id, ref.interrupt_id,
+                             {"decision": "approve", "approver": user.login, "active_minutes": body.active_minutes / max(1, len(body.items)),
+                              "feedback": f"Approved with {len(body.items)} low-risk decisions"}, background=True)
+                approved.append(ref.feature_id)
+            except (KeyError, RuntimeError, InvalidDecision) as exc:
+                skipped.append({"feature_id": ref.feature_id, "why": str(exc)[:200]})
+        return {"approved": approved, "skipped": skipped}
 
     @api.post("/features/{feature_id}/decisions/{interrupt_id}", status_code=202)
     def decide(feature_id: str, interrupt_id: str, body: DecisionIn, user: User = Depends(current_user)) -> dict:
@@ -1157,12 +1367,41 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                 raise HTTPException(403, f"Only {', '.join(who) or 'the traceability approvers'} can release "
                                     "with traceability gaps")
         decision = body.model_dump(exclude_none=True) | {"approver": user.login}
+        if decision.get("comments"):  # line comments go to the agents as part of the feedback
+            from ..decisions import with_comments
+
+            decision["feedback"] = with_comments(decision.get("feedback", ""), decision.pop("comments"))
         try:
             return eng().decide(feature_id, interrupt_id, decision, background=True)
         except InvalidDecision as exc:
             raise HTTPException(422, str(exc)) from exc
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    @api.get("/features/{feature_id}/decisions/{interrupt_id}/brief")
+    def decision_brief(feature_id: str, interrupt_id: str, user: User = Depends(current_user)) -> dict:
+        """The top of a gate: a short summary, and what changed since the version sent back."""
+        from .. import decisions
+
+        try:
+            item = eng().item(feature_id, interrupt_id)
+            v = eng().view(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if v["product_id"] not in lanes_for(user) and v["product_id"] != "INCEPTION":
+            raise HTTPException(403, f"You aren't a member of {v['product_id']}'s organization")
+        ref = item.get("artifact")
+        if ref:
+            dc = "phi"
+            try:
+                dc = eng().services.snapshot(v["product_id"]).product.data_class
+            except Exception:
+                pass
+            return decisions.brief(eng().services, feature_id, ref, history=item.get("history"),
+                                   product_id=v["product_id"], data_class=dc)
+        if item.get("preview"):
+            return {"summary": {"lines": decisions._skim(item["preview"]), "by": "document"}}
+        return {"summary": {"lines": [], "by": "document"}}
 
     @api.post("/features/{feature_id}/sync")
     def sync(feature_id: str, user: User = Depends(current_user)) -> dict:
@@ -1189,9 +1428,10 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         lanes = lanes_for(user)
         if not lanes:
             raise HTTPException(403, "You aren't a member of any product organization")
-        s = stores["intakes"].create(user.login, lanes)
-        greeting = ("What would you like to build? Describe the problem in a sentence or two, "
-                    "and mention the product if you know it.")
+        starters = list((eng().services.settings.inception or {}).get("starters") or [])
+        s = stores["intakes"].create(user.login, lanes, starter=can_decide(user, {"approvers": starters}))
+        greeting = ("What do you want to do? Describe it in your own words: a change to a product, a goal you want "
+                    "to move, or a new product. I'll work out the size with you.")
         s.messages.append({"role": "agent", "text": greeting, "at": s.created_at})
         stores["intakes"].save(s)
         return s.to_dict()
@@ -1301,6 +1541,39 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(404, f"No attachment {aid}")
         return attachment_response(eng().services.attachments.path(meta, feature_id=feature_id), meta)
 
+    def submit_sized(s, user: User) -> dict:
+        """An initiative (to G0) or a new product (to inception) from the front door."""
+        from ..intake import AGENT_PROPOSES
+
+        d = s.draft
+        measure = "" if d.success_metric == AGENT_PROPOSES else d.success_metric
+        try:
+            if d.size == "initiative":
+                if d.product_id not in lanes_for(user):
+                    raise HTTPException(403, f"You aren't a member of {d.product_id}'s organization")
+                s.feature_id = eng().create_initiative(
+                    product_id=d.product_id, title=d.title, request=d.request(), measure=measure,
+                    horizon="" if d.horizon == AGENT_PROPOSES else d.horizon, created_by=user.login,
+                    background=True, research=d.research or "quick")
+                s.kind, what = "initiative", "an initiative: research first, then the draft for G0"
+            else:
+                from ..inception import Vision
+
+                starters = list((eng().services.settings.inception or {}).get("starters") or [])
+                if not can_decide(user, {"approvers": starters}):
+                    raise HTTPException(403, f"Only {', '.join(starters) or 'the inception starters'} can start a product")
+                v = Vision(name=d.name or d.title, org=d.org, vision=d.problem,
+                           goals=[measure] if measure else [],
+                           users=[] if d.users == AGENT_PROPOSES else [d.users], budget_usd=d.budget_usd,
+                           attachments_text="", research_depth=d.research or "quick")
+                s.feature_id = eng().create_inception(v, created_by=user.login, background=True)
+                s.kind, what = "inception", "a new product: research first, then the brief for the product council"
+        except GovernanceError as exc:
+            raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
+        s.messages.append({"role": "agent", "text": f"Started {s.feature_id}, {what}.", "at": s.messages[-1]["at"]})
+        stores["intakes"].save(s)
+        return s.to_dict()
+
     @api.post("/intake/{sid}/submit", status_code=201)
     def intake_submit(sid: str, body: SubmitIn | None = None, user: User = Depends(current_user)) -> dict:
         s = intake_session(sid, user)
@@ -1308,6 +1581,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(409, f"Already submitted as {s.feature_id}")
         if s.draft.missing():
             raise HTTPException(422, f"Still needed: {', '.join(s.draft.missing())}")
+        if s.draft.size in ("initiative", "product"):
+            return submit_sized(s, user)
         if s.draft.product_id not in lanes_for(user):
             raise HTTPException(403, f"You aren't a member of {s.draft.product_id}'s organization")
         if s.duplicate:
@@ -1325,6 +1600,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
         except GovernanceError as exc:
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
+        s.kind = "feature"
         s.messages.append({"role": "agent", "text": f"Submitted as {s.feature_id}. Agents have started on it.",
                            "at": s.messages[-1]["at"]})
         stores["intakes"].save(s)

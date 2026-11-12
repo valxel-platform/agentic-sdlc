@@ -7,6 +7,7 @@ import { useLive } from "../live";
 import { Rail } from "../components/Rail";
 import { money, threadPath } from "../vocab";
 import { Pending } from "./Thread";
+import { FirstFeature, RecordPrs } from "../components/NextSteps";
 
 const STATUS: Record<string, { text: string; chip: string }> = {
   researching: { text: "Researching the problem and the market", chip: "run" },
@@ -239,6 +240,8 @@ export function InceptionPage() {
                     {s.teams && <span className="small mono">{s.teams.join(", ")}</span>}
                   </li>
                 ))}
+                <li><RecordPrs id={v.feature_id} /></li>
+                <li><FirstFeature id={v.feature_id} /></li>
                 <li><span className="small muted">Next: merge the governance pull request, then the registry one. When the tool reloads its
                   config, the product's initiatives are on the Roadmap page, ready to start; each feature creates the repos the
                   architecture names when its design passes G4.</span></li>

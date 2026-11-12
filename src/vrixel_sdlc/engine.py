@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
@@ -19,6 +21,8 @@ from .gateway import summarize
 from .services import Services
 from .waits import WaitChecker
 from .worksync import InMemoryLinkStore, WorkSync
+
+log = logging.getLogger(__name__)
 
 
 KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release", "INC": "incident", "PRD": "inception",
@@ -607,6 +611,193 @@ class FeatureEngine:
         self.bus.publish({"type": "feature.created", "feature_id": iid, "product_id": product_id})
         (self._submit if background else self._execute)(iid, inp)
         return iid
+
+    def resize(self, thread_id: str, *, by: str, background: bool = False) -> str:
+        """A feature still at its first gate becomes an initiative, or an initiative not yet approved
+        becomes one feature. What was written carries over; the old thread stops, saying where it went."""
+        state = self._state(thread_id)
+        kind = kind_of(thread_id)
+        gate = {"feature": "g1", "initiative": "g0"}.get(kind)
+        if gate is None:
+            raise ValueError("Only a feature or an initiative can change size")
+        waiting = [p for p in self.pending(thread_id) if p.get("gate") == gate]
+        if not waiting:
+            raise ValueError(f"{thread_id} can change size only while it waits at {gate.upper()}, before it's approved")
+        if kind == "feature":
+            new = self.create_initiative(product_id=state["product_id"], title=state["title"],
+                                         request=state.get("description") or state["title"], created_by=by,
+                                         background=background, research="quick")
+        else:
+            new = self.create(product_id=state["product_id"], title=state["title"], description=state.get("request", ""),
+                              created_by=by, background=background,
+                              not_duplicate_reason=f"Was initiative {thread_id}")
+        self.decide(thread_id, waiting[0]["interrupt_id"],
+                    {"decision": "abort", "approver": by,
+                     "feedback": f"Became {'initiative' if kind == 'feature' else 'feature'} {new}"},
+                    background=background)
+        return new
+
+    def change_request(self, feature_id: str, description: str, *, by: str) -> dict:
+        """The person who asked changes what they asked for, before the build starts. The new request
+        replaces the old; a gate waiting now goes back to its agents with the change as feedback."""
+        import difflib as _difflib
+
+        s = self._state(feature_id)
+        if (s.get("approvals") or {}).get("g4"):
+            raise ValueError("The build has started: start a follow-up feature for the change instead")
+        if s.get("status") in ("done", "aborted"):
+            raise ValueError("This feature has finished")
+        old = s.get("description", "")
+        if description.strip() == old.strip():
+            raise ValueError("Nothing changed")
+        if self.is_running(feature_id):
+            raise RuntimeError("Agents are working on it right now: try again when it's waiting")
+        added = [ln[2:] for ln in _difflib.ndiff(old.splitlines(), description.splitlines()) if ln.startswith("+ ")]
+        removed = [ln[2:] for ln in _difflib.ndiff(old.splitlines(), description.splitlines()) if ln.startswith("- ")]
+        note = ("The person who asked for this changed the request."
+                + (" Added: " + " / ".join(added) if added else "") + (" Removed: " + " / ".join(removed) if removed else ""))
+        _now = lambda: datetime.now(timezone.utc).isoformat()  # noqa: E731
+
+        change = {"description": description.strip(),
+                  "events": [{"at": _now(), "node": "request", "kind": "changed", "detail": note[:500], "by": by}]}
+        gate = next((p for p in self.pending(feature_id) if p.get("type") == "gate" and "revise" in (p.get("allowed") or [])), None)
+        if gate:  # the new request and the send-back in one step, so the agents revise against it
+            self.decide(feature_id, gate["interrupt_id"], {"decision": "revise", "approver": by, "feedback": note,
+                                                           "reason": "wrong_scope"}, background=True, update=change)
+        else:
+            self._g(feature_id).update_state(self._config(feature_id), change)
+        return {"feature_id": feature_id, "sent_back": gate.get("gate") if gate else "", "note": note}
+
+    # ------------------------------------------------------------------ no dead ends after approval
+
+    def record_prs(self, thread_id: str) -> list[dict]:
+        """The governance pull requests an approval opened, and whether each is merged yet."""
+        import re as _re
+
+        s = self._state(thread_id)
+        out = []
+        if s.get("record_pr", {}).get("url"):
+            pr = s["record_pr"]
+            out.append({"key": "record", "label": "Roadmap record", "url": pr["url"], "merged": bool(pr.get("merged")),
+                        "repo": self.services.settings.entry(s["product_id"]).governance.full_name,
+                        "number": pr.get("number") or int(_re.search(r"/pull/(\d+)", pr["url"]).group(1))})
+        for st in (s.get("setup") or {}).get("steps") or []:
+            if st.get("url") and st["step"] in ("governance_pr", "registry_pr"):
+                out.append({"key": st["step"], "url": st["url"], "merged": bool(st.get("merged")), "repo": st["repo"],
+                            "label": "Governance" if st["step"] == "governance_pr" else "Registry",
+                            "number": int(_re.search(r"/pull/(\d+)", st["url"]).group(1))})
+        return out
+
+    def merge_record(self, thread_id: str, key: str, *, by: str) -> dict:
+        """Merge one of those pull requests from the tool: the person approved it already, so no second
+        click on GitHub. Branch protection still applies; GitHub's refusal is passed on."""
+        pr = next((p for p in self.record_prs(thread_id) if p["key"] == key), None)
+        if pr is None:
+            raise KeyError(f"{thread_id} has no {key} pull request")
+        if not pr["merged"]:
+            res = self.services.github.merge(repo=pr["repo"], number=pr["number"], actor=by)
+            if res.get("state") != "merged":
+                raise RuntimeError(f"GitHub didn't merge {pr['url']}")
+        s = self._state(thread_id)
+        if key == "record":
+            update = {"record_pr": {**s["record_pr"], "merged": True, "merged_by": by}}
+        else:
+            setup = dict(s.get("setup") or {})
+            setup["steps"] = [{**st, "merged": True, "merged_by": by} if st["step"] == key else st
+                              for st in setup.get("steps") or []]
+            update = {"setup": setup}
+        self._g(thread_id).update_state(self._config(thread_id), update)
+        self.bus.publish({"type": "feature.updated", "feature_id": thread_id})
+        return {**pr, "merged": True}
+
+    def _queue(self) -> dict:
+        import json as _json
+        from pathlib import Path as _P
+
+        p = _P(self.services.settings.artifact_dir) / "start-queues.json"
+        try:
+            return _json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        except ValueError:
+            return {}
+
+    def _save_queue(self, q: dict) -> None:
+        import json as _json
+        from pathlib import Path as _P
+
+        (_P(self.services.settings.artifact_dir) / "start-queues.json").write_text(_json.dumps(q), encoding="utf-8")
+
+    def start_candidates(self, initiative_id: str, indexes: list[int], *, order: str, by: str) -> dict:
+        """Start an approved initiative's candidate features: together, or in order (the next starts
+        when the one before reaches everyone)."""
+        v = self.view(initiative_id)
+        if v["status"] != "approved":
+            raise ValueError("Only an approved initiative's features can be started")
+        cands = v["candidates"]
+        picked = [i for i in dict.fromkeys(indexes) if 0 <= i < len(cands) and not cands[i]["started"]]
+        if not picked:
+            raise ValueError("Nothing to start: those features have started already")
+        first = picked if order == "together" else picked[:1]
+        started = [self.create(product_id=v["product_id"], title=cands[i]["title"], description=cands[i]["description"],
+                               created_by=by, background=True, initiative_id=initiative_id,
+                               not_duplicate_reason=f"A candidate feature of {initiative_id}") for i in first]
+        q = self._queue()
+        if order == "sequence" and len(picked) > 1:
+            q[initiative_id] = {"after": started[-1], "next": picked[1:], "by": by}
+        else:
+            q.pop(initiative_id, None)
+        self._save_queue(q)
+        return {"started": started, "queued": [cands[i]["title"] for i in picked[1:]] if order == "sequence" else []}
+
+    def _start_next_in_order(self, feature_id: str) -> str | None:
+        """A feature that reached everyone: start the next one its initiative queued after it."""
+        q = self._queue()
+        hit = next(((iid, e) for iid, e in q.items() if e.get("after") == feature_id), None)
+        if hit is None:
+            return None
+        iid, e = hit
+        s = self._state(feature_id)
+        if s.get("status") != "done":
+            return None
+        try:
+            v = self.view(iid)
+            nxt = next((i for i in e["next"] if i < len(v["candidates"]) and not v["candidates"][i]["started"]), None)
+            if nxt is None:
+                q.pop(iid)
+                self._save_queue(q)
+                return None
+            c = v["candidates"][nxt]
+            fid = self.create(product_id=v["product_id"], title=c["title"], description=c["description"],
+                              created_by=e.get("by", ""), background=True, initiative_id=iid,
+                              not_duplicate_reason=f"A candidate feature of {iid}, started in order")
+        except Exception:
+            log.warning("starting the next feature of %s failed", iid, exc_info=True)
+            return None
+        rest = [i for i in e["next"] if i != nxt]
+        if rest:
+            q[iid] = {**e, "after": fid, "next": rest}
+        else:
+            q.pop(iid)
+        self._save_queue(q)
+        return fid
+
+    def start_first_feature(self, inception_id: str, *, by: str) -> str:
+        """After inception: the first initiative's first feature, once the product is registered."""
+        from .inception import formats
+        from .inception.setup import ids
+
+        s = self._state(inception_id)
+        if s.get("status") != "set_up":
+            raise ValueError("The product isn't set up yet: approve the product gate first")
+        pid = ids(s["brief"])["product_id"]
+        if pid not in self.services.settings.registry:
+            raise ValueError(f"{pid} isn't registered yet: merge the governance and registry pull requests, then "
+                             "reload the config")
+        inis = [i for i in formats.initiatives(s.get("roadmap", "")) if i.get("id")]
+        if not inis or not inis[0]["features"]:
+            raise ValueError("The roadmap has no first feature to start")
+        f = inis[0]["features"][0]
+        return self.create(product_id=pid, title=f["title"], description=f.get("does", ""), created_by=by,
+                           background=True, initiative_id=f"{pid}-INI-1")
 
     def create_inception(self, vision, *, created_by: str = "", background: bool = False) -> str:
         """Start a product inception: the brief first, then the product council's brief gate."""
@@ -1437,6 +1628,23 @@ class FeatureEngine:
             self._execute(feature_id, inp)
         return feature_id
 
+    def path(self, product_id: str, stations: list[dict]) -> dict:
+        from . import progress
+
+        cached = self._path_history.get(product_id) if hasattr(self, "_path_history") else None
+        if cached is None or time.monotonic() - cached[0] > 600:
+            states = []
+            for row in self.index.all():
+                if row["product_id"] == product_id and kind_of(row["feature_id"]) == "feature":
+                    try:
+                        states.append(self._state(row["feature_id"]))
+                    except Exception:
+                        continue
+            if not hasattr(self, "_path_history"):
+                self._path_history = {}
+            cached = self._path_history[product_id] = (time.monotonic(), progress.history(states, RAIL))
+        return progress.estimate(stations, cached[1])
+
     def _note_asked(self, feature_id: str) -> None:
         """When each question to a person was first asked, so its wait can be measured."""
         try:
@@ -1449,6 +1657,23 @@ class FeatureEngine:
                                           "kind": "asked", "ref": p["interrupt_id"],
                                           "detail": {"type": p.get("type"), "gate": p.get("gate", ""),
                                                      "phase": p.get("phase", "")}})
+        try:  # an initiative's features started in order: the next one, once this reached everyone
+            if kind_of(feature_id) == "feature":
+                self._start_next_in_order(feature_id)
+        except Exception:
+            log.warning("starting the next feature after %s failed", feature_id, exc_info=True)
+        notifier = getattr(self.services, "notifier", None)
+        if notifier is None:
+            return
+        try:  # tell the people who are needed, and the watchers when it reaches staging (vrixel_sdlc.notify)
+            s = self._state(feature_id)
+            for p in pending:
+                if p.get("type") != "external":
+                    notifier.needed({**p, "feature_id": feature_id}, s.get("title", ""))
+            if any(e.get("node") == "staging_wait" and e.get("kind") == "passed" for e in s.get("events") or []):
+                notifier.reached(feature_id, s.get("title", ""), "staging")
+        except Exception:  # never stops the work
+            log.warning("notifying about %s failed", feature_id, exc_info=True)
 
     def start(self, **kwargs) -> dict:
         """Create a feature and run it until its first human gate (synchronous)."""
@@ -1464,7 +1689,8 @@ class FeatureEngine:
                 return p
         raise KeyError(f"No pending interrupt {interrupt_id} on {feature_id}")
 
-    def decide(self, feature_id: str, interrupt_id: str, decision: dict, *, background: bool = False) -> dict:
+    def decide(self, feature_id: str, interrupt_id: str, decision: dict, *, background: bool = False,
+               update: dict | None = None) -> dict:
         if self.is_running(feature_id):
             raise RuntimeError(f"{feature_id} is still running; decide once it is waiting")
         item = self.item(feature_id, interrupt_id)
@@ -1488,7 +1714,7 @@ class FeatureEngine:
             self.services.effort.add({"feature_id": feature_id, "product_id": item.get("product_id", ""),
                                       "kind": "incident_decision", "who": d.get("approver", ""),
                                       "ref": interrupt_id, "minutes": d["active_minutes"]})
-        cmd = Command(resume={interrupt_id: d})
+        cmd = Command(resume={interrupt_id: d}, update=update) if update else Command(resume={interrupt_id: d})
         if background:
             self._submit(feature_id, cmd)
             return {"feature_id": feature_id, "accepted": True}
@@ -1523,7 +1749,9 @@ class FeatureEngine:
             "track": s.get("track", "standard"),
             "running": (running := self.is_running(feature_id)),
             "error": self.errors.get(feature_id),
-            "rail": rail(s, pending, running=running),
+            "rail": (stations := rail(s, pending, running=running)),
+            # How long each step usually takes in this product, and when it should be done (vrixel_sdlc.progress).
+            "path": self.path(s.get("product_id", ""), stations),
             # Each agent session: what it was for, its cost, and a link to its trace (vrixel_sdlc.telemetry).
             "agent_sessions": agent_sessions(records, self.trace_link),
             "constitution_version": s.get("constitution_version"),

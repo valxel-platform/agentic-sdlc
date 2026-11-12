@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, ATTACH_ACCEPT, EXPERIENCE_DELEGATED, PROFILE_HELP, PROFILE_LABEL, type Attachment, type Draft, type ExperienceKey, type IntakeSession, type Me, type Profile } from "../api";
+import { AGENT_PROPOSES, api, ATTACH_ACCEPT, EXPERIENCE_DELEGATED, PROFILE_HELP, PROFILE_LABEL, type Attachment, type Draft, type ExperienceKey, type IntakeSession, type Me, type Profile, type RequestSize } from "../api";
+import { threadPath } from "../vocab";
 import { AttachmentList } from "../components/Attachments";
 import { SimilarList } from "../components/External";
 import { Mark } from "../components/Mark";
@@ -19,13 +20,30 @@ const EXPERIENCE: { key: ExperienceKey; label: string; hint: string }[] = [
   { key: "context", label: "Where they use it", hint: "On a phone in the field, at a desk…" },
   { key: "look", label: "Look", hint: "Follow the current design, or what to mirror or avoid" },
 ];
-const FIELD_LABEL: Record<string, string> = { ...Object.fromEntries(NEEDS.map((n) => [n.key, n.label])), experience: "Experience" };
+/** What an initiative or a new product needs, in the order the agent asks. */
+const SIZED_NEEDS: Record<"initiative" | "product", { key: keyof Draft; label: string }[]> = {
+  initiative: [{ key: "product_id", label: "Product" }, { key: "problem", label: "Outcome" },
+    { key: "success_metric", label: "Measure" }, { key: "horizon", label: "When" }, { key: "research", label: "Research" }],
+  product: [{ key: "name", label: "Name" }, { key: "org", label: "GitHub org" }, { key: "problem", label: "The idea" },
+    { key: "users", label: "Users" }, { key: "success_metric", label: "First goal" }, { key: "research", label: "Research" }],
+};
+const FIELD_LABEL: Record<string, string> = {
+  ...Object.fromEntries(NEEDS.map((n) => [n.key, n.label])), experience: "Experience", size: "Size",
+  horizon: "When", research: "Research", name: "Name", org: "GitHub org",
+};
+const SIZE: Record<RequestSize, { label: string; what: string; submit: string }> = {
+  feature: { label: "Feature", what: "One change. Goes straight to a brief and G1.", submit: "Submit intent" },
+  initiative: { label: "Initiative", what: "Several features toward one goal you can measure. Researched, then drafted for G0.", submit: "Draft the initiative" },
+  product: { label: "New product", what: "New users or a new business. Researched, then a brief for the product council.", submit: "Start the product" },
+};
+const RESEARCH: Record<string, string> = { quick: "Quick web research", thorough: "Thorough research", own: "I've done my own" };
 
-/** Openings people can start from; they only fill the message box. */
-const STARTERS = [
-  "Customers can't … because …",
-  "Our team spends hours each week on …",
-  "We need to comply with … by …",
+/** Examples people can start from; they only fill the message box. */
+const STARTERS: { size: RequestSize; text: string }[] = [
+  { size: "feature", text: "Add a CSV export to the visits list" },
+  { size: "initiative", text: "Cut no-shows by a quarter this year" },
+  { size: "initiative", text: "Make onboarding a new clinic take a day, not a week" },
+  { size: "product", text: "A booking app for small vet practices" },
 ];
 
 export function Intake({ me }: { me: Me }) {
@@ -124,6 +142,11 @@ export function Intake({ me }: { me: Me }) {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); say(); }
   }
 
+  function resize(size: RequestSize) {
+    if (!s || s.draft.size === size) return;
+    run(api.intakeDraft(s.id, { size }));
+  }
+
   function edit(field: keyof Draft, value: string) {
     if (!s) return;
     setS({ ...s, draft: { ...s.draft, [field]: value } });
@@ -157,7 +180,10 @@ export function Intake({ me }: { me: Me }) {
 
   const submitted = Boolean(s.feature_id);
   const names = Object.fromEntries(me.lanes.map((l) => [l.id, l.name]));
-  const needs: { key: string; label: string }[] = s.draft.ui ? [...NEEDS, { key: "experience", label: "Experience" }] : NEEDS;
+  const size = s.draft.size;
+  const sized = size === "initiative" || size === "product";
+  const needs: { key: string; label: string }[] = sized ? SIZED_NEEDS[size]
+    : s.draft.ui ? [...NEEDS, { key: "experience", label: "Experience" }] : NEEDS;
   const have = needs.filter((n) => !s.missing.includes(n.key)).length;
   const last = s.messages[s.messages.length - 1];
   const options = !submitted && !busy && last?.role === "agent" ? last.options ?? [] : [];
@@ -169,8 +195,9 @@ export function Intake({ me }: { me: Me }) {
     <>
       <div className="page-head">
         <div>
-          <h1>New intent</h1>
-          <p className="muted">Talk it through with the intake agent. It fills in the intent as you go, and you submit it when it's right.</p>
+          <h1>What do you want to do?</h1>
+          <p className="muted">Describe it in your own words. You don't need to know whether it's a feature, an initiative or
+            a new product: the agent suggests one, and you can change it.</p>
         </div>
         <button className="btn secondary" onClick={() => api.intakeStart().then((x) => nav(`/intake/${x.id}`))}>Start over</button>
       </div>
@@ -218,8 +245,10 @@ export function Intake({ me }: { me: Me }) {
             {submitted && (
               <li className="turn system">
                 <div className="said">
-                  Submitted as <Link to={`/features/${s.feature_id}`}>{s.feature_id}</Link>. Agents have started discovery;
-                  its first gate will appear in <Link to="/inbox">Decisions</Link>.
+                  Started <Link to={threadPath(s.feature_id)}>{s.feature_id}</Link>.{" "}
+                  {s.kind === "initiative" ? "An agent is researching it, then drafting it for G0." :
+                    s.kind === "inception" ? "An agent is researching it, then agents write the brief for the product council." :
+                      "Agents have started discovery."} Its first decision will appear in <Link to="/inbox">Decisions</Link>.
                 </div>
               </li>
             )}
@@ -228,10 +257,12 @@ export function Intake({ me }: { me: Me }) {
 
           {fresh && !submitted && (
             <div className="starters">
-              <span className="small faint">Not sure how to start? Pick an opening and finish the sentence.</span>
+              <span className="small faint">Not sure how to start? Pick an example and make it yours.</span>
               <div>
                 {STARTERS.map((t) => (
-                  <button key={t} type="button" className="starter" onClick={() => { setText(t); box.current?.focus(); }}>{t}</button>
+                  <button key={t.text} type="button" className="starter" onClick={() => { setText(t.text); box.current?.focus(); }}>
+                    <span className="starter-size">{SIZE[t.size].label}</span> {t.text}
+                  </button>
                 ))}
               </div>
             </div>
@@ -246,7 +277,7 @@ export function Intake({ me }: { me: Me }) {
                 <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path d="M13.5 6.5l-6 6a2 2 0 0 0 2.8 2.8l6.4-6.4a3.5 3.5 0 0 0-5-5L5.3 10.3a5 5 0 0 0 7 7l5.2-5.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
               </button>
               <textarea id="say" ref={box} rows={1} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
-                placeholder={submitted ? "This intent has been submitted." : fresh ? "Describe the problem" : "Answer, or say what to change"}
+                placeholder={submitted ? "This request has been submitted." : fresh ? "Describe what you want, in your own words" : "Answer, or say what to change"}
                 disabled={submitted} autoFocus />
               <button className="send" type="submit" disabled={busy || submitted || !text.trim()} aria-label="Send">
                 <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h12M10 4l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -267,7 +298,7 @@ export function Intake({ me }: { me: Me }) {
 
         <section className="panel intent" aria-labelledby="h-intent">
           <header className="intent-head">
-            <h2 id="h-intent">The intent</h2>
+            <h2 id="h-intent">{size === "initiative" ? "The initiative" : size === "product" ? "The new product" : "The intent"}</h2>
             <p className={`readiness ${submitted ? "done" : s.ready ? "ready" : "waiting"}`}>
               {submitted ? "Submitted" : s.ready ? "Ready to submit" : `${have} of ${needs.length} in place`}
             </p>
@@ -282,6 +313,82 @@ export function Intake({ me }: { me: Me }) {
           </header>
 
           <div className="intent-body">
+            {(s.draft.size || s.draft.size_suggested) && (
+              <fieldset className="size-pick" disabled={submitted}>
+                <legend>Size{s.draft.size_suggested && !s.draft.size ? ": the agent suggests " + SIZE[s.draft.size_suggested].label.toLowerCase() : ""}</legend>
+                <div className="segmented" role="radiogroup">
+                  {(Object.keys(SIZE) as RequestSize[]).map((k) => (
+                    <button key={k} type="button" role="radio" aria-checked={size === k}
+                      className={`${size === k ? "on" : ""}${!size && s.draft.size_suggested === k ? " suggested" : ""}`}
+                      onClick={() => resize(k)}>{SIZE[k].label}</button>
+                  ))}
+                </div>
+                <p className="small faint">{size ? SIZE[size].what : s.draft.size_why.charAt(0).toUpperCase() + s.draft.size_why.slice(1)}</p>
+                {size === "product" && !s.starter && (
+                  <p className="small error-note">Only the inception starters can start a new product. Plan it as an initiative of a product you work on instead.</p>
+                )}
+              </fieldset>
+            )}
+            {sized ? (
+              <>
+                {size === "product" ? (
+                  <div className="split">
+                    <label className={`ifield${s.missing.includes("name") ? " missing" : ""}`}><span>Name</span>
+                      <input value={s.draft.name} disabled={submitted} placeholder="A working name is fine"
+                        onChange={(e) => edit("name", e.target.value)} onBlur={() => save("name")} /></label>
+                    <label className={`ifield${s.missing.includes("org") ? " missing" : ""}`}><span>GitHub org</span>
+                      <input value={s.draft.org} disabled={submitted} placeholder="It must already exist"
+                        onChange={(e) => edit("org", e.target.value)} onBlur={() => save("org")} /></label>
+                  </div>
+                ) : (
+                  <>
+                    <label className={`ifield title${lit.has("title") ? " lit" : ""}`}><span>Title</span>
+                      <input value={s.draft.title} disabled={submitted} onChange={(e) => edit("title", e.target.value)} onBlur={() => save("title")} /></label>
+                    <label className={`ifield${s.missing.includes("product_id") ? " missing" : ""}`}><span>Product</span>
+                      <select value={s.draft.product_id} disabled={submitted}
+                        onChange={(e) => { edit("product_id", e.target.value); run(api.intakeDraft(s.id, { product_id: e.target.value })); }}>
+                        <option value="">Not chosen yet</option>
+                        {s.lanes.map((l) => <option key={l} value={l}>{names[l] ?? l}</option>)}
+                      </select></label>
+                  </>
+                )}
+                <label className={`ifield${s.missing.includes("problem") ? " missing" : ""}`}>
+                  <span>{size === "product" ? "The idea" : "Outcome"}</span>
+                  <textarea rows={3} value={s.draft.problem} disabled={submitted} onChange={(e) => edit("problem", e.target.value)} onBlur={() => save("problem")} /></label>
+                <label className={`ifield${s.missing.includes("users") ? " missing" : ""}`}>
+                  <span>Users{size === "initiative" ? " (optional)" : ""}</span>
+                  <input value={s.draft.users} disabled={submitted} placeholder="Who, and in what situation"
+                    onChange={(e) => edit("users", e.target.value)} onBlur={() => save("users")} /></label>
+                <label className={`ifield${lit.has("success_metric") ? " lit" : ""}${s.missing.includes("success_metric") ? " missing" : ""}${s.draft.success_metric === AGENT_PROPOSES ? " delegated" : ""}`}>
+                  <span>{size === "product" ? "First goal" : "Measure"}</span>
+                  <input value={s.draft.success_metric} disabled={submitted} placeholder="A number, where it should get to, by when"
+                    onChange={(e) => edit("success_metric", e.target.value)} onBlur={() => save("success_metric")} /></label>
+                <div className="split">
+                  {size === "initiative" ? (
+                    <label className={`ifield${s.missing.includes("horizon") ? " missing" : ""}`}><span>When</span>
+                      <select value={s.draft.horizon} disabled={submitted} onChange={(e) => run(api.intakeDraft(s.id, { horizon: e.target.value }))}>
+                        <option value="">Not chosen yet</option>
+                        <option value="now">Now</option><option value="next">Next</option><option value="later">Later</option>
+                        <option value={AGENT_PROPOSES}>Let the agent suggest</option>
+                      </select></label>
+                  ) : (
+                    <label className="ifield"><span>First-year budget (USD, optional)</span>
+                      <input type="number" min={0} step={100} value={s.draft.budget_usd || ""} disabled={submitted}
+                        onChange={(e) => setS({ ...s, draft: { ...s.draft, budget_usd: Number(e.target.value) || 0 } })}
+                        onBlur={() => run(api.intakeDraft(s.id, { budget_usd: s.draft.budget_usd }))} /></label>
+                  )}
+                  <label className={`ifield${s.missing.includes("research") ? " missing" : ""}`}><span>Research first</span>
+                    <select value={s.draft.research} disabled={submitted}
+                      onChange={(e) => run(api.intakeDraft(s.id, { research: e.target.value as Draft["research"] }))}>
+                      <option value="">Not chosen yet</option>
+                      {Object.entries(RESEARCH).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                    </select></label>
+                </div>
+                {!submitted && s.missing.some((m) => ["success_metric", "horizon", "research", "users"].includes(m)) && (
+                  <button type="button" className="linkish leave" onClick={() => quick("Leave the rest to the agent")}>Leave the rest to the agent</button>
+                )}
+              </>
+            ) : (<>
             <label className={`ifield title${lit.has("title") ? " lit" : ""}`}>
               <span>Title</span>
               <input value={s.draft.title} disabled={submitted} placeholder="The agent suggests one from the problem"
@@ -338,6 +445,8 @@ export function Intake({ me }: { me: Me }) {
               </div>
             )}
 
+            </>)}
+
             {(s.attachments ?? []).length > 0 && (
               <div className="ifield attached">
                 <span>Attachments</span>
@@ -363,7 +472,7 @@ export function Intake({ me }: { me: Me }) {
 
           {!submitted && (
             <footer className="intent-foot">
-              {chosen && chosen.allowed.length > 1 && (
+              {!sized && chosen && chosen.allowed.length > 1 && (
                 <label className="field">Workflow
                   <select value={profile || chosen.dflt} onChange={(e) => setProfile(e.target.value as Profile)}>
                     {chosen.allowed.map((p) => <option key={p} value={p}>{PROFILE_LABEL[p]}</option>)}
@@ -371,13 +480,13 @@ export function Intake({ me }: { me: Me }) {
                   <span className="faint">{PROFILE_HELP[(profile || chosen.dflt) as Profile]}</span>
                 </label>
               )}
-              <label className="check small">
+              {!sized && <label className="check small">
                 <input type="checkbox" checked={pilot} onChange={(e) => setPilot(e.target.checked)} />
                 <span>Pilot feature <span className="faint">(its cost and people's time are measured on the Pilot page)</span></span>
-              </label>
+              </label>}
               {err && <p className="error-note" role="alert">{err}</p>}
               <div className="submit-row">
-                <button className="btn" disabled={busy || !s.ready} onClick={() => run(api.intakeSubmit(s.id, pilot, profile))}>Submit intent</button>
+                <button className="btn" disabled={busy || !s.ready} onClick={() => run(api.intakeSubmit(s.id, pilot, profile))}>{SIZE[size || "feature"].submit}</button>
                 {!s.ready && (
                   <span className="small faint">
                     {s.missing.length ? `Still needed: ${s.missing.map((m) => FIELD_LABEL[m] ?? m).join(", ")}` : dup ? "Say how this differs from the existing work" : ""}

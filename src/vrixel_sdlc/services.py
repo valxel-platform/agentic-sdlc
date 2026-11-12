@@ -273,6 +273,9 @@ def build_services(
     from .attachments import AttachmentStore
 
     svc.attachments = AttachmentStore(settings.artifact_dir)
+    from .notify import Notifier
+
+    svc.notifier = Notifier(settings.artifact_dir)
     svc.canary = default_canary(settings, ledger)
     from .evals import InMemoryEvalStore
 
