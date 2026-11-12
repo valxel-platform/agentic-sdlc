@@ -652,3 +652,19 @@ table.quality tfoot td { padding: 8px; font-weight: 600; }
 .comments-box { border: 1px dashed var(--lamp); border-radius: var(--r-m); padding: 10px 14px; }
 .comments-box h3 { margin: 0 0 6px; }
 .add-comment { font-size: var(--fs-0); color: var(--act); }
+
+/* The visible path */
+.path-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px; margin-bottom: 20px; align-items: start; }
+@media (max-width: 900px) { .path-row { grid-template-columns: 1fr; } }
+.path-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.path-head p { margin: 0; }
+.path-steps { list-style: none; margin: 12px 0 8px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.path-steps li { border: 1px solid var(--rule-soft); border-radius: var(--r-m); padding: 8px 10px; background: var(--raised); display: flex; flex-direction: column; gap: 4px; }
+.path-steps li.done { background: var(--panel); color: var(--ink-3); }
+.path-steps li.now { border-color: var(--lamp); box-shadow: inset 3px 0 0 var(--lamp); }
+.path-steps li.mine:not(.done) { border-color: var(--wait); }
+.path-steps li.waiting.mine { box-shadow: inset 3px 0 0 var(--wait); }
+.path-name { font-weight: 600; font-size: var(--fs-1); }
+.path-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.notify-panel { display: flex; flex-direction: column; gap: 6px; }
+.notify-panel .section-title { margin-bottom: 4px; }

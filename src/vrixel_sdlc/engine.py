@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Protocol
 
@@ -19,6 +21,8 @@ from .gateway import summarize
 from .services import Services
 from .waits import WaitChecker
 from .worksync import InMemoryLinkStore, WorkSync
+
+log = logging.getLogger(__name__)
 
 
 KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release", "INC": "incident", "PRD": "inception",
@@ -1462,6 +1466,23 @@ class FeatureEngine:
             self._execute(feature_id, inp)
         return feature_id
 
+    def path(self, product_id: str, stations: list[dict]) -> dict:
+        from . import progress
+
+        cached = self._path_history.get(product_id) if hasattr(self, "_path_history") else None
+        if cached is None or time.monotonic() - cached[0] > 600:
+            states = []
+            for row in self.index.all():
+                if row["product_id"] == product_id and kind_of(row["feature_id"]) == "feature":
+                    try:
+                        states.append(self._state(row["feature_id"]))
+                    except Exception:
+                        continue
+            if not hasattr(self, "_path_history"):
+                self._path_history = {}
+            cached = self._path_history[product_id] = (time.monotonic(), progress.history(states, RAIL))
+        return progress.estimate(stations, cached[1])
+
     def _note_asked(self, feature_id: str) -> None:
         """When each question to a person was first asked, so its wait can be measured."""
         try:
@@ -1474,6 +1495,18 @@ class FeatureEngine:
                                           "kind": "asked", "ref": p["interrupt_id"],
                                           "detail": {"type": p.get("type"), "gate": p.get("gate", ""),
                                                      "phase": p.get("phase", "")}})
+        notifier = getattr(self.services, "notifier", None)
+        if notifier is None:
+            return
+        try:  # tell the people who are needed, and the watchers when it reaches staging (vrixel_sdlc.notify)
+            s = self._state(feature_id)
+            for p in pending:
+                if p.get("type") != "external":
+                    notifier.needed({**p, "feature_id": feature_id}, s.get("title", ""))
+            if any(e.get("node") == "staging_wait" and e.get("kind") == "passed" for e in s.get("events") or []):
+                notifier.reached(feature_id, s.get("title", ""), "staging")
+        except Exception:  # never stops the work
+            log.warning("notifying about %s failed", feature_id, exc_info=True)
 
     def start(self, **kwargs) -> dict:
         """Create a feature and run it until its first human gate (synchronous)."""
@@ -1548,7 +1581,9 @@ class FeatureEngine:
             "track": s.get("track", "standard"),
             "running": (running := self.is_running(feature_id)),
             "error": self.errors.get(feature_id),
-            "rail": rail(s, pending, running=running),
+            "rail": (stations := rail(s, pending, running=running)),
+            # How long each step usually takes in this product, and when it should be done (vrixel_sdlc.progress).
+            "path": self.path(s.get("product_id", ""), stations),
             # Each agent session: what it was for, its cost, and a link to its trace (vrixel_sdlc.telemetry).
             "agent_sessions": agent_sessions(records, self.trace_link),
             "constitution_version": s.get("constitution_version"),

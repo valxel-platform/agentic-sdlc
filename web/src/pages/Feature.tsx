@@ -5,6 +5,7 @@ import { CostTable } from "../components/Costs";
 import { AgentSessions } from "../components/AgentSessions";
 import { useLive } from "../live";
 import { Resize } from "../components/Resize";
+import { NotifyPanel, PathPanel } from "../components/Path";
 import { Rail } from "../components/Rail";
 import { ArtifactBody } from "../components/Artifact";
 import { DecisionPanel } from "../components/Decision";
@@ -166,6 +167,12 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
 
       <div className="panel rail-panel"><Rail stations={f.rail} /></div>
       {!f.initiative_id && <Resize id={f.feature_id} kind="feature" pending={f.pending} />}
+      {f.path && (
+        <div className="path-row">
+          <PathPanel path={f.path} />
+          <NotifyPanel threadId={f.feature_id} watching={!!f.watching} />
+        </div>
+      )}
       {f.error && <p className="error-note" role="alert" style={{ marginBottom: 20 }}>The pipeline stopped with an error: {f.error}</p>}
 
       {people.length > 0 && (

@@ -150,6 +150,16 @@ class ReleaseIn(BaseModel):
     initiative: str = ""
 
 
+class NotifyIn(BaseModel):
+    email: str | None = Field(default=None, max_length=200, pattern=r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    needed: bool | None = None
+    staging: bool | None = None
+
+
+class WatchIn(BaseModel):
+    on: bool = True
+
+
 class LineComment(BaseModel):
     quote: str = Field("", max_length=1000, description="The line the comment is about, as written")
     text: str = Field(min_length=1, max_length=2000)
@@ -1015,6 +1025,27 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
         return {"feature_id": iid}
 
+    @api.get("/me/notifications")
+    def my_notifications(user: User = Depends(current_user)) -> dict:
+        from dataclasses import asdict as _asdict
+
+        n = eng().services.notifier
+        p = _asdict(n.get(user.login, user.teams))
+        return {**{k: p[k] for k in ("email", "needed", "staging", "watch")},
+                "channels": {"email": bool(os.environ.get("VRIXEL_SMTP_HOST")),
+                             "chat": bool(os.environ.get("VRIXEL_NOTIFY_WEBHOOK"))},
+                "sent": [m for m in n.outbox if user.login in m["to"]][-20:]}
+
+    @api.put("/me/notifications")
+    def set_notifications(body: NotifyIn, user: User = Depends(current_user)) -> dict:
+        eng().services.notifier.set(user.login, user.teams, **body.model_dump())
+        return my_notifications(user)
+
+    @api.post("/threads/{thread_id}/watch")
+    def watch(thread_id: str, body: WatchIn, user: User = Depends(current_user)) -> dict:
+        p = eng().services.notifier.watch(user.login, thread_id, body.on)
+        return {"watching": thread_id in p.watch}
+
     @api.post("/threads/{thread_id}/resize", status_code=201)
     def resize(thread_id: str, user: User = Depends(current_user)) -> dict:
         """A feature at G1 becomes an initiative; an initiative at G0 becomes one feature."""
@@ -1112,6 +1143,15 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
         v["pending"] = [decorate(feature_id, {**p, "product_id": v["product_id"]}, user) for p in v["pending"]]
+        try:  # which of the gates ahead are this person's to decide
+            lane = eng().services.snapshot(v["product_id"]).product
+            for st in (v.get("path") or {}).get("stations") or []:
+                if st["kind"] == "gate":
+                    st["mine"] = can_decide(user, {"approvers": lane.approvers.get(st["key"], [])})
+        except Exception:
+            pass
+        n = getattr(eng().services, "notifier", None)
+        v["watching"] = bool(n and feature_id in n.get(user.login).watch)
         return v
 
     @api.get("/features/{feature_id}/trace")

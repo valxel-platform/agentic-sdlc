@@ -217,7 +217,17 @@ export interface AgentSession {
   extra_skills?: string[];
 }
 
+/** How long each step usually takes, and when it should be done (vrixel_sdlc.progress). */
+export interface PathStation extends Station { eta_minutes: number; from_history: boolean; mine?: boolean }
+export interface FeaturePath { stations: PathStation[]; expected_done: string | null; minutes_left: number | null }
+export interface NotifyPrefs {
+  email: string; needed: boolean; staging: boolean; watch: string[];
+  channels: { email: boolean; chat: boolean };
+  sent: { at: string; kind: string; ref: string; subject: string }[];
+}
 export interface Feature extends FeatureSummary {
+  path?: FeaturePath;
+  watching?: boolean;
   attachments?: Attachment[];
   description: string;
   agent_sessions?: AgentSession[];
@@ -641,6 +651,9 @@ export const api = {
     request<{ id: string; content: string; version: number; constitution_version: string }>(
       "GET", `/features/${encodeURIComponent(id)}/artifacts/${kind}`),
   inbox: (mine: boolean) => request<PendingItem[]>("GET", `/inbox${mine ? "?mine=true" : ""}`),
+  notifications: () => request<NotifyPrefs>("GET", "/me/notifications"),
+  setNotifications: (body: Partial<Pick<NotifyPrefs, "email" | "needed" | "staging">>) => request<NotifyPrefs>("PUT", "/me/notifications", body),
+  watch: (id: string, on: boolean) => request<{ watching: boolean }>("POST", `/threads/${encodeURIComponent(id)}/watch`, { on }),
   decisionBrief: (featureId: string, interruptId: string) =>
     request<DecisionBriefData>("GET", `/features/${encodeURIComponent(featureId)}/decisions/${interruptId}/brief`),
   decide: (featureId: string, interruptId: string, body: Record<string, unknown>) =>
