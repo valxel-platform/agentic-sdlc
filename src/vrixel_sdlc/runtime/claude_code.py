@@ -72,6 +72,8 @@ def session_options(task: AgentTask, role, model: str, *, cwd: str | None, plugi
         "max_turns": task.max_turns or role.max_turns,
         "max_budget_usd": session_cap(task, role),
         **({"output_format": {"type": "json_schema", "schema": task.schema}} if task.schema else {}),
+        # Research may search and read the web without asking (vrixel_sdlc.research).
+        **({"allowed_tools": ["WebSearch", "WebFetch"]} if task.web_searches else {}),
     }
 
 

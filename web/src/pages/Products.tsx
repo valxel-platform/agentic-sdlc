@@ -9,6 +9,7 @@ import { money, threadPath } from "../vocab";
 import { Pending } from "./Thread";
 
 const STATUS: Record<string, { text: string; chip: string }> = {
+  researching: { text: "Researching the problem and the market", chip: "run" },
   drafting_brief: { text: "Agents writing the brief", chip: "run" },
   brief_gate: { text: "Waiting for the brief gate", chip: "wait" },
   drafting_plan: { text: "Agents writing the architecture and roadmap", chip: "run" },
@@ -19,7 +20,7 @@ const STATUS: Record<string, { text: string; chip: string }> = {
 
 /** The inception as a line: two documents, two gates, then setup. */
 function stations(status: string, running: boolean): Station[] {
-  const order = ["drafting_brief", "brief_gate", "drafting_plan", "product_gate", "set_up"];
+  const order = [status === "researching" ? "researching" : "drafting_brief", "brief_gate", "drafting_plan", "product_gate", "set_up"];
   const at = order.indexOf(status);
   const keys: [string, "phase" | "gate"][] = [["brief", "phase"], ["brief", "gate"], ["product_plan", "phase"],
     ["product", "gate"], ["setup", "phase"]];
@@ -45,6 +46,7 @@ function NewProduct({ me, onCancel }: { me: Me; onCancel: () => void }) {
   const [users, setUsers] = useState("");
   const [constraints, setConstraints] = useState("");
   const [budget, setBudget] = useState("");
+  const [research, setResearch] = useState("quick");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   async function submit(e: FormEvent) {
@@ -55,7 +57,7 @@ function NewProduct({ me, onCancel }: { me: Me; onCancel: () => void }) {
       const r = await api.createInception({
         name: existing ? (me.lanes.find((l) => l.id === existing)?.name ?? existing) : name, org: existing ? "" : org,
         vision, goals: lines(goals), users: lines(users), constraints: lines(constraints),
-        budget_usd: Number(budget) || 0, product_id: existing,
+        budget_usd: Number(budget) || 0, product_id: existing, research,
       });
       nav(threadPath(r.feature_id));
     } catch (x) {
@@ -66,7 +68,7 @@ function NewProduct({ me, onCancel }: { me: Me; onCancel: () => void }) {
   return (
     <form className="panel form-panel" onSubmit={submit}>
       <h2 className="section-title">Start a product</h2>
-      <p className="small muted">Agents write the product brief first. The product council approves it before any
+      <p className="small muted">An agent researches the problem and the market, then agents write the product brief. The product council approves it before any
         architecture is written, then approves the architecture and roadmap together.</p>
       <label className="field">Product
         <select value={existing} onChange={(e) => setExisting(e.target.value)}>
@@ -100,6 +102,16 @@ function NewProduct({ me, onCancel }: { me: Me; onCancel: () => void }) {
       <label className="field" style={{ maxWidth: 260 }}>Budget for the first year of features (USD)
         <input type="number" min={0} step={100} value={budget} onChange={(e) => setBudget(e.target.value)} />
       </label>
+      <fieldset className="field">
+        <legend>Research before the plan</legend>
+        <label className="small"><input type="radio" name="research" value="quick" checked={research === "quick"}
+          onChange={() => setResearch("quick")} /> Quick: a few web searches for the alternatives and the market</label>
+        <label className="small"><input type="radio" name="research" value="thorough" checked={research === "thorough"}
+          onChange={() => setResearch("thorough")} /> Thorough: more alternatives, public pricing, market size</label>
+        <label className="small"><input type="radio" name="research" value="own" checked={research === "own"}
+          onChange={() => setResearch("own")} /> I've done my own: it's in what I wrote above</label>
+        <span className="small faint">Every claim the plan rests on cites this research, with a source and a confidence.</span>
+      </fieldset>
       <p className="small faint">Until the brief gate approves a data class, only models under a BAA read this.</p>
       {err && <p className="error-note" role="alert">{err}</p>}
       <div className="submit-row">
@@ -164,7 +176,7 @@ export function InceptionPage() {
   const { id = "" } = useParams();
   const [v, setV] = useState<InceptionView | null>(null);
   const [err, setErr] = useState("");
-  const [tab, setTab] = useState<"brief" | "architecture" | "roadmap" | "setup">("brief");
+  const [tab, setTab] = useState<"research" | "brief" | "architecture" | "roadmap" | "setup">("brief");
   const load = useCallback(() => {
     api.inception(id).then((x) => { setV(x); setErr(""); })
       .catch((e) => setErr(e instanceof ApiError && e.status === 404 ? "This product inception doesn't exist, or it's still starting." : e.message));
@@ -180,8 +192,8 @@ export function InceptionPage() {
   if (err) return <p className="error-note" role="alert">{err}</p>;
   if (!v) return <p className="faint">Loading…</p>;
   const st = STATUS[v.status] ?? { text: v.status, chip: "plain" };
-  const tabs = [["brief", "Brief"], ["architecture", "Architecture"], ["roadmap", "Roadmap"], ["setup", "Setup"]] as const;
-  const docs: Record<string, string> = { brief: v.brief, architecture: v.architecture, roadmap: v.roadmap };
+  const tabs = [["research", "Research"], ["brief", "Brief"], ["architecture", "Architecture"], ["roadmap", "Roadmap"], ["setup", "Setup"]] as const;
+  const docs: Record<string, string> = { research: v.research ?? "", brief: v.brief, architecture: v.architecture, roadmap: v.roadmap };
   return (
     <>
       <div className="feature-head">
@@ -209,8 +221,8 @@ export function InceptionPage() {
         <div className="artifact-body" style={{ maxHeight: "none" }}>
           {tab !== "setup" && (
             docs[tab]
-              ? <><Report r={v.reports[tab]} /><div className="md"><Markdown remarkPlugins={[remarkGfm]}>{docs[tab]}</Markdown></div></>
-              : <p className="muted" style={{ paddingTop: 12 }}>{tab === "brief" ? "Agents are writing the brief." : "Written after the brief gate approves the brief."}</p>
+              ? <><Report r={v.reports[tab as keyof typeof v.reports]} /><div className="md"><Markdown remarkPlugins={[remarkGfm]}>{docs[tab]}</Markdown></div></>
+              : <p className="muted" style={{ paddingTop: 12 }}>{tab === "research" ? "An agent is researching the problem and the market." : tab === "brief" ? "Agents are writing the brief." : "Written after the brief gate approves the brief."}</p>
           )}
           {tab === "setup" && (
             v.setup.steps ? (

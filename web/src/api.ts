@@ -404,6 +404,7 @@ export interface ThreadBase {
 export interface InitiativeView extends ThreadBase {
   request: string; content: string; draft: InitiativeDraft; findings: string[]; features: FeatureRow[];
   candidates: Candidate[]; budget_usd: number; spent_usd: number; progress: { released: number; total: number };
+  research?: string;
 }
 export interface ReleaseView extends ThreadBase {
   model: "launch" | "train"; target_date: string; initiative: string; notes: string; evidence: string;
@@ -422,7 +423,8 @@ export interface InceptionView extends Omit<ThreadBase, "kind"> {
   vision: { name: string; org: string; vision: string; goals: string[]; users: string[]; constraints: string[];
             budget_usd: number; product_id: string; existing: boolean };
   brief: string; architecture: string; roadmap: string;
-  reports: Partial<Record<"brief" | "architecture" | "roadmap", InceptionReport>>;
+  reports: Partial<Record<"brief" | "architecture" | "roadmap" | "research", InceptionReport>>;
+  research?: string;
   setup: { product_id?: string; governance_repo?: string; steps?: InceptionSetupStep[]; ok?: boolean };
   council: string[];
 }
@@ -432,7 +434,7 @@ export interface InceptionSummary {
 }
 export interface InceptionIn {
   name: string; org: string; vision: string; goals: string[]; users: string[]; constraints: string[];
-  budget_usd: number; product_id: string;
+  budget_usd: number; product_id: string; research?: string;
 }
 
 export interface RoadmapInitiative {
@@ -615,7 +617,7 @@ export const api = {
     request<{ reading: ReadingRow; readouts: Readout[] }>("POST",
       `/products/${encodeURIComponent(productId)}/goals/${encodeURIComponent(goalId)}/readings`, body),
   featureOutcome: (id: string) => request<FeatureOutcome>("GET", `/features/${encodeURIComponent(id)}/outcome`),
-  createInitiative: (body: { product_id: string; title: string; request: string; measure?: string; horizon?: string }) =>
+  createInitiative: (body: { product_id: string; title: string; request: string; measure?: string; horizon?: string; research?: string }) =>
     request<{ feature_id: string }>("POST", "/initiatives", body),
   startCandidate: (id: string, index: number, not_duplicate_reason = "") =>
     request<{ feature_id: string }>("POST", `/initiatives/${encodeURIComponent(id)}/features`, { index, not_duplicate_reason }),

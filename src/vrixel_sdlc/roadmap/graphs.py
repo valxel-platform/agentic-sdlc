@@ -1,6 +1,6 @@
 """The initiative and release workflows, each a LangGraph thread like a feature.
 
-Initiative:  draft -> check (loop) -> G0 (product owners, then each other lane involved)
+Initiative:  research -> draft -> check (loop) -> G0 (product owners, then each other lane involved)
              -> record (governance PR adding roadmap/initiatives/<id>.md) -> approved
 Release:     plan (governance PR) -> wait until its features are ready -> notes and evidence
              -> release gate (G6 approvers of every lane its features touch)
@@ -18,6 +18,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from ..agents import untrusted
+from ..research import DOC_SECTIONS
+from ..research import summary as research_summary
 from ..agents.context import build_layers, skills_dir_of
 from ..gateway import CallTags
 from ..runtime import AgentTask
@@ -71,7 +73,10 @@ class InitiativeState(TypedDict, total=False):
     request: str
     measure_hint: str
     horizon_hint: str
+    research_depth: str  # quick | thorough | own (vrixel_sdlc.research)
     created_by: str
+    research: Annotated[str, last]
+    research_report: Annotated[dict, last]
     content: Annotated[str, last]
     draft: Annotated[dict, last]
     findings: Annotated[list[str], last]
@@ -99,6 +104,7 @@ def initiative_context(services, state: dict) -> dict:
         "product_id": pid, "initiative_id": state["initiative_id"], "title": state["title"],
         "request": state.get("request", ""), "measure": state.get("measure_hint", ""),
         "horizon": state.get("horizon_hint", ""), "feedback": state.get("feedback", ""),
+        "research": state.get("research", ""),
         "goals": record["goals"], "initiatives": record["initiatives"] + [i for i in in_tool if i["id"] not in known],
         "features": services.features(pid) if callable(getattr(services, "features", None)) else [],
         "dependency_lanes": list(snap.product.depends_on), "feature_budget": snap.product.budget_usd,
@@ -106,7 +112,36 @@ def initiative_context(services, state: dict) -> dict:
     }
 
 
+def initiative_research(services, state: dict):
+    """The research note the initiative cites (vrixel_sdlc.research)."""
+    from .. import research as rs
+
+    pid = state["product_id"]
+    snap = services.snapshot(pid)
+    role = "strategist"
+
+    def layers_for(skills, tail):
+        return build_layers(role=role, skills=tuple(skills), constitution=snap.constitution, product=snap.product,
+                            parent_texts={}, tail=tail, product_context=snap.product_context,
+                            skills_dir=skills_dir_of(services))
+
+    tags = CallTags(product_id=pid, feature_id=state["initiative_id"], phase="research", role=role,
+                    data_class=snap.product.data_class, workspace=snap.product.workspace, prompt_version="research@1")
+    request = state.get("request", "") + (f"\nHow it will be measured: {state['measure_hint']}"
+                                          if state.get("measure_hint") else "")
+    return rs.run(services, role=role, subject=f"{state['title']} ({snap.product.name})", request=request,
+                  depth=state.get("research_depth") or "quick", data_class=snap.product.data_class, tags=tags,
+                  layers_for=layers_for)
+
+
 def build_initiative_graph(services, checkpointer=None):
+    def research(state: InitiativeState) -> dict:
+        r = initiative_research(services, state)
+        return {"research": r.text, "research_report": {k: v for k, v in r.as_dict().items() if k != "text"},
+                "cost_usd": r.cost_usd, "status": "drafting",
+                "events": [event("research", r.status, f"{r.depth}, {'searched the web' if r.web else 'no web search'}",
+                                 findings=r.findings)]}
+
     def draft(state: InitiativeState) -> dict:
         ctx = initiative_context(services, state)
         findings = state.get("findings") or []
@@ -118,7 +153,10 @@ def build_initiative_graph(services, checkpointer=None):
             "next or later), ## Budget (USD envelope for all its features), ## Lanes (the product and any lane it "
             "depends on that must change), ## Release model (launch: features ship dark and launch together; train: "
             "regulated or contractual shipments approved together), ## Candidate features ('- Title: what it "
-            "delivers'; don't repeat features the product already has), ## Risks.",
+            "delivers'; don't repeat features the product already has), ## Risks"
+            + (f", {DOC_SECTIONS}." if state.get("research") else "."),
+            *(["The research note to cite:\n" + untrusted.wrap("research", state["research"])]
+              if state.get("research") else []),
             f"Existing goals: {ctx['goals']}",
             f"Existing initiatives: {[(i['id'], i['title'], i.get('status')) for i in ctx['initiatives']]}",
             f"Features the product has: {[(f['feature_id'], f['title'], f['status']) for f in ctx['features']]}",
@@ -154,7 +192,11 @@ def build_initiative_graph(services, checkpointer=None):
             packet = {
                 "type": "gate", "gate": "g0", "phase": "initiative", "kind": "initiative", "lane": lane_id,
                 "lanes": order, "feature_id": state["initiative_id"], "product_id": state["product_id"],
-                "title": state["title"], "preview": state["content"][:4000], "findings": state.get("findings") or [],
+                "title": state["title"], "findings": state.get("findings") or [],
+                "preview": state["content"][:6000] + (
+                    f"\n\n# The research behind it\n\n_{research_summary(state.get('research_report'))}_\n\n"
+                    + state["research"].split("\n", 1)[-1][:14000] if state.get("research") else ""),
+                "research": research_summary(state.get("research_report")),
                 "initiative": {k: d.get(k) for k in ("goal", "new_goal", "measure", "horizon", "budget_usd", "lanes",
                                                      "release_model", "candidates")},
                 "approvers": lane_approvers(lanes[lane_id], "g0"),
@@ -188,6 +230,8 @@ def build_initiative_graph(services, checkpointer=None):
                       "scope": "product", "approved_by": approvers, "approved_at": now()[:10]}
         body = state["content"].split("\n", 1)[1] if state["content"].startswith("# ") else state["content"]
         files = {f"roadmap/initiatives/{state['initiative_id']}.md": render_initiative(initiative, body=body)}
+        if state.get("research"):
+            files[f"roadmap/research/{state['initiative_id']}.md"] = state["research"]
         if d.get("new_goal"):
             goals_path = "roadmap/goals.yaml"
             try:
@@ -227,11 +271,13 @@ def build_initiative_graph(services, checkpointer=None):
         return {"status": "approved", "record_pr": pr, "events": events}
 
     g = StateGraph(InitiativeState)
+    g.add_node("research", research)
     g.add_node("draft", draft)
     g.add_node("check", check, destinations=("draft", "gate"))
     g.add_node("gate", gate, destinations=("draft", "record", END))
     g.add_node("record", record)
-    g.add_edge(START, "draft")
+    g.add_edge(START, "research")
+    g.add_edge("research", "draft")
     g.add_edge("draft", "check")
     g.add_edge("record", END)
     return g.compile(checkpointer=checkpointer, name="vrixel_initiative")

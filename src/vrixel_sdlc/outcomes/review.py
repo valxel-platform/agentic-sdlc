@@ -109,7 +109,11 @@ def evidence(services, product_id: str, initiative: dict) -> dict:
                            "why": f"still behind {s['flag']}, on for {pct if pct is not None else 0:g}% of users"})
     readouts = {f["feature_id"]: out["features"].get(f["feature_id"], []) for f in feats}
     spent = round(sum(f.get("cost_usd", 0.0) for f in feats), 2)
+    from ..research import assumptions
+
+    bets = [a for a in assumptions("## Assumptions\n" + (initiative.get("assumptions") or "")) if a["id"]]
     return {"goal_id": gid, "goal": goal, "status": status, "features": feats, "readouts": readouts,
+            "assumptions": [{"id": a["id"], "belief": a["belief"], "test": a["test"]} for a in bets],
             "spent_usd": spent, "budget_usd": float(initiative.get("budget_usd") or 0), "retire": retire,
             "in_progress": [f["feature_id"] for f in feats if f["status"] == "in_progress"]}
 
@@ -139,6 +143,10 @@ def preview(initiative: dict, ev: dict, why: str) -> str:
                              for r in rs if r.get("change") is not None) or "none yet"
             lines.append(f"| {f['feature_id']} {f['title']} | {f['status'].replace('_', ' ')} | {said} |")
     lines += ["", "## Spend", "", f"${ev['spent_usd']:,.2f} of ${ev['budget_usd']:,.2f}."]
+    if ev.get("assumptions"):
+        lines += ["", "## What the plan assumed", "",
+                  "Did each hold? Say so in your decision; the ones that didn't are usually why a goal stalls.", ""]
+        lines += [f"- {a['id']}: {a['belief']} (test: {a['test']})" for a in ev["assumptions"]]
     if ev["retire"]:
         lines += ["", "## If you stop it", "",
                   "Stopping keeps its features. These would be less effort to remove than to keep; tick the ones to retire:"]

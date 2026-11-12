@@ -23,6 +23,9 @@ def _trace_fields() -> dict:
     return {"trace_id": trace_id, "span_id": span_id, "task_id": lab.get("task", ""), "attempt": lab.get("attempt", "")}
 
 
+WEB_SEARCH_USD = 0.01  # per search ($10 per 1,000)
+
+
 class PolicyViolation(RuntimeError):
     """A request would send a data class to a provider it is not allowed to reach."""
 
@@ -79,6 +82,7 @@ class ModelGateway:
         *,
         stub_text: str | None = None,
         max_tokens: int = 4096,
+        web_searches: int = 0,
     ) -> GatewayResult:
         role = self.settings.role(tags.role)
         if not self.allowed(role.provider, tags.data_class):
@@ -93,6 +97,7 @@ class ModelGateway:
             ttl=role.ttl,
             max_tokens=max_tokens,
             stub_text=stub_text,
+            web_searches=web_searches,
         )
         started = time.monotonic()
         resp = self._provider_for(role.provider).complete(req)
@@ -119,6 +124,8 @@ class ModelGateway:
             ttl=ttl,
             prices=self.settings.prices,
         )
+        if getattr(resp, "web_searches", 0):  # the Claude API bills web search per search
+            usd = round(usd + WEB_SEARCH_USD * resp.web_searches, 6)
         rec = UsageRecord(
             ts=datetime.now(timezone.utc).isoformat(),
             product_id=tags.product_id,

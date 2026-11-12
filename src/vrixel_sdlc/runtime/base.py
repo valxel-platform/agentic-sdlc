@@ -26,6 +26,9 @@ class AgentTask:
     telemetry: dict | None = None
     # The skills the phase gave this session (pasted into L2); anything else it loads is recorded.
     skills: tuple[str, ...] = ()
+    # Web searches the session may make (0: none). Runtimes that can't search ignore it
+    # (vrixel_sdlc.research.can_search says which can).
+    web_searches: int = 0
 
 
 @dataclass

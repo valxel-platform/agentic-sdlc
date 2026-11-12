@@ -39,6 +39,10 @@ def brief(text: str, ctx: dict) -> list[str]:
         out.append(f"Data class: start the line with one of {', '.join(DATA_CLASSES)}, then ': <why>'")
     elif dc and len(why.split()) < 4:
         out.append("Data class: say why, from what the product stores")
+    if ctx.get("research"):
+        from ..research import citations
+
+        out += citations(text, ctx["research"])
     p = formats.product(text)
     if section(text, "Product"):
         if not valid_product_id(p["id"]):

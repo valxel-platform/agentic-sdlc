@@ -452,6 +452,22 @@ pass (`vrixel_sdlc/inception/`):
    every goal is served, every component is built, budgets fit the brief's, and (for a new product)
    the first initiative is a thin working version through at least two components.
 
+Before the brief, a **research note** (`vrixel_sdlc/research.py`): who has the problem, how they solve
+it today (alternatives and their public pricing), market signals, and the evidence as numbered
+claims, each with a confidence and a source (a web page it read, the request, an attachment, or
+"unsourced" at low confidence), plus the assumptions the plan bets on, each with a test. The person
+picks the depth: `quick` (a few searches, the default), `thorough` (more alternatives, pricing,
+market size) or `own` (no searching: their own research, put in the same form). Web search runs
+where the runtime has it (Claude Code, or the Claude API's web search tool at $10 per 1,000
+searches, added to the ledger); elsewhere and in stub mode the note says nothing was searched.
+Searches go to a search engine no BAA covers, so a PHI product's attachments stay out of a research
+call that searches. The brief then has `## Evidence` (every claim cites the note: `(E1, E3)`) and
+`## Assumptions` (`- A1: We believe ...; test: ...`); the checks and the critic hold it to both,
+the brief gate shows the note, and setup records it as `architecture/research.md`. New initiatives
+work the same way: research, then a draft citing it, the note shown at G0 and recorded as
+`roadmap/research/<id>.md`, and the initiative's review lists its assumptions so the council can
+say which held.
+
 The product council decides twice: on the brief before any architecture is written (the brief
 gate), then on the architecture and roadmap together (the product gate). Until the brief is
 approved every call runs as PHI, so only models under a BAA see the vision.

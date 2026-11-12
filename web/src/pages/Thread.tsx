@@ -106,6 +106,14 @@ export function InitiativePage() {
             <div className="md pad">{v.content ? <Markdown remarkPlugins={[remarkGfm]}>{v.content}</Markdown> : <p className="faint">The agent is drafting it.</p>}</div>
           </section>
         )}
+        {v.research && (
+          <section className="panel" aria-labelledby="h-research">
+            <details>
+              <summary><h2 id="h-research" className="section-title" style={{ display: "inline" }}>The research behind it</h2></summary>
+              <div className="md pad"><Markdown remarkPlugins={[remarkGfm]}>{v.research.split("\n").slice(1).join("\n")}</Markdown></div>
+            </details>
+          </section>
+        )}
       </div>
     </>
   );

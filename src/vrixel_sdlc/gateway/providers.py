@@ -31,6 +31,7 @@ class ModelRequest:
     ttl: str = "1h"
     max_tokens: int = 4096
     stub_text: str | None = None  # used only by StubProvider
+    web_searches: int = 0  # the Claude API's web search tool, at most this many uses (0: off)
 
 
 @dataclass
@@ -40,6 +41,7 @@ class ModelResponse:
     cache_creation_input_tokens: int
     cache_read_input_tokens: int
     output_tokens: int
+    web_searches: int = 0  # searches the provider ran (billed per search)
     request_id: str = field(default_factory=lambda: f"req_{uuid.uuid4().hex[:16]}")
 
 
@@ -130,6 +132,8 @@ class AnthropicProvider:
                 max_tokens=req.max_tokens,
                 system=system,
                 messages=[{"role": "user", "content": req.layers.tail}],
+                **({"tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": req.web_searches}]}
+                   if req.web_searches else {}),
             )
         except Exception as exc:
             # The SDK's rate-limit, overload, connection and 5xx errors all carry a status or say so.
@@ -146,6 +150,7 @@ class AnthropicProvider:
             cache_creation_input_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
             cache_read_input_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
             output_tokens=u.output_tokens,
+            web_searches=int(getattr(getattr(u, "server_tool_use", None), "web_search_requests", 0) or 0),
             request_id=getattr(resp, "id", "") or "",
         )
 

@@ -111,6 +111,8 @@ class InitiativeIn(BaseModel):
     request: str = Field(min_length=10, max_length=4000, description="The outcome wanted and what it involves")
     measure: str = Field("", max_length=500)
     horizon: str = Field("", pattern="^(|now|next|later)$")
+    research: str = Field("quick", pattern="^(quick|thorough|own)$",
+                          description="quick or thorough web research, or 'own': your research is in the request")
 
 
 class ProblemIn(BaseModel):
@@ -135,6 +137,8 @@ class InceptionIn(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     budget_usd: float = Field(0.0, ge=0)
     product_id: str = Field("", pattern=r"^$|^[A-Z]{2,6}$", description="An existing product to describe, or a proposed id")
+    research: str = Field("quick", pattern="^(quick|thorough|own)$",
+                          description="quick or thorough web research, or 'own': your research is in the vision")
 
 
 class ReleaseIn(BaseModel):
@@ -993,7 +997,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         try:
             iid = eng().create_initiative(product_id=body.product_id, title=body.title, request=body.request,
                                           measure=body.measure, horizon=body.horizon, created_by=user.login,
-                                          background=True)
+                                          background=True, research=body.research)
         except GovernanceError as exc:
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
         return {"feature_id": iid}
@@ -1037,7 +1041,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             org = body.org
         v = Vision(name=body.name, org=org, vision=body.vision, goals=body.goals, users=body.users,
                    constraints=body.constraints, budget_usd=body.budget_usd, product_id=body.product_id,
-                   existing=existing)
+                   existing=existing, research_depth=body.research)
         return {"feature_id": eng().create_inception(v, created_by=user.login, background=True)}
 
     @api.get("/inceptions")

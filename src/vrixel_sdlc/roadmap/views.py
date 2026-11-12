@@ -49,6 +49,7 @@ def thread_view(engine, thread_id: str) -> dict:
     if kind == "inception":
         return out | {"vision": s.get("vision") or {}, "brief": s.get("brief", ""), "architecture": s.get("architecture", ""),
                       "roadmap": s.get("roadmap", ""), "reports": s.get("reports") or {}, "setup": s.get("setup") or {},
+                      "research": s.get("research", ""),
                       "council": list((engine.services.settings.inception or {}).get("council") or [])}
     if kind == "review":
         return out | {"initiative_id": s.get("initiative_id", ""), "why": s.get("why", ""), "preview": s.get("preview", ""),
@@ -61,6 +62,7 @@ def thread_view(engine, thread_id: str) -> dict:
         spent = sum(f["cost_usd"] for f in linked)
         started = {f["title"].lower() for f in linked}
         out |= {"request": s.get("request", ""), "content": s.get("content", ""), "draft": d,
+                "research": s.get("research", ""), "research_report": s.get("research_report") or {},
                 "findings": s.get("findings", []), "features": linked,
                 "candidates": [{**c, "started": c["title"].lower() in started} for c in d.get("candidates", [])],
                 "budget_usd": d.get("budget_usd", 0.0), "spent_usd": round(spent, 2),

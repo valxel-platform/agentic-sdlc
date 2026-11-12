@@ -20,6 +20,10 @@ CONTRACTS = {
 - U1: <who they are>: <their job, and the situation they're in>
 ## Goals
 - PG1: <the outcome> (measure: <a metric with a number or threshold, and by when>)
+## Evidence
+- <a claim about the users, the problem, the alternatives or the market> (E1, E3)      citing the research note
+## Assumptions
+- A1: We believe <what the plan bets on>; test: <how we'd know: a number, an event or a goal, and by when>
 ## Non-goals
 - <what this product won't do, that someone might expect>
 ## Scope
