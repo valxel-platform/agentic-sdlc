@@ -47,9 +47,16 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
 - VX-<n>                (at least one article of the platform or product constitution)""",
     "design": """# UX spec: <title>
 ## Screens
-- S1: <screen>
-## States
-- <loading, empty, error, success, ...>
+- S1: <screen> (web: <org>/<repo>)      (the app it lives in: web or mobile, one of the product's app repos)
+## States                      (one line per screen)
+- S1: loading, empty (<what the person sees and can do>), error (<what they see and can do>), success
+                        every screen has empty and error, or says 'no empty: <why>'
+## Flow
+- start -> S1: <where the person comes from>
+- S1 -> S2: <the action that takes them there>
+- S2 -> done                   (or '-> cancel'; every screen is reachable from start)
+## Copy                        (button labels, headings and error messages, word for word)
+- S1 <element>: "<text>"
 ## Coverage                    (one line for every acceptance criterion in the PRD)
 - AC-1: S1                     (the screen or state that shows it, or 'not on screen: <why>')
 ## Accessibility
@@ -70,6 +77,16 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
 ## Diagram
 ```mermaid
 flowchart LR  (one node per affected repo)
+```
+## Flows                       (when two or more components talk: one sequence per journey, and a failure path)
+```mermaid
+sequenceDiagram
+  title <journey>
+  participant <repo name without the org>
+  web->>api: <call>
+  alt <failure>
+    api-->>web: <what happens>
+  end
 ```
 ## Audit                       (what gets an audit record)
 - <record>.<action>: <record> (<who did what>)

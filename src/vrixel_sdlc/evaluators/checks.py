@@ -144,6 +144,53 @@ def _design(text: str, ctx: dict) -> list[str]:
         out.append("UX spec lists no screens")
     if "WCAG" not in section(text, "Accessibility"):
         out.append("No accessibility section with WCAG 2.1 AA criteria (VX-9)")
+    return out + _ux_structure(text, ctx)
+
+
+def _ux_structure(text: str, ctx: dict) -> list[str]:
+    """What a builder needs: each screen's app, its states, how people move between screens, and the copy."""
+    from ..agents.parse import SCREEN_ROLES, parse_copy, parse_flow, parse_screen_apps, parse_screens, parse_states
+
+    screens = parse_screens(text)
+    if not screens:
+        return []
+    out = []
+    apps = {r["name"] for r in ctx.get("repos") or [] if r.get("role") in SCREEN_ROLES}
+    for sid, repo in parse_screen_apps(text).items():
+        if not repo:
+            out.append(f"{sid}: say which app it's in, as '- {sid}: <name> (web: <org>/<repo>)' or '(mobile: ...)'")
+        elif apps and repo not in apps:
+            out.append(f"{sid} is in {repo}, which isn't one of the product's apps ({', '.join(sorted(apps))})")
+    states = parse_states(text)
+    for sid in screens:
+        st = states.get(sid, "")
+        if not st:
+            out.append(f"{sid} has no line under States ('- {sid}: loading, empty (...), error (...), success')")
+            continue
+        if not re.search(r"\berror", st, re.I):
+            out.append(f"{sid}: no error state: what does the person see when it fails, and what can they do?")
+        if not re.search(r"\bempty|no empty", st, re.I):
+            out.append(f"{sid}: no empty state (or 'no empty: <why>')")
+    flow = parse_flow(text)
+    if not flow:
+        out.append("No Flow section: '- start -> S1: <from where>', '- S1 -> S2: <action>', '- S2 -> done'")
+    else:
+        reach, frontier = set(), ["start"]
+        while frontier:
+            at = frontier.pop()
+            for a, b, _ in flow:
+                if a == at and b not in reach:
+                    reach.add(b)
+                    frontier.append(b)
+        out += [f"{sid} ({screens[sid]}) can't be reached from start in the Flow" for sid in screens if sid not in reach]
+        if not any(b in ("done", "cancel") for _, b, _ in flow):
+            out.append("Flow: say how the person leaves ('- S2 -> done' or '-> cancel')")
+    copy = parse_copy(text)
+    if not copy:
+        out.append("No Copy section: each screen's button labels, headings and error messages, word for word "
+                   "('- S1 save button: \"Check in\"')")
+    else:
+        out += [f"{sid} ({screens[sid]}) has no copy under Copy" for sid in screens if sid not in copy]
     return out
 
 
@@ -183,6 +230,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 
     out += resources_check(text, repos, ctx)
     out += _diagram(text, repos)
+    out += _flows(text, repos)
     if ctx.get("knowledge"):
         # Against the existing design: cited decisions are current, overrides are explicit, and
         # contract changes start from the version actually merged.
@@ -342,6 +390,30 @@ def _emitters(text: str, repos: list[dict], ctx: dict) -> list[str]:
     out += [f"Event {e} is recorded by {r}, which isn't an affected repo" for e, r in emits.items()
             if e in wanted and names and r not in names]
     out += [f"Event {e} under Instrumentation isn't in the PRD" for e in emits if e not in wanted]
+    return out
+
+
+def _flows(text: str, repos: list[dict]) -> list[str]:
+    """When components talk to each other: a sequence per journey, and a failure path."""
+    from ..agents.parse import parse_sequences
+
+    talking = [r for r in repos if r["role"] in RUNTIME_ROLES + ("bff",)]
+    if len(talking) < 2:
+        return []
+    seqs = parse_sequences(text)
+    if not seqs:
+        return ["HLD has no Flows section: a mermaid sequenceDiagram for each journey under Performance, with its "
+                "failure path (alt ... end)"]
+    out = ["A Flows diagram isn't a mermaid sequenceDiagram" for s in seqs if not s["ok"]][:1]
+    names = {r["name"].split("/", 1)[-1] for r in repos}
+    for s in seqs:
+        strangers = [p for p in s["participants"] if p not in names and p.lower() not in
+                     ("user", "person", "browser", "phone", "idp", "gateway", "kafka", "aws")]
+        if s["ok"] and strangers:
+            out.append(f"Flows{(' (' + s['title'] + ')') if s['title'] else ''}: {', '.join(strangers)} isn't an "
+                       "affected repo (use the repo name without the org, or user, browser, phone, idp, gateway, kafka)")
+    if seqs and not any(s["failure"] for s in seqs):
+        out.append("Flows: show at least one failure path (an 'alt' block for a dependency that is slow or down)")
     return out
 
 

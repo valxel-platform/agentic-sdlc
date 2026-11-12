@@ -38,7 +38,8 @@ RUBRICS: dict[str, tuple[Item, ...]] = {
         Item("coverage", "Every acceptance criterion in the PRD has a screen or state that shows it"),
         Item("states", "Screens cover empty, loading and error states"),
         Item("access", "Accessibility notes are specific (labels, focus order, contrast or keyboard use)"),
-        Item("copy", "Interface text is plain and names actions by what they do", must=False),
+        Item("copy", "Interface text is plain, written out word for word, and names actions by what they do"),
+        Item("flow", "The flow says how a person gets to each screen, what moves them on, and how they leave or cancel"),
     ),
     "architecture": (
         Item("changes", "Says what changes in each affected repo"),

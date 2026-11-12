@@ -101,10 +101,22 @@ def spec(ctx: dict, defective: bool) -> str:
 
 
 def design(ctx: dict, defective: bool) -> str:
+    from .parse import SCREEN_ROLES
+
+    app = next((r for r in ctx.get("repos") or [] if r.get("role") in SCREEN_ROLES), None)
+    where = f" ({'mobile' if app and app['role'] == 'mobile' else 'web'}: {app['name']})" if app else ""
     lines = [
         f"# UX spec: {ctx['title']}",
-        "", "## Screens", f"- S1: {ctx['title']} form", "- S2: Confirmation",
-        "", "## States", "- Loading, empty, error, success",
+        "", "## Screens", f"- S1: {ctx['title']} form{where}", f"- S2: Confirmation{where}",
+        "", "## States",
+        "- S1: loading, empty (the form with its fields blank and a short hint), error (the fields keep what was "
+        "typed, the problem is named beside its field, and Save can be pressed again), success",
+        "- S2: loading, no empty: it only follows a save, error (the save didn't go through: Try again), success",
+        "", "## Flow", f"- start -> S1: from the {ctx.get('product_name', 'product')} menu", "- S1 -> S2: Save",
+        "- S1 -> cancel: Cancel", "- S2 -> done: Done",
+        "", "## Copy", '- S1 heading: "' + ctx['title'] + '"', '- S1 save button: "Save"', '- S1 cancel button: "Cancel"',
+        '- S1 error: "That didn\'t save. Check the highlighted fields and try again."', '- S2 heading: "Saved"',
+        '- S2 done button: "Done"',
         "", "## Coverage", *coverage_lines(ctx, "S1"),
         "", "## Handoff", "- Uses design-system tokens and existing form components",
     ]
@@ -187,6 +199,7 @@ def architecture(ctx: dict, defective: bool) -> str:
             else "OpenAPI minor version bump, backward compatible (VX-4)"),
         "", "## Diagram", "```mermaid", _flowchart(ctx, repos), "```",
     ]
+    lines += _sequence_lines(repos)
     if not defective or ctx.get("data_class") not in ("phi", "payments"):
         record = _slug(ctx["title"]).split("-", 1)[0] or "record"
         lines += ["", "## Audit",
@@ -217,6 +230,24 @@ def architecture(ctx: dict, defective: bool) -> str:
               " so there are fewer parts to run", "- Open: whether this change needs a feature flag beyond"
               " the one the pipeline creates"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _sequence_lines(repos: list[dict]) -> list[str]:
+    """Stub judgement: the main journey through the components that talk, front to back, and what
+    happens when the last one is down."""
+    order = ("consumer", "mobile", "bff", "agent", "mcp-server", "provider", "event-worker")
+    talking = sorted([r for r in repos if r["role"] in order], key=lambda r: order.index(r["role"]))
+    if len(talking) < 2 or sum(r["role"] != "mobile" for r in talking) < 2:
+        return []
+    names = [r["name"].split("/", 1)[-1] for r in talking]
+    lines = ["", "## Flows", "```mermaid", "sequenceDiagram", "  title The feature's main journey"]
+    lines += [f"  participant {n}" for n in names]
+    lines += [f"  {a}->>{b}: request" for a, b in zip(names, names[1:])]
+    lines += [f"  alt {names[-1]} is slow or down", f"    {names[-2]}-->>{names[0]}: an error the screen shows, nothing saved",
+              "  else success"]
+    lines += [f"    {b}-->>{a}: result" for a, b in reversed(list(zip(names, names[1:])))]
+    lines += ["  end", "```"]
+    return lines
 
 
 def _data_lines(ctx: dict, repos: list[dict]) -> list[str]:
