@@ -66,6 +66,8 @@ jobs:
           docker run --rm vrixel-sdlc:ci python -c \
             "import claude_agent_sdk, anthropic, httpx; from vrixel_sdlc.services import check_skills; check_skills(); print('skills ok')"
           docker run --rm vrixel-sdlc:ci codex exec --help | grep -q -- --output-schema
+          # Agents' shell commands run in Claude Code's sandbox, which needs these (vrixel_sdlc.sandbox).
+          docker run --rm vrixel-sdlc:ci sh -c 'command -v bwrap && command -v socat && command -v git' 
       - name: The image's plugins are the config's pin, and it can lay out another pin
         run: |
           ref=$(sed -n 's/^  ref: //p' config/plugins.yaml | head -1)

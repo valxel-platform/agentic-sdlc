@@ -40,6 +40,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VRIXEL_PLUGIN_SRC=/opt/vrixel/plugin-src \
     VRIXEL_CODEX_HOME=/opt/vrixel/codex-home
 
+# Debian's security updates since the base image was built (the image scan in CI fails on high and
+# critical CVEs with a fix), and what Claude Code's sandbox needs on Linux: agents' shell commands
+# run inside bubblewrap, their network through socat (vrixel_sdlc.sandbox).
+RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
+ && apt-get install -y --no-install-recommends bubblewrap socat git \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 COPY pyproject.toml README.md requirements.lock ./
 # Exactly the locked versions, each checked against its hash (requirements.lock is uv.lock's export;
