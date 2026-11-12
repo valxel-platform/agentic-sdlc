@@ -197,8 +197,16 @@ def build_initiative_graph(services, checkpointer=None):
             except Exception:
                 current = ""
             gid = f"GOAL-{state['product_id']}-{state['initiative_id'].rsplit('-', 1)[-1]}"
-            entry = (f"  - id: {gid}\n    title: {d['new_goal']['title']}\n    measure: {d['new_goal']['measure']}\n"
-                     f"    period: \"\"\n")
+            import yaml
+
+            from ..outcomes import stub_from_measure
+
+            # Measurable from the start, as inception's goals are: entered by hand until someone
+            # wires a query (vrixel_sdlc.outcomes).
+            goal = {"id": gid, "title": d["new_goal"]["title"], "measure": d["new_goal"]["measure"], "period": "",
+                    "metric": stub_from_measure(d["new_goal"]["measure"])}
+            entry = "".join("  " + ln + "\n" for ln in
+                            yaml.safe_dump([goal], sort_keys=False, allow_unicode=True).splitlines())
             files[goals_path] = (current.rstrip() + "\n" if current.strip() else "goals:\n") + entry
             initiative["goal"] = gid
             files[f"roadmap/initiatives/{state['initiative_id']}.md"] = render_initiative(initiative, body=body)
