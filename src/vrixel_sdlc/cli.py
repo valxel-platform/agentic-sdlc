@@ -362,6 +362,10 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
                      help="Before the brief: a quick or thorough web search, or 'own' (your research is in the vision)")
     inc.add_argument("--out", default="inception", help="Directory for the documents and report.json")
     inc.add_argument("--mode", default="stub", choices=["live", "stub"])
+    dr = sub.add_parser("design-record", help="Draft a product's design record (design/ in its governance repo) "
+                                              "from its web and mobile apps, as a pull request")
+    dr.add_argument("--product", required=True)
+    dr.add_argument("--mode", default="stub", choices=["live", "stub"])
     oc = sub.add_parser("outcomes", help="Check a product's goal metrics, read one for a window, or record a "
                                          "number typed in by hand")
     oc.add_argument("action", choices=["check", "read", "record"])
@@ -380,6 +384,16 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
         return _outcomes(args)
     if args.cmd == "inception":
         return _inception(args)
+    if args.cmd == "design-record":
+        from .config import load_settings
+        from .design_record import draft_for_existing
+        from .services import build_services
+
+        out = draft_for_existing(build_services(load_settings(mode=args.mode)), args.product)
+        print(f"Design record drafted: {', '.join(out['files'])} -> {out['pr']['url']}")
+        for repo, sha in out["read"].items():
+            print(f"  read {repo} @ {sha[:7]}")
+        return 0
     if args.cmd == "eval":
         return _eval(args)
     if args.cmd == "pilot-report":

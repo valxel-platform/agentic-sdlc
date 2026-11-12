@@ -133,3 +133,10 @@ def test_a_request_changes_before_the_build_and_the_waiting_gate_goes_back(engin
     assert [d for d in s["gate_decisions"] if d["decision"] == "revise"][-1]["feedback"].startswith("The person who asked")
     with pytest.raises(ValueError, match="Nothing changed"):
         engine.change_request(fid, s["description"], by="maria")
+
+
+def test_a_diagram_section_is_left_out_of_the_summary():
+    doc = "# HLD\n\nExtends the API.\n\n## Diagram\n```mermaid\nflowchart LR\n  a --> b\n```\n\n## Contracts\n- api: minor bump\n"
+    lines = decisions._skim(doc)
+    assert not any("mermaid" in x or x.startswith("Diagram") for x in lines)
+    assert "Contracts: api: minor bump" in lines

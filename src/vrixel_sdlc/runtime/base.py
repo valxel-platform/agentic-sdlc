@@ -29,6 +29,10 @@ class AgentTask:
     # Web searches the session may make (0: none). Runtimes that can't search ignore it
     # (vrixel_sdlc.research.can_search says which can).
     web_searches: int = 0
+    # A folder to work in, read-only: the session may read files there and change nothing
+    # (vrixel_sdlc.workspace). Runtimes without folder access ignore it.
+    cwd: str | None = None
+    read_only: bool = False
 
 
 @dataclass

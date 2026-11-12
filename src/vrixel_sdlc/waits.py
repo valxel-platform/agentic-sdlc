@@ -53,9 +53,25 @@ class WaitChecker:
         (integration in dev, e2e in staging, smoke in production) against it. Once per wait;
         a repeat after a restart is harmless (the workflow cancels duplicates)."""
         q = packet.get("quality") or {}
-        shas = {t["repo"]: t.get("sha", "") for t in q.get("targets") or [] if t.get("kind") != "acceptance"}
-        perf = {t["repo"]: t.get("perf", "none") for t in q.get("targets") or [] if t.get("kind") != "acceptance"}
+        own = ("acceptance", "screens")  # runs the tool asks for, not a component's own suite
+        shas = {t["repo"]: t.get("sha", "") for t in q.get("targets") or [] if t.get("kind") not in own}
+        perf = {t["repo"]: t.get("perf", "none") for t in q.get("targets") or [] if t.get("kind") not in own}
         urls = {r["repo"].split("/", 1)[-1]: r.get("url", "") for r in results}
+        for t in q.get("targets") or []:
+            if t.get("kind") != "screens":
+                continue
+            # The built screens: each route opened, scanned with axe, screenshotted (vrixel_sdlc.screens).
+            from .screens import check_name as screens_check
+
+            key = (packet.get("feature_id"), packet["wait"], packet.get("since"), t["repo"], "screens")
+            if not self._claim(key):
+                continue
+            try:
+                self.services.github.dispatch(repo=t["repo"], event_type="vrixel-screens", payload={
+                    "stage": packet["wait"], "sha": t["sha"], "feature_id": t["feature_id"], "flag": t.get("flag", ""),
+                    "check": screens_check(t["feature_id"], packet["wait"]), "env": urls, "screens": t["screens"]})
+            except Exception:
+                self._unclaim(key)
         for t in q.get("targets") or []:
             if t.get("kind") != "acceptance":
                 continue

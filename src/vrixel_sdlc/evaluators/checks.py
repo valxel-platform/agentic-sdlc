@@ -144,6 +144,61 @@ def _design(text: str, ctx: dict) -> list[str]:
         out.append("UX spec lists no screens")
     if "WCAG" not in section(text, "Accessibility"):
         out.append("No accessibility section with WCAG 2.1 AA criteria (VX-9)")
+    from ..design_record import check as record_check
+
+    return out + _ux_structure(text, ctx) + record_check(text, (ctx.get("knowledge") or {}).get("design") or {})
+
+
+def _ux_structure(text: str, ctx: dict) -> list[str]:
+    """What a builder needs: each screen's app, its states, how people move between screens, and the copy."""
+    from ..agents.parse import SCREEN_ROLES, parse_copy, parse_flow, parse_screen_apps, parse_screens, parse_states
+
+    screens = parse_screens(text)
+    if not screens:
+        return []
+    out = []
+    apps = {r["name"] for r in ctx.get("repos") or [] if r.get("role") in SCREEN_ROLES}
+    from ..agents.parse import parse_screen_routes
+
+    routes = parse_screen_routes(text)
+    for sid, repo in parse_screen_apps(text).items():
+        if repo and repo in apps and next((r["role"] for r in ctx.get("repos") or [] if r["name"] == repo), "") == "consumer" \
+                and not routes.get(sid, "").startswith("/"):
+            out.append(f"{sid}: give its route in the web app, as '(web: {repo}) [/path]': staging visits it to scan it")
+        if not repo:
+            out.append(f"{sid}: say which app it's in, as '- {sid}: <name> (web: <org>/<repo>)' or '(mobile: ...)'")
+        elif apps and repo not in apps:
+            out.append(f"{sid} is in {repo}, which isn't one of the product's apps ({', '.join(sorted(apps))})")
+    states = parse_states(text)
+    for sid in screens:
+        st = states.get(sid, "")
+        if not st:
+            out.append(f"{sid} has no line under States ('- {sid}: loading, empty (...), error (...), success')")
+            continue
+        if not re.search(r"\berror", st, re.I):
+            out.append(f"{sid}: no error state: what does the person see when it fails, and what can they do?")
+        if not re.search(r"\bempty|no empty", st, re.I):
+            out.append(f"{sid}: no empty state (or 'no empty: <why>')")
+    flow = parse_flow(text)
+    if not flow:
+        out.append("No Flow section: '- start -> S1: <from where>', '- S1 -> S2: <action>', '- S2 -> done'")
+    else:
+        reach, frontier = set(), ["start"]
+        while frontier:
+            at = frontier.pop()
+            for a, b, _ in flow:
+                if a == at and b not in reach:
+                    reach.add(b)
+                    frontier.append(b)
+        out += [f"{sid} ({screens[sid]}) can't be reached from start in the Flow" for sid in screens if sid not in reach]
+        if not any(b in ("done", "cancel") for _, b, _ in flow):
+            out.append("Flow: say how the person leaves ('- S2 -> done' or '-> cancel')")
+    copy = parse_copy(text)
+    if not copy:
+        out.append("No Copy section: each screen's button labels, headings and error messages, word for word "
+                   "('- S1 save button: \"Check in\"')")
+    else:
+        out += [f"{sid} ({screens[sid]}) has no copy under Copy" for sid in screens if sid not in copy]
     return out
 
 
@@ -173,6 +228,8 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     if not section(text, "Contracts"):
         out.append("HLD has no contracts section (VX-4)")
     out += _audit(text, repos, ctx)
+    out += _data(text, repos, ctx)
+    out += _threats(text, repos, ctx)
     out += _events(text, repos)
     out += _emitters(text, repos, ctx)
     out += _acceptance(repos, ctx)
@@ -181,6 +238,8 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 
     out += resources_check(text, repos, ctx)
     out += _diagram(text, repos)
+    out += _flows(text, repos)
+    out += _code_read(text, repos, ctx)
     if ctx.get("knowledge"):
         # Against the existing design: cited decisions are current, overrides are explicit, and
         # contract changes start from the version actually merged.
@@ -241,6 +300,68 @@ def _endpoints(text: str, repos: list[dict], ctx: dict) -> list[str]:
     return out
 
 
+DATA_ROLES = ("provider", "event-worker")
+_DESTRUCTIVE = re.compile(r"\b(drop|drops|dropped|rename|renames|renamed|remove[sd]? column)\b", re.I)
+
+
+def _data(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """G4 sees the data risk: tables, migration, backfill, retention, rollback."""
+    from ..agents.parse import parse_data
+
+    if not any(r["role"] in DATA_ROLES for r in repos):
+        return []
+    if not section(text, "Data"):
+        return ["HLD has no Data section: each table as '- <table>: <new|changed|none>; <what changes>', then "
+                "Migration, Backfill, Retention and Rollback lines (or '- None: <why no data changes>')"]
+    d = parse_data(text)
+    out = [f"Data: '{b[:80]}' isn't '- <table>: <new|changed|none>; ...' or a Migration, Backfill, Retention or "
+           "Rollback line" for b in d["bad"]]
+    changed = [t for t in d["tables"] if t["change"] != "none"]
+    if changed:
+        if not d["migration"]:
+            out.append(f"Data: {', '.join(t['table'] for t in changed)} change, but there's no Migration line")
+        if not d["rollback"]:
+            out.append("Data: tables change, but there's no Rollback line saying what happens to data the new "
+                       "version wrote if the release is rolled back")
+        if not d["backfill"]:
+            out.append("Data: tables change, but there's no Backfill line ('none' if nothing needs filling)")
+        destructive = [t["table"] for t in changed if _DESTRUCTIVE.search(t["what"])]
+        if destructive and not re.search(r"\b(expand|contract|later release|two releases)\b", d["migration"], re.I):
+            out.append(f"Data: {', '.join(destructive)} drop or rename a column: expand now and contract in a "
+                       "later release, so the version running during the rollout still works (say so on Migration)")
+    if ctx.get("data_class") in ("phi", "payments") and changed and not d["retention"]:
+        out.append(f"Data: a {ctx['data_class']} product's tables need a Retention line: how long, and why")
+    return out
+
+
+def _threats(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """Every product: where untrusted input enters, who may call each component and which records it
+    may touch, and each threat with how it's prevented and detected."""
+    from ..agents.parse import parse_endpoints, parse_threats
+
+    runtime = [r for r in repos if r["role"] in EXPOSED_ROLES and r["role"] != "mobile"]
+    if not runtime:
+        return []
+    if not section(text, "Threats"):
+        return ["HLD has no Threats section: a Boundary line per reachable component, an Authorization line per "
+                "component that serves requests, and each threat with 'prevented:' and 'detected:'"]
+    t = parse_threats(text)
+    out = [f"Threats: '{b[:80]}' isn't a Boundary, Authorization or '<threat>: <who>; prevented: <how>; detected: "
+           "<how>' line" for b in t["bad"]]
+    bounded = {b["repo"] for b in t["boundaries"]}
+    authorized = {a["repo"] for a in t["authorization"]}
+    for e in parse_endpoints(text):
+        reachable = [v for v in e["visibility"] if v in ("project", "namespace", "external")]
+        if reachable and e["repo"] not in bounded:
+            out.append(f"Threats: {e['repo']} is reachable ({', '.join(reachable)}) but has no Boundary line")
+        if reachable and e["repo"] not in authorized:
+            out.append(f"Threats: {e['repo']} serves requests but has no Authorization line: who may call it, and "
+                       "which records they may touch")
+    if not t["threats"]:
+        out.append("Threats: name at least one threat, as '<threat>: <who>; prevented: <how>; detected: <how>'")
+    return out
+
+
 def _acceptance(repos: list[dict], ctx: dict) -> list[str]:
     """A change across repos is tested end to end in the product's acceptance repo, when it has one."""
     from .. import acceptance
@@ -278,6 +399,42 @@ def _emitters(text: str, repos: list[dict], ctx: dict) -> list[str]:
     out += [f"Event {e} is recorded by {r}, which isn't an affected repo" for e, r in emits.items()
             if e in wanted and names and r not in names]
     out += [f"Event {e} under Instrumentation isn't in the PRD" for e in emits if e not in wanted]
+    return out
+
+
+def _code_read(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """When the architect had the code: every existing affected repo was read, or the notes say why not."""
+    read = (ctx.get("code_read") or {}).get("repos")
+    if not read:
+        return []
+    existing = {r["name"] for r in ctx.get("repos") or []}
+    notes = section(text, "Agent notes").lower()
+    return [f"{r['name']} is affected but wasn't read: read it, or say why under Agent notes ('Not read: {r['name']}: <why>')"
+            for r in repos if r["name"] in existing and not (read.get(r["name"]) or {}).get("sha")
+            and f"not read: {r['name'].lower()}" not in notes]
+
+
+def _flows(text: str, repos: list[dict]) -> list[str]:
+    """When components talk to each other: a sequence per journey, and a failure path."""
+    from ..agents.parse import parse_sequences
+
+    talking = [r for r in repos if r["role"] in RUNTIME_ROLES + ("bff",)]
+    if len(talking) < 2:
+        return []
+    seqs = parse_sequences(text)
+    if not seqs:
+        return ["HLD has no Flows section: a mermaid sequenceDiagram for each journey under Performance, with its "
+                "failure path (alt ... end)"]
+    out = ["A Flows diagram isn't a mermaid sequenceDiagram" for s in seqs if not s["ok"]][:1]
+    names = {r["name"].split("/", 1)[-1] for r in repos}
+    for s in seqs:
+        strangers = [p for p in s["participants"] if p not in names and p.lower() not in
+                     ("user", "person", "browser", "phone", "idp", "gateway", "kafka", "aws")]
+        if s["ok"] and strangers:
+            out.append(f"Flows{(' (' + s['title'] + ')') if s['title'] else ''}: {', '.join(strangers)} isn't an "
+                       "affected repo (use the repo name without the org, or user, browser, phone, idp, gateway, kafka)")
+    if seqs and not any(s["failure"] for s in seqs):
+        out.append("Flows: show at least one failure path (an 'alt' block for a dependency that is slow or down)")
     return out
 
 
@@ -338,10 +495,25 @@ def _plan(text: str, ctx: dict) -> list[str]:
         if affected and t.get("repo") not in affected:
             out.append(f"{t.get('id')} targets {t.get('repo')}, which is not in the HLD's affected repos")
     out += _screens(tasks, ctx)
+    out += _permission_cases(text, tasks, ctx)
     from .. import acceptance
 
     out += acceptance.check_plan(text, {**ctx, "plan_tasks": tasks})
     return out
+
+
+def _permission_cases(text: str, tasks: list[dict], ctx: dict) -> list[str]:
+    """Each component with an Authorization line in the design gets a permission test in the plan."""
+    from ..agents.parse import parse_threats
+
+    authz = {a["repo"] for a in parse_threats((ctx.get("parent_texts") or {}).get("HLD", ""))["authorization"]}
+    if not authz:
+        return []
+    by_task = {t.get("id"): t.get("repo") for t in tasks}
+    tested = {by_task.get(c["task"]) for c in parse_cases(text) if c["kind"] == "permission"}
+    return [f"{repo} has an Authorization line in the design but no permission test case "
+            f"('- TC-n (AC-x, permission): <who is refused> -> TASK-n <file>::<name>')"
+            for repo in sorted(authz) if repo in by_task.values() and repo not in tested]
 
 
 def _screens(tasks: list[dict], ctx: dict) -> list[str]:

@@ -228,7 +228,7 @@ NO_LESSON_ROLES = ("knowledge", "router", "intake")
 
 def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str, ...], tail: str,
                stub_text: str | None, max_tokens: int = 4096, schema: dict | None = None,
-               budget_usd: float | None = None) -> AgentResult:
+               budget_usd: float | None = None, cwd: str | None = None) -> AgentResult:
     """One agent session. Its dollar cap is the role's, and never more than what's left of the
     feature's budget (ctx budget_remaining_usd, or `budget_usd` when the caller knows better).
 
@@ -261,7 +261,8 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
         try:
             res = runtime.run(AgentTask(role=who, phase=phase, tags=tags, layers=layers, skills=tuple(skills),
                                         stub_text=stub_text, max_tokens=max_tokens, schema=schema,
-                                        max_budget_usd=None if left is None else max(0.0, float(left))))
+                                        max_budget_usd=None if left is None else max(0.0, float(left)),
+                                        cwd=cwd, read_only=bool(cwd)))
         except ProviderUnavailable as exc:
             if i == len(candidates) - 1:
                 raise
@@ -362,11 +363,11 @@ def _finish(s: PhaseState, findings: list[str], usage: dict) -> dict:
     return {"status": "retry", "reason": ""}
 
 
-ATTACHMENT_PHASES = ("discovery", "spec")
+ATTACHMENT_PHASES = ("discovery", "spec", "design")  # the designer sees the screenshots people attach
 
 
 def attachments_text(services, state: dict, phase: str) -> str:
-    """The intake attachments, for discovery and spec (later phases work from their documents)."""
+    """The intake attachments, for discovery, spec and design (later phases work from their documents)."""
     store = getattr(services, "attachments", None)
     metas = state.get("attachments") or []
     if store is None or not metas or phase not in ATTACHMENT_PHASES:
@@ -422,12 +423,33 @@ def build_phase_subgraph(phase: str, services):
         # A retry revises: the previous draft goes in, and only the sections that change come back.
         previous = (s.get("draft") or {}).get("content", "") if attempt > 1 else ""
         left = s["budget_remaining_usd"] - float((s.get("usage") or {}).get("cost_usd", 0.0))
-        with telemetry.labels(attempt=attempt):
-            res = call_agent(services, role=spec.role, phase=phase, ctx=ctx, skills=spec.skills,
-                             tail=document_tail(phase, ctx, previous), stub_text=template(ctx, defective), budget_usd=left)
+        co = None
+        if phase == "architecture":  # the architect reads the code, read-only (vrixel_sdlc.workspace)
+            from .. import workspace
+
+            co = workspace.checkout(services, [r["name"] for r in ctx.get("repos") or []],
+                                    key=f"{ctx['feature_id']}-architecture")
+            ctx = {**ctx, "code_read": co or {}}
+        try:
+            with telemetry.labels(attempt=attempt):
+                tail = document_tail(phase, ctx, previous)
+                if co:
+                    from .. import workspace
+
+                    tail = workspace.describe(co) + "\n\n" + tail
+                res = call_agent(services, role=spec.role, phase=phase, ctx=ctx, skills=spec.skills, tail=tail,
+                                 stub_text=template(ctx, defective), budget_usd=left, cwd=(co or {}).get("root"))
+        finally:
+            if co:
+                from .. import workspace
+
+                workspace.release(co)
         content = merge_sections(previous, res.text) if previous else res.text
-        return {"attempt": attempt, "draft": {"kind": spec.kind, "content": content},
-                "usage": {"tokens": res.tokens, "cost_usd": res.cost_usd}}
+        out = {"attempt": attempt, "draft": {"kind": spec.kind, "content": content},
+               "usage": {"tokens": res.tokens, "cost_usd": res.cost_usd}}
+        if phase == "architecture":
+            out["ctx"] = {**s["ctx"], "code_read": {k: v for k, v in (co or {}).items() if k != "root"}}
+        return out
 
     def evaluate(s: PhaseState) -> dict:
         with telemetry.labels(attempt=s.get("attempt", 0)):
@@ -523,7 +545,14 @@ SECURITY = {
 
 
 def security_instruction(ctx: dict, task: dict) -> str:
-    return SECURITY.get(task.get("role") or "", "")
+    """The role's rules, and who the approved design says may call this component."""
+    from ..agents.parse import parse_threats
+
+    rules = [a for a in parse_threats(ctx.get("hld_text", "") or (ctx.get("parent_texts") or {}).get("HLD", ""))
+             ["authorization"] if a["repo"] == task.get("repo")]
+    said = (" The design's authorization rules for this component, each enforced in code and tested by a refused "
+            "caller: " + "; ".join(f"{a['endpoint'] or 'all endpoints'}: {a['rule']}" for a in rules) + ".") if rules else ""
+    return SECURITY.get(task.get("role") or "", "") + said
 
 
 def ux_instruction(ctx: dict, task: dict) -> str:
@@ -927,6 +956,8 @@ def make_phase_node(phase: str, services):
                              score=out.get("score", 0.0),
                              **({"critic": out["critic"]} if out.get("critic") else {}))],
         }
+        if phase == "architecture":  # which repos the architect read, at which commit (G4 shows it)
+            delta["code_read"] = (out.get("ctx") or {}).get("code_read") or {}
         if phase == "architecture" and status == "passed" and out.get("draft"):
             content, diagram, ev = publish_diagram(services, state, out["draft"]["content"])
             out["draft"]["content"] = content
@@ -946,6 +977,20 @@ def make_phase_node(phase: str, services):
             )
             delta["artifacts"] = {spec.kind: ref}
             delta["trace_links"] = [[p, ref["id"]] for p in ctx["parent_ids"]]
+            if phase == "design" and status == "passed":  # what G3 looks at: a mockup per screen (vrixel_sdlc.mockups)
+                from .. import mockups
+
+                try:
+                    m = mockups.make(services, state, ctx, out["draft"]["content"],
+                                     budget_usd=ctx.get("budget_remaining_usd"))
+                    delta["artifacts"] = {**delta["artifacts"], **m["artifacts"]}
+                    delta["cost_usd"] += m["cost_usd"]
+                    delta["tokens_used"] += m["tokens_used"]
+                    delta["mockups"] = m["mockups"]
+                    delta["events"].append(event("design", "mockups", f"{len(m['mockups']['screens'])} screen(s)",
+                                                 findings=m["mockups"]["findings"]))
+                except Exception as exc:  # G3 still has the spec; say why there are no pictures
+                    delta["mockups"] = {"screens": [], "findings": [f"Mockups couldn't be drawn: {type(exc).__name__}"]}
         if phase in evals.DOC_PHASES and out.get("draft") and getattr(services, "evals", None) is not None:
             try:  # an eval case: what the agent was given, what it wrote and the critic's verdict
                 services.evals.capture(evals.case_from(state, phase, ctx, out,
@@ -1066,6 +1111,16 @@ def _knowledge_writeback(services, state: FeatureState, ctx: dict) -> list[dict]
                 events.append(event("operate", "architecture_record_pr", pr["url"], files=pr["files"]))
         except Exception as exc:  # the record update is a proposal; never fail a released feature on it
             events.append(event("operate", "architecture_record_failed", f"{type(exc).__name__}: {exc}"))
+    ux_ref = state.get("artifacts", {}).get("UX")
+    if ux_ref:
+        from ..design_record import propose_after_release
+
+        try:
+            pr = propose_after_release(services, state, services.artifacts.load(ux_ref))
+            if pr:
+                events.append(event("operate", "design_record_pr", pr["url"], files=pr["files"]))
+        except Exception as exc:
+            events.append(event("operate", "design_record_failed", f"{type(exc).__name__}: {exc}"))
     return events
 
 

@@ -101,16 +101,42 @@ def spec(ctx: dict, defective: bool) -> str:
 
 
 def design(ctx: dict, defective: bool) -> str:
+    from .parse import SCREEN_ROLES
+
+    app = next((r for r in ctx.get("repos") or [] if r.get("role") in SCREEN_ROLES), None)
+    mobile = bool(app and app["role"] == "mobile")
+    where = f" ({'mobile' if mobile else 'web'}: {app['name']})" if app else ""
+    slug = _slug(ctx["title"])
+    r1, r2 = ("", "") if mobile or not app else (f" [/{slug}]", f" [/{slug}/done]")
     lines = [
         f"# UX spec: {ctx['title']}",
-        "", "## Screens", f"- S1: {ctx['title']} form", "- S2: Confirmation",
-        "", "## States", "- Loading, empty, error, success",
+        "", "## Screens", f"- S1: {ctx['title']} form{where}{r1}", f"- S2: Confirmation{where}{r2}",
+        "", "## States",
+        "- S1: loading, empty (the form with its fields blank and a short hint), error (the fields keep what was "
+        "typed, the problem is named beside its field, and Save can be pressed again), success",
+        "- S2: loading, no empty: it only follows a save, error (the save didn't go through: Try again), success",
+        "", "## Flow", f"- start -> S1: from the {ctx.get('product_name', 'product')} menu", "- S1 -> S2: Save",
+        "- S1 -> cancel: Cancel", "- S2 -> done: Done",
+        "", "## Copy", '- S1 heading: "' + ctx['title'] + '"', '- S1 save button: "Save"', '- S1 cancel button: "Cancel"',
+        '- S1 error: "That didn\'t save. Check the highlighted fields and try again."', '- S2 heading: "Saved"',
+        '- S2 done button: "Done"',
+        *_component_lines(ctx),
         "", "## Coverage", *coverage_lines(ctx, "S1"),
         "", "## Handoff", "- Uses design-system tokens and existing form components",
     ]
     if not defective:
         lines += ["", "## Accessibility", "- WCAG 2.1 AA: 4.5:1 contrast, full keyboard path, labelled fields (VX-9)"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _component_lines(ctx: dict) -> list[str]:
+    """Stub judgement: the record's form and button components if it has them, else new ones."""
+    record = ((ctx.get("knowledge") or {}).get("design") or {}).get("components") or {}
+    pick = [n for n in record if re.search(r"form|button|field|input", n, re.I)][:3]
+    if pick:
+        return ["", "## Components", *[f"- {n}: existing" for n in pick]]
+    return ["", "## Components", "- Form: new: the design record has no form component yet",
+            "- Button: new: the design record has no button component yet"]
 
 
 def _mentions(ctx: dict, repo_name: str) -> bool:
@@ -187,12 +213,14 @@ def architecture(ctx: dict, defective: bool) -> str:
             else "OpenAPI minor version bump, backward compatible (VX-4)"),
         "", "## Diagram", "```mermaid", _flowchart(ctx, repos), "```",
     ]
+    lines += _sequence_lines(repos)
     if not defective or ctx.get("data_class") not in ("phi", "payments"):
         record = _slug(ctx["title"]).split("-", 1)[0] or "record"
         lines += ["", "## Audit",
                   f"- {record}.read: {record} (who opened which {record}, through which service)",
                   f"- {record}.change: {record} (who changed it, on whose behalf, approved by whom)"]
     lines += ["", "## Endpoints", *_endpoint_lines(repos)]
+    lines += _data_lines(ctx, repos) + _threat_lines(ctx, repos)
     lines += _resource_lines(ctx, repos, provider, lines)
     if any(r["role"] == "event-worker" for r in repos):
         record = _slug(ctx["title"]).split("-", 1)[0] or "record"
@@ -216,6 +244,64 @@ def architecture(ctx: dict, defective: bool) -> str:
               " so there are fewer parts to run", "- Open: whether this change needs a feature flag beyond"
               " the one the pipeline creates"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _sequence_lines(repos: list[dict]) -> list[str]:
+    """Stub judgement: the main journey through the components that talk, front to back, and what
+    happens when the last one is down."""
+    order = ("consumer", "mobile", "bff", "agent", "mcp-server", "provider", "event-worker")
+    talking = sorted([r for r in repos if r["role"] in order], key=lambda r: order.index(r["role"]))
+    if len(talking) < 2 or sum(r["role"] != "mobile" for r in talking) < 2:
+        return []
+    names = [r["name"].split("/", 1)[-1] for r in talking]
+    lines = ["", "## Flows", "```mermaid", "sequenceDiagram", "  title The feature's main journey"]
+    lines += [f"  participant {n}" for n in names]
+    lines += [f"  {a}->>{b}: request" for a, b in zip(names, names[1:])]
+    lines += [f"  alt {names[-1]} is slow or down", f"    {names[-2]}-->>{names[0]}: an error the screen shows, nothing saved",
+              "  else success"]
+    lines += [f"    {b}-->>{a}: result" for a, b in reversed(list(zip(names, names[1:])))]
+    lines += ["  end", "```"]
+    return lines
+
+
+def _data_lines(ctx: dict, repos: list[dict]) -> list[str]:
+    """Stub judgement: a provider or worker keeps one new table, added in one step (nothing dropped)."""
+    if not any(r["role"] in ("provider", "event-worker") for r in repos):
+        return []
+    record = (_slug(ctx["title"]).split("-", 1)[0] or "record").replace("-", "_")
+    keep = {"phi": "7 years after the last visit, as the clinic's record policy requires",
+            "payments": "7 years, as payment records must be"}.get(ctx.get("data_class", ""),
+                                                                  "while the account exists, then 30 days")
+    return ["", "## Data",
+            f"- {record}: new; id, created_at, updated_at and the fields the PRD names",
+            f"- Migration: V2__{record}.sql; one step: a new table, nothing existing changes",
+            "- Backfill: none",
+            f"- Retention: {keep}",
+            "- Rollback: the table stays; the previous version doesn't read it, so nothing breaks"]
+
+
+def _threat_lines(ctx: dict, repos: list[dict]) -> list[str]:
+    """Stub judgement: a boundary and an authorization rule for each reachable component, and the
+    two threats every request-serving change has."""
+    from .parse import parse_endpoints
+
+    reach = [e for e in parse_endpoints("## Endpoints\n" + "\n".join(_endpoint_lines(repos)))
+             if set(e["visibility"]) & {"project", "namespace", "external"}]
+    if not reach:
+        return []
+    out = ["", "## Threats"]
+    for e in reach:
+        where = "requests from the internet, signed in through the BFF" if "external" in e["visibility"] else \
+            "requests from the product's own components, with the caller's token"
+        out.append(f"- Boundary: {e['repo']}: {where}")
+    for e in reach:
+        out.append(f"- Authorization: {e['repo']} all endpoints: signed-in people of the product's organization; "
+                   "each request may touch only the records its caller's organization owns")
+    out += ["- Disclosure: another organization's user; prevented: every query is scoped to the caller's "
+            "organization; detected: audit records of reads, and an alert on refused requests",
+            "- Tampering: a caller changing someone else's record; prevented: ownership checked before each change; "
+            "detected: audit records of changes"]
+    return out
 
 
 def _resource_lines(ctx: dict, repos: list[dict], provider: str, lines: list[str]) -> list[str]:
@@ -344,6 +430,15 @@ def plan(ctx: dict, defective: bool) -> str:
             trace.append(f"- {nfr} -> {builder['id']}")
         suite = {"performance": "performance", "accessibility": "e2e", "security": "sast"}.get(spec["kind"], "integration")
         cases.append(f"- TC-{len(cases) + 1} ({nfr}, {spec['kind']}): {spec['text'][:80]} -> suite {suite}")
+    from .parse import parse_threats
+
+    authz = {a["repo"] for a in parse_threats(ctx["parent_texts"].get("HLD", ""))["authorization"]}
+    for t in tasks:  # each component the design authorizes: a caller without access is refused
+        if t["repo"] in authz and acs and t["role"] != "acceptance":
+            ac = (t["acs"] or acs)[0]
+            test_file = next((f for f in t["files"] if "test" in f or ".spec." in f), f"tests/test_{slug}.py")
+            cases.append(f"- TC-{len(cases) + 1} ({ac}, permission): a caller without access is refused"
+                         f" -> {t['id']} {test_file}::test_{ac.lower().replace('-', '')}_refused")
     if defective and trace:
         trace = trace[:-1]
     lines = [

@@ -214,8 +214,120 @@ def parse_new_repos(hld: str) -> list[dict]:
 
 SCREEN_ROLES = ("consumer", "mobile")  # the repos that draw what people see
 _SCREEN = re.compile(r"^-\s*(S\d+)\s*:\s*(.+?)\s*$", re.M)
+_APP = re.compile(r"\s*\((web|mobile|app)\s*:\s*([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)\)\s*(?:\[([^\]]*)\])?\s*$", re.I)
 
 
 def parse_screens(ux: str) -> dict[str, str]:
-    """The UX spec's screens: {'S1': 'Check-in form', ...}."""
-    return {m.group(1): m.group(2) for m in _SCREEN.finditer(section(ux, "Screens"))}
+    """The UX spec's screens: {'S1': 'Check-in form', ...} (the app in brackets left off)."""
+    return {m.group(1): _APP.sub("", m.group(2)).strip() for m in _SCREEN.finditer(section(ux, "Screens"))}
+
+
+def parse_screen_apps(ux: str) -> dict[str, str]:
+    """Which app repo each screen lives in: '- S1: Check-in form (web: acme/cln-web)' -> {'S1': 'acme/cln-web'}."""
+    out = {}
+    for m in _SCREEN.finditer(section(ux, "Screens")):
+        a = _APP.search(m.group(2))
+        out[m.group(1)] = a.group(2) if a else ""
+    return out
+
+
+def parse_screen_routes(ux: str) -> dict[str, str]:
+    """Each screen's route in its app, when given: '- S1: Check-in (web: acme/web) [/checkin]' -> {'S1': '/checkin'}."""
+    out = {}
+    for m in _SCREEN.finditer(section(ux, "Screens")):
+        a = _APP.search(m.group(2))
+        if a and a.group(3):
+            out[m.group(1)] = a.group(3).strip()
+    return out
+
+
+def parse_states(ux: str) -> dict[str, str]:
+    """'## States': '- S1: loading, empty, error (...), success' -> {'S1': 'loading, empty, ...'}."""
+    return {m.group(1): m.group(2) for m in _SCREEN.finditer(section(ux, "States"))}
+
+
+_FLOW = re.compile(r"^-\s*(start|S\d+)\s*->\s*(S\d+|done|cancel)\s*(?::\s*(.*))?$", re.M | re.I)
+
+
+def parse_flow(ux: str) -> list[tuple[str, str, str]]:
+    """'## Flow': '- start -> S1: from the menu', '- S1 -> S2: Save', '- S2 -> done' -> [(from, to, how)]."""
+    return [(a if a.lower() != "start" else "start", b if not b.lower() in ("done", "cancel") else b.lower(),
+             (c or "").strip()) for a, b, c in _FLOW.findall(section(ux, "Flow"))]
+
+
+_COPY = re.compile(r"^-\s*(S\d+)\b[^:]*:\s*[\"“](.+?)[\"”]\s*$", re.M)
+
+
+def parse_copy(ux: str) -> dict[str, list[str]]:
+    """'## Copy': '- S1 save button: "Check in"' -> {'S1': ['Check in', ...]}."""
+    out: dict[str, list[str]] = {}
+    for sid, text in _COPY.findall(section(ux, "Copy")):
+        out.setdefault(sid, []).append(text)
+    return out
+
+
+def parse_sequences(hld: str) -> list[dict]:
+    """'## Flows': each mermaid sequenceDiagram: its title line, participants and whether it shows a failure."""
+    out = []
+    for block in re.findall(r"```mermaid\n(.*?)\n```", section(hld, "Flows"), re.S):
+        lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+        if not lines or not lines[0].startswith("sequenceDiagram"):
+            out.append({"ok": False, "participants": [], "failure": False, "title": ""})
+            continue
+        parts = {m.group(1) for ln in lines for m in [re.match(r"(?:participant|actor)\s+([\w.-]+)", ln)] if m}
+        for ln in lines:
+            m = re.match(r"([\w.]+(?:-[\w.]+)*)\s*--?(?:>>|>|x|\))[+-]?\s*([\w.]+(?:-[\w.]+)*)\s*:", ln)
+            if m:
+                parts |= {m.group(1), m.group(2)}
+        title = next((ln[6:].strip() for ln in lines if ln.lower().startswith("title")), "")
+        failure = any(re.match(r"(alt|else|break|opt)\b", ln) for ln in lines) or "fail" in block.lower()
+        out.append({"ok": True, "participants": sorted(parts), "failure": failure, "title": title})
+    return out
+
+
+# --------------------------------------------------------------------------- data and threats (HLD)
+
+_TABLE = re.compile(r"^-\s*([A-Za-z_][\w.]*)\s*:\s*(new|changed|none)\b\s*;?\s*(.*)$", re.I)
+_KEYED = re.compile(r"^-\s*(Migration|Backfill|Retention|Rollback)\s*:\s*(.+)$", re.I)
+
+
+def parse_data(hld: str) -> dict:
+    """'## Data': tables (new, changed or none, and what changes), and the migration, backfill,
+    retention and rollback lines."""
+    out: dict = {"tables": [], "migration": "", "backfill": "", "retention": "", "rollback": "", "bad": []}
+    for line in section(hld, "Data").splitlines():
+        line = line.strip()
+        if not line.startswith("- "):
+            continue
+        if m := _KEYED.match(line):
+            out[m.group(1).lower()] = m.group(2).strip()
+        elif m := _TABLE.match(line):
+            out["tables"].append({"table": m.group(1), "change": m.group(2).lower(), "what": m.group(3).strip()})
+        elif not line[2:].lower().startswith("none"):
+            out["bad"].append(line)
+    return out
+
+
+_BOUNDARY = re.compile(r"^-\s*Boundary\s*:\s*([\w.-]+/[\w.-]+)\s*:\s*(.+)$", re.I)
+_AUTHZ = re.compile(r"^-\s*Authorization\s*:\s*([\w.-]+/[\w.-]+)\b\s*([^:]*):\s*(.+)$", re.I)
+_THREAT = re.compile(r"^-\s*([^:]+?)\s*:\s*(.+?);\s*prevented\s*:\s*(.+?);\s*detected\s*:\s*(.+)$", re.I)
+
+
+def parse_threats(hld: str) -> dict:
+    """'## Threats': where untrusted input enters, who may call what, and each threat with how it's
+    prevented and detected."""
+    out: dict = {"boundaries": [], "authorization": [], "threats": [], "bad": []}
+    for line in section(hld, "Threats").splitlines():
+        line = line.strip()
+        if not line.startswith("- "):
+            continue
+        if m := _BOUNDARY.match(line):
+            out["boundaries"].append({"repo": m.group(1), "where": m.group(2).strip()})
+        elif m := _AUTHZ.match(line):
+            out["authorization"].append({"repo": m.group(1), "endpoint": m.group(2).strip(), "rule": m.group(3).strip()})
+        elif m := _THREAT.match(line):
+            out["threats"].append({"threat": m.group(1).strip(), "who": m.group(2).strip(),
+                                   "prevented": m.group(3).strip(), "detected": m.group(4).strip()})
+        else:
+            out["bad"].append(line)
+    return out

@@ -109,6 +109,8 @@ class FeatureState(TypedDict, total=False):
     # Decided at creation (the intake's judgement), and G2's approver can change it.
     ui: Annotated[bool, last]
     ui_why: Annotated[str, last]
+    mockups: Annotated[dict, last]  # the UX spec's screens drawn for G3 (vrixel_sdlc.mockups)
+    code_read: Annotated[dict, last]  # the repos the architect read, at which commit (vrixel_sdlc.workspace)
     fit: Annotated[dict, last]  # whether the approved design and architecture fit together (vrixel_sdlc.fit)
     pull_requests: Annotated[dict[str, dict], merge_dict]
     # Each planned test case's test on its task's branch: {case id: {req, task, file, test, found}}.

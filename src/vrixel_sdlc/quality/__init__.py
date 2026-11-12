@@ -33,7 +33,8 @@ WAIT_STAGE = {"ci": "pr", "build": "build", "change_set": "change_set", "dev": "
 
 def sev_rank(sev: str | None) -> int:
     s = (sev or "").lower()
-    alias = {"error": "high", "warning": "medium", "note": "low", "none": "info", "moderate": "medium"}
+    alias = {"error": "high", "warning": "medium", "note": "low", "none": "info", "moderate": "medium",
+             "serious": "high", "minor": "low"}
     s = alias.get(s, s)
     return SEVERITIES.index(s) if s in SEVERITIES else 2  # unknown counts as medium
 
@@ -217,7 +218,7 @@ def evaluate(stage: str, policy: dict[str, dict], results: list[SuiteResult], wa
         if spec.get("stage") != POLICY_STAGE.get(stage, stage):
             continue
         mine = [r for r in results if r.suite == name]
-        if not mine and spec.get("applies_to") in ("acceptance", "performance"):
+        if not mine and spec.get("applies_to") in ("acceptance", "performance", "screens"):
             continue  # only some changes need these; Quality.check reports them when they do
         if not mine:
             mine = [SuiteResult(suite=name, kind=spec["kind"], stage=stage, state="missing")]
@@ -293,12 +294,14 @@ class Quality:
             # components. A change set with no acceptance run doesn't need one. Performance suites
             # read only the components whose change needs that level of test.
             on_acceptance = spec.get("applies_to") == "acceptance"
-            mine = [t for t in targets if (t.get("kind") == "acceptance") == on_acceptance]
+            on_screens = spec.get("applies_to") == "screens"  # the built screens (vrixel_sdlc.screens)
+            mine = [t for t in targets if t.get("kind") == "screens"] if on_screens else \
+                [t for t in targets if (t.get("kind") == "acceptance") == on_acceptance and t.get("kind") != "screens"]
             if spec.get("applies_to") == "performance":
                 need = PERF_LEVELS.index(spec.get("level") or "smoke")
                 mine = [t for t in mine if PERF_LEVELS.index(t.get("perf") or "none") >= need]
             if not mine:
-                if on_acceptance or spec.get("applies_to") == "performance":
+                if on_acceptance or on_screens or spec.get("applies_to") == "performance":
                     results.append(SuiteResult(suite=name, kind=spec["kind"], stage=stage, state="not_needed"))
                 continue
             try:

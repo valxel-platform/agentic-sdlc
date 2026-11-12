@@ -38,7 +38,8 @@ RUBRICS: dict[str, tuple[Item, ...]] = {
         Item("coverage", "Every acceptance criterion in the PRD has a screen or state that shows it"),
         Item("states", "Screens cover empty, loading and error states"),
         Item("access", "Accessibility notes are specific (labels, focus order, contrast or keyboard use)"),
-        Item("copy", "Interface text is plain and names actions by what they do", must=False),
+        Item("copy", "Interface text is plain, written out word for word, and names actions by what they do"),
+        Item("flow", "The flow says how a person gets to each screen, what moves them on, and how they leave or cancel"),
     ),
     "architecture": (
         Item("changes", "Says what changes in each affected repo"),
@@ -46,7 +47,11 @@ RUBRICS: dict[str, tuple[Item, ...]] = {
         Item("data", "Says how the product's data class is protected in the new flow"),
         Item("adrs", "Each ADR states the decision, the alternatives considered and the consequences"),
         Item("buildable", "A developer could build each repo's change from this document without asking the architect"),
-        Item("failure", "Describes what happens when a new dependency is slow or down", must=False),
+        Item("failure", "Describes what happens when a new dependency is slow or down"),
+        Item("threats", "Each threat says how it is prevented and how it is detected, and each Authorization line "
+                        "says which records a caller may touch, not only who may call"),
+        Item("data", "The Data section says what happens to data written by the new version if the release is "
+                     "rolled back, and a destructive change is split into expand and contract", must=False),
         Item("blast", "Says what else breaks if a new or changed component fails, and how that is contained",
              must=False),
         Item("performance", "States the expected load and whether the feature adds traffic or data volume",

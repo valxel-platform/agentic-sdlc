@@ -149,9 +149,12 @@ def test_an_intake_chat_continues_on_another_replica(pool):
     s = a.create(owner, ["FARM"])
     s.messages.append({"role": "agent", "text": "What would you like to build?", "at": s.created_at})
     s.draft.problem = "Farmers lose harvest notes offline"
+    assert s.draft.missing()[0] == "size"  # the front door asks whether it's a feature, an initiative or a product
+    s.draft.size = "feature"
     a.save(s)
     got = b.get(s.id, owner)
     assert got.messages[0]["text"].startswith("What") and got.draft.problem.startswith("Farmers")
+    assert got.draft.size == "feature"
     assert got.draft.missing() == ["product_id", "users", "success_metric"]
     assert [x.id for x in b.list(owner)] == [s.id]
     with pytest.raises(KeyError):

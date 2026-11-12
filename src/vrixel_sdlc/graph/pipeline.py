@@ -349,6 +349,13 @@ def make_gate(gate: str, services):
                 "aws_resources": (aws_summary(services, state, snap, ref)
                                   if gate in ("g4", "g6") and lane_id == state["product_id"] else None),
                 "design_review": review,
+                # G6 sees each screen built in staging beside the mockup G3 approved (vrixel_sdlc.screens).
+                "screens": (__import__("vrixel_sdlc.screens", fromlist=["g6"]).g6(state) if gate == "g6" else None),
+                # G3 looks at a mockup of each screen, with what their checks found.
+                "mockups": (state.get("mockups") or None) if gate == "g3" else None,
+                # G4: whether the architect read the code, and which commit of each repo.
+                "code_read": ({"checked": bool(state.get("code_read")), **(state.get("code_read") or {})}
+                              if gate == "g4" else None),
                 # G6 sees the CloudWatch alarms firing before production on what the feature touches.
                 "alarms_firing": _alarms_firing(services, state) if gate == "g6" else [],
                 # G6 sees how the change's own agents (repos with the agent role) did in their evals, by
@@ -1588,6 +1595,9 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
                     # In production a store app is only submitted: its health is the rollout's to judge.
                     if not (t.get("kind") == "store" and stage == "production") and t.get("kind") != "resource"]
         qtargets += acceptance_targets(services, state, stage, [t for t in targets if t.get("kind") not in ("store", "resource")])
+        from .. import screens as _screens
+
+        qtargets += _screens.targets(services, state, stage)
         packet = external(state, stage, targets, quality_packet(services, state, stage, qtargets))
         if stage == "staging" and any(t.get("perf") == "full" for t in qtargets):
             # Staging is smaller than production: the load test runs at a share of the expected peak.

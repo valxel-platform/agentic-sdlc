@@ -47,9 +47,19 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
 - VX-<n>                (at least one article of the platform or product constitution)""",
     "design": """# UX spec: <title>
 ## Screens
-- S1: <screen>
-## States
-- <loading, empty, error, success, ...>
+- S1: <screen> (web: <org>/<repo>) [/route]   (the app it lives in, and for a web screen its route: staging visits it)
+## States                      (one line per screen)
+- S1: loading, empty (<what the person sees and can do>), error (<what they see and can do>), success
+                        every screen has empty and error, or says 'no empty: <why>'
+## Flow
+- start -> S1: <where the person comes from>
+- S1 -> S2: <the action that takes them there>
+- S2 -> done                   (or '-> cancel'; every screen is reachable from start)
+## Copy                        (button labels, headings and error messages, word for word)
+- S1 <element>: "<text>"
+## Components                  (what the screens use, from the product's design record)
+- <Name>: existing
+- <Name>: new: <why no existing component fits>
 ## Coverage                    (one line for every acceptance criterion in the PRD)
 - AC-1: S1                     (the screen or state that shows it, or 'not on screen: <why>')
 ## Accessibility
@@ -71,6 +81,16 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
 ```mermaid
 flowchart LR  (one node per affected repo)
 ```
+## Flows                       (when two or more components talk: one sequence per journey, and a failure path)
+```mermaid
+sequenceDiagram
+  title <journey>
+  participant <repo name without the org>
+  web->>api: <call>
+  alt <failure>
+    api-->>web: <what happens>
+  end
+```
 ## Audit                       (what gets an audit record)
 - <record>.<action>: <record> (<who did what>)
 ## Endpoints
@@ -79,6 +99,16 @@ flowchart LR  (one node per affected repo)
 - vrixel.<record>.<event>.v<n>: published by <repo>, applied by <repo>
 ## Instrumentation             (one line for every event in the PRD's Instrumentation section)
 - <event_name>: <org>/<repo>   (the affected repo that records it)
+## Data                        (required when a provider or event worker changes; '- None: <why>' otherwise)
+- <table>: <new | changed | none>; <columns added, changed or dropped>
+- Migration: <Flyway version>; <expand now, contract in a later release | one step: why it's safe>
+- Backfill: <none | how, how long, whether it runs while the product is live>
+- Retention: <how long records are kept, and why>      (required for PHI and payments products)
+- Rollback: <what happens to data the new version wrote if the release is rolled back>
+## Threats                     (every product)
+- Boundary: <org>/<repo>: <where untrusted input enters>        (each project, namespace or external endpoint)
+- Authorization: <org>/<repo> <endpoint or 'all endpoints'>: <who may call it, and which records they may touch>
+- <threat (spoofing, tampering, disclosure, denial of service, privilege escalation...)>: <who could do it>; prevented: <how>; detected: <how>
 ## Resources                   (AWS services, only when needed; each with an ADR)
 - <name>: <type>; <param>=<value>
   writes: <repo>; reads: <repo>
