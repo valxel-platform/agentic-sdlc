@@ -120,6 +120,7 @@ sequenceDiagram
 - New traffic: <yes|no>: <why>
 - Data growth: <yes|no>: <why>
 - Journeys: <the user journeys to load-test, or none>
+- Added load: <component> +<n> requests/s; <component> +<n> events/s      (at the busy hour after a year; when new traffic is yes)
 ## Constitution articles
 - VX-<n>""",
     "plan": """# Plan: <title>

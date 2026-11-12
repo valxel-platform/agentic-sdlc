@@ -68,6 +68,18 @@ class OpenChoreo(Protocol):
                       retain: bool = False) -> dict: ...  # retain: keep the data if the binding goes
     def resource_status(self, *, name: str, env: str, project: str,
                         namespace: str | None = None) -> dict: ...  # {"state": ready|progressing|failed|absent, "message"}
+    # A product's own environments (vrixel_sdlc.environments): created at the product gate on the
+    # product's data planes, which the platform registers once their clusters exist. Production is
+    # created for the person who approved the gate, never by an agent (VX-3).
+    def data_plane(self, *, name: str, namespace: str | None = None) -> dict: ...  # {"state": ready|absent, ...}
+    def ensure_project(self, *, project: str, pipeline: str, namespace: str | None = None) -> str: ...  # created|exists
+    def ensure_environment(self, *, name: str, data_plane: str, production: bool, actor: str,
+                           namespace: str | None = None, labels: dict | None = None) -> str: ...  # created|exists
+    def ensure_pipeline(self, *, name: str, stages: list[str], namespace: str | None = None) -> str: ...
+    # The capacity a release binding runs with in one environment (vrixel_sdlc.capacity.binding_configs):
+    # componentTypeEnvironmentConfigs and traitEnvironmentConfigs, replacing what was set before.
+    def configure_binding(self, *, component: str, env: str, configs: dict, traits: dict,
+                          project: str | None = None, namespace: str | None = None) -> dict: ...
     # Inventory (read only): where a component runs and what a resource is, per environment.
     def component_bindings(self, *, component: str, project: str | None = None,
                            namespace: str | None = None) -> list[dict]: ...  # [{"env", "release", "state", "binding"}]
@@ -115,6 +127,11 @@ class StubOpenChoreo:
         self.env_bindings: dict[tuple[str, str], str] = {}  # (component, change-set env) -> release
         self.env_results: dict[tuple[str, str], str] = {}  # tests: (component, env) -> state
         self.refuse_environments = False  # tests: an OpenChoreo that can't create environments
+        self.data_planes: set[str] = set()  # registered data planes (the platform registers them)
+        self.projects: dict[str, dict] = {}
+        self.product_environments: dict[str, dict] = {}
+        self.pipelines: dict[str, list[str]] = {}
+        self.binding_configs: dict[tuple[str, str], dict] = {}  # (component, env) -> capacity applied
         self._seq = itertools.count(1)
         self._lock = threading.Lock()
 
@@ -166,6 +183,39 @@ class StubOpenChoreo:
                    "release": f"{component.rsplit('/', 1)[-1]}-r1"}
             self.promotions.append(rec)
             return dict(rec)
+
+    def data_plane(self, *, name, namespace=None) -> dict:
+        with self._lock:
+            return {"state": "ready" if name in self.data_planes else "absent", "name": name}
+
+    def ensure_project(self, *, project, pipeline, namespace=None) -> str:
+        with self._lock:
+            new = project not in self.projects
+            self.projects.setdefault(project, {"pipeline": pipeline, "namespace": namespace})
+        return "created" if new else "exists"
+
+    def ensure_environment(self, *, name, data_plane, production, actor, namespace=None, labels=None) -> str:
+        if production and not str(actor).startswith("human:"):
+            raise PermissionError("Agents cannot create production environments (VX-3)")
+        with self._lock:
+            if data_plane not in self.data_planes:
+                raise ValueError(f"{data_plane}: no such data plane")
+            new = name not in self.product_environments
+            self.product_environments.setdefault(name, {"data_plane": data_plane, "production": production,
+                                                        "actor": actor, "namespace": namespace,
+                                                        "labels": dict(labels or {})})
+        return "created" if new else "exists"
+
+    def ensure_pipeline(self, *, name, stages, namespace=None) -> str:
+        with self._lock:
+            new = name not in self.pipelines
+            self.pipelines.setdefault(name, list(stages))
+        return "created" if new else "exists"
+
+    def configure_binding(self, *, component, env, configs, traits, project=None, namespace=None) -> dict:
+        with self._lock:
+            self.binding_configs[(component, env)] = {"configs": configs, "traits": traits}
+        return {"component": component, "env": env}
 
     def create_environment(self, *, name, like, project=None, namespace=None, labels=None) -> dict:
         if self.refuse_environments:
@@ -471,6 +521,60 @@ class OpenChoreoMcp:
         else:
             state = "progressing"
         return {"state": state, "release": self._release_of(b), "url": _get(b, "status.endpoints.0.url") or ""}
+
+    # -- the product's own environments
+    def data_plane(self, *, name, namespace=None) -> dict:
+        try:
+            dp = self._call(("get_data_plane", "get_dataplane"), {**self._ns(namespace),
+                                                                   ("name", "data_plane", "dataplane", "data_plane_name"): name})
+        except McpError:
+            return {"state": "absent", "name": name}
+        return {"state": "ready" if dp else "absent", "name": name}
+
+    def ensure_project(self, *, project, pipeline, namespace=None) -> str:
+        scope = {**self._ns(namespace), _PROJECT: project}
+        try:
+            if self._call(("get_project",), scope):
+                return "exists"
+        except McpError:
+            pass
+        self._call(("create_project",), {**scope, ("deployment_pipeline", "deploymentPipeline", "pipeline"): pipeline})
+        return "created"
+
+    def ensure_environment(self, *, name, data_plane, production, actor, namespace=None, labels=None) -> str:
+        if production and not str(actor).startswith("human:"):
+            raise PermissionError("Agents cannot create production environments (VX-3)")
+        if self._env(name, namespace):
+            return "exists"
+        self._call(("create_environment",), {
+            **self._ns(namespace), ("name", "environment_name", "environmentName"): name,
+            ("display_name", "displayName"): name.capitalize(),
+            ("data_plane_ref", "dataPlaneRef", "data_plane", "dataPlane"): data_plane,
+            ("is_production", "isProduction", "production"): bool(production),
+            ("labels",): {"vrixel.io/created-by": str(actor).replace(":", "-")[:63], **(labels or {})}})
+        return "created"
+
+    def ensure_pipeline(self, *, name, stages, namespace=None) -> str:
+        scope = {**self._ns(namespace), ("name", "pipeline", "deployment_pipeline", "pipeline_name"): name}
+        try:
+            if self._call(("get_deployment_pipeline",), scope):
+                return "exists"
+        except McpError:
+            pass
+        paths = [{"sourceEnvironmentRef": a, "targetEnvironmentRefs": [{"name": b}]} for a, b in zip(stages, stages[1:])]
+        self._call(("create_deployment_pipeline",), {**scope, ("promotion_paths", "promotionPaths", "paths"): paths})
+        return "created"
+
+    def configure_binding(self, *, component, env, configs, traits, project=None, namespace=None) -> dict:
+        scope = self._scope(component, project, namespace)
+        b = next((x for x in self._bindings(component, project, namespace) if self._env_of(x) == env), None)
+        if b is None:
+            raise ValueError(f"{component}: not bound in {env}")
+        self._call(("update_release_binding",), {
+            **scope, _ENV: env, ("binding", "release_binding", "name", "binding_name"): _get(b, "name", "metadata.name"),
+            ("component_type_environment_configs", "componentTypeEnvironmentConfigs"): configs,
+            ("trait_environment_configs", "traitEnvironmentConfigs"): traits})
+        return {"component": component, "env": env}
 
     # -- change-set environments
     def create_environment(self, *, name, like, project=None, namespace=None, labels=None) -> dict:

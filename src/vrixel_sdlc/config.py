@@ -226,6 +226,8 @@ class Settings:
     inception: dict = field(default_factory=dict)
     # The platform's default alert rules; unset, alert-rules.yaml next to the AWS catalog.
     platform_alert_rules_path: str = ""
+    # Tiers, headroom and starting throughput for capacity plans; unset, capacity.yaml next to the AWS catalog.
+    platform_capacity_path: str = ""
     # Where error reports may go; unset, error-tracking.yaml next to the AWS catalog.
     platform_error_tracking_path: str = ""
     # What the tool may do in production by itself; unset, remediation.yaml next to the AWS catalog.
@@ -235,6 +237,8 @@ class Settings:
         folder = self.platform_resources_path.rsplit("/", 1)[0] if "/" in self.platform_resources_path else ""
         if not self.platform_alert_rules_path:
             self.platform_alert_rules_path = f"{folder}/alert-rules.yaml" if folder else "alert-rules.yaml"
+        if not self.platform_capacity_path:
+            self.platform_capacity_path = f"{folder}/capacity.yaml" if folder else "capacity.yaml"
         if not self.platform_error_tracking_path:
             self.platform_error_tracking_path = f"{folder}/error-tracking.yaml" if folder else "error-tracking.yaml"
         if not self.platform_remediation_path:
@@ -294,6 +298,7 @@ def load_settings(
         platform_constitution_path=plat.get("constitution_path", "constitution.md"),
         platform_resources_path=plat.get("resources_path", "aws-resources.yaml"),
         platform_alert_rules_path=plat.get("alert_rules_path", ""),
+        platform_capacity_path=plat.get("capacity_path", ""),
         platform_error_tracking_path=plat.get("error_tracking_path", ""),
         platform_remediation_path=plat.get("remediation_path", ""),
         limits=Limits(

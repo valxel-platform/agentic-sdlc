@@ -30,6 +30,11 @@ export interface ScreensAtRelease {
 }
 /** G4: which repos the architect read, at which commit. */
 export interface CodeRead { checked: boolean; repos?: Record<string, { sha?: string; skipped?: string }> }
+/** G4: what a design's added load does to one component's approved maximum. */
+export interface CapacityChange { repo: string; busy_from?: number; busy_to?: number; unit?: string;
+  max_from?: number; max_to?: number; error?: string }
+export interface CapacitySummary { tier: number; stages: Record<string, { monthly_usd: number; monthly_usd_max: number }>;
+  fixed: { monthly_usd: number; unpriced: string[] }; findings: string[] }
 /** A governance pull request an approval opened, mergeable from the tool. */
 export interface RecordPr { key: string; label: string; url: string; merged: boolean; repo: string; number: number }
 export interface PendingItem {
@@ -40,6 +45,10 @@ export interface PendingItem {
   mockups?: MockupSet | null;
   screens?: ScreensAtRelease | null;
   code_read?: CodeRead | null;
+  // G4: the approved maximums the design's added load raises.
+  capacity_change?: CapacityChange[] | null;
+  // The product gate: the capacity plan's cost per production stage, and the product's own fixed costs.
+  capacity?: CapacitySummary | null;
   fit?: { to: "design" | "architecture"; text: string }[];
   interrupt_id: string;
   // At the product gate: the architecture's AWS resources priced per environment.

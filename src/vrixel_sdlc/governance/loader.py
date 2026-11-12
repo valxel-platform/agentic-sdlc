@@ -41,6 +41,7 @@ class GovernanceSnapshot:
     alert_rules: dict = field(default_factory=dict)  # the platform's default OpenChoreo alert rules, empty if none
     remediation: dict = field(default_factory=dict)  # what the tool may do in production by itself (ops/remediation.py)
     lessons: tuple = ()  # approved lessons from people's corrections (vrixel_sdlc.lessons), pinned like the rest
+    capacity: dict = field(default_factory=dict)  # runtime/capacity.yaml: the approved capacity plan (vrixel_sdlc.capacity)
 
     @property
     def version(self) -> str:
@@ -117,6 +118,13 @@ class GovernanceLoader:
         except ConstitutionError as exc:
             raise GovernanceError(f"{entry.governance.full_name}: {exc}") from exc
         context = s.read(prod["org"], prod["repo"], files["context"], prod["sha"], optional=True) or ""
+        from ..capacity import load_product as load_capacity
+
+        try:
+            capacity = load_capacity(s.read(prod["org"], prod["repo"], "runtime/capacity.yaml", prod["sha"],
+                                            optional=True) or "")
+        except ValueError as exc:
+            raise GovernanceError(f"{entry.governance.full_name}/runtime/capacity.yaml: {exc}") from exc
         from ..lessons import LessonError, load_dir
 
         try:
@@ -164,7 +172,7 @@ class GovernanceLoader:
             pins={"platform": dict(plat), "product": dict(prod),
                   "dependencies": {d: dict(p) for d, p in deps_pins.items()} if not _as_dependency else {}},
             constitution_text=own_text, dependencies=dependencies, aws_catalog=catalog, alert_rules=alert_rules,
-            lessons=lessons,
+            lessons=lessons, capacity=capacity,
             remediation=remediation_mod.for_product(remediation, runtime, product.data_class,
                                                     self.settings.data_classes),
         )

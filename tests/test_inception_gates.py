@@ -62,7 +62,8 @@ def test_two_gates_then_setup_opens_the_pull_requests(client, engine, services, 
     assert v["status"] == "brief_gate"
     decide(client, engine, tid, "approve")
     item = decide(client, engine, tid, "approve")
-    assert item["gate"] == "product" and item["monthly_usd"] == {"dev": 15.0, "staging": 15.0, "production": 140.0}
+    assert item["gate"] == "product" and item["monthly_usd"] == {"dev": 5.0, "staging": 5.0, "production": 15.0}
+    assert item["capacity"]["tier"] == 3 and item["capacity"]["stages"]["pilot"]["monthly_usd"] > 0
     assert "# Product architecture" in item["preview"] and "# Roadmap" in item["preview"]
     v = wait_idle_status(engine, tid, "set_up")
     s = v["setup"]
@@ -70,10 +71,18 @@ def test_two_gates_then_setup_opens_the_pull_requests(client, engine, services, 
     gh = services.github
     files = {path for (repo, branch, path) in gh.files if repo == "acme-water/aw-governance"}
     assert {"product.yaml", "constitution.md", "roadmap/goals.yaml", "roadmap/initiatives/AW-INI-1.md",
-            "architecture/product-architecture.md"} <= files
+            "architecture/product-architecture.md", "runtime/capacity.yaml"} <= files
     registry = gh.files[("vrixel-tools/sdlc-config", "vrixel/register-aw", "config/registry.yaml")]
     assert "AW: { kind: product, org: acme-water, repo: aw-governance" in registry
-    assert [st["step"] for st in s["steps"]] == ["governance_repo", "governance_pr", "registry_pr", "teams"]
+    assert [st["step"] for st in s["steps"]] == ["governance_repo", "governance_pr", "registry_pr", "clusters_pr",
+                                                 "environments", "teams"]
+    # The clusters wait for the platform's infrastructure repo; the environments for the data planes.
+    by = {st["step"]: st for st in s["steps"]}
+    assert by["clusters_pr"]["skipped"] and by["environments"]["waiting"] == ["aw-nonprod", "aw-prod"]
+    import yaml
+
+    manifest = yaml.safe_load(gh.files[("acme-water/aw-governance", "vrixel/inception", "product.yaml")])
+    assert manifest["runtime"]["stage"] == "pilot" and manifest["runtime"]["data_planes"]["production"] == "aw-prod"
 
 
 def wait_idle_status(engine, tid, status, timeout=10.0):

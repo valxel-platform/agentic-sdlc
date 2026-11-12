@@ -54,8 +54,9 @@ def test_with_the_approved_brief_the_architecture_and_roadmap_follow(services, v
     assert a.data_class == "general"  # the approved brief's class from here on
     names = [c["name"] for c in formats.components(a.text)]
     assert {"api", "bff", "mobile", "events"} <= set(names)  # a phone app and alerts in the vision
-    assert a.monthly_usd == {"dev": 15.0, "staging": 15.0, "production": 140.0}
-    assert "## Monthly cost" in a.text and "| Total | | $15 | $15 | $140 |" in a.text
+    # The database is sized by the capacity plan: paused in dev and staging, small in the pilot.
+    assert a.monthly_usd == {"dev": 5.0, "staging": 5.0, "production": 15.0}
+    assert "## Capacity" in a.text and "| records (database) |" in a.text and "## Monthly cost" not in a.text
     inis = formats.initiatives(r.text)
     assert inis[0]["id"] == "INI-1" and inis[0]["horizon"] == "now" and not inis[0]["after"]
     assert sum(i["budget_usd"] for i in inis) <= 1500
@@ -160,5 +161,5 @@ def test_the_command_line(tmp_path, monkeypatch):
                      "--out", "out"]) == 0
     report = json.loads((tmp_path / "out" / "report.json").read_text())
     assert [d["doc"] for d in report] == ["architecture", "roadmap"]
-    assert report[0]["monthly_usd"]["production"] == 140.0
+    assert report[0]["monthly_usd"]["production"] == 15.0 and report[0]["capacity"]["tier"] == 3
     assert cli.main(["inception", "--vision", "vision.md", "--out", "out"]) == 2  # no org

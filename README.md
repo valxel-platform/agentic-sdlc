@@ -440,13 +440,18 @@ documents, each written by an agent, checked by machine and by the critic, and r
 pass (`vrixel_sdlc/inception/`):
 
 1. **Product brief** (strategist): the problem, users, goals with numeric measures, non-goals, scope,
-   the data class with its reason, compliance, risks, and the product's id, org, repo prefix and
-   budget. The org must already exist; the person names it.
+   the volumes (`## Scale`: how many at launch and after a year, how busy the busiest hour is), the
+   availability tier with its reason, the data class with its reason, compliance, risks, and the
+   product's id, org, repo prefix, budget and run budget per production stage. The org must already
+   exist; the person names it.
 2. **Product architecture** (architect): components with their repo roles and repos, AWS resources
    from the platform catalog (checked against it and against the data class), shared services, NFRs
-   with numbers, and founding ADRs with their alternatives. The tool prices the resources per
-   environment from the catalog and adds a `## Monthly cost` table. An existing product also writes
-   `## Current state` and `## Gap`.
+   with numbers, the load per user journey (`## Load`), how each component scales and what runs out
+   first (`## Scaling`), what happens when each dependency fails and how each data store recovers
+   (`## Failure`), and founding ADRs with their alternatives. The tool computes the capacity plan
+   from the volumes and the load (see below) and adds a `## Capacity` section, prices the resources
+   per environment from the catalog and adds a `## Monthly cost` table. An existing product also
+   writes `## Current state` and `## Gap`.
 3. **Roadmap** (strategist): initiatives in order, each with its horizon, budget, goals, what must come
    first and its candidate features, and which components each feature builds. The checks make sure
    every goal is served, every component is built, budgets fit the brief's, and (for a new product)
@@ -496,7 +501,55 @@ stopping writes nothing. Approving the product gate runs setup (`vrixel_sdlc/inc
   per initiative with its candidate features;
 - opens a pull request on the config repo (`VRIXEL_CONFIG_REPO`) adding the product to
   `config/registry.yaml` (without one, the line to add is shown);
-- lists the approver teams an org admin needs to create.
+- lists the approver teams an org admin needs to create;
+- records the capacity plan as `runtime/capacity.yaml`, and sets up the product's environments (below).
+
+### Capacity and environments
+
+The agents write the assumptions; code does the arithmetic (`vrixel_sdlc/capacity.py`), so no
+replica count is a model's guess. From the brief's volumes and the architecture's load per journey,
+with the platform's tiers, headroom and starting throughput per role (`platform/capacity.yaml` in
+the platform governance repo) and the catalog's database sizes, it works out for each component the
+busy-hour load at launch and after a year, the pods each stage needs, CPU and memory, the database
+size its connection pools need, Kafka partitions (set for year one now, since changing them later
+reorders events), and the monthly cost of each stage. The checks stop a plan that doesn't add up: a
+component nothing sends load to, pools no database size takes, a stage over the run budget, or a PHI
+or payments product below tier 2.
+
+Production grows in stages, so a product with few customers pays little to run:
+
+| Stage | Production runs | Availability |
+| --- | --- | --- |
+| pilot | one small pod per component, the autoscaler's ceiling at twice the launch busy hour, the small database with point-in-time recovery | tier 3 (99.5%), whatever the target; data protection never relaxes |
+| growth | the target tier's floor (2 pods each at tier 2), the Multi-AZ database | the target tier |
+| scale | the autoscaler follows load up to the approved maximum | the target tier |
+
+Dev and staging are a fixed small size (1 and 2 pods), on spot nodes, scaled to zero outside
+working hours, with a database that pauses when idle (Aurora Serverless v2 at 0 capacity).
+
+All products share one OpenChoreo control plane, workflow plane and non-production observability
+plane. Each product gets two data planes of its own (non-production and production) and its own
+production observability plane, so production logs never leave it. At the product gate, setup
+proposes those clusters to the platform's infrastructure repo (`VRIXEL_INFRA_REPO`, from the
+platform's `openchoreo/clusters.yaml` template); once the platform registers them, it creates the
+product's project, dev and staging on the non-production data plane, production on the production
+data plane (for the person who approved the gate, never an agent), and the pipeline. Until then the
+step waits; `vrixel environments --product CLN --approver maria` finishes it.
+
+Every deployment then carries its environment's part of `runtime/capacity.yaml`: replicas, CPU and
+memory in the release binding, and the platform's `autoscaler` trait's range where there is one
+(`platform/openchoreo/` has the component types and trait to apply to the control plane). After
+launch the plan keeps moving, always by a pull request people merge:
+
+- a feature design that adds load (`- Added load: cln-intake-api +20 requests/s` under
+  `## Performance`) shows G4 the maximums it raises, and the release proposes them;
+- staging's load test runs at what staging's pods should take and reports what one pod handled;
+  after three tests the median replaces the starting figure;
+- `vrixel capacity --product CLN --observed busy.json` reviews production: the busy hour over half
+  the stage's capacity on 5 days in a fortnight proposes the next stage, an autoscaler at its
+  maximum proposes a higher one, a month under a fifth proposes stepping down; and
+  `vrixel capacity --product CLN --step growth --reason "contract promises 99.9%"` proposes a step
+  with its cost before and after.
 
 When both merge and the tool reloads its config, the initiatives are on the Roadmap page ready to
 start, and each feature creates the repos the architecture names at G4. An existing product gets one

@@ -42,14 +42,18 @@ def ids(brief: str) -> dict:
 
 
 def product_yaml(vision: Vision, brief: str) -> str:
+    from .. import capacity, environments
+
     i = ids(brief)
+    tier = capacity.tier(brief)[0] or 3
     org, pid = i["org"], i["product_id"]
     approvers = {gate: [f"{org}/{team}"] for gate, team in TEAMS.items()}
     approvers["traceability"] = [f"{org}/product-owners", f"{org}/qa"]
     doc = {
         "product_id": pid, "name": vision.name, "constitution": "constitution.md", "context": "context.md",
         "depends_on": [],
-        "runtime": {"openchoreo_project": pid.lower(), "pipeline": ["dev", "staging", "production"]},
+        "runtime": {"openchoreo_project": pid.lower(), "pipeline": ["dev", "staging", "production"],
+                    **environments.runtime_entry(pid, tier)},
         # A first-year envelope spread over its features: the per-feature ceiling starts at a tenth of it.
         "budget_usd": max(50, round(i["budget_usd"] / 10)),
         "repos": [],
@@ -121,11 +125,23 @@ def initiative_files(brief: str, roadmap: str, approved_by: str) -> dict[str, st
     return out
 
 
+def capacity_file(brief: str, architecture: str, plat: dict | None) -> str:
+    """runtime/capacity.yaml from the approved documents ('' when the plan has no components)."""
+    from .. import capacity
+
+    plat = plat or {}
+    p = capacity.plan(brief, architecture, plat.get("capacity"), plat.get("catalog") or {},
+                      data_class=formats.data_class(brief)[0] or "general")
+    return capacity.capacity_yaml(p, ids(brief)["product_id"]) if p["components"] else ""
+
+
 def governance_files(vision: Vision, brief: str, architecture: str, roadmap: str, approved_by: str,
-                     research: str = "") -> dict[str, str]:
+                     research: str = "", plat: dict | None = None) -> dict[str, str]:
     i = ids(brief)
     goals, _ = goals_yaml(brief)
+    sized = capacity_file(brief, architecture, plat)
     files = {
+        **({"runtime/capacity.yaml": sized} if sized else {}),
         "architecture/brief.md": brief,
         "architecture/product-architecture.md": architecture,
         "roadmap/goals.yaml": goals,
@@ -172,7 +188,13 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
     gh = services.github
     i = ids(brief)
     steps: list[dict] = []
-    files = governance_files(vision, brief, architecture, roadmap, approved_by, research)
+    try:
+        from .run import platform
+
+        plat = platform(services)
+    except Exception:
+        plat = {}
+    files = governance_files(vision, brief, architecture, roadmap, approved_by, research, plat)
 
     def step(name: str, fn) -> dict:
         try:
@@ -223,6 +245,22 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
             return {"url": pr["url"], "repo": config_repo, "line": line}
 
         step("registry_pr", registry_pr)
+        from .. import capacity, environments
+
+        tier = capacity.tier(brief)[0] or 3
+        zones = int(((plat.get("capacity") or capacity.DEFAULTS)["tiers"].get(tier) or {}).get("zones", 2))
+        template = ""
+        try:
+            p = services.settings.platform
+            folder = services.settings.platform_resources_path.rsplit("/", 1)[0]
+            template = services.governance.source.read(p.org, p.repo, f"{folder}/openchoreo/clusters.yaml",
+                                                       plat.get("sha") or p.ref, optional=True) or ""
+        except Exception:
+            template = ""
+        steps.extend(environments.setup(services, product_id=i["product_id"], tier=tier, approver=approved_by,
+                                        template=template, zones=zones, thread_id=thread_id,
+                                        awake=(plat.get("capacity") or capacity.DEFAULTS).get("awake")
+                                        or environments.AWAKE))
         teams = sorted({f"{i['org']}/{t}" for t in (*TEAMS.values(), "qa")})
         steps.append({"step": "teams", "ok": True, "skipped": True, "teams": teams,
                       "why": "The approver teams product.yaml names; an org admin creates any that are missing"})

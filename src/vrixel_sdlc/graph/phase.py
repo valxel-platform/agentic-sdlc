@@ -1111,6 +1111,12 @@ def _knowledge_writeback(services, state: FeatureState, ctx: dict) -> list[dict]
                 events.append(event("operate", "architecture_record_pr", pr["url"], files=pr["files"]))
         except Exception as exc:  # the record update is a proposal; never fail a released feature on it
             events.append(event("operate", "architecture_record_failed", f"{type(exc).__name__}: {exc}"))
+    try:
+        pr = _propose_capacity(services, state)
+        if pr:
+            events.append(event("operate", "capacity_pr", pr["url"], files=pr["files"]))
+    except Exception as exc:  # a proposal; never fail a released feature on it
+        events.append(event("operate", "capacity_failed", f"{type(exc).__name__}: {exc}"))
     ux_ref = state.get("artifacts", {}).get("UX")
     if ux_ref:
         from ..design_record import propose_after_release
@@ -1122,6 +1128,33 @@ def _knowledge_writeback(services, state: FeatureState, ctx: dict) -> list[dict]
         except Exception as exc:
             events.append(event("operate", "design_record_failed", f"{type(exc).__name__}: {exc}"))
     return events
+
+
+def _propose_capacity(services, state: dict) -> dict | None:
+    """After release: the capacity G4 approved for the feature's added load, and what staging's load
+    test measured per pod, as one pull request to runtime/capacity.yaml."""
+    from .. import capacity
+
+    snap = services.feature_snapshot(state)
+    cap = getattr(snap, "capacity", None) or {}
+    if not cap:
+        return None
+    new = capacity.apply_change(cap, state.get("capacity_change") or [])
+    measured = []
+    staging = ((state.get("quality") or {}).get("staging") or {}).get("suites") or []
+    for row in staging:
+        for repo, m in (((row.get("details") or {}).get("per_pod")) or {}).items():
+            new = capacity.calibrate(new, repo, float(m))
+            measured.append(f"{repo}: {float(m):g} per pod")
+    if new == cap:
+        return None
+    lines = [f"- {c['repo']}: maximum {c['max_from']} -> {c['max_to']} pods (busy hour {c['busy_from']:g} -> "
+             f"{c['busy_to']:g} {c['unit']}/s after a year)" for c in state.get("capacity_change") or [] if not c.get("error")]
+    why = (f"Released {state['feature_id']} ({state['title']}).\n\n"
+           + ("Capacity G4 approved for its added load:\n" + "\n".join(lines) + "\n\n" if lines else "")
+           + ("Throughput measured by staging's load test:\n" + "\n".join(f"- {m}" for m in measured) if measured else ""))
+    return capacity.propose(services, state["product_id"], new, branch=f"vrixel/{state['feature_id']}-capacity",
+                            title=f"{state['feature_id']}: capacity", why=why.strip())
 
 
 PROVIDER_NAMES = {"lucid": "Lucid", "drawio": "draw.io"}
