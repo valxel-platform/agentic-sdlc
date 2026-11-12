@@ -77,6 +77,24 @@ def test_an_initiative_is_drafted_checked_approved_at_g0_and_recorded_in_git(tmp
     assert row["id"] == iid and row["record"] == "pull request" and row["progress"]["planned"] == 3
 
 
+def test_a_new_goal_from_an_initiative_is_measurable(tmp_path, gov_root):
+    import yaml
+
+    from vrixel_sdlc.outcomes import parse_metric
+
+    eng, svc = make(tmp_path, gov_root)
+    path = gov_root / "acme-clinic" / "cln-governance" / "roadmap" / "goals.yaml"
+    before = yaml.safe_load(path.read_text())["goals"]
+    iid = approved_initiative(eng, title="Night shift handover", request="Hand over open tasks between night "
+                              "and day nurses; Flag overdue handovers", product="CLN")
+    pr = next(p for p in svc.github.prs.values() if p["branch"] == f"vrixel/{iid}")
+    goals = yaml.safe_load(svc.github.files[("acme-clinic/cln-governance", pr["branch"], "roadmap/goals.yaml")])["goals"]
+    assert [g["id"] for g in goals[: len(before)]] == [g["id"] for g in before]  # the existing goals are kept
+    new = goals[-1]
+    assert new["id"] == f"GOAL-CLN-{iid.rsplit('-', 1)[-1]}" and new["metric"]["source"] == "manual"
+    assert parse_metric(new["id"], new["metric"])[1] == []
+
+
 def test_a_cross_lane_initiative_needs_each_lanes_approval(tmp_path, gov_root):
     eng, _ = make(tmp_path, gov_root)
     iid = eng.create_initiative(product_id="CLN", title="Card payments at check-in",
