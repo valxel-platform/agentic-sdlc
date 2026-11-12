@@ -219,3 +219,51 @@ _SCREEN = re.compile(r"^-\s*(S\d+)\s*:\s*(.+?)\s*$", re.M)
 def parse_screens(ux: str) -> dict[str, str]:
     """The UX spec's screens: {'S1': 'Check-in form', ...}."""
     return {m.group(1): m.group(2) for m in _SCREEN.finditer(section(ux, "Screens"))}
+
+
+# --------------------------------------------------------------------------- data and threats (HLD)
+
+_TABLE = re.compile(r"^-\s*([A-Za-z_][\w.]*)\s*:\s*(new|changed|none)\b\s*;?\s*(.*)$", re.I)
+_KEYED = re.compile(r"^-\s*(Migration|Backfill|Retention|Rollback)\s*:\s*(.+)$", re.I)
+
+
+def parse_data(hld: str) -> dict:
+    """'## Data': tables (new, changed or none, and what changes), and the migration, backfill,
+    retention and rollback lines."""
+    out: dict = {"tables": [], "migration": "", "backfill": "", "retention": "", "rollback": "", "bad": []}
+    for line in section(hld, "Data").splitlines():
+        line = line.strip()
+        if not line.startswith("- "):
+            continue
+        if m := _KEYED.match(line):
+            out[m.group(1).lower()] = m.group(2).strip()
+        elif m := _TABLE.match(line):
+            out["tables"].append({"table": m.group(1), "change": m.group(2).lower(), "what": m.group(3).strip()})
+        elif not line[2:].lower().startswith("none"):
+            out["bad"].append(line)
+    return out
+
+
+_BOUNDARY = re.compile(r"^-\s*Boundary\s*:\s*([\w.-]+/[\w.-]+)\s*:\s*(.+)$", re.I)
+_AUTHZ = re.compile(r"^-\s*Authorization\s*:\s*([\w.-]+/[\w.-]+)\b\s*([^:]*):\s*(.+)$", re.I)
+_THREAT = re.compile(r"^-\s*([^:]+?)\s*:\s*(.+?);\s*prevented\s*:\s*(.+?);\s*detected\s*:\s*(.+)$", re.I)
+
+
+def parse_threats(hld: str) -> dict:
+    """'## Threats': where untrusted input enters, who may call what, and each threat with how it's
+    prevented and detected."""
+    out: dict = {"boundaries": [], "authorization": [], "threats": [], "bad": []}
+    for line in section(hld, "Threats").splitlines():
+        line = line.strip()
+        if not line.startswith("- "):
+            continue
+        if m := _BOUNDARY.match(line):
+            out["boundaries"].append({"repo": m.group(1), "where": m.group(2).strip()})
+        elif m := _AUTHZ.match(line):
+            out["authorization"].append({"repo": m.group(1), "endpoint": m.group(2).strip(), "rule": m.group(3).strip()})
+        elif m := _THREAT.match(line):
+            out["threats"].append({"threat": m.group(1).strip(), "who": m.group(2).strip(),
+                                   "prevented": m.group(3).strip(), "detected": m.group(4).strip()})
+        else:
+            out["bad"].append(line)
+    return out

@@ -173,6 +173,8 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     if not section(text, "Contracts"):
         out.append("HLD has no contracts section (VX-4)")
     out += _audit(text, repos, ctx)
+    out += _data(text, repos, ctx)
+    out += _threats(text, repos, ctx)
     out += _events(text, repos)
     out += _emitters(text, repos, ctx)
     out += _acceptance(repos, ctx)
@@ -238,6 +240,68 @@ def _endpoints(text: str, repos: list[dict], ctx: dict) -> list[str]:
         unknown = [c for c in e["calls"] if c not in known]
         if unknown:
             out.append(f"{repo} calls {', '.join(unknown)}, which isn't in this design or the product")
+    return out
+
+
+DATA_ROLES = ("provider", "event-worker")
+_DESTRUCTIVE = re.compile(r"\b(drop|drops|dropped|rename|renames|renamed|remove[sd]? column)\b", re.I)
+
+
+def _data(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """G4 sees the data risk: tables, migration, backfill, retention, rollback."""
+    from ..agents.parse import parse_data
+
+    if not any(r["role"] in DATA_ROLES for r in repos):
+        return []
+    if not section(text, "Data"):
+        return ["HLD has no Data section: each table as '- <table>: <new|changed|none>; <what changes>', then "
+                "Migration, Backfill, Retention and Rollback lines (or '- None: <why no data changes>')"]
+    d = parse_data(text)
+    out = [f"Data: '{b[:80]}' isn't '- <table>: <new|changed|none>; ...' or a Migration, Backfill, Retention or "
+           "Rollback line" for b in d["bad"]]
+    changed = [t for t in d["tables"] if t["change"] != "none"]
+    if changed:
+        if not d["migration"]:
+            out.append(f"Data: {', '.join(t['table'] for t in changed)} change, but there's no Migration line")
+        if not d["rollback"]:
+            out.append("Data: tables change, but there's no Rollback line saying what happens to data the new "
+                       "version wrote if the release is rolled back")
+        if not d["backfill"]:
+            out.append("Data: tables change, but there's no Backfill line ('none' if nothing needs filling)")
+        destructive = [t["table"] for t in changed if _DESTRUCTIVE.search(t["what"])]
+        if destructive and not re.search(r"\b(expand|contract|later release|two releases)\b", d["migration"], re.I):
+            out.append(f"Data: {', '.join(destructive)} drop or rename a column: expand now and contract in a "
+                       "later release, so the version running during the rollout still works (say so on Migration)")
+    if ctx.get("data_class") in ("phi", "payments") and changed and not d["retention"]:
+        out.append(f"Data: a {ctx['data_class']} product's tables need a Retention line: how long, and why")
+    return out
+
+
+def _threats(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """Every product: where untrusted input enters, who may call each component and which records it
+    may touch, and each threat with how it's prevented and detected."""
+    from ..agents.parse import parse_endpoints, parse_threats
+
+    runtime = [r for r in repos if r["role"] in EXPOSED_ROLES and r["role"] != "mobile"]
+    if not runtime:
+        return []
+    if not section(text, "Threats"):
+        return ["HLD has no Threats section: a Boundary line per reachable component, an Authorization line per "
+                "component that serves requests, and each threat with 'prevented:' and 'detected:'"]
+    t = parse_threats(text)
+    out = [f"Threats: '{b[:80]}' isn't a Boundary, Authorization or '<threat>: <who>; prevented: <how>; detected: "
+           "<how>' line" for b in t["bad"]]
+    bounded = {b["repo"] for b in t["boundaries"]}
+    authorized = {a["repo"] for a in t["authorization"]}
+    for e in parse_endpoints(text):
+        reachable = [v for v in e["visibility"] if v in ("project", "namespace", "external")]
+        if reachable and e["repo"] not in bounded:
+            out.append(f"Threats: {e['repo']} is reachable ({', '.join(reachable)}) but has no Boundary line")
+        if reachable and e["repo"] not in authorized:
+            out.append(f"Threats: {e['repo']} serves requests but has no Authorization line: who may call it, and "
+                       "which records they may touch")
+    if not t["threats"]:
+        out.append("Threats: name at least one threat, as '<threat>: <who>; prevented: <how>; detected: <how>'")
     return out
 
 
@@ -338,10 +402,25 @@ def _plan(text: str, ctx: dict) -> list[str]:
         if affected and t.get("repo") not in affected:
             out.append(f"{t.get('id')} targets {t.get('repo')}, which is not in the HLD's affected repos")
     out += _screens(tasks, ctx)
+    out += _permission_cases(text, tasks, ctx)
     from .. import acceptance
 
     out += acceptance.check_plan(text, {**ctx, "plan_tasks": tasks})
     return out
+
+
+def _permission_cases(text: str, tasks: list[dict], ctx: dict) -> list[str]:
+    """Each component with an Authorization line in the design gets a permission test in the plan."""
+    from ..agents.parse import parse_threats
+
+    authz = {a["repo"] for a in parse_threats((ctx.get("parent_texts") or {}).get("HLD", ""))["authorization"]}
+    if not authz:
+        return []
+    by_task = {t.get("id"): t.get("repo") for t in tasks}
+    tested = {by_task.get(c["task"]) for c in parse_cases(text) if c["kind"] == "permission"}
+    return [f"{repo} has an Authorization line in the design but no permission test case "
+            f"('- TC-n (AC-x, permission): <who is refused> -> TASK-n <file>::<name>')"
+            for repo in sorted(authz) if repo in by_task.values() and repo not in tested]
 
 
 def _screens(tasks: list[dict], ctx: dict) -> list[str]:

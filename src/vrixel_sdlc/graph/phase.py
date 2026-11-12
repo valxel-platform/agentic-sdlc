@@ -523,7 +523,14 @@ SECURITY = {
 
 
 def security_instruction(ctx: dict, task: dict) -> str:
-    return SECURITY.get(task.get("role") or "", "")
+    """The role's rules, and who the approved design says may call this component."""
+    from ..agents.parse import parse_threats
+
+    rules = [a for a in parse_threats(ctx.get("hld_text", "") or (ctx.get("parent_texts") or {}).get("HLD", ""))
+             ["authorization"] if a["repo"] == task.get("repo")]
+    said = (" The design's authorization rules for this component, each enforced in code and tested by a refused "
+            "caller: " + "; ".join(f"{a['endpoint'] or 'all endpoints'}: {a['rule']}" for a in rules) + ".") if rules else ""
+    return SECURITY.get(task.get("role") or "", "") + said
 
 
 def ux_instruction(ctx: dict, task: dict) -> str:
