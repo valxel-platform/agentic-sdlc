@@ -40,13 +40,14 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def machine(ux: str, hld: str, product_repos: list[dict], ui: bool) -> list[dict]:
+def machine(ux: str, hld: str, product_repos: list[dict], ui: bool, designable: bool = True) -> list[dict]:
+    """`designable`: the workflow runs UX design at all (express doesn't: G4 approves without it)."""
     affected = parse_affected_repos(hld)
     apps = [r for r in affected if r.get("role") in SCREEN_ROLES]
     has_apps = [r for r in product_repos if r.get("role") in SCREEN_ROLES]
     screens = parse_screens(ux) if ux else {}
     out = []
-    if apps and not ux:
+    if apps and not ux and designable:
         names = ", ".join(r["name"] for r in apps)
         out.append({"to": "design", "text": f"The architecture changes {names}, which people see, but UX design was "
                                             "skipped: design the screens it changes"})
@@ -86,7 +87,10 @@ def make_fit(services):
         ctx = feature_ctx(services, state, "plan")
         texts = ctx.get("parent_texts") or {}
         ux, hld = texts.get("UX", ""), texts.get("HLD", "")
-        found = machine(ux, hld, ctx.get("repos") or [], state.get("ui", True) is not False)
+        from . import profiles
+
+        designable = "design" not in profiles.get(state.get("profile")).skips and state.get("track") != "hotfix"
+        found = machine(ux, hld, ctx.get("repos") or [], state.get("ui", True) is not False, designable)
         cost = 0.0
         if not found:  # the critic only when the machine found nothing: one reason at a time
             found, cost = critic(services, state, ctx, ux, hld)

@@ -32,6 +32,7 @@ def test_the_machine_finds_a_design_and_architecture_that_dont_fit():
     [f] = fit.machine(UX, HLD_API, REPOS, True)
     assert f["to"] == "architecture" and "2 screen(s)" in f["text"]
     assert fit.machine("", HLD_API, REPOS, False) == []  # no screens, none changed
+    assert fit.machine("", HLD_UI, REPOS, True, designable=False) == []  # express: no design by choice
 
 
 def test_the_plan_and_the_coder_get_the_approved_ux(engine):
