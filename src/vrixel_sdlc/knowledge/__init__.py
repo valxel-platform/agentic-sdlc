@@ -122,7 +122,12 @@ def render(pack: dict, max_chars: int = 12000) -> str:
                 + (f". Cause: {i['cause']}" if i.get("cause") else "") for i in incs[:10]]
     if arch.get("overview"):
         out.append("\n## Architecture overview\n" + arch["overview"].strip())
-    return _cut("\n".join(out), max_chars) + "\n"
+    design = ""
+    if "design" in pack:  # the design record, within the same bound (vrixel_sdlc.design_record)
+        from ..design_record import render as render_design
+
+        design = render_design(pack["design"], max(0, max_chars // 3))
+    return _cut("\n".join(out), max_chars - len(design)) + design + "\n"
 
 
 # --------------------------------------------------------------------------- design review

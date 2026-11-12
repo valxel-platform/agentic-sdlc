@@ -133,6 +133,9 @@ def governance_files(vision: Vision, brief: str, architecture: str, roadmap: str
         **({"architecture/research.md": research} if research else {}),
     }
     if not vision.existing:
+        from ..design_record import starter_files
+
+        files |= starter_files()  # the design record starts here; releases add screens and components
         files |= {"product.yaml": product_yaml(vision, brief), "constitution.md": constitution_md(vision, brief),
                   "context.md": context_md(vision, brief, architecture),
                   "CODEOWNERS": f"* @{i['org']}/product-owners\n"}

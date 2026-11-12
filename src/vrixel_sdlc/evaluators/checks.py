@@ -144,7 +144,9 @@ def _design(text: str, ctx: dict) -> list[str]:
         out.append("UX spec lists no screens")
     if "WCAG" not in section(text, "Accessibility"):
         out.append("No accessibility section with WCAG 2.1 AA criteria (VX-9)")
-    return out + _ux_structure(text, ctx)
+    from ..design_record import check as record_check
+
+    return out + _ux_structure(text, ctx) + record_check(text, (ctx.get("knowledge") or {}).get("design") or {})
 
 
 def _ux_structure(text: str, ctx: dict) -> list[str]:
@@ -231,6 +233,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     out += resources_check(text, repos, ctx)
     out += _diagram(text, repos)
     out += _flows(text, repos)
+    out += _code_read(text, repos, ctx)
     if ctx.get("knowledge"):
         # Against the existing design: cited decisions are current, overrides are explicit, and
         # contract changes start from the version actually merged.
@@ -391,6 +394,18 @@ def _emitters(text: str, repos: list[dict], ctx: dict) -> list[str]:
             if e in wanted and names and r not in names]
     out += [f"Event {e} under Instrumentation isn't in the PRD" for e in emits if e not in wanted]
     return out
+
+
+def _code_read(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """When the architect had the code: every existing affected repo was read, or the notes say why not."""
+    read = (ctx.get("code_read") or {}).get("repos")
+    if not read:
+        return []
+    existing = {r["name"] for r in ctx.get("repos") or []}
+    notes = section(text, "Agent notes").lower()
+    return [f"{r['name']} is affected but wasn't read: read it, or say why under Agent notes ('Not read: {r['name']}: <why>')"
+            for r in repos if r["name"] in existing and not (read.get(r["name"]) or {}).get("sha")
+            and f"not read: {r['name'].lower()}" not in notes]
 
 
 def _flows(text: str, repos: list[dict]) -> list[str]:

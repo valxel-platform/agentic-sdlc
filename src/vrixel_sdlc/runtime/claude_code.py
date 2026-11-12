@@ -65,7 +65,7 @@ def session_options(task: AgentTask, role, model: str, *, cwd: str | None, plugi
         "setting_sources": ["project"],
         "plugins": [{"type": "local", "path": p} for p in plugin_dirs],
         "model": model.split("/", 1)[-1],
-        "cwd": cwd,
+        "cwd": task.cwd or cwd,
         # Telemetry export under the tool's span, when tracing is on (vrixel_sdlc.telemetry).
         "env": {"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h", **((task.telemetry or {}).get("env") or {})},
         # Caps: a session that runs away stops here, not at the feature's budget.
@@ -74,6 +74,9 @@ def session_options(task: AgentTask, role, model: str, *, cwd: str | None, plugi
         **({"output_format": {"type": "json_schema", "schema": task.schema}} if task.schema else {}),
         # Research may search and read the web without asking (vrixel_sdlc.research).
         **({"allowed_tools": ["WebSearch", "WebFetch"]} if task.web_searches else {}),
+        # Reading a checkout: look, never touch.
+        **({"allowed_tools": ["Read", "Grep", "Glob"],
+            "disallowed_tools": ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash"]} if task.read_only else {}),
     }
 
 

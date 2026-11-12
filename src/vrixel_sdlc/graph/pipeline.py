@@ -349,6 +349,9 @@ def make_gate(gate: str, services):
                 "aws_resources": (aws_summary(services, state, snap, ref)
                                   if gate in ("g4", "g6") and lane_id == state["product_id"] else None),
                 "design_review": review,
+                # G4: whether the architect read the code, and which commit of each repo.
+                "code_read": ({"checked": bool(state.get("code_read")), **(state.get("code_read") or {})}
+                              if gate == "g4" else None),
                 # G6 sees the CloudWatch alarms firing before production on what the feature touches.
                 "alarms_firing": _alarms_firing(services, state) if gate == "g6" else [],
                 # G6 sees how the change's own agents (repos with the agent role) did in their evals, by

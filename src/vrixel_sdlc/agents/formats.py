@@ -57,6 +57,9 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
 - S2 -> done                   (or '-> cancel'; every screen is reachable from start)
 ## Copy                        (button labels, headings and error messages, word for word)
 - S1 <element>: "<text>"
+## Components                  (what the screens use, from the product's design record)
+- <Name>: existing
+- <Name>: new: <why no existing component fits>
 ## Coverage                    (one line for every acceptance criterion in the PRD)
 - AC-1: S1                     (the screen or state that shows it, or 'not on screen: <why>')
 ## Accessibility

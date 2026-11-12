@@ -117,12 +117,23 @@ def design(ctx: dict, defective: bool) -> str:
         "", "## Copy", '- S1 heading: "' + ctx['title'] + '"', '- S1 save button: "Save"', '- S1 cancel button: "Cancel"',
         '- S1 error: "That didn\'t save. Check the highlighted fields and try again."', '- S2 heading: "Saved"',
         '- S2 done button: "Done"',
+        *_component_lines(ctx),
         "", "## Coverage", *coverage_lines(ctx, "S1"),
         "", "## Handoff", "- Uses design-system tokens and existing form components",
     ]
     if not defective:
         lines += ["", "## Accessibility", "- WCAG 2.1 AA: 4.5:1 contrast, full keyboard path, labelled fields (VX-9)"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
+
+
+def _component_lines(ctx: dict) -> list[str]:
+    """Stub judgement: the record's form and button components if it has them, else new ones."""
+    record = ((ctx.get("knowledge") or {}).get("design") or {}).get("components") or {}
+    pick = [n for n in record if re.search(r"form|button|field|input", n, re.I)][:3]
+    if pick:
+        return ["", "## Components", *[f"- {n}: existing" for n in pick]]
+    return ["", "## Components", "- Form: new: the design record has no form component yet",
+            "- Button: new: the design record has no button component yet"]
 
 
 def _mentions(ctx: dict, repo_name: str) -> bool:
