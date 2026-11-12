@@ -24,7 +24,9 @@ RUN /src/plugins/prepare.sh /upstream /src/plugins/vrixel /plugins \
 # Stage 3: OpenAI's Codex CLI, for roles that run on the codex runtime (models.yaml).
 FROM alpine:3.22 AS codex
 ARG CODEX_VERSION=0.167.0
-ADD https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz /tmp/codex.tar.gz
+# The download must match this checksum (moving the version moves both, by pull request).
+ADD --checksum=sha256:9d64836106d5b374e90ee4454c7ebcde7ca7106558bd7e41a34b9f26ebda251a \
+    https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz /tmp/codex.tar.gz
 RUN tar -xzf /tmp/codex.tar.gz -C /tmp && install -m 0755 /tmp/codex-x86_64-unknown-linux-musl /codex
 
 # Stage 4: the API, which also serves the built web interface.
@@ -39,9 +41,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VRIXEL_CODEX_HOME=/opt/vrixel/codex-home
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements.lock ./
+# Exactly the locked versions, each checked against its hash (requirements.lock is uv.lock's export;
+# CI fails when they differ), then the tool itself with no further resolution.
+RUN pip install --no-cache-dir --require-hashes --no-deps -r requirements.lock
 COPY src ./src
-RUN pip install --no-cache-dir ".[live,github,integrations]"
+RUN pip install --no-cache-dir --no-deps .
 COPY config ./config
 # Sample governance repos, used only when VRIXEL_GOVERNANCE_SOURCE=local.
 COPY examples ./examples

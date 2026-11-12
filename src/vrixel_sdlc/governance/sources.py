@@ -205,6 +205,21 @@ class GitHubAppTokenProvider:
             raise GovernanceError(f"GitHub App {method} {path} failed with {exc.code}"
                                   + (f": {detail}" if detail else "")) from exc
 
+    def scoped(self, org: str, repositories: list[str], permissions: dict[str, str]) -> str:
+        """A fresh token for named repositories only, with only these permissions (never cached):
+        what an agent session gets, so it can't reach beyond its own repository and work."""
+        if not repositories:
+            raise GovernanceError("A scoped token names its repositories")
+        app_jwt = self._jwt()
+        inst = self._call("GET", f"/orgs/{quote(org)}/installation", app_jwt)
+        tok = self._call("POST", f"/app/installations/{inst['id']}/access_tokens", app_jwt,
+                         {"repositories": list(repositories), "permissions": dict(permissions)})
+        granted = tok.get("permissions") or {}
+        extra = sorted(set(granted) - set(permissions) - {"metadata"})
+        if extra:  # GitHub returns what it granted; anything beyond the ask is refused, not used
+            raise GovernanceError(f"The scoped token came back with more than asked for: {', '.join(extra)}")
+        return tok["token"]
+
     def token(self, org: str) -> str:
         with self._lock:
             cached = self._tokens.get(org)

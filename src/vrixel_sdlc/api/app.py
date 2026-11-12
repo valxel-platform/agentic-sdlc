@@ -619,6 +619,20 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(400, "Body is not JSON") from exc
         return await alarm_changes(from_cloudwatch(event))
 
+    @api.post("/signals/inspector", status_code=202)
+    async def inspector_finding(request: Request) -> dict:
+        """Amazon Inspector findings on running images (ECR enhanced scanning, continuous), from an
+        EventBridge rule on 'Inspector2 Finding' through an API destination sending Authorization:
+        Bearer VRIXEL_SIGNALS_TOKEN. High and critical vulnerabilities open incidents for the component."""
+        from ..ops.signals import from_inspector
+
+        bearer_ok(request)
+        try:
+            event = json.loads(await request.body() or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        return await ingest(from_inspector(event))
+
     @api.post("/signals/aws-budgets", status_code=202)
     async def aws_budgets(request: Request) -> JSONResponse:
         """AWS Budgets through an SNS topic with an HTTPS subscription to

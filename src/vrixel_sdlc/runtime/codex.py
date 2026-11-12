@@ -202,17 +202,25 @@ class CodexRuntime:
         role = settings.role(task.role)
         if not self.gateway.allowed(role.provider, task.tags.data_class):
             raise PolicyViolation(f"{task.tags.data_class} data may not reach {role.provider!r}")
+        from ..sandbox import clean_env
+
         provider = None
-        env = dict(os.environ)
+        extra_keys = {}
         if role.provider == "openai":
-            env.setdefault("CODEX_API_KEY", os.environ.get("OPENAI_API_KEY", ""))
+            extra_keys["CODEX_API_KEY"] = os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
         else:
             pc = settings.providers.get(role.provider)
             if pc is None:
                 raise RuntimeError(f"No provider {role.provider!r} in models.yaml for role {task.role}")
             provider = (role.provider, pc.url(), pc.api_key_env)
+            if pc.api_key_env:
+                extra_keys[pc.api_key_env] = os.environ.get(pc.api_key_env, "")
         started = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="vrixel-codex-") as tmp:
+            # Only the allowlisted environment and the model's key: none of the tool's secrets
+            # (vrixel_sdlc.sandbox). Codex's workspace-write sandbox confines the commands it runs.
+            (Path(tmp) / "user" / "tmp").mkdir(parents=True)
+            env = clean_env("codex", str(Path(tmp) / "user"), extra_keys)
             env["CODEX_HOME"] = session_home(self.home_template, Path(tmp) / "home",
                                              with_plugins=self.on_demand(task.role))
             add_otel(Path(env["CODEX_HOME"]), (task.telemetry or {}).get("codex_config", ""))
@@ -222,7 +230,7 @@ class CodexRuntime:
                 schema_path = str(Path(tmp) / "schema.json")
                 Path(schema_path).write_text(json.dumps(task.schema))
             last_path = str(Path(tmp) / "last.txt")
-            cmd = codex_command(role.model, cwd=self.cwd, schema_path=schema_path, last_path=last_path,
+            cmd = codex_command(role.model, cwd=task.cwd or self.cwd, schema_path=schema_path, last_path=last_path,
                                 provider=provider)
             try:
                 proc = self.runner(cmd, input=codex_prompt(task), capture_output=True, text=True,

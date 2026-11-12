@@ -208,6 +208,46 @@ def from_cloudwatch(event: dict) -> list[dict]:
     }]
 
 
+def from_inspector(event: dict) -> list[dict]:
+    """A vulnerability Amazon Inspector found in an image already in ECR, as EventBridge delivers it
+    (ECR enhanced scanning, continuous: images are rescanned whenever a new CVE is published, not
+    only at build). Only high and critical package vulnerabilities in images that are running
+    (inUseCount, when Inspector reports it) count; a closed finding resolves its signal. The ECR
+    repository's name is the component's (the build pushes each component to its own)."""
+    if event.get("detail-type") != "Inspector2 Finding":
+        return []
+    d = event.get("detail") or {}
+    sev = str(d.get("severity") or "").upper()
+    if d.get("type") != "PACKAGE_VULNERABILITY" or sev not in ("CRITICAL", "HIGH"):
+        return []
+    images = [r for r in d.get("resources") or [] if r.get("type") == "AWS_ECR_CONTAINER_IMAGE"]
+    if not images:
+        return []
+    img = (images[0].get("details") or {}).get("awsEcrContainerImage") or {}
+    if img.get("inUseCount") is not None and int(img.get("inUseCount") or 0) == 0:
+        return []  # not running anywhere: the next build picks up the fix
+    vuln = d.get("packageVulnerabilityDetails") or {}
+    pkgs = vuln.get("vulnerablePackages") or []
+    fixed = ", ".join(f"{p.get('name')} {p.get('version')} -> {p.get('fixedInVersion')}" for p in pkgs if p.get("fixedInVersion"))
+    fix = str(d.get("fixAvailable") or "").upper()
+    status = str(d.get("status") or "").upper()
+    repo_name = str(img.get("repositoryName") or "")
+    return [{
+        "source": "inspector", "category": "security", "status": "resolved" if status == "CLOSED" else "firing",
+        "product_id": "", "component": repo_name.rsplit("/", 1)[-1], "env": "production",
+        # Not an outage: a known hole in what runs. Critical with a fix is the one to act on now.
+        "severity": "sev2" if sev == "CRITICAL" and fix in ("YES", "PARTIAL") else "sev3",
+        "title": f"{repo_name}: {vuln.get('vulnerabilityId') or d.get('title', '')} ({sev.lower()})",
+        "detail": (f"{d.get('title', '')}. " + (f"Fixed in: {fixed}. Rebuild with the fixed version."
+                                                 if fixed else "No fixed version yet.")
+                   + f" Image {str(img.get('imageHash') or '')[:19]}, tags {', '.join(img.get('imageTags') or [])}.")[:4000],
+        "fingerprint": f"inspector:{d.get('findingArn') or repo_name + ':' + str(vuln.get('vulnerabilityId'))}",
+        "url": str(vuln.get("sourceUrl") or ""), "at": str(d.get("updatedAt") or event.get("time") or now()),
+        "labels": {"vulnerability": str(vuln.get("vulnerabilityId") or ""), "image": str(img.get("imageHash") or ""),
+                   "repository": repo_name, "fix_available": fix, "account": str(event.get("account", ""))},
+    }]
+
+
 def resolve_product(services, signal: dict) -> tuple[str, str]:
     """(product_id, repo) for a signal: an explicit product label wins; otherwise the component is
     matched against each product's repos and OpenChoreo component names."""

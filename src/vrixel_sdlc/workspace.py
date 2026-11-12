@@ -41,7 +41,10 @@ def _readonly(path: Path) -> None:
 def checkout(services, repos: list[str], *, key: str) -> dict | None:
     if not available(services) or not repos:
         return None
-    root = Path(services.settings.artifact_dir) / "checkouts" / key
+    from .sandbox import _root
+
+    # Outside /data and /app, which agent sessions may not read (vrixel_sdlc.sandbox).
+    root = _root() / "checkouts" / key
     release({"root": str(root)})
     root.mkdir(parents=True, exist_ok=True)
     gh = services.github

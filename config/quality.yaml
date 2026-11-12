@@ -12,6 +12,7 @@ sources:
   github-checks: vrixel_sdlc.quality.sources:GitHubChecks             # check runs and statuses by name
   github-code-scanning: vrixel_sdlc.quality.sources:GitHubCodeScanning  # SARIF alerts (CodeQL, Semgrep, Trivy, Snyk, ...)
   github-dependency-review: vrixel_sdlc.quality.sources:GitHubDependencyReview  # vulnerable dependencies a PR adds
+  new-dependencies: vrixel_sdlc.dependencies:NewDependencies                    # packages a PR adds: real, not brand new, licensed
   github-secret-scanning: vrixel_sdlc.quality.sources:GitHubSecretScanning      # open secret alerts in the repo
   openchoreo-workflow: vrixel_sdlc.quality.sources:OpenChoreoWorkflowTasks      # steps inside the OpenChoreo build
   acceptance-runs: vrixel_sdlc.quality.sources:AcceptanceRuns                   # the product acceptance repo's run per feature
@@ -123,6 +124,12 @@ suites:
     source: github-dependency-review
     required: true
     block_on: high
+  new-dependencies:
+    kind: security
+    stage: pr
+    source: new-dependencies
+    required: true
+    block_on: high              # not in its registry, under 30 days old, or a license the product can't ship
   secrets:
     kind: security
     stage: pr
@@ -141,8 +148,18 @@ suites:
     stage: build
     source: openchoreo-workflow
     match: { tasks: ["*scan*", "trivy*"] }
-    required: false             # required once the build workflow has a scan step
+    required: true              # the platform's build workflow scans every image (platform/openchoreo/build-workflow.yaml)
     block_on: high              # a failed scan step counts as a finding at this severity
+  # The image is signed, with its SBOM and SLSA provenance attached, by the build system's own key:
+  # each product's data planes admit only images signed by it (platform/openchoreo/admission-policy.yaml),
+  # and the pipeline doesn't promote a build without them.
+  provenance:
+    kind: security
+    stage: build
+    source: openchoreo-workflow
+    match: { tasks: ["sbom*", "sign*", "attest*"] }
+    required: true
+    block_on: high
   dast:
     kind: security
     stage: staging
@@ -160,11 +177,9 @@ floors:
   phi:
     unit: { min_coverage: 90 }
     dast: { required: true }
-    container: { required: true }
   payments:
     unit: { min_coverage: 90 }
     dast: { required: true }
-    container: { required: true }
     secrets: { block_on: info }
 
 # Accepting a blocking finding needs a security approver, a reason and an expiry.

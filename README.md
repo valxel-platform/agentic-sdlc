@@ -1141,6 +1141,48 @@ product's BFF. G4 approves it; the components' `workload.yaml`
 and the product's mesh policies follow it. Coders and reviewers get their role's rules. A web app's
 post-deploy tests run against the BFF's public URL.
 
+## Supply chain: what goes into a build, and what may run
+
+**Agent sessions never hold the tool's credentials** (`vrixel_sdlc/sandbox.py`). Every session runs
+with an allowlisted environment (its model's key, locale, telemetry; every other variable the tool
+has is blanked, so the GitHub App key, database URL and webhook secrets aren't there), with every
+hook off (`disableAllHooks`, so a repository's `.claude/settings.json` runs nothing), and with Read
+denied on the tool's own files and secrets. Shell commands run in Claude Code's sandbox, reaching
+only the package registries and GitHub (`config/egress.yaml`); Codex runs in its workspace-write
+sandbox. npm, yarn and pnpm skip packages' install scripts. A coder works in its own checkout of its
+one repository, cloned with a token the App mints for that repository alone with `contents: write`:
+it can push its branch, and can't post the `vrixel/gates` status, change settings or reach another
+repository. Its folder is deleted when the session ends. `VRIXEL_AGENT_ENV_PASS` names any other
+variable a deployment's sessions need (e.g. `AWS_REGION` for Bedrock); `VRIXEL_AGENT_SANDBOX_WEAKER=1`
+uses Claude Code's weaker sandbox in containers that can't create user namespaces.
+
+**Only images the platform's build signed run** (`platform/openchoreo/` in the platform governance
+repo). The pipeline builds only merge commits that passed the gates. The build scans the image
+(high and critical CVEs fail it), writes a CycloneDX SBOM, signs the image with a KMS key only the
+workflow plane can use, and attests SLSA provenance naming the repository and commit; the suites
+`container` and `provenance` are required for every product, so a build missing any step doesn't
+reach an environment. Kyverno on every data plane admits only images signed by that key, with
+provenance from one of the product's own repositories and an SBOM, and pins pods to the verified
+digest.
+
+**What a change adds is checked** (`vrixel_sdlc/dependencies.py`, suite `new-dependencies`): each
+package must exist in its registry (a name nobody publishes is a model's invention), be at least 30
+days old (new names are where squatting happens) and carry an allowed license
+(`config/dependencies.yaml`); an OpenSSF Scorecard under 3 is reported. Dependency manifests are
+high-risk paths, so a change to them waits for a person at G5 in every product.
+
+**Builds are pinned.** Template and tool workflows pin actions by commit; `supply-chain-pins` pins
+Dockerfile base images to their digests and, in Gradle repos, writes `gradle.lockfile` and
+`gradle/verification-metadata.xml`, refreshing both on Dependabot's pull requests. The tool's image
+installs exactly `requirements.lock` (uv.lock's export, with hashes; CI fails when they differ),
+checks the Codex download's checksum, and is scanned with an SBOM in CI.
+
+**What already runs is rescanned.** ECR's enhanced scanning (Amazon Inspector, continuous) rescans
+images whenever a CVE is published; an EventBridge rule on `Inspector2 Finding` sends findings to
+`POST /api/signals/inspector` (Bearer `VRIXEL_SIGNALS_TOKEN`). High and critical vulnerabilities in
+running images open incidents for the component (critical with a fix: sev2), and a closed finding
+resolves its signal.
+
 ## One incident per failure
 
 A failure people see in the app and the error behind it arrive as separate signals from different

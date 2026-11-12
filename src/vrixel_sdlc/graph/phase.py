@@ -228,7 +228,8 @@ NO_LESSON_ROLES = ("knowledge", "router", "intake")
 
 def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str, ...], tail: str,
                stub_text: str | None, max_tokens: int = 4096, schema: dict | None = None,
-               budget_usd: float | None = None, cwd: str | None = None) -> AgentResult:
+               budget_usd: float | None = None, cwd: str | None = None,
+               box: dict | None = None) -> AgentResult:
     """One agent session. Its dollar cap is the role's, and never more than what's left of the
     feature's budget (ctx budget_remaining_usd, or `budget_usd` when the caller knows better).
 
@@ -262,7 +263,10 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
             res = runtime.run(AgentTask(role=who, phase=phase, tags=tags, layers=layers, skills=tuple(skills),
                                         stub_text=stub_text, max_tokens=max_tokens, schema=schema,
                                         max_budget_usd=None if left is None else max(0.0, float(left)),
-                                        cwd=cwd, read_only=bool(cwd)))
+                                        # A box is a session's own writable checkout; a bare cwd is a
+                                        # read-only one (vrixel_sdlc.sandbox, vrixel_sdlc.workspace).
+                                        cwd=(box or {}).get("cwd") or cwd, read_only=bool(cwd) and not box,
+                                        sandbox=box))
         except ProviderUnavailable as exc:
             if i == len(candidates) - 1:
                 raise
@@ -707,10 +711,22 @@ def build_build_subgraph(services):
         return _coded(task, ctx, attempt, mine, fail, res)
 
     def _code(task, ctx, mine, fail, payload):
+        from .. import sandbox
+
+        branch = ctx.get("branch") or f"feature/{ctx['feature_id']}"
+        # Its own folder: in live mode a checkout of this one repo, cloned with a token for it alone.
+        with sandbox.session(services, repo=task["repo"], branch=branch) as box:
+            return _code_in(task, ctx, mine, fail, payload, box)
+
+    def _code_in(task, ctx, mine, fail, payload, box):
+        live = services.settings.mode == "live"
         return call_agent(
-            services, role="coder", phase="build", ctx=ctx, skills=spec.skills,
+            services, role="coder", phase="build", ctx=ctx, skills=spec.skills, box=box.spec,
             tail=(f"Implement {task['id']} in {task['repo']} on branch {ctx.get('branch') or 'feature/' + ctx['feature_id']}. "
-                  f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run the tests and report what they said."
+                  + ("Your working directory is its checkout on that branch: commit there and push the branch "
+                     "(git push origin HEAD). You can't push anywhere else, and your shell reaches only the "
+                     "package registries and GitHub. " if live else "")
+                  + f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run the tests and report what they said."
                   + (f" Fix this first: {ctx['feedback']}" if ctx.get("feedback") else "")
                   + (" The review blocked your last attempt; fix each of these without weakening any check: "
                      + "; ".join(payload["fix"]) + "." if payload.get("fix") else "")
@@ -895,13 +911,19 @@ def build_build_subgraph(services):
 
 def risk_tier(lane_of_repo: dict[str, ProductConfig], product: ProductConfig, tasks: list[dict]) -> str:
     """Regulated if this product, or any lane whose repos the change set touches, handles PHI or
-    payments; high if a task changes a high-risk path of the lane that owns its repo."""
+    payments; high if a task changes a high-risk path of the lane that owns its repo, or a
+    dependency manifest (vrixel_sdlc.dependencies)."""
     lanes = [product] + [lane_of_repo[t["repo"]] for t in tasks if t.get("repo") in lane_of_repo]
     if any(lane.data_class in ("phi", "payments") for lane in lanes):
         return "regulated"
+    from ..dependencies import is_manifest
+
     for task in tasks:
         lane = lane_of_repo.get(task.get("repo"), product)
         if any(f.startswith(p) for f in task.get("files", []) for p in lane.high_risk_paths):
+            return "high"
+        # Dependency manifests: what a change brings in is a person's decision (G5), for every product.
+        if any(is_manifest(f) for f in task.get("files", [])):
             return "high"
     return "low"
 
