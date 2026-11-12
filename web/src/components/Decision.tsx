@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type AgentEvals, type LineComment, type PendingItem, type ReleaseCandidate, type ReleaseTraceability } from "../api";
 import { CommentableDoc, DecisionBrief } from "./DecisionBrief";
 import { Mockups } from "./Mockups";
+import { ScreensBuilt } from "./ScreensBuilt";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
@@ -568,6 +569,8 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
 
       {item.mockups && <Mockups featureId={featureId} set={item.mockups}
         onComment={item.can_decide && canRevise ? (quote, text) => setComments((cs) => [...cs, { quote, text }]) : undefined} />}
+
+      {item.screens && <ScreensBuilt featureId={featureId} s={item.screens} />}
 
       {item.code_read && (
         <div className="small">

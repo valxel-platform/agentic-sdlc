@@ -47,7 +47,7 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
 - VX-<n>                (at least one article of the platform or product constitution)""",
     "design": """# UX spec: <title>
 ## Screens
-- S1: <screen> (web: <org>/<repo>)      (the app it lives in: web or mobile, one of the product's app repos)
+- S1: <screen> (web: <org>/<repo>) [/route]   (the app it lives in, and for a web screen its route: staging visits it)
 ## States                      (one line per screen)
 - S1: loading, empty (<what the person sees and can do>), error (<what they see and can do>), success
                         every screen has empty and error, or says 'no empty: <why>'

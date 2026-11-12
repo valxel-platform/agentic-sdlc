@@ -214,7 +214,7 @@ def parse_new_repos(hld: str) -> list[dict]:
 
 SCREEN_ROLES = ("consumer", "mobile")  # the repos that draw what people see
 _SCREEN = re.compile(r"^-\s*(S\d+)\s*:\s*(.+?)\s*$", re.M)
-_APP = re.compile(r"\s*\((web|mobile|app)\s*:\s*([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)\)\s*$", re.I)
+_APP = re.compile(r"\s*\((web|mobile|app)\s*:\s*([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)\)\s*(?:\[([^\]]*)\])?\s*$", re.I)
 
 
 def parse_screens(ux: str) -> dict[str, str]:
@@ -228,6 +228,16 @@ def parse_screen_apps(ux: str) -> dict[str, str]:
     for m in _SCREEN.finditer(section(ux, "Screens")):
         a = _APP.search(m.group(2))
         out[m.group(1)] = a.group(2) if a else ""
+    return out
+
+
+def parse_screen_routes(ux: str) -> dict[str, str]:
+    """Each screen's route in its app, when given: '- S1: Check-in (web: acme/web) [/checkin]' -> {'S1': '/checkin'}."""
+    out = {}
+    for m in _SCREEN.finditer(section(ux, "Screens")):
+        a = _APP.search(m.group(2))
+        if a and a.group(3):
+            out[m.group(1)] = a.group(3).strip()
     return out
 
 

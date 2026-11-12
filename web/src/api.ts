@@ -22,6 +22,12 @@ export interface DecisionBriefData {
 export interface LineComment { quote: string; text: string }
 /** G3: the UX spec's screens drawn as mockups (vrixel_sdlc.mockups). */
 export interface MockupSet { screens: { id: string; name: string; app: string; phone: boolean }[]; findings: string[]; version?: number }
+/** G6: each screen as built in staging beside its approved mockup (vrixel_sdlc.screens). */
+export interface ScreensAtRelease {
+  scanned: boolean; state: string;
+  screens: { id: string; name: string; app: string; staging?: { route?: string; result?: string; desktop?: string; phone?: string };
+             violations: { fingerprint?: string; rule: string; severity: string; title: string }[] }[];
+}
 /** G4: which repos the architect read, at which commit. */
 export interface CodeRead { checked: boolean; repos?: Record<string, { sha?: string; skipped?: string }> }
 /** A governance pull request an approval opened, mergeable from the tool. */
@@ -32,6 +38,7 @@ export interface PendingItem {
   // G2: whether UX design runs. The fit check: what doesn't fit, and which document should change.
   ux_design?: { runs: boolean; why: string } | null;
   mockups?: MockupSet | null;
+  screens?: ScreensAtRelease | null;
   code_read?: CodeRead | null;
   fit?: { to: "design" | "architecture"; text: string }[];
   interrupt_id: string;

@@ -15,6 +15,7 @@ sources:
   github-secret-scanning: vrixel_sdlc.quality.sources:GitHubSecretScanning      # open secret alerts in the repo
   openchoreo-workflow: vrixel_sdlc.quality.sources:OpenChoreoWorkflowTasks      # steps inside the OpenChoreo build
   acceptance-runs: vrixel_sdlc.quality.sources:AcceptanceRuns                   # the product acceptance repo's run per feature
+  screen-scans: vrixel_sdlc.screens:ScreenScans                                 # axe and screenshots of the built screens
 
 # The recommended profile: a common industry baseline (OWASP SAMM / NIST SSDF practices, the
 # test pyramid). Tools in `match` are the defaults we suggest, not requirements.
@@ -71,6 +72,16 @@ suites:
     required: true
     min_repos: 2
     budget_s: 900
+  # The built screens (vrixel_sdlc.screens): after the staging deploy, each screen the approved UX
+  # spec names is opened with the staging test account, scanned with axe at desktop and phone widths,
+  # and screenshotted for G6. Serious and critical WCAG 2.1 AA violations block the release (VX-9).
+  screens:
+    kind: security
+    stage: staging
+    source: screen-scans
+    applies_to: screens
+    block_on: high              # axe 'serious' and 'critical'
+    required: true
   # Performance (vrixel_sdlc.performance): run only for the repositories whose change needs them,
   # by the tool's rules (a hot path, a migration, an upgrade: smoke; a contract change, a new event
   # handler, a design that adds traffic: full). Each repo's templates run them; the tool labels the

@@ -121,6 +121,7 @@ class GitHub(Protocol):
     def secret_alerts(self, *, repo: str) -> list | None: ...
     # Provisioning new repositories (see vrixel_sdlc.provisioning); each call is idempotent.
     def get_file(self, *, repo: str, path: str, ref: str) -> str | None: ...  # ref '' = default branch
+    def get_bytes(self, *, repo: str, path: str, ref: str) -> bytes | None: ...  # a binary file (a screenshot)
     def create_repo(self, *, repo: str, template: str | None, private: bool, description: str) -> str: ...
     def update_repo(self, *, repo: str, merge: dict, default_branch: str, description: str) -> None: ...
     def enable_security(self, *, repo: str, **features: bool) -> None: ...
@@ -263,6 +264,10 @@ class StubGitHub:
 
     def get_file(self, *, repo, path, ref):
         return self.files.get((repo, ref or "main", path))
+
+    def get_bytes(self, *, repo, path, ref):
+        v = self.files.get((repo, ref or "main", path))
+        return v.encode() if isinstance(v, str) else v
 
     def create_repo(self, *, repo, template, private, description) -> str:
         r = self._repo(repo, "create_repo")
@@ -536,6 +541,13 @@ class GitHubRest:
         if not res or not isinstance(res, dict) or "content" not in res:
             return None
         return base64.b64decode(res["content"]).decode("utf-8")
+
+    def get_bytes(self, *, repo, path, ref):
+        query = f"?ref={quote(ref, safe='')}" if ref else ""
+        res = self._call("GET", repo, f"/contents/{quote(path)}{query}", ok404=True)
+        if not res or not isinstance(res, dict) or "content" not in res:
+            return None
+        return base64.b64decode(res["content"])
 
     def create_repo(self, *, repo, template, private, description) -> str:
         org, name = repo.split("/", 1)

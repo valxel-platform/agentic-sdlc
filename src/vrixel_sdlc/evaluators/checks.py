@@ -158,7 +158,13 @@ def _ux_structure(text: str, ctx: dict) -> list[str]:
         return []
     out = []
     apps = {r["name"] for r in ctx.get("repos") or [] if r.get("role") in SCREEN_ROLES}
+    from ..agents.parse import parse_screen_routes
+
+    routes = parse_screen_routes(text)
     for sid, repo in parse_screen_apps(text).items():
+        if repo and repo in apps and next((r["role"] for r in ctx.get("repos") or [] if r["name"] == repo), "") == "consumer" \
+                and not routes.get(sid, "").startswith("/"):
+            out.append(f"{sid}: give its route in the web app, as '(web: {repo}) [/path]': staging visits it to scan it")
         if not repo:
             out.append(f"{sid}: say which app it's in, as '- {sid}: <name> (web: <org>/<repo>)' or '(mobile: ...)'")
         elif apps and repo not in apps:

@@ -104,10 +104,13 @@ def design(ctx: dict, defective: bool) -> str:
     from .parse import SCREEN_ROLES
 
     app = next((r for r in ctx.get("repos") or [] if r.get("role") in SCREEN_ROLES), None)
-    where = f" ({'mobile' if app and app['role'] == 'mobile' else 'web'}: {app['name']})" if app else ""
+    mobile = bool(app and app["role"] == "mobile")
+    where = f" ({'mobile' if mobile else 'web'}: {app['name']})" if app else ""
+    slug = _slug(ctx["title"])
+    r1, r2 = ("", "") if mobile or not app else (f" [/{slug}]", f" [/{slug}/done]")
     lines = [
         f"# UX spec: {ctx['title']}",
-        "", "## Screens", f"- S1: {ctx['title']} form{where}", f"- S2: Confirmation{where}",
+        "", "## Screens", f"- S1: {ctx['title']} form{where}{r1}", f"- S2: Confirmation{where}{r2}",
         "", "## States",
         "- S1: loading, empty (the form with its fields blank and a short hint), error (the fields keep what was "
         "typed, the problem is named beside its field, and Save can be pressed again), success",
