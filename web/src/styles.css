@@ -668,3 +668,10 @@ table.quality tfoot td { padding: 8px; font-weight: 600; }
 .path-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .notify-panel { display: flex; flex-direction: column; gap: 6px; }
 .notify-panel .section-title { margin-bottom: 4px; }
+
+/* No dead ends after approval */
+.records { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.record-line { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.next-steps { margin-bottom: 20px; }
+.next-steps .pick-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 14px; }
+.next-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }

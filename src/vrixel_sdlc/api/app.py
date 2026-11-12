@@ -160,6 +160,11 @@ class WatchIn(BaseModel):
     on: bool = True
 
 
+class StartIn(BaseModel):
+    indexes: list[int] = Field(min_length=1, max_length=50)
+    order: str = Field("together", pattern="^(together|sequence)$")
+
+
 class LineComment(BaseModel):
     quote: str = Field("", max_length=1000, description="The line the comment is about, as written")
     text: str = Field(min_length=1, max_length=2000)
@@ -1045,6 +1050,69 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     def watch(thread_id: str, body: WatchIn, user: User = Depends(current_user)) -> dict:
         p = eng().services.notifier.watch(user.login, thread_id, body.on)
         return {"watching": thread_id in p.watch}
+
+    def approvers_of(thread_id: str, v: dict) -> list[str]:
+        """Who approved this kind of thread, so may merge its record: the council, or the lane's G0 approvers."""
+        council = list((eng().services.settings.inception or {}).get("council") or [])
+        if v.get("product_id") == "INCEPTION" or thread_id.split("-")[1] in ("REV",):
+            return council
+        lane = eng().services.snapshot(v["product_id"]).product
+        return list(lane.approvers.get("g0") or lane.approvers.get("g1") or []) + council
+
+    @api.get("/threads/{thread_id}/records")
+    def records(thread_id: str, user: User = Depends(current_user)) -> list[dict]:
+        try:
+            return eng().record_prs(thread_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @api.post("/threads/{thread_id}/records/{key}/merge")
+    def merge_record(thread_id: str, key: str, user: User = Depends(current_user)) -> dict:
+        """Merge an approved roadmap or setup pull request here, instead of a second click on GitHub."""
+        from ..integrations.github import GitHubError
+
+        try:
+            v = eng().view(thread_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        who = approvers_of(thread_id, v)
+        if not can_decide(user, {"approvers": who}):
+            raise HTTPException(403, f"Only {', '.join(who) or 'its approvers'} can merge it")
+        try:
+            return eng().merge_record(thread_id, key, by=user.login)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except (GitHubError, RuntimeError) as exc:
+            raise HTTPException(409, f"GitHub didn't merge it ({exc}). Merge it on GitHub instead.") from exc
+
+    @api.post("/initiatives/{initiative_id}/start", status_code=201)
+    def start_features(initiative_id: str, body: StartIn, user: User = Depends(current_user)) -> dict:
+        """Start an approved initiative's features: together, or in order."""
+        try:
+            v = eng().view(initiative_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        member_of(user, v["product_id"])
+        try:
+            return eng().start_candidates(initiative_id, body.indexes, order=body.order, by=user.login)
+        except DuplicateIntent as exc:
+            raise HTTPException(409, {"message": str(exc), "similar": exc.matches}) from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/inceptions/{inception_id}/first-feature", status_code=201)
+    def first_feature(inception_id: str, user: User = Depends(current_user)) -> dict:
+        try:
+            v = eng().view(inception_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        who = approvers_of(inception_id, v)
+        if not can_decide(user, {"approvers": who}):
+            raise HTTPException(403, f"Only {', '.join(who) or 'the product council'} can start it")
+        try:
+            return {"feature_id": eng().start_first_feature(inception_id, by=user.login)}
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @api.post("/threads/{thread_id}/resize", status_code=201)
     def resize(thread_id: str, user: User = Depends(current_user)) -> dict:

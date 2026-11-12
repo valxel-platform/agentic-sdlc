@@ -20,6 +20,8 @@ export interface DecisionBriefData {
   changed?: { from_version: number; asked: string; lines: { op: " " | "-" | "+" | "…"; text: string }[] };
 }
 export interface LineComment { quote: string; text: string }
+/** A governance pull request an approval opened, mergeable from the tool. */
+export interface RecordPr { key: string; label: string; url: string; merged: boolean; repo: string; number: number }
 export interface PendingItem {
   interrupt_id: string;
   // At the product gate: the architecture's AWS resources priced per environment.
@@ -643,6 +645,11 @@ export const api = {
   featureOutcome: (id: string) => request<FeatureOutcome>("GET", `/features/${encodeURIComponent(id)}/outcome`),
   createInitiative: (body: { product_id: string; title: string; request: string; measure?: string; horizon?: string; research?: string }) =>
     request<{ feature_id: string }>("POST", "/initiatives", body),
+  records: (id: string) => request<RecordPr[]>("GET", `/threads/${encodeURIComponent(id)}/records`),
+  mergeRecord: (id: string, key: string) => request<RecordPr>("POST", `/threads/${encodeURIComponent(id)}/records/${key}/merge`),
+  startFeatures: (id: string, indexes: number[], order: "together" | "sequence") =>
+    request<{ started: string[]; queued: string[] }>("POST", `/initiatives/${encodeURIComponent(id)}/start`, { indexes, order }),
+  firstFeature: (id: string) => request<{ feature_id: string }>("POST", `/inceptions/${encodeURIComponent(id)}/first-feature`),
   startCandidate: (id: string, index: number, not_duplicate_reason = "") =>
     request<{ feature_id: string }>("POST", `/initiatives/${encodeURIComponent(id)}/features`, { index, not_duplicate_reason }),
   createRelease: (body: { product_id: string; title: string; model: string; features: string[]; target_date?: string; initiative?: string }) =>

@@ -637,6 +637,137 @@ class FeatureEngine:
                     background=background)
         return new
 
+    # ------------------------------------------------------------------ no dead ends after approval
+
+    def record_prs(self, thread_id: str) -> list[dict]:
+        """The governance pull requests an approval opened, and whether each is merged yet."""
+        import re as _re
+
+        s = self._state(thread_id)
+        out = []
+        if s.get("record_pr", {}).get("url"):
+            pr = s["record_pr"]
+            out.append({"key": "record", "label": "Roadmap record", "url": pr["url"], "merged": bool(pr.get("merged")),
+                        "repo": self.services.settings.entry(s["product_id"]).governance.full_name,
+                        "number": pr.get("number") or int(_re.search(r"/pull/(\d+)", pr["url"]).group(1))})
+        for st in (s.get("setup") or {}).get("steps") or []:
+            if st.get("url") and st["step"] in ("governance_pr", "registry_pr"):
+                out.append({"key": st["step"], "url": st["url"], "merged": bool(st.get("merged")), "repo": st["repo"],
+                            "label": "Governance" if st["step"] == "governance_pr" else "Registry",
+                            "number": int(_re.search(r"/pull/(\d+)", st["url"]).group(1))})
+        return out
+
+    def merge_record(self, thread_id: str, key: str, *, by: str) -> dict:
+        """Merge one of those pull requests from the tool: the person approved it already, so no second
+        click on GitHub. Branch protection still applies; GitHub's refusal is passed on."""
+        pr = next((p for p in self.record_prs(thread_id) if p["key"] == key), None)
+        if pr is None:
+            raise KeyError(f"{thread_id} has no {key} pull request")
+        if not pr["merged"]:
+            res = self.services.github.merge(repo=pr["repo"], number=pr["number"], actor=by)
+            if res.get("state") != "merged":
+                raise RuntimeError(f"GitHub didn't merge {pr['url']}")
+        s = self._state(thread_id)
+        if key == "record":
+            update = {"record_pr": {**s["record_pr"], "merged": True, "merged_by": by}}
+        else:
+            setup = dict(s.get("setup") or {})
+            setup["steps"] = [{**st, "merged": True, "merged_by": by} if st["step"] == key else st
+                              for st in setup.get("steps") or []]
+            update = {"setup": setup}
+        self._g(thread_id).update_state(self._config(thread_id), update)
+        self.bus.publish({"type": "feature.updated", "feature_id": thread_id})
+        return {**pr, "merged": True}
+
+    def _queue(self) -> dict:
+        import json as _json
+        from pathlib import Path as _P
+
+        p = _P(self.services.settings.artifact_dir) / "start-queues.json"
+        try:
+            return _json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        except ValueError:
+            return {}
+
+    def _save_queue(self, q: dict) -> None:
+        import json as _json
+        from pathlib import Path as _P
+
+        (_P(self.services.settings.artifact_dir) / "start-queues.json").write_text(_json.dumps(q), encoding="utf-8")
+
+    def start_candidates(self, initiative_id: str, indexes: list[int], *, order: str, by: str) -> dict:
+        """Start an approved initiative's candidate features: together, or in order (the next starts
+        when the one before reaches everyone)."""
+        v = self.view(initiative_id)
+        if v["status"] != "approved":
+            raise ValueError("Only an approved initiative's features can be started")
+        cands = v["candidates"]
+        picked = [i for i in dict.fromkeys(indexes) if 0 <= i < len(cands) and not cands[i]["started"]]
+        if not picked:
+            raise ValueError("Nothing to start: those features have started already")
+        first = picked if order == "together" else picked[:1]
+        started = [self.create(product_id=v["product_id"], title=cands[i]["title"], description=cands[i]["description"],
+                               created_by=by, background=True, initiative_id=initiative_id,
+                               not_duplicate_reason=f"A candidate feature of {initiative_id}") for i in first]
+        q = self._queue()
+        if order == "sequence" and len(picked) > 1:
+            q[initiative_id] = {"after": started[-1], "next": picked[1:], "by": by}
+        else:
+            q.pop(initiative_id, None)
+        self._save_queue(q)
+        return {"started": started, "queued": [cands[i]["title"] for i in picked[1:]] if order == "sequence" else []}
+
+    def _start_next_in_order(self, feature_id: str) -> str | None:
+        """A feature that reached everyone: start the next one its initiative queued after it."""
+        q = self._queue()
+        hit = next(((iid, e) for iid, e in q.items() if e.get("after") == feature_id), None)
+        if hit is None:
+            return None
+        iid, e = hit
+        s = self._state(feature_id)
+        if s.get("status") != "done":
+            return None
+        try:
+            v = self.view(iid)
+            nxt = next((i for i in e["next"] if i < len(v["candidates"]) and not v["candidates"][i]["started"]), None)
+            if nxt is None:
+                q.pop(iid)
+                self._save_queue(q)
+                return None
+            c = v["candidates"][nxt]
+            fid = self.create(product_id=v["product_id"], title=c["title"], description=c["description"],
+                              created_by=e.get("by", ""), background=True, initiative_id=iid,
+                              not_duplicate_reason=f"A candidate feature of {iid}, started in order")
+        except Exception:
+            log.warning("starting the next feature of %s failed", iid, exc_info=True)
+            return None
+        rest = [i for i in e["next"] if i != nxt]
+        if rest:
+            q[iid] = {**e, "after": fid, "next": rest}
+        else:
+            q.pop(iid)
+        self._save_queue(q)
+        return fid
+
+    def start_first_feature(self, inception_id: str, *, by: str) -> str:
+        """After inception: the first initiative's first feature, once the product is registered."""
+        from .inception import formats
+        from .inception.setup import ids
+
+        s = self._state(inception_id)
+        if s.get("status") != "set_up":
+            raise ValueError("The product isn't set up yet: approve the product gate first")
+        pid = ids(s["brief"])["product_id"]
+        if pid not in self.services.settings.registry:
+            raise ValueError(f"{pid} isn't registered yet: merge the governance and registry pull requests, then "
+                             "reload the config")
+        inis = [i for i in formats.initiatives(s.get("roadmap", "")) if i.get("id")]
+        if not inis or not inis[0]["features"]:
+            raise ValueError("The roadmap has no first feature to start")
+        f = inis[0]["features"][0]
+        return self.create(product_id=pid, title=f["title"], description=f.get("does", ""), created_by=by,
+                           background=True, initiative_id=f"{pid}-INI-1")
+
     def create_inception(self, vision, *, created_by: str = "", background: bool = False) -> str:
         """Start a product inception: the brief first, then the product council's brief gate."""
         from dataclasses import asdict
@@ -1495,6 +1626,11 @@ class FeatureEngine:
                                           "kind": "asked", "ref": p["interrupt_id"],
                                           "detail": {"type": p.get("type"), "gate": p.get("gate", ""),
                                                      "phase": p.get("phase", "")}})
+        try:  # an initiative's features started in order: the next one, once this reached everyone
+            if kind_of(feature_id) == "feature":
+                self._start_next_in_order(feature_id)
+        except Exception:
+            log.warning("starting the next feature after %s failed", feature_id, exc_info=True)
         notifier = getattr(self.services, "notifier", None)
         if notifier is None:
             return
