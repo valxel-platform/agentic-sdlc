@@ -597,11 +597,13 @@ class FeatureEngine:
         return out
 
     def create_initiative(self, *, product_id: str, title: str, request: str, created_by: str = "",
-                          measure: str = "", horizon: str = "", background: bool = False) -> str:
+                          measure: str = "", horizon: str = "", background: bool = False,
+                          research: str = "quick") -> str:
         self.services.snapshot(product_id)  # validates the product's governance
         iid = self._new_id(product_id, "initiative", title)
         inp = {"initiative_id": iid, "product_id": product_id, "title": title, "request": request,
-               "created_by": created_by, "measure_hint": measure, "horizon_hint": horizon, "attempt": 0}
+               "created_by": created_by, "measure_hint": measure, "horizon_hint": horizon, "attempt": 0,
+               "research_depth": research}
         self.bus.publish({"type": "feature.created", "feature_id": iid, "product_id": product_id})
         (self._submit if background else self._execute)(iid, inp)
         return iid
@@ -614,7 +616,7 @@ class FeatureEngine:
 
         tid = self._new_id(PRODUCT_ID, "inception", vision.name)
         inp = {"inception_id": tid, "product_id": PRODUCT_ID, "title": vision.name, "vision": asdict(vision),
-               "created_by": created_by, "status": "drafting_brief"}
+               "created_by": created_by, "status": "researching"}
         self.bus.publish({"type": "feature.created", "feature_id": tid, "product_id": PRODUCT_ID})
         (self._submit if background else self._execute)(tid, inp)
         return tid

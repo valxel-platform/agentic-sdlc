@@ -41,6 +41,8 @@ def parse_draft(text: str) -> dict:
         "release_model": _first_bullet(text, "Release model").split()[0].lower() if section(text, "Release model") else "",
         "candidates": cands,
         "risks": section(text, "Risks"),
+        "evidence": section(text, "Evidence"),
+        "assumptions": section(text, "Assumptions"),
     }
 
 
@@ -80,6 +82,10 @@ def stub_draft(ctx: dict) -> str:
         "", "## Candidate features", *[f"- {t}: {d}" if d else f"- {t}" for t, d in cands],
         "", "## Risks", "- Scope grows beyond the budget; the gate reviews the envelope",
     ]
+    if ctx.get("research"):
+        from ..inception.templates import evidence_lines
+
+        lines += evidence_lines(ctx["research"])
     if feedback:
         lines += ["", "## Changes from review", f"- {feedback}"]
     return "\n".join(lines) + "\n"
@@ -118,6 +124,11 @@ def check_draft(d: dict, ctx: dict) -> list[str]:
         if hits:
             out.append(f"Candidate '{c['title']}' repeats {describe(hits[0])}: drop it, or name that feature in its "
                        "description if this extends it")
+    if ctx.get("research"):
+        from ..research import citations
+
+        body = "\n".join(f"## {h}\n{d.get(k) or ''}" for h, k in (("Evidence", "evidence"), ("Assumptions", "assumptions")))
+        out += citations(body, ctx["research"])
     for other in ctx.get("initiatives") or []:
         if other["id"] != ctx.get("initiative_id") and other.get("status") not in ("dropped", "done") and \
                 similarity(ctx["title"], d["outcome"], other["title"], other.get("outcome", "")) >= DUPLICATE:

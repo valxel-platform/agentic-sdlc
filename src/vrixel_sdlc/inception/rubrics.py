@@ -11,7 +11,10 @@ RUBRICS: dict[str, tuple[Item, ...]] = {
         Item("outcomes", "Each goal is an outcome for users or the business, not a feature to build"),
         Item("nongoals", "The non-goals rule out something a reader could reasonably expect the product to do"),
         Item("dataclass", "The data class follows from what the product will store and who it serves"),
-        Item("assumptions", "Every assumption the brief relies on is listed under Agent notes as 'Assumed:'"),
+        Item("evidence", "Each claim about the users, the problem, the alternatives or the market is under Evidence "
+                         "citing the research note, or is listed under Assumptions"),
+        Item("assumptions", "Every assumption the brief relies on is under Assumptions with a test someone could "
+                            "actually run"),
         Item("risks", "Each risk names how it will be handled", must=False),
     ),
     "architecture": (

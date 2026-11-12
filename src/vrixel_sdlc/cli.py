@@ -191,6 +191,8 @@ def _inception(args) -> int:
 
     from .config import load_settings
     from .inception import KIND, Vision
+    from .inception.run import draft as draft_doc
+    from .inception.run import research as research_note
     from .inception.run import run
     from .services import build_services
 
@@ -206,11 +208,23 @@ def _inception(args) -> int:
         print("Give --org: the GitHub org the product will live in.", file=sys.stderr)
         return 2
     vision = Vision.from_markdown(text, org=org, product_id=args.product, existing=existing)
+    vision.research_depth = args.research
     brief = Path(args.brief).read_text(encoding="utf-8") if args.brief else ""
-    drafts = run(services, vision, brief=brief, through=args.through)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     report = []
+    if brief:
+        drafts = run(services, vision, brief=brief, through=args.through)
+    else:  # research first, then the brief that cites it
+        r = research_note(services, vision)
+        path = out / f"{KIND['research']}.md"
+        path.write_text(r.text, encoding="utf-8")
+        report.append({k: v for k, v in r.as_dict().items() if k != "text"} | {"doc": "research", "file": str(path)})
+        print(f"research: {r.status} ({r.depth}, {'searched the web' if r.web else 'no web search'}), "
+              f"${r.cost_usd:.2f} -> {path}")
+        for f in r.findings:
+            print(f"  - {f}")
+        drafts = [draft_doc(services, vision, "brief", research=r.text)]
     for d in drafts:
         path = out / f"{KIND[d.doc]}.md"
         path.write_text(d.text, encoding="utf-8")
@@ -344,6 +358,8 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     inc.add_argument("--product", default="", help="An existing product's id (describe it), or a proposed id")
     inc.add_argument("--brief", help="The brief approved at the brief gate: drafts the architecture and roadmap")
     inc.add_argument("--through", choices=["architecture", "roadmap"], default="roadmap")
+    inc.add_argument("--research", choices=["quick", "thorough", "own"], default="quick",
+                     help="Before the brief: a quick or thorough web search, or 'own' (your research is in the vision)")
     inc.add_argument("--out", default="inception", help="Directory for the documents and report.json")
     inc.add_argument("--mode", default="stub", choices=["live", "stub"])
     oc = sub.add_parser("outcomes", help="Check a product's goal metrics, read one for a window, or record a "

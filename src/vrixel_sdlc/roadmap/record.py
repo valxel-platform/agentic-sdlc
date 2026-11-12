@@ -87,6 +87,8 @@ def parse_initiative(text: str, path: str = "") -> dict | None:
         # When the product council reviews whether its goal is moving (outcome loop, step 5).
         "review_by": str(meta.get("review_by") or ""),
         "outcome": section(body, "Outcome"), "candidates": candidates(body), "path": path,
+        # What the plan bet on, checked at its review (vrixel_sdlc.research).
+        "assumptions": section(body, "Assumptions"),
     }
 
 

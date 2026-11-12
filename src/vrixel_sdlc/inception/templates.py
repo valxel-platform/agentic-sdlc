@@ -49,6 +49,7 @@ def brief(v: Vision, ctx: dict) -> str:
     lines = [
         f"# Product brief: {v.name}", "", "## Problem", v.vision.strip() or f"The problem {v.name} solves.",
         "", "## Users", *users, "", "## Goals", *goals,
+        *evidence_lines(ctx.get("research", "")),
         "", "## Non-goals", f"- {v.name} doesn't replace the systems its users already rely on for other work",
         "", "## Scope", "- The first year covers the goals above, for the users above",
         "", "## Data class", f"- {dc}: {why}",
@@ -59,6 +60,18 @@ def brief(v: Vision, ctx: dict) -> str:
         "", "## Agent notes", "- Assumed: the goals and users are the ones the person gave, in their words",
     ]
     return "\n".join(lines) + "\n"
+
+
+def evidence_lines(research: str) -> list[str]:
+    """The Evidence and Assumptions sections from a research note (none without one)."""
+    from .. import research as rs
+
+    if not research:
+        return []
+    ev = [e for e in rs.evidence(research) if e["id"]]
+    asm = [a for a in rs.assumptions(research) if a["id"] and a["test"]]
+    return (["", "## Evidence", *[f"- {e['claim'].rstrip('.')} ({e['id']})" for e in ev],
+             "", "## Assumptions", *[f"- {a['line']}" for a in asm]])
 
 
 def plan_components(v: Vision, prefix: str) -> list[tuple[str, str, str]]:

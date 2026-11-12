@@ -121,7 +121,8 @@ def initiative_files(brief: str, roadmap: str, approved_by: str) -> dict[str, st
     return out
 
 
-def governance_files(vision: Vision, brief: str, architecture: str, roadmap: str, approved_by: str) -> dict[str, str]:
+def governance_files(vision: Vision, brief: str, architecture: str, roadmap: str, approved_by: str,
+                     research: str = "") -> dict[str, str]:
     i = ids(brief)
     goals, _ = goals_yaml(brief)
     files = {
@@ -129,6 +130,7 @@ def governance_files(vision: Vision, brief: str, architecture: str, roadmap: str
         "architecture/product-architecture.md": architecture,
         "roadmap/goals.yaml": goals,
         **initiative_files(brief, roadmap, approved_by),
+        **({"architecture/research.md": research} if research else {}),
     }
     if not vision.existing:
         files |= {"product.yaml": product_yaml(vision, brief), "constitution.md": constitution_md(vision, brief),
@@ -162,12 +164,12 @@ def add_to_registry(text: str, line: str) -> str:
 
 
 def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str, approved_by: str,
-        thread_id: str, config_repo: str | None = None) -> dict:
+        thread_id: str, config_repo: str | None = None, research: str = "") -> dict:
     """Open the pull requests that record the approved product. Returns what was done, step by step."""
     gh = services.github
     i = ids(brief)
     steps: list[dict] = []
-    files = governance_files(vision, brief, architecture, roadmap, approved_by)
+    files = governance_files(vision, brief, architecture, roadmap, approved_by, research)
 
     def step(name: str, fn) -> dict:
         try:

@@ -61,6 +61,7 @@ function NewInitiative({ productId, onCancel }: { productId: string; onCancel: (
   const [request, setRequest] = useState("");
   const [measure, setMeasure] = useState("");
   const [horizon, setHorizon] = useState("");
+  const [research, setResearch] = useState("quick");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   async function submit(e: FormEvent) {
@@ -68,7 +69,7 @@ function NewInitiative({ productId, onCancel }: { productId: string; onCancel: (
     setBusy(true);
     setErr("");
     try {
-      const r = await api.createInitiative({ product_id: productId, title, request, measure, horizon });
+      const r = await api.createInitiative({ product_id: productId, title, request, measure, horizon, research });
       nav(threadPath(r.feature_id));
     } catch (x) {
       setErr((x as Error).message);
@@ -78,7 +79,7 @@ function NewInitiative({ productId, onCancel }: { productId: string; onCancel: (
   return (
     <form className="panel form-panel" onSubmit={submit}>
       <h2 className="section-title">New initiative</h2>
-      <p className="small muted">An agent drafts the goal, measure, budget and the features that deliver it; product owners approve it at G0.</p>
+      <p className="small muted">An agent researches it, then drafts the goal, measure, budget and the features that deliver it; product owners approve it at G0.</p>
       <label className="field">Title<input value={title} onChange={(e) => setTitle(e.target.value)} required minLength={3} /></label>
       <label className="field">What outcome do you want, and what does it involve?
         <textarea value={request} onChange={(e) => setRequest(e.target.value)} required minLength={10}
@@ -91,6 +92,16 @@ function NewInitiative({ productId, onCancel }: { productId: string; onCancel: (
           {Object.entries(HORIZONS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
       </label>
+      <fieldset className="field">
+        <legend>Research before the plan</legend>
+        <label className="small"><input type="radio" name="research" value="quick" checked={research === "quick"}
+          onChange={() => setResearch("quick")} /> Quick: a few web searches for the alternatives and the market</label>
+        <label className="small"><input type="radio" name="research" value="thorough" checked={research === "thorough"}
+          onChange={() => setResearch("thorough")} /> Thorough: more alternatives, public pricing, market size</label>
+        <label className="small"><input type="radio" name="research" value="own" checked={research === "own"}
+          onChange={() => setResearch("own")} /> I've done my own: it's in what I wrote above</label>
+        <span className="small faint">Every claim the plan rests on cites this research, with a source and a confidence.</span>
+      </fieldset>
       {err && <p className="error-note" role="alert">{err}</p>}
       <div className="actions">
         <button className="btn" disabled={busy}>Draft initiative</button>

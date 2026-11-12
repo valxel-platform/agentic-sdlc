@@ -24,7 +24,7 @@ import re
 from dataclasses import dataclass, field
 
 DOCS = ("brief", "architecture", "roadmap")
-KIND = {"brief": "BRIEF", "architecture": "PARCH", "roadmap": "ROADMAP"}
+KIND = {"brief": "BRIEF", "architecture": "PARCH", "roadmap": "ROADMAP", "research": "RESEARCH"}
 ROLE = {"brief": "strategist", "architecture": "architect", "roadmap": "strategist"}
 SKILLS = {
     "brief": ("product-management:write-spec", "product-management:competitive-brief"),
@@ -51,6 +51,7 @@ class Vision:
     product_id: str = ""                                # proposed (new) or existing
     existing: bool = False                              # describe an existing product
     attachments_text: str = ""
+    research_depth: str = "quick"                       # quick | thorough | own (vrixel_sdlc.research)
 
     @staticmethod
     def from_markdown(text: str, *, org: str = "", product_id: str = "", existing: bool = False) -> "Vision":

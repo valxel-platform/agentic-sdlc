@@ -65,14 +65,15 @@ def existing_context(services, product_id: str) -> str:
 
 
 def context_for(services, vision: Vision, doc: str, *, brief: str = "", architecture: str = "",
-                plat: dict | None = None) -> dict:
+                plat: dict | None = None, research: str = "") -> dict:
     """What the checks (and the stub templates) need for this document."""
     plat = plat or platform(services)
     pb = formats.product(brief) if brief else {}
     dc = formats.data_class(brief)[0] if brief else ""
     ctx = {"existing": vision.existing, "org": vision.org, "registered": set(services.settings.registry),
            "product_id": pb.get("id") or vision.product_id, "prefix": pb.get("prefix", ""),
-           "budget_usd": pb.get("budget_usd", 0.0), "data_class": dc, "catalog": plat["catalog"]}
+           "budget_usd": pb.get("budget_usd", 0.0), "data_class": dc, "catalog": plat["catalog"],
+           "research": research if doc == "brief" else ""}
     if vision.existing and vision.product_id:
         ctx["product_id"] = vision.product_id
         try:
@@ -168,7 +169,7 @@ def monthly_cost(text: str, catalog: dict) -> tuple[dict, str]:
 
 
 def draft(services, vision: Vision, doc: str, *, brief: str = "", architecture: str = "",
-          max_loops: int | None = None, feedback: str = "", previous: str = "") -> Draft:
+          max_loops: int | None = None, feedback: str = "", previous: str = "", research: str = "") -> Draft:
     """One document, written and revised until the checks and the critic pass."""
     if doc not in DOCS:
         raise ValueError(f"No inception document {doc}; one of {', '.join(DOCS)}")
@@ -177,12 +178,12 @@ def draft(services, vision: Vision, doc: str, *, brief: str = "", architecture: 
     if doc == "roadmap" and not architecture:
         raise ValueError("The roadmap needs the architecture")
     plat = platform(services)
-    ctx = context_for(services, vision, doc, brief=brief, architecture=architecture, plat=plat)
+    ctx = context_for(services, vision, doc, brief=brief, architecture=architecture, plat=plat, research=research)
     # Strictest until the brief gate approves a data class; then the approved one.
     data_class = ctx["data_class"] if doc != "brief" and ctx["data_class"] else STRICTEST
     constitution = plat["constitution"]
     product_context = existing_context(services, vision.product_id) if vision.existing and vision.product_id else ""
-    parents = {"brief": brief, "architecture": architecture}
+    parents = {"research": research if doc == "brief" else "", "brief": brief, "architecture": architecture}
     loops = max_loops or services.settings.limits.max_loops
     # A gate's feedback starts the loop: the people's words first, then the draft they read.
     text, cost, judged = previous, 0.0, []
@@ -206,6 +207,24 @@ def draft(services, vision: Vision, doc: str, *, brief: str = "", architecture: 
             return Draft(doc, text, "passed", attempt, [], judged, round(cost, 4), monthly, data_class)
         findings = notes
     return Draft(doc, text, "escalated", loops, findings, judged, round(cost, 4), {}, data_class)
+
+
+def research(services, vision: Vision, max_loops: int | None = None):
+    """The research note the brief cites (vrixel_sdlc.research). Runs as PHI, like the brief: no
+    data class is approved yet."""
+    from .. import research as rs
+
+    plat = platform(services)
+    product_context = existing_context(services, vision.product_id) if vision.existing and vision.product_id else ""
+    role = ROLE["brief"]
+
+    def layers_for(skills, tail):
+        return _layers(services, role, tuple(skills), plat["constitution"], product_context, "", tail)
+
+    return rs.run(services, role=role, subject=vision.name, request=vision.as_request(),
+                  depth=vision.research_depth, data_class=STRICTEST,
+                  tags=_tags(vision, "research", role, STRICTEST), layers_for=layers_for,
+                  attachments_text=vision.attachments_text, max_loops=max_loops)
 
 
 def run(services, vision: Vision, *, brief: str = "", through: str = "roadmap") -> list[Draft]:
