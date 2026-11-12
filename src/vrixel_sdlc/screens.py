@@ -8,7 +8,8 @@ the approved UX spec names, shown at G6 beside the mockup G3 approved.
 
         - S1 /checkin: passed; desktop: CLN-FEAT-7/staging/S1-desktop.png; phone: CLN-FEAT-7/staging/S1-phone.png
         - S1 serious color-contrast: Save button text is 3.1:1 against its background
-        - S2 /ready: failed; desktop: CLN-FEAT-7/staging/S2-desktop.png
+        - S2 /ready: failed; desktop: CLN-FEAT-7/staging/S2-desktop.png   (failed with no violation
+          listed means it didn't load; with one, it has a serious or critical problem)
 
     The screenshots are committed to the scanning repo's 'vrixel-screens' branch; the tool reads them
     with its own token and serves them to the people at G6 (they're never public URLs).
@@ -85,8 +86,11 @@ def result(suite: str, stage: str, target: dict, summary: str, state: str, url: 
                 for sid, impact, rule, text in _VIOLATION.findall(summary or "")]
     missing = [s["id"] if isinstance(s, dict) else s for s in target.get("screens") or []]
     missing = [s for s in missing if s not in seen]
-    msg = f"not visited: {', '.join(missing)}" if missing else ""
-    st = "failed" if (state == "failure" and not findings) or missing else "passed"
+    flagged = {f.title.split(":", 1)[0] for f in findings}
+    broken = [sid for sid, outcome in seen.items() if outcome == "failed" and sid not in flagged]  # didn't load
+    msg = "; ".join(x for x in (f"not visited: {', '.join(missing)}" if missing else "",
+                                f"didn't load: {', '.join(broken)}" if broken else "") if x)
+    st = "failed" if (state == "failure" and not findings) or missing or broken else "passed"
     return SuiteResult(suite=suite, kind="security", stage=stage, state=st, repo=target["repo"], url=url, message=msg,
                        findings=findings, details={"screens": shots, "missing": missing})
 

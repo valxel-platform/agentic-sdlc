@@ -96,3 +96,14 @@ def test_screenshots_are_served_from_the_scanning_repo_to_members_only():
     assert screens.screenshot(svc, state, "S9", "desktop") is None
     bad = {**state, "quality": {"staging": {"suites": [{**row, "details": {"screens": {"S1": {"desktop": "../x.png"}}}}]}}}
     assert screens.screenshot(svc, bad, "S1", "desktop") is None
+
+
+def test_a_screen_that_did_not_load_fails_the_suite_even_with_findings():
+    from vrixel_sdlc import screens
+
+    summary = ("- S1 /c/: passed; desktop: F/staging/S1-desktop.png\n"
+               "- S1 serious color-contrast: low contrast\n"
+               "- S2 /missing: failed (desktop: HTTP 404, phone: HTTP 404)\n")
+    r = screens.result("screens", "staging", {"repo": "a/b", "screens": [{"id": "S1"}, {"id": "S2"}]}, summary, "failure", "u")
+    assert r.state == "failed" and "didn't load: S2" in r.message
+    assert [f.rule for f in r.findings] == ["color-contrast"]
