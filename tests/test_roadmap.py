@@ -228,7 +228,7 @@ def test_a_release_train_approves_its_features_together(tmp_path, gov_root):
         v = eng.auto_drive(f)
         assert [p.get("wait") for p in v["pending"]] == ["release_train"]  # past staging, waiting for the train
     g = gate(eng, rid, "release")
-    assert "promotes to production" in g["summary"] and "26/26 suites passed" in g["evidence"]  # the change set's own environment ran the dev suites too
+    assert "promotes to production" in g["summary"] and "30/30 suites passed" in g["evidence"]  # image scan, provenance and new dependencies too; the change set's own environment ran the dev suites too
     eng.decide(rid, g["interrupt_id"], {"decision": "approve", "approver": "rm"})
     for f in (a, b):
         v = eng.view(f)

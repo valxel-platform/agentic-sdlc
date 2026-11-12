@@ -18,11 +18,17 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U vrixel -d vrixel" --health-interval 3s --health-timeout 3s --health-retries 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+      - name: The image's requirements.lock is uv.lock's export
+        run: |
+          uv export --frozen --format requirements-txt --extra live --extra github --extra integrations \
+            --no-emit-project --no-dev -q -o /tmp/requirements.lock
+          diff <(grep -v '^#' requirements.lock) <(grep -v '^#' /tmp/requirements.lock)
       - name: Fetch the plugins the image pins
         run: |
           ref=$(python -c "import yaml; print(yaml.safe_load(open('config/plugins.yaml'))['knowledge_work_plugins']['ref'])")
@@ -37,16 +43,31 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build
         run: |
           ref=$(sed -n 's/^  ref: //p' config/plugins.yaml | head -1)
           docker build --build-arg KNOWLEDGE_WORK_PLUGINS_REF="$ref" -t vrixel-sdlc:ci .
+      - name: No high or critical vulnerabilities in the image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: vrixel-sdlc:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: The image's SBOM
+        uses: anchore/sbom-action@fffec3d851af758d56fee099cf3fbf8aa8779843 # v0.24.3
+        with:
+          image: vrixel-sdlc:ci
+          format: cyclonedx-json
+          artifact-name: vrixel-sdlc.cdx.json
       - name: The image has every skill live mode needs, and the live extras
         run: |
           docker run --rm vrixel-sdlc:ci python -c \
             "import claude_agent_sdk, anthropic, httpx; from vrixel_sdlc.services import check_skills; check_skills(); print('skills ok')"
           docker run --rm vrixel-sdlc:ci codex exec --help | grep -q -- --output-schema
+          # Agents' shell commands run in Claude Code's sandbox, which needs these (vrixel_sdlc.sandbox).
+          docker run --rm vrixel-sdlc:ci sh -c 'command -v bwrap && command -v socat && command -v git' 
       - name: The image's plugins are the config's pin, and it can lay out another pin
         run: |
           ref=$(sed -n 's/^  ref: //p' config/plugins.yaml | head -1)
@@ -66,8 +87,8 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm

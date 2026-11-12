@@ -105,6 +105,11 @@ def check_promotion(env: str, actor_type: str, pipeline: tuple[str, ...]) -> Non
         raise PermissionError("Agents cannot promote to production (VX-3); G6 is a human action")
 
 
+# The platform build workflow's steps (platform/openchoreo/build-workflow.yaml), as the stub reports them.
+BUILD_STEPS = tuple({"name": n, "phase": "Succeeded", "message": ""}
+                    for n in ("checkout", "build-image", "push", "scan-image", "sbom", "sign", "attest-provenance"))
+
+
 class StubOpenChoreo:
     """In memory. Builds succeed and deployments are ready at once unless a test says otherwise
     through `run_results` (component -> status) or `deploy_results` ((component, env) -> state)."""
@@ -162,7 +167,7 @@ class StubOpenChoreo:
 
     def run_status(self, *, run_id, component, project=None, namespace=None) -> dict:
         return {"status": self.run_results.get(component, "succeeded"), "message": "",
-                "tasks": list(self.run_tasks.get(component, [])),
+                "tasks": list(self.run_tasks.get(component, BUILD_STEPS)),
                 "started_at": "2026-11-02T15:10:00+00:00", "finished_at": "2026-11-02T15:16:00+00:00"}
 
     def environment(self, component: str) -> str | None:

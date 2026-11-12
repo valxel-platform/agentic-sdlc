@@ -33,6 +33,9 @@ class AgentTask:
     # (vrixel_sdlc.workspace). Runtimes without folder access ignore it.
     cwd: str | None = None
     read_only: bool = False
+    # The session's own folder and home (vrixel_sdlc.sandbox.Box.spec): a coder's checkout of its one
+    # repository, cloned with a token for that repository only.
+    sandbox: dict | None = None
 
 
 @dataclass

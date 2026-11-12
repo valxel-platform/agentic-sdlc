@@ -31,6 +31,7 @@ from pathlib import Path
 
 from .. import plugins
 from ..gateway import ModelGateway, ModelResponse, PolicyViolation, ProviderUnavailable, is_transient
+from ..sandbox import claude_sandbox, claude_settings, session_env
 from .base import AgentResult, AgentTask
 
 log = logging.getLogger(__name__)
@@ -50,7 +51,8 @@ def plugin_dirs_from(base: str | None) -> list[str]:
                   if d.is_dir() and any((d / m).exists() for m in marks))
 
 
-def session_options(task: AgentTask, role, model: str, *, cwd: str | None, plugin_dirs: list[str]) -> dict:
+def session_options(task: AgentTask, role, model: str, *, cwd: str | None, plugin_dirs: list[str],
+                    home: str | None = None) -> dict:
     """The ClaudeAgentOptions for one session, as keyword arguments (kept free of the SDK so the
     offline tests can check them)."""
     lay = task.layers.layers()
@@ -63,11 +65,19 @@ def session_options(task: AgentTask, role, model: str, *, cwd: str | None, plugi
         "system_prompt": {"type": "preset", "preset": "claude_code", "append": append,
                           "exclude_dynamic_sections": True},
         "setting_sources": ["project"],
+        # No hooks from anywhere (a repository's .claude/settings.json runs nothing), and the tool's
+        # own files and secrets unreadable (vrixel_sdlc.sandbox).
+        "settings": json.dumps(claude_settings(home or "")),
         "plugins": [{"type": "local", "path": p} for p in plugin_dirs],
         "model": model.split("/", 1)[-1],
         "cwd": task.cwd or cwd,
         # Telemetry export under the tool's span, when tracing is on (vrixel_sdlc.telemetry).
-        "env": {"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h", **((task.telemetry or {}).get("env") or {})},
+        # Only the allowlisted environment: every other name the tool's process has is blanked.
+        "env": session_env("claude_code", home or os.environ.get("HOME", ""),
+                           {"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h", **((task.telemetry or {}).get("env") or {})}),
+        # Shell commands run in Claude Code's sandbox, network only to the allowlist; a read-only
+        # session has no shell to sandbox.
+        **({} if task.read_only else {"sandbox": claude_sandbox()}),
         # Caps: a session that runs away stops here, not at the feature's budget.
         "max_turns": task.max_turns or role.max_turns,
         "max_budget_usd": session_cap(task, role),
@@ -110,11 +120,22 @@ class ClaudeCodeRuntime:
             raise
 
     async def _run(self, task: AgentTask, model: str) -> AgentResult:
-        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query  # lazy import
+        from claude_agent_sdk import ClaudeAgentOptions  # lazy import
 
         role = self.gateway.settings.role(task.role)
-        options = ClaudeAgentOptions(**session_options(task, role, model, cwd=self.cwd,
-                                                       plugin_dirs=self.plugins_for(task.role)))
+        import tempfile
+
+        # Every session gets a home of its own: nothing from the container's home directory.
+        with tempfile.TemporaryDirectory(prefix="vrixel-session-") as home:
+            Path(home, "tmp").mkdir()
+            options = ClaudeAgentOptions(**session_options(task, role, model, cwd=self.cwd,
+                                                           plugin_dirs=self.plugins_for(task.role),
+                                                           home=(task.sandbox or {}).get("home") or home))
+            return await self._query(task, model, options)
+
+    async def _query(self, task: AgentTask, model: str, options) -> AgentResult:
+        from claude_agent_sdk import ResultMessage, query  # lazy import
+
         text, result, loaded = "", None, set()
         started = time.monotonic()
         async for message in query(prompt=task.layers.tail, options=options):
