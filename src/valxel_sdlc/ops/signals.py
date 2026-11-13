@@ -45,7 +45,7 @@ def from_alertmanager(payload: dict) -> list[dict]:
         ann = a.get("annotations") or {}
         out.append({
             "source": "prometheus", "status": "resolved" if a.get("status") == "resolved" else "firing",
-            "product_id": labels.get("valxel_product") or labels.get("vrixel_product") or labels.get("product") or "",
+            "product_id": labels.get("valxel_product") or labels.get("product") or "",
             "component": labels.get("component") or labels.get("service") or labels.get("app") or labels.get("job") or "",
             "env": labels.get("environment") or labels.get("env") or "production",
             "severity": _sev(labels.get("severity", ""), _ALERT_SEV, "sev3"),
@@ -71,7 +71,7 @@ def from_sentry(payload: dict, resource: str = "") -> list[dict]:
     action = payload.get("action", "")
     return [{
         "source": "sentry", "status": "resolved" if action == "resolved" else "firing",
-        "product_id": tags.get("valxel_product") or tags.get("vrixel_product", ""),
+        "product_id": tags.get("valxel_product", ""),
         "component": tags.get("component") or tags.get("service") or project_slug or "",
         "env": tags.get("environment") or issue.get("environment") or "production",
         "severity": _sev(issue.get("level", ""), _SENTRY_SEV, "sev3"),
