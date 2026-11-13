@@ -58,7 +58,7 @@ def start_new_service(eng, product="CLN", title="Consent registry"):
 
 def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
-    tpl = "valxel-tools/template-service"
+    tpl = "valxel-platform/template-service"
     svc.github.files[(tpl, "main", ".valxel/identity")] = "# files that carry the template's name\nworkload.yaml\nsrc/main/resources/application.yaml\nmissing.txt\n"
     svc.github.files[(tpl, "main", "workload.yaml")] = "metadata:\n  name: template-service\n"
     svc.github.files[(tpl, "main", "src/main/resources/application.yaml")] = "spring:\n  application:\n    name: template-service\n"
@@ -71,7 +71,7 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     assert plan["ruleset"]["required_checks"] == ["unit", "contract", "CodeQL"]
 
     repo = svc.github.repos[NEW]
-    assert repo["created"]["template"] == "valxel-tools/template-service" and not repo["created"]["private"]
+    assert repo["created"]["template"] == "valxel-platform/template-service" and not repo["created"]["private"]
     assert repo["security"]["secret_scanning"] and repo["security"]["push_protection"]
     assert repo["security"]["code_scanning_default_setup"]
     assert repo["teams"] == {"tech-leads": "maintain", "architects": "push", "security": "push",
@@ -214,9 +214,9 @@ class Tokens:
 def test_github_admin_calls():
     api = FakeAdminApi()
     gh = GitHubRest(Tokens(), opener=api)
-    assert gh.create_repo(repo="o/cln-x-service", template="valxel-tools/template-service", private=True,
+    assert gh.create_repo(repo="o/cln-x-service", template="valxel-platform/template-service", private=True,
                           description="d") == "created"
-    assert gh.create_repo(repo="o/cln-x-service", template="valxel-tools/template-service", private=True,
+    assert gh.create_repo(repo="o/cln-x-service", template="valxel-platform/template-service", private=True,
                           description="d") == "exists"
     gh.update_repo(repo="o/cln-x-service", merge={"squash": True}, default_branch="main", description="d")
     gh.enable_security(repo="o/cln-x-service", secret_scanning=True, push_protection=True)
@@ -229,7 +229,7 @@ def test_github_admin_calls():
     gh.upsert_ruleset(repo="o/cln-x-service", branch="main", spec=spec)
 
     calls = [(m, p) for m, p, _ in api.calls]
-    assert ("POST", "/repos/valxel-tools/template-service/generate") in calls
+    assert ("POST", "/repos/valxel-platform/template-service/generate") in calls
     assert ("PUT", "/repos/o/cln-x-service/vulnerability-alerts") in calls
     assert ("PATCH", "/repos/o/cln-x-service/code-scanning/default-setup") in calls
     assert ("PUT", "/orgs/o/teams/tech-leads/repos/o/cln-x-service") in calls
@@ -272,7 +272,7 @@ def test_openchoreo_component_registration():
 
 
 def test_an_agent_is_registered_as_an_agent_with_its_isolation():
-    from vrixel_sdlc.integrations.openchoreo import StubOpenChoreo
+    from valxel_sdlc.integrations.openchoreo import StubOpenChoreo
 
     oc = StubOpenChoreo()
     oc.register_component(component="acme/cln-assist", project="cln", namespace=None, component_type="deployment/agent",
@@ -285,7 +285,7 @@ def test_an_agent_is_registered_as_an_agent_with_its_isolation():
 def test_the_platforms_agent_type_locks_the_pod_down():
     from pathlib import Path
 
-    docs = list(yaml.safe_load_all((Path(__file__).resolve().parents[1] / "examples/governance/vrixel-tools/"
+    docs = list(yaml.safe_load_all((Path(__file__).resolve().parents[1] / "examples/governance/valxel-platform/"
                                     "sdlc-governance/platform/openchoreo/component-types.yaml").read_text()))
     agent = next(d for d in docs if d["metadata"]["name"] == "agent")
     res = {r["id"]: r["template"] for r in agent["spec"]["resources"]}

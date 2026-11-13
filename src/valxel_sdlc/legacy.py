@@ -4,7 +4,7 @@
                   naming the new one); a set VALXEL_* always wins
     database      tables, indexes and sequences named vrixel_* are renamed to valxel_* once, the first
                   time the tool connects, so an existing deployment keeps its data
-    signals       alerts labelled vrixel_product still find their product (vrixel_sdlc.ops.signals)
+    signals       alerts labelled vrixel_product still find their product (valxel_sdlc.ops.signals)
     CLI           `vrixel` still runs `valxel`
     GitHub        the valxel/gates status is also posted as vrixel/gates (rulesets that still require
                   it), and each valxel-* repository_dispatch is also sent as vrixel-* (repos created

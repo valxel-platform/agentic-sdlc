@@ -54,7 +54,7 @@ def test_first_feature_proposes_creates_and_builds_the_first_repo(tmp_path, gov_
 
     new = "acme-clinic/cln-patient-registration-service"
     [plan] = seen["g4"]["new_repos"]
-    assert plan["repo"] == new and plan["template"] == "valxel-tools/template-service"
+    assert plan["repo"] == new and plan["template"] == "valxel-platform/template-service"
     assert new in svc.github.repos  # created on the golden path
     assert any(pr["repo"] == new for pr in svc.github.prs.values())  # the build worked in it
     gov_pr = [pr for pr in svc.github.prs.values() if pr["repo"] == "acme-clinic/cln-governance" and "repos" in pr["branch"]]

@@ -13,7 +13,7 @@ from valxel_sdlc.governance.manifest import parse_manifest
 from valxel_sdlc.inception import setup
 from valxel_sdlc.web.auth import AuthConfig
 
-COUNCIL = ["valxel-tools/product-council"]
+COUNCIL = ["valxel-platform/product-council"]
 BODY = {"name": "Aqua Watch", "org": "acme-water",
         "vision": "Small farms lose crops because nobody sees soil moisture until too late. Alert the manager's phone.",
         "goals": ["Fewer dry-field incidents (measure: under 2 a month per farm)",
@@ -53,7 +53,7 @@ def test_only_starters_begin_and_only_the_council_decides(client, engine):
 
 
 def test_two_gates_then_setup_opens_the_pull_requests(client, engine, services, monkeypatch):
-    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-tools/sdlc-config")
+    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-platform/sdlc-config")
     sign_in(client, "lead", teams=COUNCIL)
     tid = client.post("/api/inceptions", json=BODY).json()["feature_id"]
     decide(client, engine, tid, "revise", feedback="Name agronomists as users too")
@@ -72,7 +72,7 @@ def test_two_gates_then_setup_opens_the_pull_requests(client, engine, services, 
     files = {path for (repo, branch, path) in gh.files if repo == "acme-water/aw-governance"}
     assert {"product.yaml", "constitution.md", "roadmap/goals.yaml", "roadmap/initiatives/AW-INI-1.md",
             "architecture/product-architecture.md", "runtime/capacity.yaml"} <= files
-    registry = gh.files[("valxel-tools/sdlc-config", "valxel/register-aw", "config/registry.yaml")]
+    registry = gh.files[("valxel-platform/sdlc-config", "valxel/register-aw", "config/registry.yaml")]
     assert "AW: { kind: product, org: acme-water, repo: aw-governance" in registry
     assert [st["step"] for st in s["steps"]] == ["governance_repo", "governance_pr", "registry_pr", "clusters_pr",
                                                  "environments", "teams"]

@@ -607,7 +607,7 @@ def events_instruction(ctx: dict, task: dict) -> str:
             + " List the event types after 'Events:' in the patch summary.")
 
 
-# How each template records a product event (valxel-tools/template-*: counter, summary line, cohorts).
+# How each template records a product event (valxel-platform/template-*: counter, summary line, cohorts).
 EVENT_APIS = {
     "provider": 'ProductEvents.record("<name>") or record("<name>", Map.of("<category>", "<value>")) in Java',
     "event-worker": 'ProductEvents.record("<name>") in the handler',

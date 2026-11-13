@@ -18,7 +18,7 @@ from valxel_sdlc.ops.signals import from_alertmanager, from_openchoreo
 from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-POLICY = EXAMPLES / "valxel-tools" / "sdlc-governance" / "platform" / "remediation.yaml"
+POLICY = EXAMPLES / "valxel-platform" / "sdlc-governance" / "platform" / "remediation.yaml"
 CLN = "acme-clinic/cln-governance"
 NOW = datetime(2026, 11, 6, 22, 0, tzinfo=timezone.utc)
 

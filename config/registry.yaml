@@ -20,7 +20,7 @@ governance:
   github_api: https://api.github.com
 
 platform:
-  org: valxel-tools
+  org: valxel-platform
   repo: sdlc-governance
   ref: main
   constitution_path: platform/constitution.md
@@ -43,8 +43,8 @@ limits:
 # Product inception (valxel_sdlc.inception): who may start one, and the fixed product council that
 # decides both of its gates (the brief gate, then the product gate). GitHub teams or logins.
 inception:
-  starters: [valxel-tools/product-council]
-  council: [valxel-tools/product-council]
+  starters: [valxel-platform/product-council]
+  council: [valxel-platform/product-council]
   budget_usd: 50        # what agents may spend writing one product's three documents
 
 products:

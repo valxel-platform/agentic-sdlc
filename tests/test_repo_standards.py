@@ -48,11 +48,11 @@ def test_managed_repos_come_from_governance_the_registry_and_the_platform_list(s
     ts = {t.repo: t for t in rs.targets(svc)}
     assert ts["acme-clinic/cln-governance"].kind == "governance"
     assert ts["acme-clinic/cln-intake-api"].kind == "lane"
-    assert ts["valxel-tools/template-service"].kind == "template" and ts["valxel-tools/template-service"].plan["is_template"]
-    assert ts["valxel-tools/agentic-sdlc"].plan["ruleset"]["required_checks"] == ["test", "web"]
-    assert ts["valxel-tools/agentic-sdlc"].plan["visibility"] == "public"
+    assert ts["valxel-platform/template-service"].kind == "template" and ts["valxel-platform/template-service"].plan["is_template"]
+    assert ts["valxel-platform/agentic-sdlc"].plan["ruleset"]["required_checks"] == ["test", "web"]
+    assert ts["valxel-platform/agentic-sdlc"].plan["visibility"] == "public"
     assert all(t.plan["visibility"] == "public" for t in ts.values())  # every repo is public
-    assert ts["valxel-tools/template-agent"].plan["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
+    assert ts["valxel-platform/template-agent"].plan["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
     gov = ts["acme-clinic/cln-governance"].plan
     assert gov["ruleset"]["required_checks"] == [] and gov["tag_ruleset"] == {}
     # No GitHub review: people approve in the pipeline's gates, and pull requests merge on checks.
@@ -90,7 +90,7 @@ def test_apply_brings_a_hand_made_repo_on_standard(svc):
 
 def test_without_advanced_security_codeql_is_not_required(svc):
     gh = StubGitHub()
-    repo = "valxel-tools/template-service"
+    repo = "valxel-platform/template-service"
     existing(gh, repo, ghas=False)
     rep = rs.reconcile(gh, target(svc, repo), apply=True)
     assert rep.ok and rep.errors == []
@@ -133,11 +133,11 @@ def test_what_is_never_changed_automatically(svc):
 
 def test_the_cli_reports_and_exits_nonzero_on_drift(svc, capsys, monkeypatch):
     gh = StubGitHub()
-    existing(gh, "valxel-tools/sdlc-governance")
+    existing(gh, "valxel-platform/sdlc-governance")
     monkeypatch.setattr("valxel_sdlc.cli.build_services", lambda settings: svc)
-    assert main(["repos", "check", "--repo", "valxel-tools/sdlc-governance"], github=gh) == 1
+    assert main(["repos", "check", "--repo", "valxel-platform/sdlc-governance"], github=gh) == 1
     assert "settings.delete_branch_on_merge" in capsys.readouterr().out
-    assert main(["repos", "apply", "--repo", "valxel-tools/sdlc-governance", "--json"], github=gh) == 0
+    assert main(["repos", "apply", "--repo", "valxel-platform/sdlc-governance", "--json"], github=gh) == 0
     [r] = json.loads(capsys.readouterr().out)
     assert r["ok"] and "ruleset" in r["applied"]
     monkeypatch.delenv("VALXEL_GITHUB_APP_ID", raising=False)
@@ -320,7 +320,7 @@ def test_lane_repos_require_the_gates_status_from_the_platform_app_only(svc, mon
     rules = {r["type"]: r.get("parameters") for r in ruleset_body(lane)["rules"]}
     assert {"context": "valxel/gates", "integration_id": 4242} in rules["required_status_checks"]["required_status_checks"]
     # The pipeline doesn't deliver to governance, templates or the tool, so nothing would post it there.
-    for repo in ("acme-clinic/cln-governance", "valxel-tools/template-service", "valxel-tools/agentic-sdlc"):
+    for repo in ("acme-clinic/cln-governance", "valxel-platform/template-service", "valxel-platform/agentic-sdlc"):
         assert not ts[repo].plan["ruleset"]["gates_check"]
 
     # A ruleset whose gates check anyone could set is drift.

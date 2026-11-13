@@ -14,7 +14,7 @@ strongest on the JVM. Rust gives lower latency and memory use, at a higher cost 
 
 ## Decision
 
-New services start from valxel-tools/template-service (Java 21, Spring Boot). A component moves to
+New services start from valxel-platform/template-service (Java 21, Spring Boot). A component moves to
 Rust only when a measured hot path misses its SLO on the JVM, and an ADR records the measurement.
 
 ## Consequences

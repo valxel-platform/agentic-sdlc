@@ -88,7 +88,7 @@ spec:
   allowedTraits:
     - { kind: ClusterTrait, name: autoscaler }
     - { kind: ClusterTrait, name: observability-alert-rule }
-  # Set once, when the Vrixel SDLC registers the component (repos.yaml `isolation` per data class).
+  # Set once, when the Valxel SDLC registers the component (repos.yaml `isolation` per data class).
   parameters:
     openAPIV3Schema:
       type: object
@@ -181,10 +181,10 @@ spec:
                 - namespaceSelector: {}
                   podSelector:
                     matchExpressions:
-                      - { key: vrixel.io/role, operator: In, values: [mcp-server, llm-gateway] }
+                      - { key: valxel.io/role, operator: In, values: [mcp-server, llm-gateway] }
             # Traces and metrics to the data plane's OpenTelemetry collector.
             - to:
-                - namespaceSelector: { matchLabels: { vrixel.io/plane: observability } }
+                - namespaceSelector: { matchLabels: { valxel.io/plane: observability } }
               ports: [{ protocol: TCP, port: 4317 }, { protocol: TCP, port: 4318 }]
             # The database and event brokers.
             - to: '${environmentConfigs.egressCIDRs.map(c, {"ipBlock": {"cidr": c}})}'

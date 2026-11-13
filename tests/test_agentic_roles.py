@@ -24,7 +24,7 @@ class Product:
 def test_every_role_has_a_template_and_checks():
     assert set(STD.roles) == set(ROLES)
     for role, spec in STD.roles.items():
-        assert spec["template"].startswith("valxel-tools/template-"), role
+        assert spec["template"].startswith("valxel-platform/template-"), role
         assert "unit" in spec["required_checks"] and "CodeQL" in spec["required_checks"]
 
 
@@ -53,12 +53,12 @@ def test_new_agent_and_mcp_server_repos_are_planned_with_their_checks():
 
     standards = effective_standards(STD, "phi", None)
     agent = plan(Product, proposals[1], standards)
-    assert agent["template"] == "valxel-tools/template-agent"
+    assert agent["template"] == "valxel-platform/template-agent"
     assert agent["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
     assert agent["ruleset"]["required_approvals"] == 0  # people approve at the gates, not in GitHub
     # Its own locked-down type, and gVisor for a PHI product (platform/openchoreo/component-types.yaml).
     assert agent["openchoreo"]["component_type"] == "deployment/agent"
-    from vrixel_sdlc.provisioning import component_parameters
+    from valxel_sdlc.provisioning import component_parameters
 
     assert component_parameters(agent["openchoreo"], "phi") == {"isolation": "gvisor"}
     assert component_parameters(agent["openchoreo"], "payments") == {"isolation": "gvisor"}
@@ -66,7 +66,7 @@ def test_new_agent_and_mcp_server_repos_are_planned_with_their_checks():
     assert component_parameters(plan(Product, proposals[0], standards)["openchoreo"], "phi") == {}
     assert "agent" in agent["topics"]
     mcp = plan(Product, proposals[0], standards)
-    assert mcp["template"] == "valxel-tools/template-mcp-server"
+    assert mcp["template"] == "valxel-platform/template-mcp-server"
     assert mcp["ruleset"]["required_checks"] == ["unit", "CodeQL"]
 
 

@@ -94,7 +94,7 @@ def test_the_cli_exports_and_runs_from_a_file(engine, services, tmp_path, capsys
 def test_a_config_pull_request_gets_an_eval_status(engine, services, monkeypatch):
     released_with_a_revision(engine)
     gh = StubGitHub()
-    repo = "valxel-tools/sdlc-config"
+    repo = "valxel-platform/sdlc-config"
     models = yaml.safe_load((Path(services.settings.config_dir) / "models.yaml").read_text())
     gh.files[(repo, "head1", "config/models.yaml")] = yaml.safe_dump(models)
     gate = evals.ConfigGate(services, gh, config_repo=repo, public_url="https://sdlc.example", background=False)
@@ -108,11 +108,11 @@ def test_a_config_pull_request_gets_an_eval_status(engine, services, monkeypatch
 
 def test_the_webhook_starts_a_run_and_the_api_shows_it(engine, services, monkeypatch):
     released_with_a_revision(engine)
-    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-tools/sdlc-config")
+    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-platform/sdlc-config")
     monkeypatch.setenv("VALXEL_GITHUB_WEBHOOK_SECRET", "s3cret")
-    monkeypatch.setenv("VALXEL_EVAL_APPROVERS", "valxel-tools/platform")
+    monkeypatch.setenv("VALXEL_EVAL_APPROVERS", "valxel-platform/platform")
     with TestClient(create_app(engine, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None)) as c:
-        body = json.dumps({"action": "synchronize", "repository": {"full_name": "valxel-tools/sdlc-config"},
+        body = json.dumps({"action": "synchronize", "repository": {"full_name": "valxel-platform/sdlc-config"},
                            "pull_request": {"head": {"sha": "abc123", "ref": "cheaper-critic"}, "base": {"sha": ""},
                                             "user": {"login": "ana"}}}).encode()
         sig = "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
@@ -127,7 +127,7 @@ def test_the_webhook_starts_a_run_and_the_api_shows_it(engine, services, monkeyp
         assert c.get(f"/api/evals/runs/{run_id}").json()["status"] == "passed"
         assert c.get("/api/evals/runs").json()[0]["id"] == run_id
         assert c.post("/api/evals/runs", json={"ref": "abc123"}).status_code == 403
-        c.post("/api/auth/dev-login", json={"login": "ana", "teams": ["valxel-tools/platform"]})
+        c.post("/api/auth/dev-login", json={"login": "ana", "teams": ["valxel-platform/platform"]})
         assert c.post("/api/evals/runs", json={"ref": "abc123"}).status_code == 202
 
 

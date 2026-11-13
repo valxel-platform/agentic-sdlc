@@ -85,45 +85,45 @@ defaults:
 #   kind: governance  reviewed by its owners (CODEOWNERS); no CI checks
 #   kind: tool        the tools org's own code
 platform_repos:
-  valxel-tools/agentic-sdlc: { kind: tool, product: platform, required_checks: [test, web] }
-  valxel-tools/sdlc-governance: { kind: governance, product: platform }
-  valxel-tools/template-service: { kind: template, role: provider }
-  valxel-tools/template-web: { kind: template, role: consumer }
-  valxel-tools/template-library: { kind: template, role: library }
-  valxel-tools/template-agent: { kind: template, role: agent }
-  valxel-tools/template-mcp-server: { kind: template, role: mcp-server }
-  valxel-tools/template-event-worker: { kind: template, role: event-worker }
-  valxel-tools/template-acceptance: { kind: template, role: acceptance }
-  valxel-tools/template-bff: { kind: template, role: bff }
-  valxel-tools/template-mobile: { kind: template, role: mobile }
-  valxel-tools/platform-security: { kind: tool, product: platform, required_checks: [test] }
+  valxel-platform/agentic-sdlc: { kind: tool, product: platform, required_checks: [test, web] }
+  valxel-platform/sdlc-governance: { kind: governance, product: platform }
+  valxel-platform/template-service: { kind: template, role: provider }
+  valxel-platform/template-web: { kind: template, role: consumer }
+  valxel-platform/template-library: { kind: template, role: library }
+  valxel-platform/template-agent: { kind: template, role: agent }
+  valxel-platform/template-mcp-server: { kind: template, role: mcp-server }
+  valxel-platform/template-event-worker: { kind: template, role: event-worker }
+  valxel-platform/template-acceptance: { kind: template, role: acceptance }
+  valxel-platform/template-bff: { kind: template, role: bff }
+  valxel-platform/template-mobile: { kind: template, role: mobile }
+  valxel-platform/platform-security: { kind: tool, product: platform, required_checks: [test] }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in
-# valxel-tools: Java 21 + Spring Boot (service and event worker), React + TypeScript (web), Java
+# valxel-platform: Java 21 + Spring Boot (service and event worker), React + TypeScript (web), Java
 # library, and Python for agentic work: a LangGraph workflow agent and an MCP server.
 roles:
   provider:
-    template: valxel-tools/template-service
+    template: valxel-platform/template-service
     required_checks: [unit, contract, CodeQL]
     openchoreo: { component_type: deployment/service, workflow: docker }
   consumer:
-    template: valxel-tools/template-web
+    template: valxel-platform/template-web
     required_checks: [unit, contract, CodeQL]
     openchoreo: { component_type: deployment/web-app, workflow: docker }
   # Keeps a data store from the product's events (VX-16): Kafka in, Postgres or an index out.
   event-worker:
-    template: valxel-tools/template-event-worker
+    template: valxel-platform/template-event-worker
     required_checks: [unit, CodeQL]          # unit runs the integration tests (Postgres and Kafka in containers)
     # No public endpoint, only health and metrics. If your OpenChoreo has no worker type, define one
     # (a Deployment with no Endpoint) or use deployment/service.
     openchoreo: { component_type: deployment/worker, workflow: docker }
   mcp-server:
-    template: valxel-tools/template-mcp-server
+    template: valxel-platform/template-mcp-server
     required_checks: [unit, CodeQL]
     openchoreo: { component_type: deployment/service, workflow: docker }
   agent:
-    template: valxel-tools/template-agent
+    template: valxel-platform/template-agent
     required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR
     # Its own OpenChoreo type (platform/openchoreo/component-types.yaml): no Kubernetes token in the
     # pod, a read-only file system, non-root with no added privileges, and network only to the
@@ -134,7 +134,7 @@ roles:
   # Keycloak realm, tokens kept server-side, the web app and its API on one origin. Its only
   # external endpoint for the web app (VX-17).
   bff:
-    template: valxel-tools/template-bff
+    template: valxel-platform/template-bff
     required_checks: [unit, CodeQL]          # unit runs the sign-in flow against a fake realm and Redis
     openchoreo: { component_type: deployment/service, workflow: docker }
   # An iOS and Android app (React Native, Expo; offline-first). Not deployed: each stage asks the
@@ -143,7 +143,7 @@ roles:
   # step by step, each step after min_hours and a crash-free check (valxel_sdlc.store). It calls
   # the product's API through the BFF's /mobile route.
   mobile:
-    template: valxel-tools/template-mobile
+    template: valxel-platform/template-mobile
     required_checks: [unit, contract, CodeQL]
     openchoreo: null
     rollout: { steps: [0.1, 0.5, 1.0], min_hours: 24, step_timeout_hours: 96, recheck_hours: 6 }
@@ -151,11 +151,11 @@ roles:
   # tests for every feature, browser tests when a web app changes. One per product; not deployed:
   # the pipeline runs it against each environment after the change set is deployed.
   acceptance:
-    template: valxel-tools/template-acceptance
+    template: valxel-platform/template-acceptance
     required_checks: [unit, CodeQL]          # unit: the fixtures' own tests and the catalog check
     openchoreo: null
   library:
-    template: valxel-tools/template-library
+    template: valxel-platform/template-library
     required_checks: [unit, CodeQL]
     openchoreo: null                       # libraries publish packages; no runtime component
 

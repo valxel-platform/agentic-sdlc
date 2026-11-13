@@ -54,7 +54,7 @@ def test_the_default_setup_lists_every_stand_in(services):
 
 
 def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services, monkeypatch):
-    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-tools/sdlc-config")
+    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-platform/sdlc-config")
     live_ish(services)
     gaps = strict.check(services, auth_mode="github", env=LIVE)
     assert gaps == []
@@ -79,7 +79,7 @@ def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services, mon
 
 
 def test_one_missing_token_is_enough_to_refuse(services, monkeypatch):
-    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-tools/sdlc-config")
+    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-platform/sdlc-config")
     live_ish(services)
     services.trackers["jira"] = StubTracker("jira")  # the Jira token has a typo
     with pytest.raises(strict.StrictModeError) as err:

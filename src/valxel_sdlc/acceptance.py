@@ -1,6 +1,6 @@
 """Product acceptance tests: end-to-end tests of a feature across the repos it changes.
 
-Each product may keep one acceptance repo (role `acceptance`, from valxel-tools/template-acceptance):
+Each product may keep one acceptance repo (role `acceptance`, from valxel-platform/template-acceptance):
 Playwright Test in TypeScript, API and event tests for every feature, browser tests when the
 feature changes a web app. Tests are tagged with the feature and acceptance criteria they prove
 (`@CLN-FEAT-12`, `@CLN-FEAT-12/AC-3`), the capability (`@cap-consent`) and the components they

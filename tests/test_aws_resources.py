@@ -13,7 +13,7 @@ from valxel_sdlc.engine import FeatureEngine
 from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-CATALOG = resources.load_catalog((EXAMPLES / "valxel-tools/sdlc-governance/platform/aws-resources.yaml").read_text())
+CATALOG = resources.load_catalog((EXAMPLES / "valxel-platform/sdlc-governance/platform/aws-resources.yaml").read_text())
 REPOS = [{"name": "o/farm-api", "role": "provider"}, {"name": "o/farm-worker", "role": "event-worker"},
          {"name": "o/farm-web", "role": "consumer"}]
 AWS = {"region": "us-east-2", "accounts": {"dev": "1" * 12, "staging": "2" * 12, "production": "3" * 12}}

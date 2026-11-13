@@ -16,7 +16,7 @@ from valxel_sdlc.ops.signals import from_openchoreo
 from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-RULES = EXAMPLES / "valxel-tools" / "sdlc-governance" / "platform" / "alert-rules.yaml"
+RULES = EXAMPLES / "valxel-platform" / "sdlc-governance" / "platform" / "alert-rules.yaml"
 
 
 def test_the_platform_rules_become_traits_per_component():

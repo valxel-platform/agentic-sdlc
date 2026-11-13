@@ -114,7 +114,7 @@ def test_a_new_product_needs_an_inception_starter(client, engine):
     s = say(client, sid, "It's a new product")
     assert "inception starters" in s["messages"][-1]["text"] and not s["ready"]
 
-    s = start(client, login="sunil", teams=["valxel-tools/product-council"], orgs=["acme-farm"])
+    s = start(client, login="sunil", teams=["valxel-platform/product-council"], orgs=["acme-farm"])
     sid = s["id"]
     say(client, sid, "A booking app for small vet practices")
     s = say(client, sid, "It's a new product")
@@ -133,7 +133,7 @@ def test_a_new_product_needs_an_inception_starter(client, engine):
 
 
 def test_a_bad_org_is_asked_again(client):
-    s = start(client, login="sunil", teams=["valxel-tools/product-council"], orgs=["acme-farm"])
+    s = start(client, login="sunil", teams=["valxel-platform/product-council"], orgs=["acme-farm"])
     sid = s["id"]
     say(client, sid, "A booking app for small vet practices")
     say(client, sid, "It's a new product")

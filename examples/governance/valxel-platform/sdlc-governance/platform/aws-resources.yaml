@@ -3,7 +3,7 @@
 # The Valxel SDLC's architect picks from these types when a feature needs a managed service and
 # writes them in the design's Resources section; G4 approves the choice, its access and its cost.
 # Each type is an OpenChoreo ClusterResourceType backed by a Crossplane Composition in
-# valxel-tools/platform-resources, which builds in the defaults below (encryption, private access,
+# valxel-platform/platform-resources, which builds in the defaults below (encryption, private access,
 # backups, tags). Products may tighten this (product.yaml runtime.aws), never loosen it.
 #
 # Adding a type is a pull request here and a Composition there, approved by the platform owner.

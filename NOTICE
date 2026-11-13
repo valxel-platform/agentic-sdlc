@@ -1,7 +1,7 @@
 Valxel SDLC
 Copyright 2026 Valxel
 
-This product includes software developed by Valxel (https://github.com/valxel-tools).
+This product includes software developed by Valxel (https://github.com/valxel-platform).
 
 The container image includes Anthropic's knowledge-work-plugins (Product Management, Engineering
 and Design), https://github.com/anthropics/knowledge-work-plugins, licensed under the Apache

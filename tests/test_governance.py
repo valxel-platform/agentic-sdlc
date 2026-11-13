@@ -46,7 +46,7 @@ def edit(path: Path, old: str, new: str) -> None:
 def test_snapshot_reads_platform_and_product_from_their_orgs(services):
     snap = services.snapshot("CLN")
     assert snap.product.org == "acme-clinic"
-    assert snap.pins["platform"]["org"] == "valxel-tools"
+    assert snap.pins["platform"]["org"] == "valxel-platform"
     assert snap.pins["product"]["org"] == "acme-clinic"
     assert {"VX-3", "CLN-8"} <= set(snap.constitution.article_ids)
     prefixes = {a.split("-")[0] for a in snap.constitution.product_articles()}
@@ -160,10 +160,10 @@ def _repo_files(org_repo: str) -> dict[str, str]:
 
 
 def test_github_source_uses_a_token_per_org_and_pins_by_sha(tmp_path):
-    repos = ["valxel-tools/sdlc-governance", "acme-clinic/cln-governance", "acme-shared/ss-governance",
+    repos = ["valxel-platform/sdlc-governance", "acme-clinic/cln-governance", "acme-shared/ss-governance",
              "acme-pay/pay-governance"]
     fake = FakeGitHub({r: _repo_files(r) for r in repos})
-    tokens = EnvTokenProvider({"VALXEL_GITHUB_TOKEN__VALXEL_TOOLS": "tok-tools",
+    tokens = EnvTokenProvider({"VALXEL_GITHUB_TOKEN__VALXEL_PLATFORM": "tok-tools",
                                "VALXEL_GITHUB_TOKEN__ACME_CLINIC": "tok-cln",
                                "VALXEL_GITHUB_TOKEN__ACME_SHARED": "tok-ss",
                                "VALXEL_GITHUB_TOKEN__ACME_PAY": "tok-pay"})
@@ -174,7 +174,7 @@ def test_github_source_uses_a_token_per_org_and_pins_by_sha(tmp_path):
     assert snap.pins["product"]["sha"] == "a" * 40
     assert "#aaaaaaa" in snap.version
     auth_by_org = {url.split("/repos/")[1].split("/")[0]: auth for _, url, auth, _ in fake.calls}
-    assert auth_by_org == {"valxel-tools": "Bearer tok-tools", "acme-clinic": "Bearer tok-cln",
+    assert auth_by_org == {"valxel-platform": "Bearer tok-tools", "acme-clinic": "Bearer tok-cln",
                            "acme-shared": "Bearer tok-ss", "acme-pay": "Bearer tok-pay"}
     assert any("?ref=" + "a" * 40 in url for _, url, _, _ in fake.calls)  # reads are pinned to the commit
 

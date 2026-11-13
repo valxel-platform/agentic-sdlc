@@ -19,7 +19,7 @@ from valxel_sdlc.services import build_services
 from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-POLICY = et.load_policy((EXAMPLES / "valxel-tools" / "sdlc-governance" / "platform" / "error-tracking.yaml").read_text())
+POLICY = et.load_policy((EXAMPLES / "valxel-platform" / "sdlc-governance" / "platform" / "error-tracking.yaml").read_text())
 TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
 
 

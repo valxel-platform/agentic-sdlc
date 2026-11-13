@@ -3,7 +3,7 @@
 The platform catalog (`aws-resources.yaml` in the platform governance repo) lists the services a
 product may use: what each is for, which data classes may use it, the IAM actions behind "reads"
 and "writes", sizes with planning costs, and the emulator for tests. Each type is an OpenChoreo
-ClusterResourceType backed by a Crossplane Composition (valxel-tools/platform-resources).
+ClusterResourceType backed by a Crossplane Composition (valxel-platform/platform-resources).
 
 1. Design (architect, checked here, approved at G4). The HLD's Resources section names each
    service a feature needs and who may use it:

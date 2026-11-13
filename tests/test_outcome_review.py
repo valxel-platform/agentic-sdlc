@@ -40,7 +40,7 @@ Patients check themselves in.
 
 - Kiosk check-in: patients scan a code at a kiosk
 """
-COUNCIL = "valxel-tools/product-council"
+COUNCIL = "valxel-platform/product-council"
 
 
 def make(tmp_path, approved="2026-08-01", extra=""):

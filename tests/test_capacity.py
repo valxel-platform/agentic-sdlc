@@ -12,7 +12,7 @@ from valxel_sdlc.inception import checks, formats
 from valxel_sdlc.integrations.openchoreo import StubOpenChoreo
 from valxel_sdlc.resources import load_catalog, parse_resources
 
-PLATFORM = Path(__file__).resolve().parents[1] / "examples/governance/valxel-tools/sdlc-governance/platform"
+PLATFORM = Path(__file__).resolve().parents[1] / "examples/governance/valxel-platform/sdlc-governance/platform"
 CATALOG = load_catalog((PLATFORM / "aws-resources.yaml").read_text())
 CFG = capacity.load_platform((PLATFORM / "capacity.yaml").read_text())
 

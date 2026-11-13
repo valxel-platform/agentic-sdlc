@@ -83,7 +83,7 @@ Three screens, all updated live over server-sent events (`/api/events`):
 
 ### Sign-in and who can decide
 
-GitHub sign-in uses an OAuth app owned by `valxel-tools`:
+GitHub sign-in uses an OAuth app owned by `valxel-platform`:
 
 1. In the org's settings, open Developer settings, OAuth Apps, New OAuth App. Set the callback
    URL to `<VALXEL_PUBLIC_URL>/api/auth/callback`.
@@ -134,7 +134,7 @@ repos are named after the product id: `cln-governance`, `farm-governance`, `ss-g
 (`repo:` in `config/registry.yaml`; that name is the default when it's left out).
 
 ```
-valxel-tools/                          tools org
+valxel-platform/                          tools org
   agentic-sdlc                         this repo: registry.yaml points at every governance repo
   sdlc-governance                      platform/constitution.md (VX- articles)
 acme-clinic/                           one org per product; each owns its runtime
@@ -264,7 +264,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 
 | Area | Setting |
 | --- | --- |
-| Source | Generated from the role's template (`valxel-tools/template-service`, `-web`, `-bff`, `-library`, `-event-worker`, `-mcp-server`, `-agent`, `-acceptance`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
+| Source | Generated from the role's template (`valxel-platform/template-service`, `-web`, `-bff`, `-library`, `-event-worker`, `-mcp-server`, `-agent`, `-acceptance`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
 | Name | The template's name replaced by the component's in the files the template lists in `.valxel/identity` (its Workload, app and component name), so its logs, traces and error reports name it |
 | Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
 | Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
@@ -293,7 +293,7 @@ repo_standards:
 ```
 
 **Setup once per org.**
-1. Publish the templates named in `config/repos.yaml` to `valxel-tools` and mark each one a
+1. Publish the templates named in `config/repos.yaml` to `valxel-platform` and mark each one a
    template repository: `template-service` and `template-event-worker` (Java 21, Spring Boot),
    `template-web` (React, TypeScript), `template-library` (Java), `template-mcp-server` and
    `template-agent` (Python).
@@ -318,8 +318,8 @@ keep the data stores from those events, and any store can be rebuilt by replayin
 
 | Role | Template | Required checks | What it is |
 | --- | --- | --- | --- |
-| `provider` | `valxel-tools/template-service` | `unit`, `contract`, `CodeQL` | Versioned API; commands publish CloudEvents with `Events.publish` (idempotent producer, acks=all, keyed by record id); 503 and no change when Kafka doesn't confirm |
-| `event-worker` | `valxel-tools/template-event-worker` | `unit`, `CodeQL` | Applies events to Postgres (or an index) once and in order: event ids recorded in the same transaction, rows keep their Kafka position, retries then a dead-letter topic; integration tests against real Postgres and Kafka |
+| `provider` | `valxel-platform/template-service` | `unit`, `contract`, `CodeQL` | Versioned API; commands publish CloudEvents with `Events.publish` (idempotent producer, acks=all, keyed by record id); 503 and no change when Kafka doesn't confirm |
+| `event-worker` | `valxel-platform/template-event-worker` | `unit`, `CodeQL` | Applies events to Postgres (or an index) once and in order: event ids recorded in the same transaction, rows keep their Kafka position, retries then a dead-letter topic; integration tests against real Postgres and Kafka |
 
 An HLD with event workers has an `## Events` section, one line per event type
 (`- valxel.<entity>.<what happened>.v1: <who publishes it, who applies it>`). Coders are told to
@@ -334,8 +334,8 @@ like any other repo and the provision step creates them on the golden path:
 
 | Role | Template | Required checks | What it is |
 | --- | --- | --- | --- |
-| `mcp-server` | `valxel-tools/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
-| `agent` | `valxel-tools/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
+| `mcp-server` | `valxel-platform/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
+| `agent` | `valxel-platform/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
 
 Roles merge and deploy in dependency order: library, provider, event-worker, mcp-server, agent, consumer, bff, acceptance (merged, never deployed).
 The `evals` quality suite reads the agent's `evals / report` status on every PR (recorded model
@@ -1121,7 +1121,7 @@ In stub delivery mode every suite passes with sample numbers; tests inject resul
 
 Every request carries two checked identities: the calling workload, proven by the mesh (Istio
 ambient mTLS), and the person or service it acts for, as a token from the product's Keycloak realm
-issued for the product. `valxel-tools/platform-security` generates each product's realm and mesh
+issued for the product. `valxel-platform/platform-security` generates each product's realm and mesh
 policies from one spec.
 
 | Component | Template | What it enforces |
@@ -1280,7 +1280,7 @@ sides:
   component in OpenChoreo's traces, and failures it logs can drive OpenChoreo log alerts
   (`/api/signals/openchoreo`).
 - **From the service.** Every resource comes with its catalog type's standard CloudWatch alarms
-  (platform catalog `alarms`, built by the Compositions in `valxel-tools/platform-resources`).
+  (platform catalog `alarms`, built by the Compositions in `valxel-platform/platform-resources`).
   Each data plane's `AlarmRouting` sends their state changes through EventBridge to
   `/api/signals/cloudwatch`. An alarm's description says whose it is (product, feature, resource,
   environment, the components that use it, severity).
@@ -1524,7 +1524,7 @@ compute and shared platform costs allocated to products.
 Features that need a managed service get it from the platform's AWS catalog
 (`platform/aws-resources.yaml` in sdlc-governance): DynamoDB, Kinesis, SQS, S3, SNS, and RDS
 PostgreSQL and ElastiCache Valkey through OpenChoreo's Crossplane provisioner. Each type is an
-OpenChoreo ClusterResourceType backed by a Crossplane Composition in `valxel-tools/platform-resources`,
+OpenChoreo ClusterResourceType backed by a Crossplane Composition in `valxel-platform/platform-resources`,
 with encryption, private access, backups and tags built in. People approve; agents do the rest:
 
 | Step | Who | What |
@@ -1577,7 +1577,7 @@ minimum passes every version that used the old shape.
 
 Each repo tests itself (unit, contract, its own post-deploy suites). A feature that changes two or
 more runtime repos is also tested **end to end, across repos**, from the product's acceptance repo
-(role `acceptance`, one per product, from `valxel-tools/template-acceptance`: Playwright Test in
+(role `acceptance`, one per product, from `valxel-platform/template-acceptance`: Playwright Test in
 TypeScript). Add it to the product's `repos:` to turn this on.
 
 - **Backend and frontend.** The `api` project tests through the components' APIs and events (no
@@ -1865,7 +1865,7 @@ pairwise judgment against the approved version, and cost and time. The compariso
 cases under the config in use and the candidate and fails when a rate drops by more than
 `max_drop` (5 points by default) or, if set, cost rises more than `max_cost_increase`.
 
-- **Pull requests to the config repo** (`VALXEL_CONFIG_REPO`, e.g. `valxel-tools/sdlc-config`): the
+- **Pull requests to the config repo** (`VALXEL_CONFIG_REPO`, e.g. `valxel-platform/sdlc-config`): the
   GitHub App's `pull_request` webhook makes the tool replay the newest labelled cases (5 per phase,
   `VALXEL_EVAL_CASES_PER_PHASE`; up to `VALXEL_EVAL_BUDGET_USD`, 20 by default, per config) under
   the PR's config and its base, and post `valxel / evals` on the head commit. Make it a required

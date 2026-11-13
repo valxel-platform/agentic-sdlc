@@ -266,7 +266,7 @@ def test_the_tool_turns_a_flipt_flag_off(tmp_path, gov_root):
     with_flipt(gov_root)
     # No OpenChoreo analysis here (live delivery, no agents): the platform lets the tool act on the
     # release suspect alone.
-    pol = gov_root / "valxel-tools" / "sdlc-governance" / "platform" / "remediation.yaml"
+    pol = gov_root / "valxel-platform" / "sdlc-governance" / "platform" / "remediation.yaml"
     pol.write_text(pol.read_text().replace("without_analysis: page", "without_analysis: suspects"))
     fake = FakeFlipt()
     eng, _ = make(tmp_path, gov_root, flipt=fake, live=True)

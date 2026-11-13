@@ -15,7 +15,7 @@ import time
 import httpx
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8080").rstrip("/") + "/api"
-ORGS = ("acme-clinic", "acme-dental", "acme-farm", "acme-pay", "acme-shared", "acme-shop", "valxel-tools")
+ORGS = ("acme-clinic", "acme-dental", "acme-farm", "acme-pay", "acme-shared", "acme-shop", "valxel-platform")
 TEAMS = ("architects", "design", "product-owners", "qa", "release-managers", "security", "tech-leads",
          "clinical-reviewers", "platform-owners", "platform")
 
