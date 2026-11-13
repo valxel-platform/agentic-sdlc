@@ -266,6 +266,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 | --- | --- |
 | Source | Generated from the role's template (`valxel-platform/template-service`, `-web`, `-bff`, `-library`, `-event-worker`, `-mcp-server`, `-agent`, `-acceptance`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
 | Name | The template's name replaced by the component's in the files the template lists in `.valxel/identity` (its Workload, app and component name), so its logs, traces and error reports name it |
+| License | The template's own `LICENSE` (MIT, Valxel's) removed: the product's code is its owner's, under terms they choose |
 | Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
 | Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |

@@ -112,6 +112,7 @@ class GitHub(Protocol):
     # sha: the head the gates approved; GitHub refuses the merge if the branch has moved since.
     def merge(self, *, repo: str, number: int, actor: str, sha: str = "") -> dict: ...
     def put_file(self, *, repo: str, branch: str, path: str, content: str, message: str) -> dict: ...
+    def delete_file(self, *, repo: str, branch: str, path: str, message: str) -> bool: ...  # False: it wasn't there
     def checks(self, *, repo: str, sha: str) -> dict: ...  # {"state": pending|success|failure, "checks": [...]}
     def set_status(self, *, repo: str, sha: str, context: str, state: str, description: str,
                    url: str = "") -> None: ...
@@ -196,6 +197,10 @@ class StubGitHub:
             self.files[(repo, branch, path)] = content
         return {"repo": repo, "branch": branch, "path": path, "message": message,
                 "sha": hashlib.sha1(content.encode()).hexdigest()}
+
+    def delete_file(self, *, repo, branch, path, message) -> bool:
+        with self._lock:
+            return self.files.pop((repo, branch, path), None) is not None
 
     def checks(self, *, repo, sha) -> dict:
         state = self.ci.get((repo, sha), self.ci_default)
@@ -412,6 +417,14 @@ class GitHubRest:
             body["sha"] = current["sha"]
         res = self._call("PUT", repo, f"/contents/{qpath}", body)
         return {"repo": repo, "branch": branch, "path": path, "sha": res["commit"]["sha"]}
+
+    def delete_file(self, *, repo, branch, path, message) -> bool:
+        qpath = quote(path)
+        current = self._call("GET", repo, f"/contents/{qpath}?ref={quote(branch, safe='')}", ok404=True)
+        if not current or not isinstance(current, dict) or not current.get("sha"):
+            return False
+        self._call("DELETE", repo, f"/contents/{qpath}", {"message": message, "sha": current["sha"], "branch": branch})
+        return True
 
     def open_pr(self, *, repo, branch, title, body, files, labels) -> dict:
         org = repo.split("/", 1)[0]
