@@ -13,16 +13,16 @@ export interface AwsResources {
   region: string; accounts: Record<string, string>; note: string;
 }
 
-/** The top of a gate (vrixel_sdlc.decisions). */
+/** The top of a gate (valxel_sdlc.decisions). */
 export interface DecisionBriefData {
   summary: { lines: string[]; by: "agent" | "document" };
   version?: number;
   changed?: { from_version: number; asked: string; lines: { op: " " | "-" | "+" | "…"; text: string }[] };
 }
 export interface LineComment { quote: string; text: string }
-/** G3: the UX spec's screens drawn as mockups (vrixel_sdlc.mockups). */
+/** G3: the UX spec's screens drawn as mockups (valxel_sdlc.mockups). */
 export interface MockupSet { screens: { id: string; name: string; app: string; phone: boolean }[]; findings: string[]; version?: number }
-/** G6: each screen as built in staging beside its approved mockup (vrixel_sdlc.screens). */
+/** G6: each screen as built in staging beside its approved mockup (valxel_sdlc.screens). */
 export interface ScreensAtRelease {
   scanned: boolean; state: string;
   screens: { id: string; name: string; app: string; staging?: { route?: string; result?: string; desktop?: string; phone?: string };
@@ -246,7 +246,7 @@ export interface AgentSession {
   extra_skills?: string[];
 }
 
-/** How long each step usually takes, and when it should be done (vrixel_sdlc.progress). */
+/** How long each step usually takes, and when it should be done (valxel_sdlc.progress). */
 export interface PathStation extends Station { eta_minutes: number; from_history: boolean; mine?: boolean }
 export interface FeaturePath { stations: PathStation[]; expected_done: string | null; minutes_left: number | null }
 export interface NotifyPrefs {
@@ -456,7 +456,7 @@ export interface ReleaseView extends ThreadBase {
   model: "launch" | "train"; target_date: string; initiative: string; notes: string; evidence: string;
   approved_by: string; dropped: string[]; features: FeatureRow[];
 }
-/** Product inception (vrixel_sdlc.inception): a vision to a brief, an architecture and a roadmap. */
+/** Product inception (valxel_sdlc.inception): a vision to a brief, an architecture and a roadmap. */
 export interface InceptionReport {
   doc: string; status: "passed" | "escalated"; attempts: number; findings: string[];
   checklist: { id: string; must: boolean; met: boolean; evidence: string; why: string }[];
@@ -564,7 +564,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const res = await fetch(`/api${path}`, {
     method,
     credentials: "same-origin",
-    headers: body !== undefined ? { "Content-Type": "application/json" } : { "X-Vrixel-Client": "web" },
+    headers: body !== undefined ? { "Content-Type": "application/json" } : { "X-Valxel-Client": "web" },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -705,7 +705,7 @@ export const api = {
   intakeAttach: async (id: string, file: File): Promise<IntakeSession> => {
     const res = await fetch(`/api/intake/${id}/attachments?name=${encodeURIComponent(file.name)}`, {
       method: "POST", credentials: "same-origin", body: file,
-      headers: { "Content-Type": "application/octet-stream", "X-Vrixel-Client": "web" },
+      headers: { "Content-Type": "application/octet-stream", "X-Valxel-Client": "web" },
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new ApiError(res.status, typeof data.detail === "string" ? data.detail : `Couldn't attach ${file.name}`);

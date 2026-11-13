@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.ops.signals import from_inspector
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.ops.signals import from_inspector
+from valxel_sdlc.web.auth import AuthConfig
 
 
 def finding(sev="CRITICAL", status="ACTIVE", fix="YES", in_use=2, repo="acme-clinic/cln-intake-api", kind="PACKAGE_VULNERABILITY"):
@@ -39,7 +39,7 @@ def test_a_running_images_vulnerability_becomes_a_signal():
 
 def test_the_endpoint_wants_the_signals_token_and_opens_an_incident(engine, monkeypatch):
     client = TestClient(create_app(engine, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
-    monkeypatch.setenv("VRIXEL_SIGNALS_TOKEN", "t0k")
+    monkeypatch.setenv("VALXEL_SIGNALS_TOKEN", "t0k")
     assert client.post("/api/signals/inspector", json=finding()).status_code == 401
     r = client.post("/api/signals/inspector", json=finding(), headers={"authorization": "Bearer t0k"})
     assert r.status_code == 202 and r.json()["signals"] == 1

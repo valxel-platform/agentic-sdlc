@@ -18,16 +18,16 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 from mcp.server import MCPServer
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.governance import GovernanceError
-from vrixel_sdlc.integrations.github import GitHubRest
-from vrixel_sdlc.integrations.mcp_client import McpHttp
-from vrixel_sdlc.integrations.openchoreo import OpenChoreoMcp
-from vrixel_sdlc.services import DeliveryConfigError, build_services, default_delivery
-from vrixel_sdlc.waits import WaitChecker
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.governance import GovernanceError
+from valxel_sdlc.integrations.github import GitHubRest
+from valxel_sdlc.integrations.mcp_client import McpHttp
+from valxel_sdlc.integrations.openchoreo import OpenChoreoMcp
+from valxel_sdlc.services import DeliveryConfigError, build_services, default_delivery
+from valxel_sdlc.waits import WaitChecker
+from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 
@@ -130,11 +130,11 @@ def test_builds_run_on_the_merge_commit_and_report_back_to_github(engine, servic
     assert ("acme-farm/farm-mobile", "openchoreo/build") in contexts
     assert ("acme-farm/farm-mobile", "openchoreo/production") in contexts
     files = [f[2] for f in services.github.files]
-    assert ".vrixel/changes/FARM-FEAT-1/TASK-1.md" in files
+    assert ".valxel/changes/FARM-FEAT-1/TASK-1.md" in files
 
 
 def test_failed_build_asks_release_managers_and_retry_rebuilds(engine, services, tmp_path, monkeypatch):
-    from vrixel_sdlc import changeset_env
+    from valxel_sdlc import changeset_env
 
     monkeypatch.setitem(changeset_env.DEFAULTS, "enabled", False)  # the merge commit's build, not the change set's
     services.openchoreo.run_results["acme-farm/farm-mobile"] = "failed"
@@ -295,10 +295,10 @@ class Tokens:
 def test_github_adapter_branch_note_pr_checks_and_merge():
     api = FakeGitHubApi()
     gh = GitHubRest(Tokens(), opener=api)
-    first = gh.put_file(repo="o/r", branch="feature/X-1", path=".vrixel/changes/X-1/TASK-1.md",
+    first = gh.put_file(repo="o/r", branch="feature/X-1", path=".valxel/changes/X-1/TASK-1.md",
                         content="note", message="m")
     assert api.refs[("o/r", "feature/X-1")] == first["sha"]
-    assert gh.put_file(repo="o/r", branch="feature/X-1", path=".vrixel/changes/X-1/TASK-1.md",
+    assert gh.put_file(repo="o/r", branch="feature/X-1", path=".valxel/changes/X-1/TASK-1.md",
                        content="note", message="m")["unchanged"]
 
     pr = gh.open_pr(repo="o/r", branch="feature/X-1", title="X-1 TASK-1", body="b", files=[], labels=["product:FARM"])
@@ -374,9 +374,9 @@ def fake_openchoreo():
 
 def test_openchoreo_adapter_builds_deploys_and_promotes():
     server, st = fake_openchoreo()
-    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
+    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="valxel")
     run = oc.run_workflow(component="acme-farm/farm-field-api", ref="m3rge", kind="main", project="farm")
-    assert st["calls"][0] == ("trigger", "vrixel", "farm", "farm-field-api", "m3rge")
+    assert st["calls"][0] == ("trigger", "valxel", "farm", "farm-field-api", "m3rge")
     scope = {"component": "acme-farm/farm-field-api", "project": "farm"}
     assert oc.run_status(run_id=run["run_id"], **scope)["status"] == "running"
     st["runs"][run["run_id"]] = "Failed"
@@ -411,7 +411,7 @@ def test_runtime_component_names_are_validated(tmp_path, gov_root):
     path = gov_root / "acme-farm" / "farm-governance" / "product.yaml"
     path.write_text(path.read_text().replace(
         "  pipeline: [dev, staging, production]",
-        "  pipeline: [dev, staging, production]\n  namespace: vrixel\n  components:\n"
+        "  pipeline: [dev, staging, production]\n  namespace: valxel\n  components:\n"
         "    acme-farm/farm-mobile: field-app\n    acme-clinic/cln-web: nope"))
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a",
                       governance_source="local", governance_root=gov_root)
@@ -423,28 +423,28 @@ def test_component_mapping_and_namespace_reach_openchoreo(tmp_path, gov_root):
     path = gov_root / "acme-farm" / "farm-governance" / "product.yaml"
     path.write_text(path.read_text().replace(
         "  pipeline: [dev, staging, production]",
-        "  pipeline: [dev, staging, production]\n  namespace: vrixel\n  components:\n"
+        "  pipeline: [dev, staging, production]\n  namespace: valxel\n  components:\n"
         "    acme-farm/farm-mobile: field-app"))
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a",
                       governance_source="local", governance_root=gov_root)
     eng = FeatureEngine(build_services(s), InMemorySaver())
     v = eng.auto_drive(to_build(eng)["feature_id"])
     run = v["runs"]["acme-farm/farm-mobile"]
-    assert run["component"] == "field-app" and run["namespace"] == "vrixel"
+    assert run["component"] == "field-app" and run["namespace"] == "valxel"
 
 
 def test_live_delivery_lists_what_is_missing(monkeypatch, tmp_path, gov_root):
-    monkeypatch.setenv("VRIXEL_DELIVERY", "live")
-    for v in ("VRIXEL_GITHUB_APP_ID", "VRIXEL_OPENCHOREO_MCP_URL", "VRIXEL_OPENCHOREO_CLIENT_SECRET"):
+    monkeypatch.setenv("VALXEL_DELIVERY", "live")
+    for v in ("VALXEL_GITHUB_APP_ID", "VALXEL_OPENCHOREO_MCP_URL", "VALXEL_OPENCHOREO_CLIENT_SECRET"):
         monkeypatch.delenv(v, raising=False)
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a",
                       governance_source="local", governance_root=gov_root)
-    with pytest.raises(DeliveryConfigError, match="VRIXEL_GITHUB_APP_ID.*VRIXEL_OPENCHOREO_MCP_URL"):
+    with pytest.raises(DeliveryConfigError, match="VALXEL_GITHUB_APP_ID.*VALXEL_OPENCHOREO_MCP_URL"):
         default_delivery(s)
 
 
 def test_github_webhook_is_verified_and_resumes_the_feature(monkeypatch, engine, services):
-    monkeypatch.setenv("VRIXEL_GITHUB_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("VALXEL_GITHUB_WEBHOOK_SECRET", "s3cret")
     auth = AuthConfig(mode="dev", secret="x" * 32)
     client = TestClient(create_app(engine=engine, auth=auth, web_dist=None))
     services.github.ci_default = "pending"
@@ -471,7 +471,7 @@ def test_ready_deployments_start_each_repos_post_deploy_suite(engine, services):
     heads = {pr["repo"]: pr["head_sha"] for pr in v["pull_requests"].values()}
     assert pre["payload"]["stage"] == "change_set" and pre["payload"]["sha"] == heads[pre["repo"]]  # before the merge
     assert pre["payload"]["base_url"].endswith(".cs-farm-feat-1.example.internal")
-    assert d["event_type"] == "vrixel-deployed" and d["payload"]["sha"] == v["runs"][d["repo"]]["sha"]
+    assert d["event_type"] == "valxel-deployed" and d["payload"]["sha"] == v["runs"][d["repo"]]["sha"]
     assert len(sent) == len(set(sent))  # once per stage and repo
 
 

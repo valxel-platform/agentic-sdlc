@@ -11,19 +11,19 @@ from pathlib import Path
 
 import pytest
 
-from vrixel_sdlc import sandbox
-from vrixel_sdlc.governance.sources import GitHubAppTokenProvider
+from valxel_sdlc import sandbox
+from valxel_sdlc.governance.sources import GitHubAppTokenProvider
 
 
 def test_the_session_sees_only_the_allowlisted_environment():
     base = {"PATH": "/usr/bin", "LANG": "C.UTF-8", "ANTHROPIC_API_KEY": "sk-model", "DATABASE_URL": "postgres://x",
-            "VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE": "/run/secrets/app.pem", "VRIXEL_SESSION_SECRET": "s3cret",
-            "OPENAI_API_KEY": "sk-openai", "VRIXEL_AGENT_ENV_PASS": "AWS_REGION", "AWS_REGION": "us-east-2"}
+            "VALXEL_GITHUB_APP_PRIVATE_KEY_FILE": "/run/secrets/app.pem", "VALXEL_SESSION_SECRET": "s3cret",
+            "OPENAI_API_KEY": "sk-openai", "VALXEL_AGENT_ENV_PASS": "AWS_REGION", "AWS_REGION": "us-east-2"}
     env = sandbox.session_env("claude_code", "/tmp/h", {"CLAUDE_CODE_PROMPT_CACHE_TTL": "1h"}, base=base)
     # Every name the tool has is present, so the SDK's merge can't bring it back; secrets are blank.
     assert set(base) <= set(env)
     assert env["ANTHROPIC_API_KEY"] == "sk-model" and env["PATH"] == "/usr/bin" and env["AWS_REGION"] == "us-east-2"
-    for secret in ("DATABASE_URL", "VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE", "VRIXEL_SESSION_SECRET", "OPENAI_API_KEY"):
+    for secret in ("DATABASE_URL", "VALXEL_GITHUB_APP_PRIVATE_KEY_FILE", "VALXEL_SESSION_SECRET", "OPENAI_API_KEY"):
         assert env[secret] == ""
     assert env["HOME"] == "/tmp/h" and env["npm_config_ignore_scripts"] == "true"
     # Codex gets only the names it may have, and its own key.
@@ -32,26 +32,26 @@ def test_the_session_sees_only_the_allowlisted_environment():
 
 
 def test_no_hooks_the_tools_files_unreadable_and_the_shell_sandboxed(monkeypatch, tmp_path):
-    monkeypatch.setenv("VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE", "/etc/vrixel-keys/app.pem")
+    monkeypatch.setenv("VALXEL_GITHUB_APP_PRIVATE_KEY_FILE", "/etc/valxel-keys/app.pem")
     s = sandbox.claude_settings("/tmp/w")
     assert s["disableAllHooks"] is True
     deny = s["permissions"]["deny"]
-    assert {"Read(//app/**)", "Read(//data/**)", "Read(//etc/vrixel-keys/**)", "Read(//proc/self/environ)"} <= set(deny)
+    assert {"Read(//app/**)", "Read(//data/**)", "Read(//etc/valxel-keys/**)", "Read(//proc/self/environ)"} <= set(deny)
     egress = tmp_path / "egress.yaml"
     egress.write_text("allowed: [registry.npmjs.org, github.com]\n")
-    monkeypatch.setenv("VRIXEL_EGRESS_CONFIG", str(egress))
+    monkeypatch.setenv("VALXEL_EGRESS_CONFIG", str(egress))
     box = sandbox.claude_sandbox()
     assert box["enabled"] and box["allowUnsandboxedCommands"] is False
     assert box["network"]["allowedDomains"] == ["registry.npmjs.org", "github.com"]
     # The shipped allowlist is registries and GitHub only.
-    monkeypatch.setenv("VRIXEL_EGRESS_CONFIG", str(Path(__file__).resolve().parents[1] / "config/egress.yaml"))
+    monkeypatch.setenv("VALXEL_EGRESS_CONFIG", str(Path(__file__).resolve().parents[1] / "config/egress.yaml"))
     assert all(d.endswith(("npmjs.org", "pythonhosted.org", "pypi.org", "maven.org", "apache.org", "gradle.org",
                            "github.com", "githubusercontent.com")) for d in sandbox.egress())
 
 
 def test_claude_code_sessions_carry_it():
-    from vrixel_sdlc.runtime.base import AgentTask
-    from vrixel_sdlc.runtime.claude_code import session_options
+    from valxel_sdlc.runtime.base import AgentTask
+    from valxel_sdlc.runtime.claude_code import session_options
 
     class Role:
         max_turns, max_call_usd = 10, 1.0
@@ -66,7 +66,7 @@ def test_claude_code_sessions_carry_it():
     assert json.loads(opts["settings"])["disableAllHooks"] is True
     assert opts["sandbox"]["enabled"] and opts["env"]["HOME"] == "/tmp/h" and opts["cwd"] == "/tmp/w"
     for name in os.environ:
-        if name.startswith("VRIXEL_"):
+        if name.startswith("VALXEL_"):
             assert opts["env"][name] == ""
     ro = AgentTask(role="architect", phase="architecture", tags=None, layers=Layers(), stub_text="", cwd="/tmp/c", read_only=True)
     assert "sandbox" not in session_options(ro, Role(), "x", cwd=None, plugin_dirs=[], home="/tmp/h")
@@ -110,7 +110,7 @@ def test_a_coder_token_names_one_repository_and_contents_only(monkeypatch):
 
 
 def test_a_session_folder_is_outside_the_tools_files_and_goes_away(monkeypatch, tmp_path):
-    monkeypatch.setenv("VRIXEL_SANDBOX_DIR", str(tmp_path / "boxes"))
+    monkeypatch.setenv("VALXEL_SANDBOX_DIR", str(tmp_path / "boxes"))
 
     class S:
         class settings:

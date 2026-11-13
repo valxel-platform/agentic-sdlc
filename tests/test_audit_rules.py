@@ -1,8 +1,8 @@
 """VX-15: PHI and payments designs name what gets audited, and the build publishes those records."""
 
-from vrixel_sdlc.agents.parse import parse_audit
-from vrixel_sdlc.evaluators.checks import run_checks
-from vrixel_sdlc.graph.phase import audit_findings, audit_instruction
+from valxel_sdlc.agents.parse import parse_audit
+from valxel_sdlc.evaluators.checks import run_checks
+from valxel_sdlc.graph.phase import audit_findings, audit_instruction
 
 HLD = """# HLD: Consent capture
 

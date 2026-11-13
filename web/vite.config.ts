@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// In development, run the API on :8080 (uvicorn --factory vrixel_sdlc.api.app:create_app --port 8080)
+// In development, run the API on :8080 (uvicorn --factory valxel_sdlc.api.app:create_app --port 8080)
 // and `npm run dev`; /api is proxied so cookies stay same-origin.
 export default defineConfig({
   plugins: [react()],

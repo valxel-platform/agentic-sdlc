@@ -1,0 +1,50 @@
+# Each product's data planes run only images the platform's build signed, with SLSA provenance
+# naming one of the product's own repositories and an SBOM attached (build-workflow.yaml). Kyverno,
+# installed on every data plane; the public key is the build system's KMS key's.
+# Dry-run first: written against Kyverno 1.15 documentation, not applied to a live install.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: valxel-signed-images
+  annotations:
+    policies.kyverno.io/description: Only images signed by the Valxel build, with provenance and an SBOM.
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 15
+  background: false
+  rules:
+    - name: signed-by-the-build
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaceSelector:
+                matchExpressions:
+                  - { key: openchoreo.dev/environment, operator: Exists }
+      verifyImages:
+        - imageReferences: ["*"]
+          mutateDigest: true        # pods run the digest that was verified, never a moving tag
+          verifyDigest: true
+          required: true
+          attestors:
+            - entries:
+                - keys:
+                    kms: awskms:///alias/valxel-build-signing
+          attestations:
+            - type: https://slsa.dev/provenance/v1
+              attestors:
+                - entries:
+                    - keys: { kms: "awskms:///alias/valxel-build-signing" }
+              conditions:
+                - all:
+                    # The product's own org: the platform sets this label on each product's namespaces.
+                    - key: "{{ buildDefinition.externalParameters.repository }}"
+                      operator: Equals
+                      value: "{{ request.namespace_labels.\"valxel.io/github-org\" }}/*"
+                    - key: "{{ runDetails.builder.id }}"
+                      operator: Equals
+                      value: https://valxel.io/workflow-plane
+            - type: https://cyclonedx.org/bom
+              attestors:
+                - entries:
+                    - keys: { kms: "awskms:///alias/valxel-build-signing" }

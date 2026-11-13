@@ -6,16 +6,16 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from vrixel_sdlc import attachments
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.attachments import AttachmentError, AttachmentStore, check
-from vrixel_sdlc.graph.phase import document_tail
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc import attachments
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.attachments import AttachmentError, AttachmentStore, check
+from valxel_sdlc.graph.phase import document_tail
+from valxel_sdlc.web.auth import AuthConfig
 
 from test_api import SECRET, sign_in, wait_idle
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
-UPLOAD = {"content-type": "application/octet-stream", "x-vrixel-client": "web"}
+UPLOAD = {"content-type": "application/octet-stream", "x-valxel-client": "web"}
 
 
 @pytest.mark.parametrize("name,data,why", [
@@ -32,10 +32,10 @@ def test_files_that_arent_what_they_say_are_refused(name, data, why):
 
 
 def test_size_and_count_limits(tmp_path, monkeypatch):
-    monkeypatch.setenv("VRIXEL_ATTACHMENT_MAX_MB", "0.001")
+    monkeypatch.setenv("VALXEL_ATTACHMENT_MAX_MB", "0.001")
     with pytest.raises(AttachmentError, match="larger than"):
         check("big.txt", b"a" * 2000)
-    monkeypatch.delenv("VRIXEL_ATTACHMENT_MAX_MB")
+    monkeypatch.delenv("VALXEL_ATTACHMENT_MAX_MB")
     store, have = AttachmentStore(tmp_path), []
     for i in range(attachments.MAX_FILES):
         have.append(store.add("s1", have, f"n{i}.txt", f"note {i}".encode()))
@@ -85,7 +85,7 @@ def test_attach_submit_and_download(client, engine):
     sign_in(client, "priya", orgs=["acme-farm"])
     sid = client.post("/api/intake", json={}).json()["id"]
 
-    # Not JSON and no X-Vrixel-Client: refused, as a cross-site form post would be.
+    # Not JSON and no X-Valxel-Client: refused, as a cross-site form post would be.
     assert client.post(f"/api/intake/{sid}/attachments?name=a.txt", content=b"hi",
                        headers={"content-type": "application/octet-stream"}).status_code == 415
     bad = client.post(f"/api/intake/{sid}/attachments?name=a.png", content=b"MZ...", headers=UPLOAD)
@@ -96,7 +96,7 @@ def test_attach_submit_and_download(client, engine):
     s = client.post(f"/api/intake/{sid}/attachments?name=map.png", content=PNG, headers=UPLOAD).json()
     names = {a["name"]: a for a in s["attachments"]}
     assert names["readings.csv"]["read_by_agents"] and not names["map.png"]["read_by_agents"]
-    gone = client.delete(f"/api/intake/{sid}/attachments/{names['map.png']['id']}", headers={"x-vrixel-client": "web"})
+    gone = client.delete(f"/api/intake/{sid}/attachments/{names['map.png']['id']}", headers={"x-valxel-client": "web"})
     assert [a["name"] for a in gone.json()["attachments"]] == ["readings.csv"]
     assert [m["text"] for m in gone.json()["messages"] if m.get("attachment")] == ["Attached readings.csv"]
 
@@ -120,7 +120,7 @@ def test_attach_submit_and_download(client, engine):
 
 def test_the_intake_agent_never_sees_attachment_contents(client, engine, monkeypatch):
     seen = []
-    from vrixel_sdlc.intake import IntakeAgent
+    from valxel_sdlc.intake import IntakeAgent
 
     monkeypatch.setattr(IntakeAgent, "respond", lambda self, s, text: seen.append(repr(s.attachments)) or "ok")
     sign_in(client, "priya", orgs=["acme-farm"])

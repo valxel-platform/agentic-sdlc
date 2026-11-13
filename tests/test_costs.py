@@ -11,26 +11,26 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.ops import cost
-from vrixel_sdlc.ops.incident import recovery
-from vrixel_sdlc.ops.signals import from_aws_budget, from_openchoreo, still_firing
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.ops import cost
+from valxel_sdlc.ops.incident import recovery
+from valxel_sdlc.ops.signals import from_aws_budget, from_openchoreo, still_firing
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-TOPIC = "arn:aws:sns:us-east-2:333333333333:vrixel-budgets"
+TOPIC = "arn:aws:sns:us-east-2:333333333333:valxel-budgets"
 
 BUDGET_MAIL = """AWS Budget Notification November 05, 2026
 AWS Account 333333333333
 
 Dear AWS Customer,
 
-You requested that we alert you when the ACTUAL Cost associated with your vrixel-FARM-production budget is greater than $800.00 for the current month. The ACTUAL Cost associated with this budget is $1,042.17.
+You requested that we alert you when the ACTUAL Cost associated with your valxel-FARM-production budget is greater than $800.00 for the current month. The ACTUAL Cost associated with this budget is $1,042.17.
 
-Budget Name: vrixel-FARM-production
+Budget Name: valxel-FARM-production
 Budget Type: Cost
 Budgeted Amount: $1,000.00
 Alert Type: ACTUAL
@@ -84,10 +84,10 @@ def test_an_aws_budgets_notification_names_its_product_and_environment():
     assert s["category"] == "cost" and s["resolves"] is False
     assert "ACTUAL $1,042.17 against a budget of $1,000.00" in s["detail"] and "333333333333" in s["detail"]
     forecast = BUDGET_MAIL.replace("Alert Type: ACTUAL", "Alert Type: FORECASTED").replace(
-        "ACTUAL Amount", "FORECASTED Amount").replace("vrixel-FARM-production", "vrixel-FARM-staging")
+        "ACTUAL Amount", "FORECASTED Amount").replace("valxel-FARM-production", "valxel-FARM-staging")
     [f] = from_aws_budget(forecast, ["FARM"])
     assert (f["env"], f["severity"]) == ("staging", "sev4")
-    [other] = from_aws_budget(BUDGET_MAIL.replace("vrixel-FARM-production", "team-budget"), ["FARM"])
+    [other] = from_aws_budget(BUDGET_MAIL.replace("valxel-FARM-production", "team-budget"), ["FARM"])
     assert other["product_id"] == ""  # not ours: ingest drops it
     assert from_aws_budget("hello", ["FARM"]) == []
 
@@ -148,10 +148,10 @@ def test_g4_records_the_plan_and_a_released_feature_over_it_opens_a_cost_inciden
 
 
 def test_a_cost_finding_never_joins_a_components_outage(engine):
-    from vrixel_sdlc.ops.signals import from_alertmanager
+    from valxel_sdlc.ops.signals import from_alertmanager
 
     outage = engine.ingest(from_alertmanager({"alerts": [{"status": "firing", "fingerprint": "x", "labels": {
-        "alertname": "Errors", "severity": "critical", "component": "farm-field-api", "vrixel_product": "FARM"}}]}))
+        "alertname": "Errors", "severity": "critical", "component": "farm-field-api", "valxel_product": "FARM"}}]}))
     budget = engine.ingest(from_openchoreo(oc_budget()))
     assert budget and budget != outage
     assert engine._state(budget[0])["product_id"] == "FARM"  # found through the OpenChoreo project
@@ -161,16 +161,16 @@ def test_a_cost_finding_never_joins_a_components_outage(engine):
 def test_budget_webhooks(engine, monkeypatch):
     client = TestClient(create_app(engine, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
     assert client.post("/api/signals/openchoreo", json=oc_budget()).status_code == 404  # not configured
-    monkeypatch.setenv("VRIXEL_SIGNALS_TOKEN", "t0k")
+    monkeypatch.setenv("VALXEL_SIGNALS_TOKEN", "t0k")
     r = client.post("/api/signals/openchoreo", json=oc_budget(), headers={"authorization": "Bearer t0k"})
     assert r.status_code == 202 and r.json()["incidents"] == ["FARM-INC-1"]
 
     note = {"Type": "Notification", "TopicArn": TOPIC, "Message": BUDGET_MAIL, "Timestamp": "2026-11-05T10:00:00Z"}
     assert client.post("/api/signals/aws-budgets", json=note).status_code == 404  # no topics allowed yet
-    monkeypatch.setenv("VRIXEL_AWS_BUDGET_TOPICS", TOPIC)
+    monkeypatch.setenv("VALXEL_AWS_BUDGET_TOPICS", TOPIC)
     r = client.post("/api/signals/aws-budgets", json=note)
     assert r.status_code == 401 and r.headers["www-authenticate"].startswith("Basic")  # SNS's challenge
-    basic = {"authorization": "Basic " + base64.b64encode(b"vrixel:t0k").decode()}
+    basic = {"authorization": "Basic " + base64.b64encode(b"valxel:t0k").decode()}
     r = client.post("/api/signals/aws-budgets", json=note, headers=basic)
     assert r.status_code == 202 and r.json()["incidents"] == ["FARM-INC-2"]
     assert client.post("/api/signals/aws-budgets", json={**note, "TopicArn": TOPIC + "x"}, headers=basic).status_code == 403
@@ -254,4 +254,4 @@ def test_observer_and_cost_explorer_sources():
                                                  start=T0, end=T0 + timedelta(days=7))
     assert out == {"Amazon DynamoDB": 2.5} and ce.kw[1]["NextPageToken"] == "n"
     tags = ce.kw[0]["Filter"]["And"][0]["Tags"]
-    assert tags["Key"] == "vrixel:feature" and tags["Values"] == ["FARM-FEAT-1"]
+    assert tags["Key"] == "valxel:feature" and tags["Values"] == ["FARM-FEAT-1"]

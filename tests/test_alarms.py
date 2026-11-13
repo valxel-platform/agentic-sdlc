@@ -8,13 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.ops.alarms import InMemoryAlarmBoard, for_feature
-from vrixel_sdlc.ops.signals import from_cloudwatch
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.ops.alarms import InMemoryAlarmBoard, for_feature
+from valxel_sdlc.ops.signals import from_cloudwatch
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 
@@ -22,7 +22,7 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 def event(state="ALARM", env="production", feature="FARM-FEAT-1", resource="field-state", alarm="write-throttled",
           consumers="farm-field-api", at="2026-11-06T18:00:00.000+0000", **over):
     account = {"production": "333333333333", "staging": "222222222222"}.get(env, "111111111111")
-    desc = (f"vrixel product=FARM feature={feature} resource={resource} env={env} consumers={consumers} "
+    desc = (f"valxel product=FARM feature={feature} resource={resource} env={env} consumers={consumers} "
             f"alarm={alarm} severity=sev3\nWrites are throttled: the table needs more capacity, or one key is too hot.")
     return {"version": "0", "id": "e1", "detail-type": "CloudWatch Alarm State Change", "source": "aws.cloudwatch",
             "account": account, "time": at, "region": "us-east-2",
@@ -34,7 +34,7 @@ def event(state="ALARM", env="production", feature="FARM-FEAT-1", resource="fiel
                        "configuration": {"description": desc}}, **over}
 
 
-def test_a_vrixel_alarm_says_whose_it_is():
+def test_a_valxel_alarm_says_whose_it_is():
     [s] = from_cloudwatch(event())
     assert (s["source"], s["status"], s["product_id"], s["env"], s["severity"]) == (
         "cloudwatch", "firing", "FARM", "production", "sev3")
@@ -104,7 +104,7 @@ def test_g4_shows_the_alarms_and_g6_shows_what_fires_before_production(engine):
     [row] = seen["g4"]["aws_resources"]["resources"]
     assert {a["name"] for a in row["alarms"]} == {"read-throttled", "write-throttled"}
     [res] = [r for r in s["resources"] if r["type"] == "dynamodb-table"]
-    assert res["parameters"]["tags"]["vrixel:resource"] == res["name"]
+    assert res["parameters"]["tags"]["valxel:resource"] == res["name"]
     [firing] = seen["g6"]["alarms_firing"]
     assert firing["env"] == "staging" and firing["severity"] == "sev3" and firing["says"].startswith("Writes")
 
@@ -124,7 +124,7 @@ def test_production_alarms_open_and_resolve_incidents_and_others_never_do(engine
 
 def test_the_endpoint_wants_the_signals_token(engine, monkeypatch):
     client = TestClient(create_app(engine, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
-    monkeypatch.setenv("VRIXEL_SIGNALS_TOKEN", "t0k")
+    monkeypatch.setenv("VALXEL_SIGNALS_TOKEN", "t0k")
     assert client.post("/api/signals/cloudwatch", json=event()).status_code == 401
     r = client.post("/api/signals/cloudwatch", json=event(), headers={"authorization": "Bearer t0k"})
     assert r.status_code == 202 and r.json()["recorded"] == 1 and len(r.json()["incidents"]) == 1

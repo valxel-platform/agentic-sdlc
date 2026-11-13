@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from vrixel_sdlc.agents.parse import parse_data, parse_threats
-from vrixel_sdlc.evaluators.checks import _data, _permission_cases, _threats
-from vrixel_sdlc.graph.phase import security_instruction
+from valxel_sdlc.agents.parse import parse_data, parse_threats
+from valxel_sdlc.evaluators.checks import _data, _permission_cases, _threats
+from valxel_sdlc.graph.phase import security_instruction
 
 REPOS = [{"name": "acme/api", "role": "provider"}, {"name": "acme/bff", "role": "bff"}]
 HLD = """## Endpoints

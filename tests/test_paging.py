@@ -13,14 +13,14 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.ops import incident as incident_mod
-from vrixel_sdlc.ops import paging
-from vrixel_sdlc.ops.signals import from_alertmanager, from_sentry
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.ops import incident as incident_mod
+from valxel_sdlc.ops import paging
+from valxel_sdlc.ops.signals import from_alertmanager, from_sentry
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 KEYS = {"CLN": "cln-key", "FARM": "farm-key"}
@@ -30,7 +30,7 @@ def alert(status="firing", fingerprint="fp1", component="cln-intake-api", severi
           at="2026-11-06T21:00:00Z"):
     labels = {"alertname": "HighErrorRate", "severity": severity, "component": component}
     if product:
-        labels["vrixel_product"] = product
+        labels["valxel_product"] = product
     return {"alerts": [{"status": status, "fingerprint": fingerprint, "startsAt": at, "labels": labels,
                         "annotations": {"summary": f"Errors on {component}: patient 4411 lookup failed"}}]}
 
@@ -42,7 +42,7 @@ def eng(tmp_path):
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",
                       governance_root=root)
     svc = build_services(s)
-    svc.pager = paging.RecordingPager(KEYS, "https://sdlc.vrixel.dev")
+    svc.pager = paging.RecordingPager(KEYS, "https://sdlc.valxel.dev")
     return FeatureEngine(svc, InMemorySaver())
 
 
@@ -59,14 +59,14 @@ def test_the_page_says_how_bad_and_where_and_nothing_private():
     inc = {"incident_id": "CLN-INC-4", "product_id": "CLN", "title": "Patient 4411: NullPointerException",
            "severity": "sev1", "component": "acme-clinic/cln-intake-api", "env": "production", "source": "sentry",
            "data_class": "phi", "why": "the tool's rollback didn't fix it"}
-    body = paging.page_payload(inc, "k", "https://sdlc.vrixel.dev/", urgent=True)
+    body = paging.page_payload(inc, "k", "https://sdlc.valxel.dev/", urgent=True)
     assert (body["routing_key"], body["event_action"], body["dedup_key"]) == ("k", "trigger", "CLN-INC-4:urgent")
     p = body["payload"]
     assert p["severity"] == "critical" and p["component"] == "cln-intake-api" and p["group"] == "CLN"
     assert "4411" not in json.dumps(body) and "NullPointer" not in json.dumps(body)  # PHI: no title
     assert p["summary"] == "CLN-INC-4 SEV1 on cln-intake-api needs on-call (the tool's rollback didn't fix it)"
     assert p["custom_details"]["why on-call"] == "the tool's rollback didn't fix it"
-    assert body["links"] == [{"href": "https://sdlc.vrixel.dev/incidents/CLN-INC-4", "text": "CLN-INC-4 in the SDLC tool"}]
+    assert body["links"] == [{"href": "https://sdlc.valxel.dev/incidents/CLN-INC-4", "text": "CLN-INC-4 in the SDLC tool"}]
     heads_up = paging.page_payload(inc, "k", "u")
     assert heads_up["dedup_key"] == "CLN-INC-4" and heads_up["payload"]["severity"] == "info"
     assert "the SDLC tool is mitigating it (no action needed)" in heads_up["payload"]["summary"]
@@ -129,7 +129,7 @@ def test_the_first_decision_acknowledges_and_mitigation_resolves(tmp_path, monke
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",
                       governance_root=root)
     svc = build_services(s)
-    svc.pager = paging.RecordingPager(KEYS, "https://sdlc.vrixel.dev")
+    svc.pager = paging.RecordingPager(KEYS, "https://sdlc.valxel.dev")
     eng = FeatureEngine(svc, InMemorySaver())
     released(eng)
     [iid] = eng.ingest(from_alertmanager(alert()))
@@ -152,7 +152,7 @@ def test_an_agents_merge_resolves_without_acknowledging(eng):
     def issue(n, slug, at):
         return {"action": "triggered", "data": {"event": {
             "issue_id": n, "title": "ApiError", "level": "fatal", "project": {"slug": slug}, "lastSeen": at,
-            "environment": "production", "tags": [["vrixel_product", "CLN"], ["trace_id", n * 32]]}}}
+            "environment": "production", "tags": [["valxel_product", "CLN"], ["trace_id", n * 32]]}}}
 
     [a] = eng.ingest(from_sentry(issue("1", "cln-web", "2026-11-06T10:00:00Z")))
     [b] = eng.ingest(from_sentry(issue("2", "cln-intake-api", "2026-11-06T16:00:00Z")))
@@ -198,17 +198,17 @@ def test_pagerduty_is_retried_in_order_and_failures_are_kept():
 
 
 def test_the_pager_comes_from_the_environment(monkeypatch):
-    monkeypatch.delenv("VRIXEL_PAGERDUTY_ROUTING_KEYS", raising=False)
+    monkeypatch.delenv("VALXEL_PAGERDUTY_ROUTING_KEYS", raising=False)
     assert type(paging.from_env("u")) is paging.RecordingPager
-    monkeypatch.setenv("VRIXEL_PAGERDUTY_ROUTING_KEYS", '{"CLN": "k", "FARM": ""}')
+    monkeypatch.setenv("VALXEL_PAGERDUTY_ROUTING_KEYS", '{"CLN": "k", "FARM": ""}')
     p = paging.from_env("u")
     assert isinstance(p, paging.PagerDutyPager) and p.routing_keys == {"CLN": "k"}
-    monkeypatch.setenv("VRIXEL_PAGERDUTY_REGION", "EU")
+    monkeypatch.setenv("VALXEL_PAGERDUTY_REGION", "EU")
     assert paging.from_env("u").url == "https://events.eu.pagerduty.com/v2/enqueue"
-    monkeypatch.setenv("VRIXEL_PAGERDUTY_REGION", "mars")
+    monkeypatch.setenv("VALXEL_PAGERDUTY_REGION", "mars")
     with pytest.raises(ValueError):
         paging.from_env("u")
-    monkeypatch.setenv("VRIXEL_PAGERDUTY_ROUTING_KEYS", "not json")
+    monkeypatch.setenv("VALXEL_PAGERDUTY_ROUTING_KEYS", "not json")
     with pytest.raises(ValueError):
         paging.from_env("u")
 
@@ -216,7 +216,7 @@ def test_the_pager_comes_from_the_environment(monkeypatch):
 def test_a_webhook_pages_and_answers_before_triage_runs(eng, monkeypatch):
     import threading
 
-    from vrixel_sdlc.ops import incident as incident_mod
+    from valxel_sdlc.ops import incident as incident_mod
 
     release = threading.Event()
     real = incident_mod.stub_triage
@@ -226,7 +226,7 @@ def test_a_webhook_pages_and_answers_before_triage_runs(eng, monkeypatch):
         return real(ctx)
 
     monkeypatch.setattr(incident_mod, "stub_triage", slow_triage)
-    monkeypatch.setenv("VRIXEL_SIGNALS_TOKEN", "t0k")
+    monkeypatch.setenv("VALXEL_SIGNALS_TOKEN", "t0k")
     client = TestClient(create_app(eng, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
     r = client.post("/api/signals/alertmanager", content=json.dumps(alert()), headers={"authorization": "Bearer t0k"})
     assert r.status_code == 202 and r.json()["incidents"] == ["CLN-INC-1"]

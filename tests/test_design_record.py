@@ -6,12 +6,12 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-from vrixel_sdlc import design_record as dr
-from vrixel_sdlc import workspace
-from vrixel_sdlc.evaluators.checks import _code_read
-from vrixel_sdlc.graph.phase import ATTACHMENT_PHASES
-from vrixel_sdlc.runtime.base import AgentTask
-from vrixel_sdlc.runtime.claude_code import session_options
+from valxel_sdlc import design_record as dr
+from valxel_sdlc import workspace
+from valxel_sdlc.evaluators.checks import _code_read
+from valxel_sdlc.graph.phase import ATTACHMENT_PHASES
+from valxel_sdlc.runtime.base import AgentTask
+from valxel_sdlc.runtime.claude_code import session_options
 
 UX = """## Screens
 - S1: Ready list (web: acme/web)
@@ -53,11 +53,11 @@ def test_the_record_is_rendered_and_updated_after_a_release():
 
 
 def test_a_new_product_starts_with_a_record(services):
-    from vrixel_sdlc.inception import Vision
-    from vrixel_sdlc.inception.setup import governance_files
+    from valxel_sdlc.inception import Vision
+    from valxel_sdlc.inception.setup import governance_files
 
     v = Vision(name="Aqua Watch", org="acme-water", vision="Farms lose crops.")
-    from vrixel_sdlc.inception.run import draft
+    from valxel_sdlc.inception.run import draft
 
     b = draft(services, v, "brief")
     files = governance_files(v, b.text, "", "", "sunil")
@@ -99,7 +99,7 @@ def test_a_checkout_is_read_only_and_released(tmp_path, monkeypatch):
 
 
 def test_a_reading_session_may_only_read(services):
-    from vrixel_sdlc.gateway import CallTags, PromptLayers
+    from valxel_sdlc.gateway import CallTags, PromptLayers
 
     role = services.settings.role("architect")
     tags = CallTags(product_id="X", feature_id="X-1", phase="architecture", role="architect", data_class="general",

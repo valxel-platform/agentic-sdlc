@@ -10,10 +10,10 @@ import httpx
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc import models
-from vrixel_sdlc.config import RoleConfig, load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.gateway import (
+from valxel_sdlc import models
+from valxel_sdlc.config import RoleConfig, load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.gateway import (
     CallTags,
     InMemoryLedger,
     ModelGateway,
@@ -21,17 +21,17 @@ from vrixel_sdlc.gateway import (
     PromptLayers,
     ProviderUnavailable,
 )
-from vrixel_sdlc.gateway.providers import ModelRequest, OpenAICompatibleProvider
-from vrixel_sdlc.graph.phase import merge_second_opinion
-from vrixel_sdlc.runtime import AgentResult
-from vrixel_sdlc.runtime.base import AgentTask
-from vrixel_sdlc.runtime.codex import (
+from valxel_sdlc.gateway.providers import ModelRequest, OpenAICompatibleProvider
+from valxel_sdlc.graph.phase import merge_second_opinion
+from valxel_sdlc.runtime import AgentResult
+from valxel_sdlc.runtime.base import AgentTask
+from valxel_sdlc.runtime.codex import (
     CodexRuntime,
     codex_command,
     codex_prompt,
     usage_from,
 )
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -110,9 +110,9 @@ def test_the_codex_command_is_headless_sandboxed_and_reads_the_prompt_from_stdin
     assert cmd[cmd.index("--sandbox") + 1] == "workspace-write" and 'model="gpt-5.4"' in cmd
     assert cmd[cmd.index("--output-schema") + 1] == "/t/s.json" and cmd[cmd.index("--cd") + 1] == "/work"
     own = codex_command("selfhosted/qwen3-coder", cwd=None, schema_path=None, last_path="/t/l",
-                        provider=("selfhosted", "http://vllm:8000/v1", "VRIXEL_SELFHOSTED_API_KEY"))
+                        provider=("selfhosted", "http://vllm:8000/v1", "VALXEL_SELFHOSTED_API_KEY"))
     assert 'model_provider="selfhosted"' in own and 'model_providers.selfhosted.base_url="http://vllm:8000/v1"' in own
-    assert 'model_providers.selfhosted.env_key="VRIXEL_SELFHOSTED_API_KEY"' in own and "--output-schema" not in own
+    assert 'model_providers.selfhosted.env_key="VALXEL_SELFHOSTED_API_KEY"' in own and "--output-schema" not in own
 
 
 def test_the_codex_prompt_puts_the_stable_layers_before_the_task():
@@ -204,7 +204,7 @@ def test_the_second_opinion_says_why_it_was_skipped(tmp_path):
 
 
 def test_live_mode_turns_optional_roles_off_and_refuses_missing_required_ones(tmp_path, monkeypatch):
-    for var in ("OPENAI_API_KEY", "CODEX_API_KEY", "VRIXEL_SELFHOSTED_URL", "VRIXEL_SELFHOSTED_API_KEY"):
+    for var in ("OPENAI_API_KEY", "CODEX_API_KEY", "VALXEL_SELFHOSTED_URL", "VALXEL_SELFHOSTED_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     s = settings(tmp_path, mode="live")
     on = models.available_roles(s)
@@ -275,7 +275,7 @@ def test_every_fallback_down_fails_the_task(tmp_path, monkeypatch):
         return Wrapped()
 
     monkeypatch.setattr(svc, "runtime_for", down)
-    from vrixel_sdlc.graph.phase import call_agent
+    from valxel_sdlc.graph.phase import call_agent
     with pytest.raises(ProviderUnavailable):
         call_agent(svc, role="coder", phase="build", ctx={"product_id": "FARM", "feature_id": "F-1"},
                    skills=(), tail="t", stub_text="x")
@@ -320,7 +320,7 @@ def test_a_session_stuck_reconnecting_is_stopped_early(tmp_path):
     import sys
     import time
 
-    from vrixel_sdlc.runtime.codex import failure_from, run_codex
+    from valxel_sdlc.runtime.codex import failure_from, run_codex
     script = tmp_path / "fake_codex.py"
     script.write_text("import json, sys, time\nsys.stdin.read()\n"
                       "for _ in range(50):\n"
@@ -335,7 +335,7 @@ def test_a_session_stuck_reconnecting_is_stopped_early(tmp_path):
 def test_each_codex_session_starts_from_a_copy_of_the_plugin_home(tmp_path, monkeypatch):
     template = tmp_path / "codex-home"
     (template / "plugins" / "cache").mkdir(parents=True)
-    (template / "config.toml").write_text('[plugins."engineering@vrixel-plugins"]\nenabled = true\n')
+    (template / "config.toml").write_text('[plugins."engineering@valxel-plugins"]\nenabled = true\n')
     (template / "tmp").mkdir()  # the install's scratch state stays behind
     seen = []
 
@@ -351,7 +351,7 @@ def test_each_codex_session_starts_from_a_copy_of_the_plugin_home(tmp_path, monk
     rt = CodexRuntime(gw, runner=Peek(), home_template=str(template))
     for _ in range(2):
         rt.run(AgentTask(role="coder_codex", phase="build", tags=tags("coder_codex"), layers=layers()))
-    assert seen[0][0] != seen[1][0] and all("engineering@vrixel-plugins" in c for _, c in seen)
+    assert seen[0][0] != seen[1][0] and all("engineering@valxel-plugins" in c for _, c in seen)
     assert not (template / "state.db").exists() and not seen[0][0].exists()
 
 
@@ -364,9 +364,9 @@ def test_the_image_plugins_are_skills_only_and_form_a_marketplace(tmp_path):
     (upstream / "engineering" / "hooks").mkdir()
     (upstream / "LICENSE").write_text("Apache")
     out = tmp_path / "out"
-    subprocess.run([str(ROOT / "plugins" / "prepare.sh"), str(upstream), str(ROOT / "plugins" / "vrixel"), str(out)],
+    subprocess.run([str(ROOT / "plugins" / "prepare.sh"), str(upstream), str(ROOT / "plugins" / "valxel"), str(out)],
                    check=True)
     assert not list(out.rglob(".mcp.json")) and not (out / "engineering" / "hooks").exists()
     market = json.loads((out / ".claude-plugin" / "marketplace.json").read_text())
-    assert {p["name"] for p in market["plugins"]} == {"product-management", "engineering", "design", "vrixel"}
+    assert {p["name"] for p in market["plugins"]} == {"product-management", "engineering", "design", "valxel"}
     assert all((out / p["source"]).is_dir() for p in market["plugins"])

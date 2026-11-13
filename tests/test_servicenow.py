@@ -10,12 +10,12 @@ from urllib.error import HTTPError
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.governance.loader import GovernanceError
-from vrixel_sdlc.ops import changes
-from vrixel_sdlc.ops.servicenow import InMemoryReceipts, ServiceNowReceipts, WithReceipts, body_for
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.governance.loader import GovernanceError
+from valxel_sdlc.ops import changes
+from valxel_sdlc.ops.servicenow import InMemoryReceipts, ServiceNowReceipts, WithReceipts, body_for
+from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 SPEC = {"provider": "servicenow", "instance": "https://acme.service-now.com", "assignment_group": "Platform Engineering",
@@ -60,12 +60,12 @@ def record(log=None, **kw):
 
 def receipts(http, store=None, spec=SPEC, auth="Basic dTpw"):
     return ServiceNowReceipts(lambda pid: spec, store or InMemoryReceipts(),
-                              env={"VRIXEL_SERVICENOW_AUTH_CLN": auth} if auth else {}, opener=http, delays=(0, 0))
+                              env={"VALXEL_SERVICENOW_AUTH_CLN": auth} if auth else {}, opener=http, delays=(0, 0))
 
 
 def test_the_receipt_says_what_changed_and_who_approved_it():
     b = body_for(record(), SPEC)
-    assert b["type"] == "normal" and b["correlation_id"] == "vrixel:CHG-1" and b["correlation_display"] == "vrixel-sdlc"
+    assert b["type"] == "normal" and b["correlation_id"] == "valxel:CHG-1" and b["correlation_display"] == "valxel-sdlc"
     assert b["short_description"] == "[standard] CLN-FEAT-1 Consent capture at intake"
     assert "component cln-intake-api release api-7" in b["description"] and "for 5% of users" in b["description"]
     assert "G6 rm-1" in b["description"] and "pull/7" in b["description"] and b["assignment_group"] == "Platform Engineering"
@@ -81,9 +81,9 @@ def test_a_change_becomes_a_closed_change_request():
     r.flush()
     (get, url0, _, h), (post, url1, body, _), (patch, url2, closing, _) = http.calls
     assert (get, post, patch) == ("GET", "POST", "PATCH") and h["Authorization"] == "Basic dTpw"
-    assert "correlation_id%3Dvrixel%3ACHG-1" in url0 and url1.endswith("/api/now/table/change_request?sysparm_input_display_value=true")
+    assert "correlation_id%3Dvalxel%3ACHG-1" in url0 and url1.endswith("/api/now/table/change_request?sysparm_input_display_value=true")
     assert url2.endswith("/change_request/abc123?sysparm_input_display_value=false")
-    assert closing == {"state": "3", "close_code": "successful", "close_notes": f"Recorded by the Vrixel SDLC tool: {rec['summary']}"}
+    assert closing == {"state": "3", "close_code": "successful", "close_notes": f"Recorded by the Valxel SDLC tool: {rec['summary']}"}
     assert r.store.get(["CHG-1"])["CHG-1"] | {"at": ""} == {"status": "closed", "number": "CHG0030001", "sys_id": "abc123",
                                                            "instance": SPEC["instance"], "change_id": "CHG-1", "at": ""}
 
@@ -107,7 +107,7 @@ def test_busy_servicenow_is_retried_and_missing_credentials_said_plainly():
     nocred = receipts(FakeSN(), auth="")
     nocred.send(record())
     assert nocred.store.get(["CHG-1"])["CHG-1"] | {"at": ""} == {
-        "status": "not_sent", "detail": "set VRIXEL_SERVICENOW_AUTH_CLN", "change_id": "CHG-1", "at": ""}
+        "status": "not_sent", "detail": "set VALXEL_SERVICENOW_AUTH_CLN", "change_id": "CHG-1", "at": ""}
 
 
 def test_only_new_records_are_sent_and_only_for_products_that_want_it():

@@ -9,13 +9,13 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.evaluators.checks import run_checks
-from vrixel_sdlc.graph.phase import instrumentation_findings, instrumentation_instruction
-from vrixel_sdlc.ops.cohorts import StubLogs
-from vrixel_sdlc.outcomes import instrumentation as ins
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.evaluators.checks import run_checks
+from valxel_sdlc.graph.phase import instrumentation_findings, instrumentation_instruction
+from valxel_sdlc.ops.cohorts import StubLogs
+from valxel_sdlc.outcomes import instrumentation as ins
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 GOALS = [{"id": "GOAL-CLN-1", "title": "Faster check-in", "measure": "under 3 minutes"},
@@ -127,7 +127,7 @@ def test_the_coder_is_told_and_held_to_it():
 def test_summary_lines_are_counted():
     entries = [("cln-intake-api", ins.line({"checkin_completed": 3})),
                ("cln-intake-api", '{"message": "' + ins.line({"checkin_completed": 2}).replace('"', '\\"') + '"}'),
-               ("cln-intake-api", "vrixel.flag_cohorts {\"flag\": \"x\"}")]
+               ("cln-intake-api", "valxel.flag_cohorts {\"flag\": \"x\"}")]
     assert ins.parse_counts(entries) == {"checkin_completed": 5}
 
 

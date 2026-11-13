@@ -1,11 +1,11 @@
 """VX-17: designs say who may reach each component; only the BFF faces the internet; coders and
 reviewers are told the security model of their role; web apps are tested through the BFF."""
 
-from vrixel_sdlc.agents.parse import parse_endpoints
-from vrixel_sdlc.agents.templates import _endpoint_lines
-from vrixel_sdlc.evaluators.checks import _endpoints
-from vrixel_sdlc.graph.phase import security_instruction
-from vrixel_sdlc.repo_roles import REPO_ORDER
+from valxel_sdlc.agents.parse import parse_endpoints
+from valxel_sdlc.agents.templates import _endpoint_lines
+from valxel_sdlc.evaluators.checks import _endpoints
+from valxel_sdlc.graph.phase import security_instruction
+from valxel_sdlc.repo_roles import REPO_ORDER
 
 REPOS = [
     {"name": "acme-clinic/cln-intake-api", "role": "provider"},
@@ -70,7 +70,7 @@ def test_each_role_is_told_its_security_model() -> None:
 
 
 def test_web_apps_are_tested_through_the_bff() -> None:
-    from vrixel_sdlc.waits import WaitChecker
+    from valxel_sdlc.waits import WaitChecker
 
     sent = []
 

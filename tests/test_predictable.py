@@ -9,14 +9,14 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.agents import formats, structured
-from vrixel_sdlc.config import RoleConfig, load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.evaluators import critic, rubrics
-from vrixel_sdlc.runtime import AgentResult
-from vrixel_sdlc.runtime.base import AgentTask
-from vrixel_sdlc.runtime.claude_code import session_cap
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.agents import formats, structured
+from valxel_sdlc.config import RoleConfig, load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.evaluators import critic, rubrics
+from valxel_sdlc.runtime import AgentResult
+from valxel_sdlc.runtime.base import AgentTask
+from valxel_sdlc.runtime.claude_code import session_cap
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -123,7 +123,7 @@ def test_a_session_is_capped_by_its_role_and_by_what_is_left_of_the_budget():
 
 
 def test_a_retry_returns_only_the_sections_it_changes():
-    from vrixel_sdlc.agents.parse import merge_sections
+    from valxel_sdlc.agents.parse import merge_sections
 
     prev = "# PRD: X\nFeature: F\n\n## Goals\n- G1\n\n## Acceptance criteria\n- AC-1: vague\n\n## Constitution articles\n- VX-5\n"
     rev = "## Acceptance criteria\n- AC-1: Given a, when b, then c\n\n## Non-goals\n- none\n"

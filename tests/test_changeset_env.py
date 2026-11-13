@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from vrixel_sdlc import changeset_env
+from valxel_sdlc import changeset_env
 
 from test_delivery import external, to_build, wait_idle
 
@@ -104,7 +104,7 @@ def test_governance_validates_the_setting(settings):
 
     import yaml
 
-    from vrixel_sdlc.governance.manifest import GovernanceError, parse_manifest
+    from valxel_sdlc.governance.manifest import GovernanceError, parse_manifest
 
     path = Path(settings.governance_root) / "acme-farm" / "farm-governance" / "product.yaml"
     raw = yaml.safe_load(path.read_text())
@@ -120,8 +120,8 @@ def test_governance_validates_the_setting(settings):
 def test_the_openchoreo_adapter_creates_binds_and_deletes():
     from mcp.server import MCPServer
 
-    from vrixel_sdlc.integrations.mcp_client import McpHttp
-    from vrixel_sdlc.integrations.openchoreo import OpenChoreoMcp
+    from valxel_sdlc.integrations.mcp_client import McpHttp
+    from valxel_sdlc.integrations.openchoreo import OpenChoreoMcp
 
     server = MCPServer("openchoreo")
     st = {"envs": {"dev": {"metadata": {"name": "dev"}, "spec": {"dataPlaneRef": {"name": "plane-a"}}}},
@@ -172,10 +172,10 @@ def test_the_openchoreo_adapter_creates_binds_and_deletes():
         st["bindings"] = {k: v for k, v in st["bindings"].items() if v["name"] != binding_name}
         return {}
 
-    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
-    oc.create_environment(name="cs-farm-feat-1", like="dev", project="farm", labels={"vrixel.io/feature": "FARM-FEAT-1"})
+    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="valxel")
+    oc.create_environment(name="cs-farm-feat-1", like="dev", project="farm", labels={"valxel.io/feature": "FARM-FEAT-1"})
     assert st["calls"][0] == ("create", "cs-farm-feat-1", "plane-a", False,
-                              {"vrixel.io/change-set": "true", "vrixel.io/feature": "FARM-FEAT-1"})
+                              {"valxel.io/change-set": "true", "valxel.io/feature": "FARM-FEAT-1"})
     oc.create_environment(name="cs-farm-feat-1", like="dev", project="farm")  # a retry: already there
     assert len([c for c in st["calls"] if c[0] == "create"]) == 1
     assert [e["name"] for e in oc.list_environments()] == ["dev", "cs-farm-feat-1"]

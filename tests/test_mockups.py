@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from test_api import SECRET, sign_in
-from vrixel_sdlc import mockups
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc import mockups
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.web.auth import AuthConfig
 
 UX = """## Screens
 - S1: Ready list (web: acme/web)

@@ -4,9 +4,9 @@ test, the reviewer raising (never lowering) a level, and the suites reading only
 import pytest
 
 from conftest import approve
-from vrixel_sdlc import performance as perf
-from vrixel_sdlc.quality import Quality, QualityConfig, SuiteResult, effective_policy, load_quality
-from vrixel_sdlc.config import load_settings
+from valxel_sdlc import performance as perf
+from valxel_sdlc.quality import Quality, QualityConfig, SuiteResult, effective_policy, load_quality
+from valxel_sdlc.config import load_settings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,7 +48,7 @@ def test_a_products_performance_settings_are_checked():
     ("provider", ["src/main/resources/application.yaml"], "", "smoke"),
     ("provider", ["api/openapi.yaml", "src/main/java/com/x/A.java"], "", "full"),
     ("provider", ["src/main/java/com/x/greeting/GreetingController.java"], HLD_TRAFFIC, "full"),
-    ("event-worker", ["src/main/java/com/vrixel/worker/x/SavedHandler.java"], "", "smoke"),  # no staging test
+    ("event-worker", ["src/main/java/com/valxel/worker/x/SavedHandler.java"], "", "smoke"),  # no staging test
     ("library", ["src/main/java/com/x/Ids.java", "gradle/libs.versions.toml"], HLD_TRAFFIC, "none"),
     ("consumer", ["src/app/Intake.tsx"], HLD_TRAFFIC, "full"),
     ("provider", [f"src/main/java/com/x/M{i}.java" for i in range(15)], "", "smoke"),
@@ -71,7 +71,7 @@ def test_the_reviewer_raises_a_level_and_never_lowers_one():
     assert raised.level == "smoke" and "the reviewer: an N+1 query in list()" in raised.reasons
     full = perf.decide("o/r", "provider", ["api/openapi.yaml"], concerns=["fine"])
     assert full.level == "full"
-    assert perf.label("smoke") == "vrixel:perf-smoke" and perf.label("full") == "vrixel:perf-full"
+    assert perf.label("smoke") == "valxel:perf-smoke" and perf.label("full") == "valxel:perf-full"
     assert perf.label("none") is None
 
 
@@ -124,7 +124,7 @@ def test_the_staging_run_is_asked_for_with_the_scaled_load(engine, services):
     state = engine.graph.get_state(engine._config(fid)).values
     full = {r for r, d in (state.get("performance") or {}).items() if d["level"] == "full"}
     staging = [d for d in services.github.dispatches
-               if d["event_type"] == "vrixel-deployed" and d["payload"]["stage"] == "staging"]
+               if d["event_type"] == "valxel-deployed" and d["payload"]["stage"] == "staging"]
     assert staging
     for d in staging:
         assert d["payload"]["performance"] == state["performance"].get(d["repo"], {}).get("level", "none")
@@ -137,8 +137,8 @@ def test_the_staging_run_is_asked_for_with_the_scaled_load(engine, services):
 def test_a_product_with_bad_performance_settings_is_refused(tmp_path):
     import shutil
 
-    from vrixel_sdlc.governance.errors import GovernanceError
-    from vrixel_sdlc.services import build_services
+    from valxel_sdlc.governance.errors import GovernanceError
+    from valxel_sdlc.services import build_services
 
     gov = tmp_path / "gov"
     shutil.copytree(ROOT / "examples" / "governance", gov)
@@ -162,8 +162,8 @@ def test_a_failed_smoke_test_goes_back_to_the_agents(engine, services):
 
 
 def test_the_acceptance_report_carries_the_journey_load_test():
-    from vrixel_sdlc.acceptance import parse_report
-    from vrixel_sdlc.quality.sources import acceptance_result
+    from valxel_sdlc.acceptance import parse_report
+    from valxel_sdlc.quality.sources import acceptance_result
 
     ok = "- AC-1: passed\nDuration: 40s\nPerformance: passed (p95 210 ms (budget 500 ms), errors 0.0%)\n"
     assert parse_report(ok)["performance"] == {"passed": True, "text": "p95 210 ms (budget 500 ms), errors 0.0%"}
@@ -176,7 +176,7 @@ def test_the_acceptance_report_carries_the_journey_load_test():
 
 
 def test_the_acceptance_run_loads_journeys_only_when_staging_needs_a_load_test(services):
-    from vrixel_sdlc.waits import WaitChecker
+    from valxel_sdlc.waits import WaitChecker
 
     settings = {"perf_settings": {"peak_rps": 50, "load_factor": 0.1}}
     def packet(wait, level):
@@ -187,6 +187,6 @@ def test_the_acceptance_run_loads_journeys_only_when_staging_needs_a_load_test(s
     w = WaitChecker(services)
     for wait, level in (("staging", "full"), ("staging", "smoke"), ("dev", "full")):
         w._start_post_deploy(packet(wait, level), [{"repo": "o/svc", "url": "https://svc"}])
-    sent = [d for d in services.github.dispatches if d["event_type"] == "vrixel-acceptance"]
+    sent = [d for d in services.github.dispatches if d["event_type"] == "valxel-acceptance"]
     assert [("perf_settings" in d["payload"]) for d in sent] == [True, False, False]
     assert all(len(d["payload"]) <= 10 for d in services.github.dispatches)

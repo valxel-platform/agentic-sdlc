@@ -11,14 +11,14 @@ from types import SimpleNamespace
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc import research as rs
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.inception import Vision
-from vrixel_sdlc.inception import run as inception_run
-from vrixel_sdlc.runtime.base import AgentTask
-from vrixel_sdlc.runtime.claude_code import session_options
-from vrixel_sdlc.services import build_services
+from valxel_sdlc import research as rs
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.inception import Vision
+from valxel_sdlc.inception import run as inception_run
+from valxel_sdlc.runtime.base import AgentTask
+from valxel_sdlc.runtime.claude_code import session_options
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -96,7 +96,7 @@ def test_only_runtimes_that_can_search_are_asked_to():
 
 
 def test_claude_code_may_search_only_in_a_research_session(services):
-    from vrixel_sdlc.gateway import CallTags, PromptLayers
+    from valxel_sdlc.gateway import CallTags, PromptLayers
 
     role = services.settings.role("strategist")
     tags = CallTags(product_id="X", feature_id="X-1", phase="research", role="strategist", data_class="general",
@@ -111,8 +111,8 @@ def test_claude_code_may_search_only_in_a_research_session(services):
 
 
 def test_the_claude_api_gets_the_web_search_tool_and_bills_each_search():
-    from vrixel_sdlc.gateway.prompt import PromptLayers
-    from vrixel_sdlc.gateway.providers import AnthropicProvider, ModelRequest
+    from valxel_sdlc.gateway.prompt import PromptLayers
+    from valxel_sdlc.gateway.providers import AnthropicProvider, ModelRequest
 
     sent = {}
 
@@ -172,7 +172,7 @@ def test_inception_researches_first_and_the_brief_cites_it(services):
     assert "## Evidence" in b.text and "(E1)" in b.text and "- A1: We believe" in b.text
     # The checks hold the brief to it.
     ctx = inception_run.context_for(services, v, "brief", research=note.text)
-    from vrixel_sdlc.inception import checks
+    from valxel_sdlc.inception import checks
 
     broken = b.text.replace("(E1)", "(E9)")
     assert "Evidence: E9 isn't in the research note" in checks.run("brief", broken, ctx)
@@ -208,7 +208,7 @@ def make(tmp_path, gov_root):
 
 
 def test_an_initiative_cites_its_research_which_is_recorded_beside_it(tmp_path, gov_root):
-    from vrixel_sdlc.roadmap.record import parse_initiative
+    from valxel_sdlc.roadmap.record import parse_initiative
 
     eng, svc = make(tmp_path, gov_root)
     iid = eng.create_initiative(product_id="CLN", title="Walk-in intake", created_by="maria", research="own",
@@ -218,7 +218,7 @@ def test_an_initiative_cites_its_research_which_is_recorded_beside_it(tmp_path, 
     assert g0["research"] == "from your own research"
     assert "- A1: We believe" in eng.view(iid)["content"]
     eng.decide(iid, g0["interrupt_id"], {"decision": "approve", "approver": "maria-po"})
-    pr = next(p for p in svc.github.prs.values() if p["branch"] == f"vrixel/{iid}")
+    pr = next(p for p in svc.github.prs.values() if p["branch"] == f"valxel/{iid}")
     files = {path: text for (repo, branch, path), text in svc.github.files.items() if branch == pr["branch"]}
     assert files[f"roadmap/research/{iid}.md"].startswith("# Research: Walk-in intake")
     record = parse_initiative(files[f"roadmap/initiatives/{iid}.md"])
@@ -226,7 +226,7 @@ def test_an_initiative_cites_its_research_which_is_recorded_beside_it(tmp_path, 
 
 
 def test_the_initiative_review_lists_what_the_plan_assumed():
-    from vrixel_sdlc.outcomes import review
+    from valxel_sdlc.outcomes import review
 
     ev = {"goal_id": "", "goal": {}, "status": "no_data", "features": [], "readouts": {}, "spent_usd": 0.0,
           "budget_usd": 100.0, "retire": [], "in_progress": [],

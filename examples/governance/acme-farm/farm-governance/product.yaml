@@ -1,4 +1,4 @@
-# Farm app governance manifest, read by the Vrixel SDLC tool.
+# Farm app governance manifest, read by the Valxel SDLC tool.
 # Changes are pull requests approved by the product owner (see CODEOWNERS).
 # The tool rejects values that loosen platform limits.
 product_id: FARM
@@ -57,6 +57,6 @@ high_risk_paths:
 - src/auth/
 - migrations/
 
-# Workflow profiles people may start work with (vrixel_sdlc.profiles): small low-risk changes can go express.
+# Workflow profiles people may start work with (valxel_sdlc.profiles): small low-risk changes can go express.
 workflow:
   profiles: [feature, express]

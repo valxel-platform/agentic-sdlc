@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from vrixel_sdlc.graph.pipeline import agent_evals
-from vrixel_sdlc.quality import SuiteResult, effective_policy, evaluate, load_quality
+from valxel_sdlc.graph.pipeline import agent_evals
+from valxel_sdlc.quality import SuiteResult, effective_policy, evaluate, load_quality
 
 CFG = load_quality(Path(__file__).resolve().parents[1] / "config" / "quality.yaml")
 AGENT = "acme-farm/farm-crop-agent"

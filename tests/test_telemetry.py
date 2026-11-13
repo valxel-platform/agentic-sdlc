@@ -5,12 +5,12 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from vrixel_sdlc import telemetry
-from vrixel_sdlc.gateway import CallTags, PromptLayers
-from vrixel_sdlc.runtime import AgentTask
-from vrixel_sdlc.runtime.claude_code import session_options
-from vrixel_sdlc.runtime.codex import add_otel
-from vrixel_sdlc.telemetry import Telemetry, TelemetryConfig, TracedRuntime
+from valxel_sdlc import telemetry
+from valxel_sdlc.gateway import CallTags, PromptLayers
+from valxel_sdlc.runtime import AgentTask
+from valxel_sdlc.runtime.claude_code import session_options
+from valxel_sdlc.runtime.codex import add_otel
+from valxel_sdlc.telemetry import Telemetry, TelemetryConfig, TracedRuntime
 
 
 def traced(cfg=None):
@@ -43,7 +43,7 @@ def test_content_follows_the_data_class_and_a_baa():
 
 
 def test_the_shipped_config_keeps_content_off_until_a_store_is_approved(settings):
-    cfg = telemetry.load_config(settings.config_dir, env={"VRIXEL_OTEL_ENDPOINT": "http://c:4318/"})
+    cfg = telemetry.load_config(settings.config_dir, env={"VALXEL_OTEL_ENDPOINT": "http://c:4318/"})
     assert cfg.endpoint == "http://c:4318" and {cfg.level(c) for c in ("general", "phi", "payments")} == {"none"}
     assert not Telemetry(telemetry.load_config(settings.config_dir, env={})).enabled
 
@@ -58,11 +58,11 @@ def test_a_claude_code_session_exports_under_the_tools_span():
     assert env["CLAUDE_CODE_ENABLE_TELEMETRY"] == "1" and env["OTEL_TRACES_EXPORTER"] == "otlp"
     assert env["OTEL_EXPORTER_OTLP_ENDPOINT"] == "http://collector:4318"
     assert (env["OTEL_LOG_TOOL_DETAILS"], env["OTEL_LOG_USER_PROMPTS"], env["OTEL_LOG_TOOL_CONTENT"]) == ("1", "0", "0")
-    assert "vrixel.feature_id=FARM-FEAT-1" in env["OTEL_RESOURCE_ATTRIBUTES"] and "vrixel.task=TASK-2" in env["OTEL_RESOURCE_ATTRIBUTES"]
+    assert "valxel.feature_id=FARM-FEAT-1" in env["OTEL_RESOURCE_ATTRIBUTES"] and "valxel.task=TASK-2" in env["OTEL_RESOURCE_ATTRIBUTES"]
     [s] = exporter.get_finished_spans()
-    assert s.name == "vrixel.agent build/coder"
-    assert s.attributes["vrixel.task"] == "TASK-2" and s.attributes["vrixel.attempt"] == "1"
-    assert s.attributes["gen_ai.request.model"] == "claude-opus-5-5" and s.attributes["vrixel.config_version"] == "cfg1"
+    assert s.name == "valxel.agent build/coder"
+    assert s.attributes["valxel.task"] == "TASK-2" and s.attributes["valxel.attempt"] == "1"
+    assert s.attributes["gen_ai.request.model"] == "claude-opus-5-5" and s.attributes["valxel.config_version"] == "cfg1"
     t.telemetry = {"env": env}
     opts = session_options(t, type("R", (), {"max_turns": 5, "max_call_usd": 1.0})(), "anthropic/claude-opus-5-5",
                            cwd=None, plugin_dirs=[])
@@ -90,9 +90,9 @@ def test_every_session_is_a_span_and_the_ledger_knows_its_trace(engine, services
     v = engine.auto_drive(fid)
     spans = exporter.get_finished_spans()
     names = {s.name for s in spans}
-    assert {"vrixel.agent spec/spec", "vrixel.agent build/coder", "vrixel.agent build/reviewer"} <= names
-    coder = [s for s in spans if s.name == "vrixel.agent build/coder"]
-    assert {s.attributes["vrixel.task"] for s in coder} == {t["id"] for t in engine._state(fid)["tasks"]}
+    assert {"valxel.agent spec/spec", "valxel.agent build/coder", "valxel.agent build/reviewer"} <= names
+    coder = [s for s in spans if s.name == "valxel.agent build/coder"]
+    assert {s.attributes["valxel.task"] for s in coder} == {t["id"] for t in engine._state(fid)["tasks"]}
     rows = services.ledger.records(fid)
     assert all(r.trace_id for r in rows)  # every call belongs to a traced session
     sessions = v["agent_sessions"]
@@ -125,7 +125,7 @@ def test_full_content_adds_the_prompt_and_reply_for_general_lanes_only():
         name, capabilities = "generic", frozenset({"text"})
 
         def run(self, task):
-            from vrixel_sdlc.runtime import AgentResult
+            from valxel_sdlc.runtime import AgentResult
 
             return AgentResult(text="the reply", tokens=10, cost_usd=0.01)
 

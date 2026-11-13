@@ -9,11 +9,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from test_api import CLN_TEAMS, SECRET, sign_in, wait_idle
-from vrixel_sdlc import progress
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.engine import RAIL
-from vrixel_sdlc.notify import Notifier
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc import progress
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.engine import RAIL
+from valxel_sdlc.notify import Notifier
+from valxel_sdlc.web.auth import AuthConfig
 
 T0 = datetime(2026, 11, 1, 9, tzinfo=timezone.utc)
 
@@ -48,7 +48,7 @@ def test_the_expected_finish_counts_whats_left():
 
 def test_people_are_told_once_when_theyre_needed_and_watchers_at_staging(tmp_path):
     sent, posted = [], []
-    n = Notifier(tmp_path, base_url="https://vrixel.example", send_email=lambda *a: sent.append(a),
+    n = Notifier(tmp_path, base_url="https://valxel.example", send_email=lambda *a: sent.append(a),
                  post=posted.append)
     n.set("maria", ["acme-clinic/product-owners"], email="maria@example.com")
     n.set("raj", ["acme-clinic/architects"], email="raj@example.com")
@@ -58,7 +58,7 @@ def test_people_are_told_once_when_theyre_needed_and_watchers_at_staging(tmp_pat
     assert n.needed(item, "Walk-in intake") == []  # once
     to, subject, text = sent[0]
     assert to == "maria@example.com" and subject == "You're needed: G1 for CLN-FEAT-1 Walk-in intake"
-    assert "https://vrixel.example/features/CLN-FEAT-1" in text and "@maria" in posted[0]
+    assert "https://valxel.example/features/CLN-FEAT-1" in text and "@maria" in posted[0]
     n.watch("raj", "CLN-FEAT-1", True)
     n.set("raj", ["acme-clinic/architects"], staging=True)
     assert n.reached("CLN-FEAT-1", "Walk-in intake", "staging") == ["raj"]

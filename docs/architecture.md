@@ -9,7 +9,7 @@ gates, and each product's own governance repo sets the rules the tool must follo
 outside the dashed frame below belongs to the products or to third parties, and the tool reaches each
 through an interface with an offline stub, so the whole pipeline runs deterministically in tests.
 
-![Vrixel SDLC: people, production signals and GitHub webhooks enter its API; the engine runs the roadmap, feature pipeline and incident workflows, which use agents through the model gateway and act under the production policy through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, Jira or OpenProject, Lucid or draw.io, AWS and the Backstage catalog. It reads governance pinned per feature and deploys products, which send signals back.](architecture.svg)
+![Valxel SDLC: people, production signals and GitHub webhooks enter its API; the engine runs the roadmap, feature pipeline and incident workflows, which use agents through the model gateway and act under the production policy through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, Jira or OpenProject, Lucid or draw.io, AWS and the Backstage catalog. It reads governance pinned per feature and deploys products, which send signals back.](architecture.svg)
 
 The diagram is [architecture.svg](architecture.svg). [architecture.html](architecture.html) is the
 same page with the flows and rules laid out together: download it or serve the `docs/` folder

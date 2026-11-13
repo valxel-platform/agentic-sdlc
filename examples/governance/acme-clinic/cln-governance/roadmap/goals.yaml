@@ -1,5 +1,5 @@
 # Sample goals for the tool's demo and tests. A product's goals: outcomes for a period, each with
-# a measure (the sentence people read) and a metric (how the tool reads it: vrixel_sdlc.outcomes).
+# a measure (the sentence people read) and a metric (how the tool reads it: valxel_sdlc.outcomes).
 # Initiatives name the goal they serve; `parent` is reserved for a portfolio goal.
 goals:
   - id: GOAL-CLN-1

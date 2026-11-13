@@ -1,10 +1,10 @@
 """The Claude Code session keeps Claude Code's own prompt, reads settings from the repository
 only, and loads the installed plugins."""
 
-from vrixel_sdlc.config import RoleConfig
-from vrixel_sdlc.gateway import PromptLayers
-from vrixel_sdlc.runtime.base import AgentTask
-from vrixel_sdlc.runtime.claude_code import (
+from valxel_sdlc.config import RoleConfig
+from valxel_sdlc.gateway import PromptLayers
+from valxel_sdlc.runtime.base import AgentTask
+from valxel_sdlc.runtime.claude_code import (
     APPEND_LIMIT_BYTES,
     plugin_dirs_from,
     session_options,

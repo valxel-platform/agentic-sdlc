@@ -1,0 +1,42 @@
+# The alert rules every backend component gets, as OpenChoreo `observability-alert-rule` traits
+# that feed the incident flow.
+#
+# The Valxel SDLC adds them to each component before its first deployment, and adds any that are
+# missing later; it never removes or changes a rule someone tuned. OpenChoreo evaluates them in
+# every environment and notifies the environment's default notification channel, which the platform
+# points at the SDLC tool (/api/signals/openchoreo): in production a firing rule opens an incident,
+# elsewhere it shows at G6.
+#
+# Log queries are plain text found anywhere in a log line, so they work with every OpenChoreo logs
+# module (OpenSearch matches *text*, CloudWatch matches the raw line). The templates log JSON with
+# the exception under error.stack_trace (Java: Spring Boot's ECS format; Python: the templates'
+# JsonFormatter), so `stack_trace` marks a line that carries an exception. A plain-text stack
+# trace is split into one record per line and would be over-counted: keep logs in JSON.
+version: 1
+
+trait: observability-alert-rule
+
+# OpenChoreo component types the rules apply to: anything that runs code in the cluster.
+applies_to: ["deployment/*", "statefulset/*", "cronjob/*"]
+
+rules:
+  exceptions:
+    description: "More than 10 exceptions logged in 5 minutes."
+    severity: warning           # SEV3 in the SDLC tool
+    source: { type: log, query: "stack_trace" }
+    condition: { window: 5m, interval: 1m, operator: gt, threshold: 10 }
+    says: "The component is logging exceptions. Open its logs in OpenChoreo and follow trace.id to the failing request."
+
+  exception-surge:
+    description: "More than 100 exceptions logged in 5 minutes."
+    severity: critical          # SEV1 in the SDLC tool
+    source: { type: log, query: "stack_trace" }
+    condition: { window: 5m, interval: 1m, operator: gt, threshold: 100 }
+    says: "Exceptions on most requests: the component is failing. Check the latest release first."
+
+  memory:
+    description: "Memory above 90% of its limit for 5 minutes."
+    severity: warning
+    source: { type: metric, metric: memory_usage }
+    condition: { window: 5m, interval: 1m, operator: gt, threshold: 90 }
+    says: "The component is close to being killed for running out of memory."

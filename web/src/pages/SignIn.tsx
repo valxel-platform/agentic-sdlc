@@ -21,8 +21,8 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <div className="signin">
-      <section className="signin-art" aria-label="About Vrixel SDLC">
-        <div className="brand"><Mark size={32} /> Vrixel SDLC</div>
+      <section className="signin-art" aria-label="About Valxel SDLC">
+        <div className="brand"><Mark size={32} /> Valxel SDLC</div>
         <Line />
         <p>Agents carry each feature from intent to production. You clear the signals: every gate waits
           for the people your GitHub teams name.</p>
