@@ -5,7 +5,7 @@ documentation (ComponentType `parameters` and `environmentConfigs`, templates wi
 environment values in each ReleaseBinding); dry-run them on your installation before applying,
 since field names can differ between releases.
 
-- `component-types.yaml`: service, bff, web app and event worker. Each takes `replicas` and
+- `component-types.yaml`: service, bff, web app and event worker, and `agent`: an agent's pods hold no Kubernetes token, write only to /tmp, run non-root with no added privileges, reach only the product's LLM gateway, MCP servers, database and event brokers, and (PHI and payments) run under gVisor, set per data class by `isolation` in repos.yaml. Data planes running PHI or payments agents need the gVisor RuntimeClass installed (`gvisor`). Each takes `replicas` and
   `resources` per environment (set by the Vrixel SDLC from the product's runtime/capacity.yaml),
   spreads pods across zones, adds a disruption budget when 2 or more pods run, and sets health
   probes and graceful shutdown.

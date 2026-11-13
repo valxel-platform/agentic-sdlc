@@ -72,3 +72,130 @@ spec:
             matchLabels: ${metadata.podSelectors}
 # bff, web-app and event-worker: copy this type under their names, changing the defaults and, for the
 # event worker, the probes (it serves no HTTP traffic: probe its health port instead).
+---
+# A product's agent (repos.yaml role `agent`): the same deployment as a service, locked down. An agent
+# reads untrusted text (people's messages, documents, tool results), so its pod assumes it may be
+# talked into trying things: it holds no Kubernetes token, can't write outside /tmp, has no privileges
+# to gain, and reaches only the product's LLM gateway, MCP servers, database and event brokers. PHI
+# and payments agents run under gVisor (isolation: gvisor), their system calls served by a kernel of
+# their own. An agent never runs model-written code itself; that goes to a code-execution sandbox.
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterComponentType
+metadata:
+  name: agent
+spec:
+  workloadType: deployment
+  allowedTraits:
+    - { kind: ClusterTrait, name: autoscaler }
+    - { kind: ClusterTrait, name: observability-alert-rule }
+  # Set once, when the Vrixel SDLC registers the component (repos.yaml `isolation` per data class).
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        isolation: { type: string, enum: [standard, gvisor], default: standard }
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      properties:
+        replicas: { type: integer, minimum: 1, default: 1 }
+        resources:
+          type: object
+          properties:
+            requests:
+              type: object
+              properties:
+                cpu: { type: string, default: "500m" }
+                memory: { type: string, default: "512Mi" }
+            limits:
+              type: object
+              properties:
+                memory: { type: string, default: "512Mi" }
+        # The database and event brokers outside the cluster (the data plane's private subnets),
+        # set by the platform per environment.
+        egressCIDRs: { type: array, items: { type: string }, default: [] }
+  resources:
+    - id: deployment
+      template:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: ${metadata.name}
+        spec:
+          replicas: ${environmentConfigs.replicas}
+          strategy:
+            type: RollingUpdate
+            rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+          selector:
+            matchLabels: ${metadata.podSelectors}
+          template:
+            metadata:
+              labels: ${metadata.podSelectors}
+            spec:
+              automountServiceAccountToken: false        # no Kubernetes API from inside the agent
+              runtimeClassName: '${parameters.isolation == "gvisor" ? "gvisor" : null}'
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 10001
+                seccompProfile: { type: RuntimeDefault }
+              terminationGracePeriodSeconds: 60          # a run in flight checkpoints before it stops
+              topologySpreadConstraints:
+                - maxSkew: 1
+                  topologyKey: topology.kubernetes.io/zone
+                  whenUnsatisfiable: ScheduleAnyway
+                  labelSelector:
+                    matchLabels: ${metadata.podSelectors}
+              containers:
+                - name: main
+                  image: ${workload.containers.main.image}
+                  resources: ${environmentConfigs.resources}
+                  securityContext:
+                    readOnlyRootFilesystem: true
+                    allowPrivilegeEscalation: false
+                    capabilities: { drop: [ALL] }
+                  volumeMounts:
+                    - { name: tmp, mountPath: /tmp }
+                  readinessProbe: { httpGet: { path: /readyz, port: 8080 }, periodSeconds: 5 }
+                  livenessProbe: { httpGet: { path: /healthz, port: 8080 }, periodSeconds: 10, failureThreshold: 6 }
+              volumes:
+                - name: tmp
+                  emptyDir: { sizeLimit: 256Mi }
+    - id: egress
+      template:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: ${metadata.name}-egress
+        spec:
+          podSelector:
+            matchLabels: ${metadata.podSelectors}
+          policyTypes: [Egress]
+          egress:
+            # DNS
+            - to:
+                - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+                  podSelector: { matchLabels: { k8s-app: kube-dns } }
+              ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
+            # The product's MCP servers and its LLM gateway (every model call goes through it).
+            - to:
+                - namespaceSelector: {}
+                  podSelector:
+                    matchExpressions:
+                      - { key: vrixel.io/role, operator: In, values: [mcp-server, llm-gateway] }
+            # Traces and metrics to the data plane's OpenTelemetry collector.
+            - to:
+                - namespaceSelector: { matchLabels: { vrixel.io/plane: observability } }
+              ports: [{ protocol: TCP, port: 4317 }, { protocol: TCP, port: 4318 }]
+            # The database and event brokers.
+            - to: '${environmentConfigs.egressCIDRs.map(c, {"ipBlock": {"cidr": c}})}'
+    - id: pdb
+      includeWhen: ${environmentConfigs.replicas >= 2}
+      template:
+        apiVersion: policy/v1
+        kind: PodDisruptionBudget
+        metadata:
+          name: ${metadata.name}
+        spec:
+          maxUnavailable: 1
+          selector:
+            matchLabels: ${metadata.podSelectors}

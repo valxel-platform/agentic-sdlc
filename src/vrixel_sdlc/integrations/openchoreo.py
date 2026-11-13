@@ -49,7 +49,8 @@ class OpenChoreo(Protocol):
                     namespace: str | None = None) -> dict: ...  # the component's newest release, in env
     def unbind(self, *, component: str, env: str, project: str | None = None, namespace: str | None = None) -> None: ...
     def register_component(self, *, component: str, project: str | None, namespace: str | None,
-                           component_type: str, workflow: str | None, repo_url: str, branch: str) -> str: ...
+                           component_type: str, workflow: str | None, repo_url: str, branch: str,
+                           parameters: dict | None = None) -> str: ...  # the type's parameters, e.g. an agent's isolation
     # Adds the traits a component lacks (by instanceName); never changes or removes one. Returns
     # the instance names added.
     def ensure_traits(self, *, component: str, traits: list[dict], project: str | None = None,
@@ -141,12 +142,13 @@ class StubOpenChoreo:
         self._lock = threading.Lock()
 
     def register_component(self, *, component, project, namespace, component_type, workflow, repo_url,
-                           branch) -> str:
+                           branch, parameters=None) -> str:
         with self._lock:
             new = component not in self.components
             self.components.setdefault(component, {"project": project, "namespace": namespace,
                                                    "component_type": component_type, "workflow": workflow,
-                                                   "repo_url": repo_url, "branch": branch})
+                                                   "repo_url": repo_url, "branch": branch,
+                                                   "parameters": dict(parameters or {})})
         return "created" if new else "exists"
 
     def ensure_traits(self, *, component, traits, project=None, namespace=None) -> list[str]:
@@ -399,7 +401,7 @@ class OpenChoreoMcp:
 
     # -- components
     def register_component(self, *, component, project, namespace, component_type, workflow, repo_url,
-                           branch) -> str:
+                           branch, parameters=None) -> str:
         """Create the component if missing. The pipeline triggers builds itself (autoBuild off) and
         deploys through release bindings (autoDeploy off), so every change passes the gates."""
         scope = self._scope(component, project, namespace)
@@ -416,6 +418,7 @@ class OpenChoreoMcp:
             ("branch", "git_branch"): branch,
             ("auto_deploy", "autoDeploy"): False,
             ("auto_build", "autoBuild"): False,
+            **({("parameters", "component_parameters", "componentParameters"): dict(parameters)} if parameters else {}),
         })
         return "created"
 
