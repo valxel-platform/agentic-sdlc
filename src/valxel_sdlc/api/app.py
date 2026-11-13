@@ -256,9 +256,6 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
 
         pool = ConnectionPool(settings.database_url, max_size=10,
                               kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
-        from ..legacy import rename_in
-
-        rename_in(pool)  # tables from before the rename keep their data
         saver = PostgresSaver(pool)
         saver.setup()
         from ..integrations.catalog import PostgresCatalog

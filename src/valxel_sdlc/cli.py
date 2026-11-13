@@ -117,7 +117,6 @@ def _verify_changes(log=None) -> int:
         from psycopg_pool import ConnectionPool
 
         pool = ConnectionPool(url, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
-        _rename_legacy(pool)
         log = PostgresChangeLog(pool)
     out = verify(log.all())
     if out["ok"]:
@@ -163,7 +162,6 @@ def _eval(args: argparse.Namespace) -> int:
         from psycopg_pool import ConnectionPool
 
         pool = ConnectionPool(os.environ["DATABASE_URL"], max_size=2, kwargs={"autocommit": True, "row_factory": dict_row})
-        _rename_legacy(pool)
         cases = evals.PostgresEvalStore(pool).cases(product_id=args.product, phases=phases, data_classes=classes,
                                                      limit_per_phase=args.limit)
     if args.action == "export":
@@ -261,7 +259,6 @@ def _outcomes(args, services=None) -> int:
 
             pool = ConnectionPool(settings.database_url, max_size=2,
                                   kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
-            _rename_legacy(pool)
             services.readings = PostgresReadingStore(pool)
         elif args.action == "record":
             print("Recording needs the tool's database: set DATABASE_URL.", file=sys.stderr)
@@ -477,10 +474,3 @@ def _capacity(args) -> int:
     if not found:
         print("Production fits its stage: nothing to propose")
     return 0
-
-
-def _rename_legacy(pool) -> None:
-    """Tables from before the rename (vrixel_*) keep their data (valxel_sdlc.legacy)."""
-    from .legacy import rename_in
-
-    rename_in(pool)
