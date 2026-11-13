@@ -206,6 +206,19 @@ def give_identity(gh, repo: str, template: str, component: str, branch: str, fea
     return f"named {component} in {', '.join(changed)}" if changed else f"no file names {old}"
 
 
+# Files that belong to the template, not to the repos made from it: the templates are MIT licensed
+# by Valxel, and a product's code is its owner's, under whatever terms they choose.
+TEMPLATE_ONLY_FILES = ("LICENSE",)
+
+
+def drop_template_files(gh, repo: str, branch: str, feature_id: str) -> str:
+    """Remove the template's own license from a new repo."""
+    gone = [path for path in TEMPLATE_ONLY_FILES
+            if gh.delete_file(repo=repo, branch=branch, path=path,
+                              message=f"{feature_id}: the template's license is not the product's")]
+    return f"removed {', '.join(gone)}" if gone else "no template license to remove"
+
+
 def add_repo_to_manifest(text: str, repo: str, role: str) -> str:
     """Append a repo to product.yaml's `repos:` list, keeping the rest of the file as written."""
     if f"name: {repo}" in text:
@@ -253,6 +266,7 @@ class RepoProvisioner:
         if ok and p.get("template"):
             ok = step("identity", lambda: give_identity(gh, repo, p["template"], component_name(product, repo),
                                                         p["default_branch"], feature_id))
+            ok = ok and step("template_files", lambda: drop_template_files(gh, repo, p["default_branch"], feature_id))
         ok = ok and step("settings", lambda: gh.update_repo(repo=repo, merge=p["merge"], default_branch=p["default_branch"],
                                                             description=p["purpose"], features=p.get("features")))
         ok = ok and step("security", lambda: gh.enable_security(repo=repo, **p["security"]))
