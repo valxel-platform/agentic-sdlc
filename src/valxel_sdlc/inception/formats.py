@@ -75,6 +75,54 @@ CONTRACTS = {
         compliance, usability, maintainability, observability
 ## ADRs
 - ADR-<product id>-<n>: <decision> (alternatives: <what else was weighed>; consequences: <what follows>)
+## Context diagram            (the people and outside services, every component and every resource, and who calls whom)
+```mermaid
+flowchart LR
+  user(("<who uses it>"))
+  web["web"]
+  api["api"]
+  records[("records")]
+  user -->|"<what they do>"| web
+  web -->|"<call>"| api
+  api --> records
+```
+        node forms: id["label"], id[("label")] for a store, id(("label")) for a person; ids are the
+        component and resource names; outside services get a node too
+## Deployment diagram         (where each component runs: OpenChoreo's shared control plane, and the product's two data planes)
+```mermaid
+flowchart TB
+  subgraph cp["OpenChoreo control plane (shared)"]
+    choreo["OpenChoreo"]
+  end
+  subgraph nonprod["Non-production data plane: dev, staging"]
+    api_np["api"]
+    records_np[("records (pauses when idle)")]
+  end
+  subgraph prod["Production data plane"]
+    api_prod["api (scales on cpu)"]
+    records_prod[("records (Multi-AZ)")]
+  end
+  choreo --> api_np
+  choreo --> api_prod
+```
+        every component that runs (not libraries or the mobile app) in both data planes, with its resources;
+        subgraphs are not nested
+## Journey flows              (one sequence for each journey under Load, titled with its id, showing what happens when a step fails)
+```mermaid
+sequenceDiagram
+  title J1: <journey>
+  participant user
+  participant web
+  participant api
+  user->>web: <step>
+  web->>api: <call>
+  alt api is slow or down
+    web-->>user: <what people see, and what is kept>
+  else success
+    api-->>web: <result>
+  end
+```
+        participants are components, resources, or people and outside services from the context diagram
 ## Current state              (existing products only: what runs today)
 ## Gap                        (existing products only: what changes to reach this architecture)""",
     "roadmap": """# Roadmap: <name>

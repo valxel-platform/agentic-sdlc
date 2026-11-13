@@ -195,7 +195,7 @@ class DiagramRequest:
     feature_id: str
     title: str  # e.g. "FARM-FEAT-2 Offline crop log: architecture v1"
     mermaid: str
-    repo: str  # the provider repo whose feature branch receives drawio files
+    repo: str  # the provider repo whose feature branch receives drawio files; "" to commit nothing
     branch: str
     version: int
     settings: dict = field(default_factory=dict)  # the product's tools.diagrams block
@@ -218,6 +218,9 @@ class DrawioPublisher:
         if not fc.nodes:
             raise ValueError("the HLD's diagram has no nodes")
         xml = to_drawio(fc, req.title)
+        if not req.repo:  # nothing to commit to yet (a new product's inception): the editor link alone
+            return {"provider": self.provider, "title": req.title, "version": req.version,
+                    "url": drawio_editor_url(xml), "id": ""}
         folder = req.settings.get("path", "docs/architecture").strip("/")
         path = f"{folder}/{req.feature_id}.drawio"
         commit = self.github.put_file(repo=req.repo, branch=req.branch, path=path, content=xml,

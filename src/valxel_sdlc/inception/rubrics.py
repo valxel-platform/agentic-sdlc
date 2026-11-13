@@ -26,6 +26,9 @@ RUBRICS: dict[str, tuple[Item, ...]] = {
                          "why not"),
         Item("buildable", "A developer could start the first repo from this document without asking the architect"),
         Item("proportionate", "The design is no bigger than the brief's goals and budget need", must=False),
+        Item("diagrams", "The diagrams agree with the text: the context diagram's calls match the components' "
+                         "responsibilities, the deployment diagram matches the capacity and environment decisions, "
+                         "and each journey flow's failure path matches the Failure section", must=False),
     ),
     "roadmap": (
         Item("first", "The first initiative delivers something people can use end to end (for a new product, a "

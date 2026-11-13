@@ -322,6 +322,10 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-weight: 500;
 .md pre { background: var(--ground); padding: 10px 12px; border-radius: var(--r-s); overflow: auto; font-size: 13px; }
 .md code { font-size: 0.88em; background: var(--rule-soft); padding: 1px 4px; border-radius: 2px; }
 .md pre code { background: none; padding: 0; }
+.md .diagram { margin: 12px 0; max-width: none; }
+.md .diagram-svg { overflow-x: auto; background: var(--ground); border-radius: var(--r-s); padding: 12px; }
+.md .diagram-svg svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.md .diagram details { margin-top: 4px; }
 .md table { border-collapse: collapse; font-size: var(--fs-1); }
 .md th, .md td { border-bottom: 1px solid var(--rule-soft); padding: 5px 10px 5px 0; text-align: left; }
 

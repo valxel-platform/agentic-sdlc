@@ -116,6 +116,7 @@ def architecture(v: Vision, ctx: dict) -> str:
               "consequences: one relational store to back up and migrate)",
               f"- ADR-{pid}-2: one provider owns every record; clients reach it only through its API "
               "(alternatives: a database per client; consequences: one place for rules and audit)"]
+    lines += diagram_lines(comps)
     if dc in ("phi", "payments"):
         lines += ["", "## Audit", f"Every read or change of {dc} records is published to the product's audit topic (VX-15)."]
     if ctx.get("existing"):
@@ -179,3 +180,41 @@ def load_lines(comps: list[tuple[str, str, str]]) -> list[str]:
     lines.append("- records: recovery: automated backups with point-in-time recovery; Multi-AZ failover from the "
                  "growth stage")
     return lines
+
+
+def diagram_lines(comps: list[tuple[str, str, str]]) -> list[str]:
+    """The context, deployment and journey diagrams for the planned components: people reach the
+    front end, which calls the API (through the BFF and the agent when there are ones), which keeps
+    the records; event workers react to the API's events on Kafka."""
+    roles = {r: n for n, r, _ in comps}
+    front = roles.get("mobile") or roles.get("consumer")
+    path = [n for n in (front, roles.get("bff"), roles.get("agent"), "api") if n]
+    ctx = ["", "## Context diagram", "```mermaid", "flowchart LR", '  user(("People"))']
+    ctx += [f'  {n}["{n}"]' for n, _, _ in comps]
+    ctx += ['  records[("records")]']
+    ctx += ['  user -->|"use the product"| ' + path[0]] + [f"  {a} --> {b}" for a, b in zip(path, path[1:])]
+    ctx += ['  api -->|"reads and writes"| records']
+    if roles.get("event-worker"):
+        ctx += ['  kafka[("kafka")]', '  api -->|"events"| kafka', f"  kafka --> {roles['event-worker']}",
+                f"  {roles['event-worker']} --> api"]
+    ctx += ["```"]
+    running = [n for n, r, _ in comps if r not in ("library", "mobile")]
+    dep = ["", "## Deployment diagram", "```mermaid", "flowchart TB",
+           '  subgraph cp["OpenChoreo control plane (shared)"]', '    choreo["OpenChoreo"]', "  end",
+           '  subgraph nonprod["Non-production data plane: dev, staging"]',
+           *[f'    {n}_np["{n}"]' for n in running], '    records_np[("records (pauses when idle)")]', "  end",
+           '  subgraph prod["Production data plane"]',
+           *[f'    {n}_prod["{n} (scales on cpu)"]' for n in running], '    records_prod[("records (Multi-AZ)")]', "  end",
+           "  choreo --> api_np", "  choreo --> api_prod", "```"]
+    names = ["user", *path]
+    seq = ["", "## Journey flows", "```mermaid", "sequenceDiagram", "  title J1: Use the product"]
+    seq += [f"  participant {n}" for n in names + ["records"]]
+    seq += [f"  {a}->>{b}: request" for a, b in zip(names, names[1:])]
+    back = list(reversed(list(zip(names, names[1:]))))
+    seq += ["  api->>records: read and write", "  alt records are slow or down"]
+    seq += [f"    {b}-->>{a}: " + ("a message to try again in a minute, nothing typed is lost" if a == "user"
+                                  else "an error saying to try again") for a, b in back]
+    seq += ["  else success", "    records-->>api: the records"]
+    seq += [f"    {b}-->>{a}: result" for a, b in back]
+    seq += ["  end", "```"]
+    return ctx + dep + seq
