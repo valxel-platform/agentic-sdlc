@@ -269,3 +269,30 @@ def test_openchoreo_component_registration():
     assert oc.register_component(**args) == "exists"
     assert calls == [("vrixel", "cln", "cln-consent-registry-service", "deployment/service",
                       f"https://github.com/{NEW}", False)]
+
+
+def test_an_agent_is_registered_as_an_agent_with_its_isolation():
+    from vrixel_sdlc.integrations.openchoreo import StubOpenChoreo
+
+    oc = StubOpenChoreo()
+    oc.register_component(component="acme/cln-assist", project="cln", namespace=None, component_type="deployment/agent",
+                          workflow="docker", repo_url="https://github.com/acme/cln-assist", branch="main",
+                          parameters={"isolation": "gvisor"})
+    assert oc.components["acme/cln-assist"]["component_type"] == "deployment/agent"
+    assert oc.components["acme/cln-assist"]["parameters"] == {"isolation": "gvisor"}
+
+
+def test_the_platforms_agent_type_locks_the_pod_down():
+    from pathlib import Path
+
+    docs = list(yaml.safe_load_all((Path(__file__).resolve().parents[1] / "examples/governance/vrixel-tools/"
+                                    "sdlc-governance/platform/openchoreo/component-types.yaml").read_text()))
+    agent = next(d for d in docs if d["metadata"]["name"] == "agent")
+    res = {r["id"]: r["template"] for r in agent["spec"]["resources"]}
+    pod = res["deployment"]["spec"]["template"]["spec"]
+    main = pod["containers"][0]["securityContext"]
+    assert pod["automountServiceAccountToken"] is False and pod["securityContext"]["runAsNonRoot"] is True
+    assert main == {"readOnlyRootFilesystem": True, "allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}}
+    assert "gvisor" in pod["runtimeClassName"]
+    assert res["egress"]["kind"] == "NetworkPolicy" and res["egress"]["spec"]["policyTypes"] == ["Egress"]
+    assert agent["spec"]["parameters"]["openAPIV3Schema"]["properties"]["isolation"]["enum"] == ["standard", "gvisor"]

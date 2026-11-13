@@ -274,7 +274,8 @@ class RepoProvisioner:
             ok = step("openchoreo", lambda: self.openchoreo.register_component(
                 component=(rt.get("components") or {}).get(repo, repo), project=rt.get("openchoreo_project"),
                 namespace=rt.get("namespace"), component_type=oc["component_type"], workflow=oc.get("workflow"),
-                repo_url=f"https://github.com/{repo}", branch=p["default_branch"]))
+                repo_url=f"https://github.com/{repo}", branch=p["default_branch"],
+                parameters=component_parameters(oc, product.data_class)))
         pr = None
         if ok:
             def governance_pr():
@@ -297,3 +298,10 @@ class RepoProvisioner:
                 "required_checks": p["ruleset"]["required_checks"],
                 "required_approvals": p["ruleset"].get("required_approvals"),
                 "status": "provisioned" if ok else "failed"}
+
+
+def component_parameters(oc: dict, data_class: str) -> dict:
+    """The component type's parameters the role sets: for an agent, how isolated its pods run
+    (repos.yaml `isolation` per data class: gvisor for PHI and payments, standard otherwise)."""
+    iso = oc.get("isolation")
+    return {"isolation": iso.get(data_class, "standard")} if isinstance(iso, dict) else {}

@@ -125,7 +125,11 @@ roles:
   agent:
     template: vrixel-tools/template-agent
     required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR
-    openchoreo: { component_type: deployment/service, workflow: docker }  # needs Postgres and the LLM gateway
+    # Its own OpenChoreo type (platform/openchoreo/component-types.yaml): no Kubernetes token in the
+    # pod, a read-only file system, non-root with no added privileges, and network only to the
+    # product's LLM gateway, MCP servers, database and event brokers. PHI and payments agents also
+    # run under gVisor, a kernel of their own. It never runs model-written code itself.
+    openchoreo: { component_type: deployment/agent, workflow: docker, isolation: { phi: gvisor, payments: gvisor } }
   # The product's backend-for-frontend (Spring Cloud Gateway): browser sign-in with the product's
   # Keycloak realm, tokens kept server-side, the web app and its API on one origin. Its only
   # external endpoint for the web app (VX-17).
