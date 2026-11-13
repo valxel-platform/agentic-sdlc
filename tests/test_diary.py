@@ -1,8 +1,8 @@
 """Agents' notes for the gate: what they assumed, changed, traded off and left open."""
 
 from conftest import approve
-from vrixel_sdlc import diary
-from vrixel_sdlc.agents import formats, structured
+from valxel_sdlc import diary
+from valxel_sdlc.agents import formats, structured
 
 
 def test_notes_are_read_from_a_document_open_questions_first():

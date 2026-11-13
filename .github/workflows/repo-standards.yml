@@ -1,7 +1,7 @@
 # Keeps every managed repo on the standards in config/repos.yaml.
 # Daily: report drift (the run fails when a repo needs fixing). By hand: check or apply.
 # Needs the platform's GitHub App, installed in every org with administration rights:
-#   secrets VRIXEL_GITHUB_APP_ID and VRIXEL_GITHUB_APP_PRIVATE_KEY
+#   secrets VALXEL_GITHUB_APP_ID and VALXEL_GITHUB_APP_PRIVATE_KEY
 name: repo-standards
 on:
   schedule:
@@ -29,8 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      VRIXEL_GITHUB_APP_ID: ${{ secrets.VRIXEL_GITHUB_APP_ID }}
-      VRIXEL_GOVERNANCE_SOURCE: github
+      VALXEL_GITHUB_APP_ID: ${{ secrets.VALXEL_GITHUB_APP_ID }}
+      VALXEL_GOVERNANCE_SOURCE: github
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -39,15 +39,15 @@ jobs:
       - run: pip install -e ".[github]"
       - name: App key
         env:
-          KEY: ${{ secrets.VRIXEL_GITHUB_APP_PRIVATE_KEY }}
+          KEY: ${{ secrets.VALXEL_GITHUB_APP_PRIVATE_KEY }}
         run: |
-          if [ -z "$KEY" ] || [ -z "$VRIXEL_GITHUB_APP_ID" ]; then
-            echo "::error::Set the VRIXEL_GITHUB_APP_ID and VRIXEL_GITHUB_APP_PRIVATE_KEY secrets"
+          if [ -z "$KEY" ] || [ -z "$VALXEL_GITHUB_APP_ID" ]; then
+            echo "::error::Set the VALXEL_GITHUB_APP_ID and VALXEL_GITHUB_APP_PRIVATE_KEY secrets"
             exit 1
           fi
           key_file="$RUNNER_TEMP/app.pem"
           (umask 077 && printf '%s\n' "$KEY" > "$key_file")
-          echo "VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE=$key_file" >> "$GITHUB_ENV"
+          echo "VALXEL_GITHUB_APP_PRIVATE_KEY_FILE=$key_file" >> "$GITHUB_ENV"
       - name: ${{ inputs.action || 'check' }}
         env:
           ACTION: ${{ inputs.action || 'check' }}
@@ -57,7 +57,7 @@ jobs:
           args=(repos "$ACTION")
           if [ -n "$ONLY" ]; then args+=(--repo "$ONLY"); fi
           status=0
-          vrixel "${args[@]}" | tee standards.txt || status=$?
+          valxel "${args[@]}" | tee standards.txt || status=$?
           { echo '```'; cat standards.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - if: always()

@@ -13,14 +13,14 @@ import yaml
 from langgraph.checkpoint.memory import InMemorySaver
 from mcp.server import MCPServer
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.evaluators import run_checks
-from vrixel_sdlc.governance import GovernanceError
-from vrixel_sdlc.integrations.github import GitHubRest
-from vrixel_sdlc.integrations.mcp_client import McpHttp
-from vrixel_sdlc.integrations.openchoreo import OpenChoreoMcp
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.evaluators import run_checks
+from valxel_sdlc.governance import GovernanceError
+from valxel_sdlc.integrations.github import GitHubRest
+from valxel_sdlc.integrations.mcp_client import McpHttp
+from valxel_sdlc.integrations.openchoreo import OpenChoreoMcp
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 NEW = "acme-clinic/cln-consent-registry-service"
@@ -58,8 +58,8 @@ def start_new_service(eng, product="CLN", title="Consent registry"):
 
 def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
-    tpl = "vrixel-tools/template-service"
-    svc.github.files[(tpl, "main", ".vrixel/identity")] = "# files that carry the template's name\nworkload.yaml\nsrc/main/resources/application.yaml\nmissing.txt\n"
+    tpl = "valxel-tools/template-service"
+    svc.github.files[(tpl, "main", ".valxel/identity")] = "# files that carry the template's name\nworkload.yaml\nsrc/main/resources/application.yaml\nmissing.txt\n"
     svc.github.files[(tpl, "main", "workload.yaml")] = "metadata:\n  name: template-service\n"
     svc.github.files[(tpl, "main", "src/main/resources/application.yaml")] = "spring:\n  application:\n    name: template-service\n"
     seen = {}
@@ -71,12 +71,12 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     assert plan["ruleset"]["required_checks"] == ["unit", "contract", "CodeQL"]
 
     repo = svc.github.repos[NEW]
-    assert repo["created"]["template"] == "vrixel-tools/template-service" and not repo["created"]["private"]
+    assert repo["created"]["template"] == "valxel-tools/template-service" and not repo["created"]["private"]
     assert repo["security"]["secret_scanning"] and repo["security"]["push_protection"]
     assert repo["security"]["code_scanning_default_setup"]
     assert repo["teams"] == {"tech-leads": "maintain", "architects": "push", "security": "push",
                              "product-owners": "pull"}
-    assert repo["properties"]["vrixel_data_class"] == "phi" and "cln" in repo["topics"]
+    assert repo["properties"]["valxel_data_class"] == "phi" and "cln" in repo["topics"]
     assert repo["ruleset"]["branch"] == "main" and not repo["ruleset"]["code_owner_review"]
     codeowners = svc.github.files[(NEW, "main", ".github/CODEOWNERS")]
     assert "* @acme-clinic/tech-leads" in codeowners and "/src/phi/ @acme-clinic/security" in codeowners
@@ -86,7 +86,7 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     assert svc.github.files[(NEW, "main", "workload.yaml")] == f"metadata:\n  name: {short}\n"
     assert f"name: {short}" in svc.github.files[(NEW, "main", "src/main/resources/application.yaml")]
 
-    manifest = svc.github.files[("acme-clinic/cln-governance", "vrixel/CLN-FEAT-1-repos", "product.yaml")]
+    manifest = svc.github.files[("acme-clinic/cln-governance", "valxel/CLN-FEAT-1-repos", "product.yaml")]
     assert {"name": NEW, "role": "provider"} in yaml.safe_load(manifest)["repos"]
     (rec,) = v["new_repos"]
     assert rec["status"] == "provisioned" and rec["governance_pr"].startswith("https://github.com/acme-clinic/cln-governance/pull/")
@@ -124,7 +124,7 @@ def test_a_failed_step_goes_to_architects_and_retry_resumes(tmp_path, gov_root):
 def test_proposals_are_checked_against_the_standards(tmp_path, gov_root):
     eng, svc = make(tmp_path, gov_root)
     product = svc.snapshot("CLN").product
-    from vrixel_sdlc.provisioning import naming_policy
+    from valxel_sdlc.provisioning import naming_policy
 
     hld = "\n".join([
         "# HLD: x", "", "## ADRs", "- ADR-1: Extend the API", "- ADR-2: Create acme-clinic/cln-good-service because",
@@ -214,22 +214,22 @@ class Tokens:
 def test_github_admin_calls():
     api = FakeAdminApi()
     gh = GitHubRest(Tokens(), opener=api)
-    assert gh.create_repo(repo="o/cln-x-service", template="vrixel-tools/template-service", private=True,
+    assert gh.create_repo(repo="o/cln-x-service", template="valxel-tools/template-service", private=True,
                           description="d") == "created"
-    assert gh.create_repo(repo="o/cln-x-service", template="vrixel-tools/template-service", private=True,
+    assert gh.create_repo(repo="o/cln-x-service", template="valxel-tools/template-service", private=True,
                           description="d") == "exists"
     gh.update_repo(repo="o/cln-x-service", merge={"squash": True}, default_branch="main", description="d")
     gh.enable_security(repo="o/cln-x-service", secret_scanning=True, push_protection=True)
     gh.grant_team(org="o", team="tech-leads", repo="o/cln-x-service", permission="maintain")
-    gh.set_topics(repo="o/cln-x-service", topics=["vrixel"])
-    gh.set_properties(repo="o/cln-x-service", properties={"vrixel_managed": "true"})
-    spec = {"name": "vrixel-default-branch", "required_approvals": 2, "required_checks": ["unit", "CodeQL"],
+    gh.set_topics(repo="o/cln-x-service", topics=["valxel"])
+    gh.set_properties(repo="o/cln-x-service", properties={"valxel_managed": "true"})
+    spec = {"name": "valxel-default-branch", "required_approvals": 2, "required_checks": ["unit", "CodeQL"],
             "code_scanning_merge_protection": "high", "linear_history": True, "bypass_app_id": "12345"}
     gh.upsert_ruleset(repo="o/cln-x-service", branch="main", spec=spec)
     gh.upsert_ruleset(repo="o/cln-x-service", branch="main", spec=spec)
 
     calls = [(m, p) for m, p, _ in api.calls]
-    assert ("POST", "/repos/vrixel-tools/template-service/generate") in calls
+    assert ("POST", "/repos/valxel-tools/template-service/generate") in calls
     assert ("PUT", "/repos/o/cln-x-service/vulnerability-alerts") in calls
     assert ("PATCH", "/repos/o/cln-x-service/code-scanning/default-setup") in calls
     assert ("PUT", "/orgs/o/teams/tech-leads/repos/o/cln-x-service") in calls
@@ -262,12 +262,12 @@ def test_openchoreo_component_registration():
         calls.append((namespace_name, project_name, component_name, component_type, repository_url, auto_deploy))
         return {"name": component_name}
 
-    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
+    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="valxel")
     args = dict(component=NEW, project="cln", namespace=None, component_type="deployment/service",
                 workflow="docker", repo_url=f"https://github.com/{NEW}", branch="main")
     assert oc.register_component(**args) == "created"
     assert oc.register_component(**args) == "exists"
-    assert calls == [("vrixel", "cln", "cln-consent-registry-service", "deployment/service",
+    assert calls == [("valxel", "cln", "cln-consent-registry-service", "deployment/service",
                       f"https://github.com/{NEW}", False)]
 
 

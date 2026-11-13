@@ -11,12 +11,12 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: vrixel
-          POSTGRES_PASSWORD: vrixel
-          POSTGRES_DB: vrixel
+          POSTGRES_USER: valxel
+          POSTGRES_PASSWORD: valxel
+          POSTGRES_DB: valxel
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U vrixel -d vrixel" --health-interval 3s --health-timeout 3s --health-retries 20
+          --health-cmd "pg_isready -U valxel -d valxel" --health-interval 3s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
@@ -37,8 +37,8 @@ jobs:
           echo "KNOWLEDGE_WORK_PLUGINS=$RUNNER_TEMP/kwp" >> "$GITHUB_ENV"
       - run: pytest
         env:
-          VRIXEL_TEST_DATABASE_URL: postgresql://vrixel:vrixel@localhost:5432/vrixel
-      - run: vrixel demo --product CLN --fault spec=1 --revise
+          VALXEL_TEST_DATABASE_URL: postgresql://valxel:valxel@localhost:5432/valxel
+      - run: valxel demo --product CLN --fault spec=1 --revise
 
   image:
     runs-on: ubuntu-latest
@@ -47,39 +47,39 @@ jobs:
       - name: Build
         run: |
           ref=$(sed -n 's/^  ref: //p' config/plugins.yaml | head -1)
-          docker build --build-arg KNOWLEDGE_WORK_PLUGINS_REF="$ref" -t vrixel-sdlc:ci .
+          docker build --build-arg KNOWLEDGE_WORK_PLUGINS_REF="$ref" -t valxel-sdlc:ci .
       - name: No high or critical vulnerabilities in the image
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
-          image-ref: vrixel-sdlc:ci
+          image-ref: valxel-sdlc:ci
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
       - name: The image's SBOM
         uses: anchore/sbom-action@fffec3d851af758d56fee099cf3fbf8aa8779843 # v0.24.3
         with:
-          image: vrixel-sdlc:ci
+          image: valxel-sdlc:ci
           format: cyclonedx-json
-          artifact-name: vrixel-sdlc.cdx.json
+          artifact-name: valxel-sdlc.cdx.json
       - name: The image has every skill live mode needs, and the live extras
         run: |
-          docker run --rm vrixel-sdlc:ci python -c \
-            "import claude_agent_sdk, anthropic, httpx; from vrixel_sdlc.services import check_skills; check_skills(); print('skills ok')"
-          docker run --rm vrixel-sdlc:ci codex exec --help | grep -q -- --output-schema
-          # Agents' shell commands run in Claude Code's sandbox, which needs these (vrixel_sdlc.sandbox).
-          docker run --rm vrixel-sdlc:ci sh -c 'command -v bwrap && command -v socat && command -v git' 
+          docker run --rm valxel-sdlc:ci python -c \
+            "import claude_agent_sdk, anthropic, httpx; from valxel_sdlc.services import check_skills; check_skills(); print('skills ok')"
+          docker run --rm valxel-sdlc:ci codex exec --help | grep -q -- --output-schema
+          # Agents' shell commands run in Claude Code's sandbox, which needs these (valxel_sdlc.sandbox).
+          docker run --rm valxel-sdlc:ci sh -c 'command -v bwrap && command -v socat && command -v git' 
       - name: The image's plugins are the config's pin, and it can lay out another pin
         run: |
           ref=$(sed -n 's/^  ref: //p' config/plugins.yaml | head -1)
-          test "$(docker run --rm vrixel-sdlc:ci cat /opt/vrixel/plugins/REF)" = "$ref"
-          docker run --rm vrixel-sdlc:ci test -f /opt/vrixel/plugin-src/prepare.sh -a -d /opt/vrixel/plugin-src/vrixel
+          test "$(docker run --rm valxel-sdlc:ci cat /opt/valxel/plugins/REF)" = "$ref"
+          docker run --rm valxel-sdlc:ci test -f /opt/valxel/plugin-src/prepare.sh -a -d /opt/valxel/plugin-src/valxel
       - name: The plugins carry skills only, and Codex has them installed
         run: |
-          docker run --rm vrixel-sdlc:ci sh -c \
-            '! find /opt/vrixel/plugins \( -name .mcp.json -o -name .app.json -o -name hooks -o -name hooks.json \) | grep .'
-          docker run --rm vrixel-sdlc:ci sh -c \
-            'cp -R "$VRIXEL_CODEX_HOME" /tmp/h && CODEX_HOME=/tmp/h codex plugin list 2>/dev/null' \
-            | grep -E '^(product-management|engineering|design|vrixel)@vrixel-plugins .*installed, enabled' | wc -l | grep -qx 4
+          docker run --rm valxel-sdlc:ci sh -c \
+            '! find /opt/valxel/plugins \( -name .mcp.json -o -name .app.json -o -name hooks -o -name hooks.json \) | grep .'
+          docker run --rm valxel-sdlc:ci sh -c \
+            'cp -R "$VALXEL_CODEX_HOME" /tmp/h && CODEX_HOME=/tmp/h codex plugin list 2>/dev/null' \
+            | grep -E '^(product-management|engineering|design|valxel)@valxel-plugins .*installed, enabled' | wc -l | grep -qx 4
 
   web:
     runs-on: ubuntu-latest

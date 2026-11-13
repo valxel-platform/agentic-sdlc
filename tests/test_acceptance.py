@@ -10,12 +10,12 @@ import pytest
 import yaml
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc import acceptance
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.quality import SuiteResult
-from vrixel_sdlc.quality.sources import AcceptanceRuns, acceptance_result
-from vrixel_sdlc.services import build_services
+from valxel_sdlc import acceptance
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.quality import SuiteResult
+from valxel_sdlc.quality.sources import AcceptanceRuns, acceptance_result
+from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 ACC = "acme-farm/farm-acceptance"
@@ -55,7 +55,7 @@ def test_a_feature_across_repos_is_tested_end_to_end(engine, services):
     assert prs[ACC]["state"] == "merged"  # the acceptance tests merge with the change set, last
     assert ACC not in v["runs"]  # and are not built or deployed
 
-    runs = [d for d in services.github.dispatches if d["event_type"] == "vrixel-acceptance"]
+    runs = [d for d in services.github.dispatches if d["event_type"] == "valxel-acceptance"]
     # First against the change set's own environment, on the pull request head, before anything merges.
     assert [d["payload"]["stage"] for d in runs] == ["change_set", "dev", "staging"]
     pre = runs.pop(0)["payload"]
@@ -183,7 +183,7 @@ def test_suites_on_components_ignore_the_acceptance_repo(services):
 
 
 def test_a_design_across_repos_lists_the_acceptance_repo():
-    from vrixel_sdlc.evaluators.checks import _acceptance
+    from valxel_sdlc.evaluators.checks import _acceptance
     ctx = {"repos": [{"name": ACC, "role": "acceptance"}]}
     two = [{"name": "o/api", "role": "provider"}, {"name": "o/web", "role": "consumer"}]
     assert "list acme-farm/farm-acceptance (acceptance)" in _acceptance(two, ctx)[0]
@@ -192,7 +192,7 @@ def test_a_design_across_repos_lists_the_acceptance_repo():
 
 
 def test_the_review_command_lists_overlaps(tmp_path, capsys):
-    from vrixel_sdlc.cli import main
+    from valxel_sdlc.cli import main
 
     f = tmp_path / "catalog.json"
     f.write_text(json.dumps(CATALOG))

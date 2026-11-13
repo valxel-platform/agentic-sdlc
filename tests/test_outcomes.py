@@ -6,10 +6,10 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from vrixel_sdlc.governance.manifest import parse_manifest
-from vrixel_sdlc.outcomes import Metric, parse_metric, stub_from_measure
-from vrixel_sdlc.outcomes import read as outcomes
-from vrixel_sdlc.outcomes.sources import ManualSource, PostHogSource, PrometheusSource, SqlSource, select_problems
+from valxel_sdlc.governance.manifest import parse_manifest
+from valxel_sdlc.outcomes import Metric, parse_metric, stub_from_measure
+from valxel_sdlc.outcomes import read as outcomes
+from valxel_sdlc.outcomes.sources import ManualSource, PostHogSource, PrometheusSource, SqlSource, select_problems
 
 GOOD = ("SELECT avg(minutes) AS value, count(*) AS n FROM visits "
         "WHERE arrived_at >= :start AND arrived_at < :end")
@@ -69,8 +69,8 @@ def test_a_phi_rate_also_suppresses_its_numerator(services):
     assert not any("`k`" in p for p in select_problems(metric(), "phi"))  # an average isn't a rate
     outcomes.sources(services)
     services.metric_sources["sql"], _ = sql_source(["value", "n", "k"], [(0.02, 300, 6)])
-    from vrixel_sdlc.outcomes.read import suppress
-    from vrixel_sdlc.outcomes import Reading
+    from valxel_sdlc.outcomes.read import suppress
+    from valxel_sdlc.outcomes import Reading
 
     r = suppress(Reading("CLN", "G", "sql", "a", "b", "ok", value=0.02, n=300, k=6), "phi", 11)
     assert r.status == "suppressed" and r.value is None
@@ -130,10 +130,10 @@ def test_sql_reads_one_aggregate_read_only():
 
 def test_prometheus_answers_with_one_series():
     src = PrometheusSource()
-    assert src.check(metric("sum(increase(vrixel_alerts_sent_total[$window]))", "prometheus"), "phi") == []
-    assert src.check(metric("sum by (farm) (vrixel_alerts_sent_total)", "prometheus"), "general")
-    assert src.check(metric("rate(vrixel_alerts_sent_total[5m])", "prometheus"), "general")
-    assert src.check(metric("sum(vrixel_logins_total{user_id='1'})", "prometheus"), "general")
+    assert src.check(metric("sum(increase(valxel_alerts_sent_total[$window]))", "prometheus"), "phi") == []
+    assert src.check(metric("sum by (farm) (valxel_alerts_sent_total)", "prometheus"), "general")
+    assert src.check(metric("rate(valxel_alerts_sent_total[5m])", "prometheus"), "general")
+    assert src.check(metric("sum(valxel_logins_total{user_id='1'})", "prometheus"), "general")
     seen = {}
 
     def http(url, params, headers):
@@ -235,9 +235,9 @@ def test_a_number_typed_in_is_read_back(services):
 
 
 def test_inception_writes_measurable_goals(services):
-    from vrixel_sdlc.inception import Vision
-    from vrixel_sdlc.inception import setup
-    from vrixel_sdlc.inception.run import run
+    from valxel_sdlc.inception import Vision
+    from valxel_sdlc.inception import setup
+    from valxel_sdlc.inception.run import run
 
     v = Vision(name="Aqua Watch", org="acme-water", vision="Alert farm managers when fields run dry.",
                goals=["Fewer dry fields (measure: under 2 a month per farm)"], users=["Farm managers"], budget_usd=1500)
@@ -251,7 +251,7 @@ def test_inception_writes_measurable_goals(services):
 def test_the_command_checks_and_reads(services, capsys):
     from argparse import Namespace
 
-    from vrixel_sdlc.cli import _outcomes
+    from valxel_sdlc.cli import _outcomes
 
     base = dict(product="CLN", goal="", days=30, start="", end="", value=None, n=None, by="sunil", dry_run=True,
                 json=False)

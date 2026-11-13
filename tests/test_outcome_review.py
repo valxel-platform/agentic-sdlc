@@ -11,11 +11,11 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.outcomes import Reading, readouts as ro, review
-from vrixel_sdlc.roadmap import read_roadmap
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.outcomes import Reading, readouts as ro, review
+from valxel_sdlc.roadmap import read_roadmap
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 INI = """---
@@ -40,7 +40,7 @@ Patients check themselves in.
 
 - Kiosk check-in: patients scan a code at a kiosk
 """
-COUNCIL = "vrixel-tools/product-council"
+COUNCIL = "valxel-tools/product-council"
 
 
 def make(tmp_path, approved="2026-08-01", extra=""):
@@ -69,7 +69,7 @@ def gate(eng, rid):
 
 
 def written(svc, path="roadmap/initiatives/CLN-INI-1.md"):
-    return next(c for (repo, branch, p), c in svc.github.files.items() if p == path and branch.startswith("vrixel/cln-rev"))
+    return next(c for (repo, branch, p), c in svc.github.files.items() if p == path and branch.startswith("valxel/cln-rev"))
 
 
 def test_a_review_is_due_on_its_date_or_after_two_off_track_readings(tmp_path):
@@ -145,7 +145,7 @@ def test_stop_keeps_features_and_retires_only_the_ticked_ones(tmp_path, monkeypa
 
 def test_the_roadmap_shows_review_dates_and_reviews(tmp_path):
     eng, svc = make(tmp_path, extra="review_by: '2027-02-01'\n")
-    from vrixel_sdlc.roadmap.views import product_roadmap
+    from valxel_sdlc.roadmap.views import product_roadmap
 
     [i] = product_roadmap(eng, "CLN")["initiatives"]
     assert i["review_by"] == "2027-02-01" and i["reviews"] == []

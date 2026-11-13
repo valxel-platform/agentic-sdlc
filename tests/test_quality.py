@@ -7,15 +7,15 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.governance import GovernanceError
-from vrixel_sdlc.graph import InvalidDecision
-from vrixel_sdlc.quality import Finding, SuiteResult, effective_policy, evaluate, load_quality
-from vrixel_sdlc.quality.sources import (
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.governance import GovernanceError
+from valxel_sdlc.graph import InvalidDecision
+from valxel_sdlc.quality import Finding, SuiteResult, effective_policy, evaluate, load_quality
+from valxel_sdlc.quality.sources import (
     GitHubChecks, GitHubCodeScanning, GitHubDependencyReview, GitHubSecretScanning,
 )
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 CFG = load_quality(ROOT / "config" / "quality.yaml")

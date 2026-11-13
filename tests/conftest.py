@@ -1,9 +1,9 @@
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.services import build_services
 
 
 @pytest.fixture

@@ -49,7 +49,7 @@ roles:
 # provider to serve the Responses API (vLLM does).
 providers:
   openai:     { base_url: "https://api.openai.com/v1", api_key_env: OPENAI_API_KEY }
-  selfhosted: { base_url_env: VRIXEL_SELFHOSTED_URL, api_key_env: VRIXEL_SELFHOSTED_API_KEY }
+  selfhosted: { base_url_env: VALXEL_SELFHOSTED_URL, api_key_env: VALXEL_SELFHOSTED_API_KEY }
 
 # USD per million tokens (input, output, cached input) for models the tool has no built-in price
 # for. A role whose model has no price can't run in live mode, so budgets hold whichever vendor

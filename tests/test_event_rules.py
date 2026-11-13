@@ -1,10 +1,10 @@
 """VX-16: changes go to Kafka first; designs with event workers name their events, and the build
 publishes and applies them."""
 
-from vrixel_sdlc.agents.parse import parse_events, parse_affected_repos
-from vrixel_sdlc.evaluators.checks import run_checks
-from vrixel_sdlc.graph.phase import events_findings, events_instruction
-from vrixel_sdlc.repo_roles import REPO_ORDER
+from valxel_sdlc.agents.parse import parse_events, parse_affected_repos
+from valxel_sdlc.evaluators.checks import run_checks
+from valxel_sdlc.graph.phase import events_findings, events_instruction
+from valxel_sdlc.repo_roles import REPO_ORDER
 
 HLD = """# HLD: Consent capture
 
@@ -30,8 +30,8 @@ flowchart LR
 
 EVENTS = """
 ## Events
-- vrixel.consent.recorded.v1: published by cln-intake-api, applied by cln-consent-worker
-- vrixel.consent.withdrawn.v1: published by cln-intake-api, applied by cln-consent-worker
+- valxel.consent.recorded.v1: published by cln-intake-api, applied by cln-consent-worker
+- valxel.consent.withdrawn.v1: published by cln-intake-api, applied by cln-consent-worker
 """
 
 
@@ -46,7 +46,7 @@ def test_event_workers_are_a_role_that_merges_after_providers() -> None:
 
 
 def test_the_events_section_is_parsed() -> None:
-    assert [e["type"] for e in parse_events(EVENTS)] == ["vrixel.consent.recorded.v1", "vrixel.consent.withdrawn.v1"]
+    assert [e["type"] for e in parse_events(EVENTS)] == ["valxel.consent.recorded.v1", "valxel.consent.withdrawn.v1"]
     assert parse_events("## Events\n- consent recorded\n") == []
 
 
@@ -61,7 +61,7 @@ def test_designs_with_event_workers_must_name_their_events() -> None:
 def test_coders_publish_first_and_workers_apply_once() -> None:
     c = {"events": parse_events(EVENTS)}
     provider = events_instruction(c, {"role": "provider"})
-    assert "never write a database in the request" in provider and "vrixel.consent.recorded.v1" in provider
+    assert "never write a database in the request" in provider and "valxel.consent.recorded.v1" in provider
     worker = events_instruction(c, {"role": "event-worker"})
     assert "only moves forward" in worker and "InvalidEventException" in worker
     assert events_instruction(c, {"role": "consumer"}) == ""
@@ -71,9 +71,9 @@ def test_coders_publish_first_and_workers_apply_once() -> None:
 def test_the_build_must_publish_or_apply_what_the_design_names() -> None:
     c = {"events": parse_events(EVENTS)}
     worker = {"role": "event-worker", "repo": "o/w", "tests_passed": True}
-    ok = {"T1": {**worker, "summary": "Events: vrixel.consent.recorded.v1, vrixel.consent.withdrawn.v1"}}
-    half = {"T1": {**worker, "summary": "Events: vrixel.consent.recorded.v1"}}
+    ok = {"T1": {**worker, "summary": "Events: valxel.consent.recorded.v1, valxel.consent.withdrawn.v1"}}
+    half = {"T1": {**worker, "summary": "Events: valxel.consent.recorded.v1"}}
     web = {"T1": {"role": "consumer", "repo": "o/web", "tests_passed": True, "summary": ""}}
     assert events_findings(c, ok) == [] and events_findings(c, web) == [] and events_findings({}, half) == []
     assert events_findings(c, half) == [
-        "No task publishes or applies the events the HLD names: vrixel.consent.withdrawn.v1 (VX-16)"]
+        "No task publishes or applies the events the HLD names: valxel.consent.withdrawn.v1 (VX-16)"]

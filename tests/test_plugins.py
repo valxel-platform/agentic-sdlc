@@ -12,13 +12,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from vrixel_sdlc import plugins, strict
-from vrixel_sdlc.agents.context import load_skill
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.gateway.ledger import UsageRecord
-from vrixel_sdlc.plugins import PluginsConfig, load_plugins
-from vrixel_sdlc.runtime import claude_code, codex
-from vrixel_sdlc.telemetry import sessions
+from valxel_sdlc import plugins, strict
+from valxel_sdlc.agents.context import load_skill
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.gateway.ledger import UsageRecord
+from valxel_sdlc.plugins import PluginsConfig, load_plugins
+from valxel_sdlc.runtime import claude_code, codex
+from valxel_sdlc.telemetry import sessions
 
 ROOT = Path(__file__).resolve().parents[1]
 SHA_A, SHA_B = "a" * 40, "b" * 40
@@ -39,7 +39,7 @@ def test_a_pin_must_be_a_commit(tmp_path):
 
 
 def test_settings_carry_the_pin_and_the_skills_folder(monkeypatch, tmp_path):
-    monkeypatch.setenv("VRIXEL_SKILLS_DIR", str(tmp_path))
+    monkeypatch.setenv("VALXEL_SKILLS_DIR", str(tmp_path))
     s = load_settings()
     assert s.plugins.ref == load_plugins(ROOT / "config" / "plugins.yaml").ref
     assert s.skills_dir == str(tmp_path)
@@ -89,7 +89,7 @@ def test_a_config_that_moves_the_pin_gets_its_own_copy_once(tmp_path):
     assert out != str(installed) and plugins.installed_ref(out) == SHA_B
     assert "engineering at B" in (Path(out) / "engineering" / "skills" / "s" / "SKILL.md").read_text()
     assert not list(Path(out).rglob(".mcp.json"))  # laid out like the image's: skills only
-    assert (Path(out) / "vrixel").is_dir()
+    assert (Path(out) / "valxel").is_dir()
     assert plugins.skills_dir_for(moved, fetch=fetch, cache_root=tmp_path / "cache") == out
     assert calls == [("anthropics/knowledge-work-plugins", SHA_B)]  # fetched once
 
@@ -117,7 +117,7 @@ def test_the_phase_skills_come_from_the_configs_folder(tmp_path):
 
 
 def test_claude_code_gives_a_role_without_on_demand_no_plugins(tmp_path):
-    for p in ("engineering", "vrixel"):
+    for p in ("engineering", "valxel"):
         (tmp_path / p / "skills").mkdir(parents=True)
     settings = SimpleNamespace(skills_dir=str(tmp_path),
                                plugins=PluginsConfig(on_demand_roles={"critic": False}))
@@ -135,8 +135,8 @@ def test_claude_code_records_the_skills_a_session_invoked():
 
 def test_codex_sessions_record_skill_files_they_read():
     events = ('{"type":"item.completed","item":{"type":"command_execution","command":"cat /h/plugins/cache/'
-              'vrixel-plugins/design/1.0.0/skills/ux-copy/SKILL.md"}}\n'
-              '{"command":"cat /opt/vrixel/plugins/product-management/commands/brainstorm.md"}\n'
+              'valxel-plugins/design/1.0.0/skills/ux-copy/SKILL.md"}}\n'
+              '{"command":"cat /opt/valxel/plugins/product-management/commands/brainstorm.md"}\n'
               '{"command":"cat /repo/docs/skills/other/SKILL.md"}')
     assert plugins.skills_in_paths(events, codex.PLUGIN_NAMES) == {"design:ux-copy", "product-management:brainstorm"}
 
@@ -144,7 +144,7 @@ def test_codex_sessions_record_skill_files_they_read():
 def test_codex_leaves_the_template_plugins_out_when_off_or_pinned_elsewhere(tmp_path, monkeypatch):
     installed = tmp_path / "installed"
     installed.mkdir()
-    monkeypatch.setenv("VRIXEL_SKILLS_DIR", str(installed))
+    monkeypatch.setenv("VALXEL_SKILLS_DIR", str(installed))
 
     def rt(skills_dir, roles=None):
         s = SimpleNamespace(skills_dir=skills_dir, plugins=PluginsConfig(on_demand_roles=roles or {}))
@@ -174,7 +174,7 @@ def test_strict_mode_warns_when_the_image_and_the_config_disagree(tmp_path, monk
     (tmp_path / "REF").write_text(SHA_A)
     settings = replace(load_settings(), mode="live", skills_dir=str(tmp_path),
                        plugins=PluginsConfig(ref=SHA_B), registry={})
-    monkeypatch.setenv("VRIXEL_CONFIG_REPO", "o/c")
+    monkeypatch.setenv("VALXEL_CONFIG_REPO", "o/c")
     gaps = strict.known_gaps(SimpleNamespace(settings=settings, telemetry=SimpleNamespace(enabled=True)))
     assert any("plugins.yaml pins" in g for g in gaps)
     settings = replace(settings, plugins=PluginsConfig(ref=SHA_A))

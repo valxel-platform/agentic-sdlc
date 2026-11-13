@@ -2,11 +2,11 @@
 
 from pathlib import Path
 
-from vrixel_sdlc.agents.parse import parse_affected_repos, parse_new_repos
-from vrixel_sdlc.agents.templates import _flowchart
-from vrixel_sdlc.provisioning import check_proposal, effective_standards, load_standards, plan
-from vrixel_sdlc.quality import SuiteResult, effective_policy, evaluate, load_quality
-from vrixel_sdlc.repo_roles import REPO_ORDER, ROLES
+from valxel_sdlc.agents.parse import parse_affected_repos, parse_new_repos
+from valxel_sdlc.agents.templates import _flowchart
+from valxel_sdlc.provisioning import check_proposal, effective_standards, load_standards, plan
+from valxel_sdlc.quality import SuiteResult, effective_policy, evaluate, load_quality
+from valxel_sdlc.repo_roles import REPO_ORDER, ROLES
 
 ROOT = Path(__file__).resolve().parents[1]
 STD = load_standards(ROOT / "config" / "repos.yaml")
@@ -24,7 +24,7 @@ class Product:
 def test_every_role_has_a_template_and_checks():
     assert set(STD.roles) == set(ROLES)
     for role, spec in STD.roles.items():
-        assert spec["template"].startswith("vrixel-tools/template-"), role
+        assert spec["template"].startswith("valxel-tools/template-"), role
         assert "unit" in spec["required_checks"] and "CodeQL" in spec["required_checks"]
 
 
@@ -53,7 +53,7 @@ def test_new_agent_and_mcp_server_repos_are_planned_with_their_checks():
 
     standards = effective_standards(STD, "phi", None)
     agent = plan(Product, proposals[1], standards)
-    assert agent["template"] == "vrixel-tools/template-agent"
+    assert agent["template"] == "valxel-tools/template-agent"
     assert agent["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
     assert agent["ruleset"]["required_approvals"] == 0  # people approve at the gates, not in GitHub
     # Its own locked-down type, and gVisor for a PHI product (platform/openchoreo/component-types.yaml).
@@ -66,7 +66,7 @@ def test_new_agent_and_mcp_server_repos_are_planned_with_their_checks():
     assert component_parameters(plan(Product, proposals[0], standards)["openchoreo"], "phi") == {}
     assert "agent" in agent["topics"]
     mcp = plan(Product, proposals[0], standards)
-    assert mcp["template"] == "vrixel-tools/template-mcp-server"
+    assert mcp["template"] == "valxel-tools/template-mcp-server"
     assert mcp["ruleset"]["required_checks"] == ["unit", "CodeQL"]
 
 

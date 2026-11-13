@@ -6,8 +6,8 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi.testclient import TestClient
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.web.auth import AuthConfig, GitHubOAuth
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.web.auth import AuthConfig, GitHubOAuth
 
 SECRET = "x" * 40
 CLN_TEAMS = ["acme-clinic/product-owners", "acme-clinic/architects", "acme-clinic/design",
@@ -229,14 +229,14 @@ class FakeGitHub:
 
 def test_github_sign_in_flow(engine):
     cfg = AuthConfig(mode="github", secret=SECRET, client_id="cid", client_secret="cs",
-                     public_url="https://sdlc.vrixel.dev")
+                     public_url="https://sdlc.valxel.dev")
     fake = FakeGitHub()
     app = create_app(engine, auth=cfg, oauth=GitHubOAuth(cfg, opener=fake), web_dist=None)
-    with TestClient(app, base_url="https://sdlc.vrixel.dev") as client:
+    with TestClient(app, base_url="https://sdlc.valxel.dev") as client:
         assert client.post("/api/auth/dev-login", json={"login": "x"}).status_code == 404
         r = client.get("/api/auth/login", follow_redirects=False)
         q = parse_qs(urlparse(r.headers["location"]).query)
-        assert q["scope"] == ["read:org"] and q["redirect_uri"] == ["https://sdlc.vrixel.dev/api/auth/callback"]
+        assert q["scope"] == ["read:org"] and q["redirect_uri"] == ["https://sdlc.valxel.dev/api/auth/callback"]
 
         bad = client.get("/api/auth/callback?code=the-code&state=forged", follow_redirects=False)
         assert bad.status_code == 400  # state must match the cookie set at login
@@ -251,7 +251,7 @@ def test_github_sign_in_flow(engine):
 
 def test_tampered_session_cookies_are_rejected(client):
     sign_in(client, "maria", teams=CLN_TEAMS)
-    token = client.cookies.get("vrixel_session")
+    token = client.cookies.get("valxel_session")
     # Change the first character of the signature: the last one of a base64 string can carry
     # unused bits, so changing it doesn't always change the signature.
     payload, sig = token.rsplit(".", 1)
@@ -259,4 +259,4 @@ def test_tampered_session_cookies_are_rejected(client):
         # Replace the cookie outright: setting it again can add a second cookie for another
         # domain, and some httpx versions send the original one.
         client.cookies.clear()
-        assert client.get("/api/me", headers={"Cookie": f"vrixel_session={forged}"}).status_code == 401
+        assert client.get("/api/me", headers={"Cookie": f"valxel_session={forged}"}).status_code == 401

@@ -13,15 +13,15 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 from mcp.server import MCPServer
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.governance import GovernanceError
-from vrixel_sdlc.integrations.diagrams import (
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.governance import GovernanceError
+from valxel_sdlc.integrations.diagrams import (
     LucidPublisher, decode_editor_url, drawio_editor_url, parse_flowchart, to_drawio,
 )
-from vrixel_sdlc.integrations.mcp_client import McpHttp
-from vrixel_sdlc.integrations.worktracking import JiraTracker, OpenProjectTracker, StubTracker
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.integrations.mcp_client import McpHttp
+from valxel_sdlc.integrations.worktracking import JiraTracker, OpenProjectTracker, StubTracker
+from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 
@@ -144,7 +144,7 @@ def test_lucid_publisher_imports_mermaid_tags_and_shares_view_only(tmp_path, gov
     create = calls[0]
     assert create[1] == "FARM-FEAT-1 Offline crop log: architecture v1" and create[3] == "lucidchart"
     assert parse_flowchart(create[2]).nodes  # the HLD's mermaid, as written
-    assert ("tags", "d0c-1", ["vrixel", "FARM-FEAT-1"]) in calls
+    assert ("tags", "d0c-1", ["valxel", "FARM-FEAT-1"]) in calls
     assert ("share", "d0c-1", "view", True) in calls
 
 
@@ -270,7 +270,7 @@ def test_jira_over_the_atlassian_mcp_tools(tmp_path, gov_root):
     issues = store["issues"]
     epic = issues["FARM-1"]
     assert epic["type"] == "Epic" and epic["summary"] == "[FARM-FEAT-1] Offline crop log"
-    assert "vrixel-FARM-FEAT-1" in epic["labels"]
+    assert "valxel-FARM-FEAT-1" in epic["labels"]
     stories = [i for i in issues.values() if i["type"] == "Story"]
     assert len(stories) == 5 and all(s["parent"] == "FARM-1" for s in stories)  # 3 criteria, 2 NFRs
     subtasks = [i for i in issues.values() if i["type"] == "Sub-task"]

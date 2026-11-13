@@ -10,14 +10,14 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.cli import _verify_changes
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.ops import changes, incident as incident_mod, lookback
-from vrixel_sdlc.ops.signals import from_alertmanager
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.cli import _verify_changes
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.ops import changes, incident as incident_mod, lookback
+from valxel_sdlc.ops.signals import from_alertmanager
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 

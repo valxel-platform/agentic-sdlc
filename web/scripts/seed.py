@@ -1,6 +1,6 @@
 """Fill a local stub-mode server with features at different stages, for UI work and screenshots.
 
-    VRIXEL_AUTH=dev VRIXEL_SESSION_SECRET=dev uvicorn --factory vrixel_sdlc.api.app:create_app --port 8080
+    VALXEL_AUTH=dev VALXEL_SESSION_SECRET=dev uvicorn --factory valxel_sdlc.api.app:create_app --port 8080
     python web/scripts/seed.py [http://localhost:8080]
 
 Signs in as `demo` (a member of every example team), starts a handful of features and approves
@@ -15,7 +15,7 @@ import time
 import httpx
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8080").rstrip("/") + "/api"
-ORGS = ("acme-clinic", "acme-dental", "acme-farm", "acme-pay", "acme-shared", "acme-shop", "vrixel-tools")
+ORGS = ("acme-clinic", "acme-dental", "acme-farm", "acme-pay", "acme-shared", "acme-shop", "valxel-tools")
 TEAMS = ("architects", "design", "product-owners", "qa", "release-managers", "security", "tech-leads",
          "clinical-reviewers", "platform-owners", "platform")
 

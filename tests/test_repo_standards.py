@@ -1,5 +1,5 @@
-"""Every managed repo stays on the standards in config/repos.yaml: `vrixel repos check` reports
-drift, `vrixel repos apply` fixes what can be fixed."""
+"""Every managed repo stays on the standards in config/repos.yaml: `valxel repos check` reports
+drift, `valxel repos apply` fixes what can be fixed."""
 
 import json
 import re
@@ -10,11 +10,11 @@ from urllib.error import HTTPError
 
 import pytest
 
-from vrixel_sdlc import repo_standards as rs
-from vrixel_sdlc.cli import main
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.integrations.github import GitHubRest, StubGitHub, ruleset_body
-from vrixel_sdlc.services import build_services
+from valxel_sdlc import repo_standards as rs
+from valxel_sdlc.cli import main
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.integrations.github import GitHubRest, StubGitHub, ruleset_body
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = (".github/CODEOWNERS", ".github/dependabot.yml", "SECURITY.md")
@@ -48,11 +48,11 @@ def test_managed_repos_come_from_governance_the_registry_and_the_platform_list(s
     ts = {t.repo: t for t in rs.targets(svc)}
     assert ts["acme-clinic/cln-governance"].kind == "governance"
     assert ts["acme-clinic/cln-intake-api"].kind == "lane"
-    assert ts["vrixel-tools/template-service"].kind == "template" and ts["vrixel-tools/template-service"].plan["is_template"]
-    assert ts["vrixel-tools/agentic-sdlc"].plan["ruleset"]["required_checks"] == ["test", "web"]
-    assert ts["vrixel-tools/agentic-sdlc"].plan["visibility"] == "public"
+    assert ts["valxel-tools/template-service"].kind == "template" and ts["valxel-tools/template-service"].plan["is_template"]
+    assert ts["valxel-tools/agentic-sdlc"].plan["ruleset"]["required_checks"] == ["test", "web"]
+    assert ts["valxel-tools/agentic-sdlc"].plan["visibility"] == "public"
     assert all(t.plan["visibility"] == "public" for t in ts.values())  # every repo is public
-    assert ts["vrixel-tools/template-agent"].plan["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
+    assert ts["valxel-tools/template-agent"].plan["ruleset"]["required_checks"] == ["unit", "evals", "CodeQL"]
     gov = ts["acme-clinic/cln-governance"].plan
     assert gov["ruleset"]["required_checks"] == [] and gov["tag_ruleset"] == {}
     # No GitHub review: people approve in the pipeline's gates, and pull requests merge on checks.
@@ -69,9 +69,9 @@ def test_apply_brings_a_hand_made_repo_on_standard(svc):
     assert not before.ok
     items = {(d.area, d.item) for d in before.drift}
     assert ("settings", "delete_branch_on_merge") in items and ("settings", "allow_merge_commit") in items
-    assert ("settings", "has_wiki") in items and ("ruleset", "vrixel-default-branch") in items
-    assert ("tags", "vrixel-release-tags") in items and ("security", "secret_scanning") in items
-    assert ("properties", "vrixel_data_class") in items
+    assert ("settings", "has_wiki") in items and ("ruleset", "valxel-default-branch") in items
+    assert ("tags", "valxel-release-tags") in items and ("security", "secret_scanning") in items
+    assert ("properties", "valxel_data_class") in items
 
     after = rs.reconcile(gh, t, apply=True)
     assert after.ok and after.drift == [] and after.errors == []
@@ -79,24 +79,24 @@ def test_apply_brings_a_hand_made_repo_on_standard(svc):
     state = gh.repos[repo]["state"]
     assert state["delete_branch_on_merge"] is True and state["allow_auto_merge"] is True
     assert state["allow_merge_commit"] is False and state["has_wiki"] is False
-    branch = state["rulesets"]["vrixel-default-branch"]
+    branch = state["rulesets"]["valxel-default-branch"]
     rules = {r["type"]: r.get("parameters") for r in branch["rules"]}
     assert rules["pull_request"]["required_approving_review_count"] == 0  # pull requests only; checks decide
-    assert [c["context"] for c in rules["required_status_checks"]["required_status_checks"]] == ["unit", "contract", "CodeQL", "vrixel/gates"]
+    assert [c["context"] for c in rules["required_status_checks"]["required_status_checks"]] == ["unit", "contract", "CodeQL", "valxel/gates"]
     assert {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"} in branch["bypass_actors"]
-    assert gh.org_properties["acme-clinic"] == ["vrixel_data_class", "vrixel_managed", "vrixel_product"]
+    assert gh.org_properties["acme-clinic"] == ["valxel_data_class", "valxel_managed", "valxel_product"]
     assert rs.reconcile(gh, t, apply=True).applied == []  # nothing left to do: safe to repeat
 
 
 def test_without_advanced_security_codeql_is_not_required(svc):
     gh = StubGitHub()
-    repo = "vrixel-tools/template-service"
+    repo = "valxel-tools/template-service"
     existing(gh, repo, ghas=False)
     rep = rs.reconcile(gh, target(svc, repo), apply=True)
     assert rep.ok and rep.errors == []
     unavailable = {d.item for d in rep.drift if d.fix == "unavailable"}
     assert unavailable == {"secret_scanning", "push_protection", "code_scanning_default_setup"}
-    rules = {r["type"]: r.get("parameters") for r in gh.repos[repo]["state"]["rulesets"]["vrixel-default-branch"]["rules"]}
+    rules = {r["type"]: r.get("parameters") for r in gh.repos[repo]["state"]["rulesets"]["valxel-default-branch"]["rules"]}
     assert [c["context"] for c in rules["required_status_checks"]["required_status_checks"]] == ["unit", "contract"]
     assert "code_scanning" not in rules
     assert gh.repos[repo]["state"]["is_template"] is True
@@ -109,12 +109,12 @@ def test_drift_after_someone_changes_a_setting_is_reported_and_fixed(svc):
     t = target(svc, repo)
     rs.reconcile(gh, t, apply=True)
     gh.repos[repo]["state"]["delete_branch_on_merge"] = False  # someone turned it off
-    rules = gh.repos[repo]["state"]["rulesets"]["vrixel-default-branch"]["rules"]
+    rules = gh.repos[repo]["state"]["rulesets"]["valxel-default-branch"]["rules"]
     next(r for r in rules if r["type"] == "pull_request")["parameters"]["required_approving_review_count"] = 1
     rep = rs.reconcile(gh, t, apply=False)
     assert {(d.area, d.item, str(d.want)) for d in rep.drift if d.fix == "apply"} == {
         ("settings", "delete_branch_on_merge", "True"),
-        ("ruleset", "vrixel-default-branch", "pull_request.required_approving_review_count")}
+        ("ruleset", "valxel-default-branch", "pull_request.required_approving_review_count")}
     # Missing files are reported, never written: they come with a pull request.
     assert {d.item for d in rep.drift if d.fix == "manual"} == {".github/CODEOWNERS", "SECURITY.md"}
     assert rs.reconcile(gh, t, apply=True).ok
@@ -133,14 +133,14 @@ def test_what_is_never_changed_automatically(svc):
 
 def test_the_cli_reports_and_exits_nonzero_on_drift(svc, capsys, monkeypatch):
     gh = StubGitHub()
-    existing(gh, "vrixel-tools/sdlc-governance")
-    monkeypatch.setattr("vrixel_sdlc.cli.build_services", lambda settings: svc)
-    assert main(["repos", "check", "--repo", "vrixel-tools/sdlc-governance"], github=gh) == 1
+    existing(gh, "valxel-tools/sdlc-governance")
+    monkeypatch.setattr("valxel_sdlc.cli.build_services", lambda settings: svc)
+    assert main(["repos", "check", "--repo", "valxel-tools/sdlc-governance"], github=gh) == 1
     assert "settings.delete_branch_on_merge" in capsys.readouterr().out
-    assert main(["repos", "apply", "--repo", "vrixel-tools/sdlc-governance", "--json"], github=gh) == 0
+    assert main(["repos", "apply", "--repo", "valxel-tools/sdlc-governance", "--json"], github=gh) == 0
     [r] = json.loads(capsys.readouterr().out)
     assert r["ok"] and "ruleset" in r["applied"]
-    monkeypatch.delenv("VRIXEL_GITHUB_APP_ID", raising=False)
+    monkeypatch.delenv("VALXEL_GITHUB_APP_ID", raising=False)
     with pytest.raises(SystemExit, match="GitHub App"):
         main(["repos", "check"])
 
@@ -184,7 +184,7 @@ class FakeApi:
                 raise HTTPError(req.full_url, 403, "f", {}, BytesIO(b'{"message": "Advanced Security must be enabled"}'))
             return Resp(b'{"state": "configured"}')
         if path == f"{repo}/rulesets":
-            return Resp(b'[{"id": 7, "name": "vrixel-default-branch", "source_type": "Repository"},'
+            return Resp(b'[{"id": 7, "name": "valxel-default-branch", "source_type": "Repository"},'
                         b' {"id": 8, "name": "org-wide", "source_type": "Organization"}]')
         if path == f"{repo}/rulesets/7":
             body = ruleset_body({"required_checks": ["unit"], "admin_bypass": "pull_request"})
@@ -194,15 +194,15 @@ class FakeApi:
         if path == f"{repo}/teams":
             return Resp(b'[{"slug": "tech-leads", "permission": "maintain"}]')
         if path == f"{repo}/properties/values":
-            return Resp(b'[{"property_name": "vrixel_managed", "value": "true"}]')
+            return Resp(b'[{"property_name": "valxel_managed", "value": "true"}]')
         if path == f"{repo}/topics":
-            return Resp(b'{"names": ["vrixel"]}')
+            return Resp(b'{"names": ["valxel"]}')
         if path.startswith(f"{repo}/contents/"):
             if "SECURITY" in path:
                 raise HTTPError(req.full_url, 404, "nf", {}, BytesIO(b"{}"))
             return Resp(json.dumps({"content": "eA=="}).encode())
         if re.fullmatch(r"/orgs/o/properties/schema", path):
-            return Resp(b'[{"property_name": "vrixel_managed"}]')
+            return Resp(b'[{"property_name": "valxel_managed"}]')
         return Resp(b"{}")
 
 
@@ -218,14 +218,14 @@ def test_repo_state_reads_github():
     assert st["security"]["dependabot_alerts"] and st["security"]["dependabot_security_updates"]
     assert st["security"]["code_scanning_default_setup"] and not st["security"]["secret_scanning"]
     assert st["available"] == {"code_scanning": True, "secret_scanning": True, "rulesets": True}
-    assert list(st["rulesets"]) == ["vrixel-default-branch"]  # org rulesets are the org's business
-    assert st["teams"] == {"tech-leads": "maintain"} and st["topics"] == ["vrixel"]
+    assert list(st["rulesets"]) == ["valxel-default-branch"]  # org rulesets are the org's business
+    assert st["teams"] == {"tech-leads": "maintain"} and st["topics"] == ["valxel"]
     assert st["files"]["SECURITY.md"] is None and st["files"][".github/CODEOWNERS"] == "x"
     # GitHub's extra fields in a ruleset are not drift; what the standards set is compared.
     want = ruleset_body({"required_checks": ["unit"], "admin_bypass": "pull_request"})
-    assert rs._rules_differ(want, st["rulesets"]["vrixel-default-branch"]) == []
+    assert rs._rules_differ(want, st["rulesets"]["valxel-default-branch"]) == []
     assert rs._rules_differ(ruleset_body({"required_checks": ["unit", "contract"]}),
-                            st["rulesets"]["vrixel-default-branch"]) == [
+                            st["rulesets"]["valxel-default-branch"]) == [
         "required_status_checks.required_status_checks", "bypass"]
 
 
@@ -235,7 +235,7 @@ def test_repo_state_without_advanced_security_and_org_properties():
     st = gh.repo_state(repo="o/r")
     assert st["available"] == {"code_scanning": False, "secret_scanning": False, "rulesets": True}
     assert st["security"]["code_scanning_default_setup"] is False
-    gh.ensure_org_properties(org="o", names=["vrixel_managed", "vrixel_product"])
+    gh.ensure_org_properties(org="o", names=["valxel_managed", "valxel_product"])
     assert ("PATCH", "/orgs/o/properties/schema") in api.calls
     gh.enable_security(repo="o/r", secret_scanning=False, push_protection=False, code_scanning_default_setup=False,
                        dependabot_security_updates=True)
@@ -244,22 +244,22 @@ def test_repo_state_without_advanced_security_and_org_properties():
 
 
 def test_the_platform_app_keeps_its_merge_train_bypass_on_lane_repos(svc, monkeypatch):
-    monkeypatch.setenv("VRIXEL_GITHUB_APP_ID", "424242")
+    monkeypatch.setenv("VALXEL_GITHUB_APP_ID", "424242")
     gh = StubGitHub()
     existing(gh, "acme-clinic/cln-intake-api")
     existing(gh, "acme-clinic/cln-governance")
     for repo in ("acme-clinic/cln-intake-api", "acme-clinic/cln-governance"):
         rs.reconcile(gh, target(svc, repo), apply=True)
-    lane = gh.repos["acme-clinic/cln-intake-api"]["state"]["rulesets"]["vrixel-default-branch"]["bypass_actors"]
-    gov = gh.repos["acme-clinic/cln-governance"]["state"]["rulesets"]["vrixel-default-branch"]["bypass_actors"]
+    lane = gh.repos["acme-clinic/cln-intake-api"]["state"]["rulesets"]["valxel-default-branch"]["bypass_actors"]
+    gov = gh.repos["acme-clinic/cln-governance"]["state"]["rulesets"]["valxel-default-branch"]["bypass_actors"]
     assert {"actor_id": 424242, "actor_type": "Integration", "bypass_mode": "pull_request"} in lane
     assert all(a["actor_type"] != "Integration" for a in gov)  # governance changes are people's to merge
 
 
 def test_missing_app_permissions_are_named():
-    from vrixel_sdlc.governance.sources import missing_permissions
+    from valxel_sdlc.governance.sources import missing_permissions
 
-    from vrixel_sdlc.integrations.github import PROVISIONING_PERMISSIONS
+    from valxel_sdlc.integrations.github import PROVISIONING_PERMISSIONS
 
     granted = {"administration": "write", "contents": "write", "repository_custom_properties": "read",
                "metadata": "read"}
@@ -313,14 +313,14 @@ def test_codeowners_at_the_root_counts_and_public_repos_take_vulnerability_repor
 
 
 def test_lane_repos_require_the_gates_status_from_the_platform_app_only(svc, monkeypatch):
-    monkeypatch.setenv("VRIXEL_GITHUB_APP_ID", "4242")
+    monkeypatch.setenv("VALXEL_GITHUB_APP_ID", "4242")
     ts = {t.repo: t for t in rs.targets(svc)}
     lane = ts["acme-clinic/cln-intake-api"].plan["ruleset"]
-    assert lane["gates_check"] == "vrixel/gates"
+    assert lane["gates_check"] == "valxel/gates"
     rules = {r["type"]: r.get("parameters") for r in ruleset_body(lane)["rules"]}
-    assert {"context": "vrixel/gates", "integration_id": 4242} in rules["required_status_checks"]["required_status_checks"]
+    assert {"context": "valxel/gates", "integration_id": 4242} in rules["required_status_checks"]["required_status_checks"]
     # The pipeline doesn't deliver to governance, templates or the tool, so nothing would post it there.
-    for repo in ("acme-clinic/cln-governance", "vrixel-tools/template-service", "vrixel-tools/agentic-sdlc"):
+    for repo in ("acme-clinic/cln-governance", "valxel-tools/template-service", "valxel-tools/agentic-sdlc"):
         assert not ts[repo].plan["ruleset"]["gates_check"]
 
     # A ruleset whose gates check anyone could set is drift.
@@ -329,11 +329,11 @@ def test_lane_repos_require_the_gates_status_from_the_platform_app_only(svc, mon
     existing(gh, repo)
     t = ts[repo]
     rs.reconcile(gh, t, apply=True)
-    rules = gh.repos[repo]["state"]["rulesets"]["vrixel-default-branch"]["rules"]
+    rules = gh.repos[repo]["state"]["rulesets"]["valxel-default-branch"]["rules"]
     checks = next(r for r in rules if r["type"] == "required_status_checks")["parameters"]["required_status_checks"]
-    next(c for c in checks if c["context"] == "vrixel/gates").pop("integration_id")
+    next(c for c in checks if c["context"] == "valxel/gates").pop("integration_id")
     rep = rs.reconcile(gh, t, apply=False)
-    assert ("ruleset", "vrixel-default-branch") in {(d.area, d.item) for d in rep.drift}
+    assert ("ruleset", "valxel-default-branch") in {(d.area, d.item) for d in rep.drift}
 
 
 def test_a_dependency_graph_that_is_off_is_reported_for_a_person(svc):

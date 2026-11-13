@@ -8,7 +8,7 @@ COPY web ./
 RUN npm run build
 
 # Stage 2: the plugins whose skills the agents follow: Anthropic's Product Management, Engineering
-# and Design plugins (Apache 2.0) at a pinned commit, and ours (plugins/vrixel). The pin is config
+# and Design plugins (Apache 2.0) at a pinned commit, and ours (plugins/valxel). The pin is config
 # (config/plugins.yaml), so moving it goes through the config repo's evals; this default must name
 # the same commit (tests/test_plugins.py checks), and CI builds with the config's. CI also checks
 # that every skill the phases name is in them.
@@ -18,7 +18,7 @@ ADD --keep-git-dir=false https://github.com/anthropics/knowledge-work-plugins.gi
 COPY plugins /src/plugins
 # Skills and commands only: the plugins' connectors (.mcp.json) and hooks are left out. REF records
 # the commit, so the tool can tell when a config pins another one.
-RUN /src/plugins/prepare.sh /upstream /src/plugins/vrixel /plugins \
+RUN /src/plugins/prepare.sh /upstream /src/plugins/valxel /plugins \
  && echo "${KNOWLEDGE_WORK_PLUGINS_REF}" > /plugins/REF
 
 # Stage 3: OpenAI's Codex CLI, for roles that run on the codex runtime (models.yaml).
@@ -34,15 +34,15 @@ FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    VRIXEL_ROOT=/app \
-    VRIXEL_ARTIFACT_DIR=/data/artifacts \
-    VRIXEL_SKILLS_DIR=/opt/vrixel/plugins \
-    VRIXEL_PLUGIN_SRC=/opt/vrixel/plugin-src \
-    VRIXEL_CODEX_HOME=/opt/vrixel/codex-home
+    VALXEL_ROOT=/app \
+    VALXEL_ARTIFACT_DIR=/data/artifacts \
+    VALXEL_SKILLS_DIR=/opt/valxel/plugins \
+    VALXEL_PLUGIN_SRC=/opt/valxel/plugin-src \
+    VALXEL_CODEX_HOME=/opt/valxel/codex-home
 
 # Debian's security updates since the base image was built (the image scan in CI fails on high and
 # critical CVEs with a fix), and what Claude Code's sandbox needs on Linux: agents' shell commands
-# run inside bubblewrap, their network through socat (vrixel_sdlc.sandbox).
+# run inside bubblewrap, their network through socat (valxel_sdlc.sandbox).
 RUN apt-get update \
  && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends bubblewrap socat git \
@@ -56,22 +56,22 @@ RUN pip install --no-cache-dir --require-hashes --no-deps -r requirements.lock
 COPY src ./src
 RUN pip install --no-cache-dir --no-deps .
 COPY config ./config
-# Sample governance repos, used only when VRIXEL_GOVERNANCE_SOURCE=local.
+# Sample governance repos, used only when VALXEL_GOVERNANCE_SOURCE=local.
 COPY examples ./examples
 COPY --from=web /web/dist ./web/dist
-COPY --from=plugins /plugins /opt/vrixel/plugins
-# What lays out a copy at another pin (an eval run's or the canary's config): vrixel_sdlc.plugins.
-COPY plugins /opt/vrixel/plugin-src
+COPY --from=plugins /plugins /opt/valxel/plugins
+# What lays out a copy at another pin (an eval run's or the canary's config): valxel_sdlc.plugins.
+COPY plugins /opt/valxel/plugin-src
 COPY --from=codex /codex /usr/local/bin/codex
 # The same plugins, installed for Codex: each Codex session starts from a copy of this home.
-RUN export CODEX_HOME=/opt/vrixel/codex-home && mkdir -p "$CODEX_HOME" \
- && codex plugin marketplace add /opt/vrixel/plugins \
- && for p in product-management engineering design vrixel; do codex plugin add "$p@vrixel-plugins"; done \
+RUN export CODEX_HOME=/opt/valxel/codex-home && mkdir -p "$CODEX_HOME" \
+ && codex plugin marketplace add /opt/valxel/plugins \
+ && for p in product-management engineering design valxel; do codex plugin add "$p@valxel-plugins"; done \
  && find "$CODEX_HOME" -mindepth 1 -maxdepth 1 ! -name config.toml ! -name plugins -exec rm -rf {} + \
  && chmod -R a+rX "$CODEX_HOME"
 
-RUN useradd --create-home --uid 10001 vrixel && mkdir -p /data/artifacts && chown -R vrixel /data
-USER vrixel
+RUN useradd --create-home --uid 10001 valxel && mkdir -p /data/artifacts && chown -R valxel /data
+USER valxel
 
 EXPOSE 8080
-CMD ["uvicorn", "--factory", "vrixel_sdlc.api.app:create_app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "--factory", "valxel_sdlc.api.app:create_app", "--host", "0.0.0.0", "--port", "8080"]

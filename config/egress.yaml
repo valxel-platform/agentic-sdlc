@@ -1,4 +1,4 @@
-# Where an agent session's shell may connect (vrixel_sdlc.sandbox): Claude Code's sandbox lets
+# Where an agent session's shell may connect (valxel_sdlc.sandbox): Claude Code's sandbox lets
 # every Bash command reach only these domains. The session's own model calls are the runtime's,
 # not the shell's, and aren't listed here. Adding a registry is a config change, reviewed like any
 # other: keep it to package registries and GitHub.

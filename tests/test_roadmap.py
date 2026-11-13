@@ -7,14 +7,14 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.knowledge import render
-from vrixel_sdlc.roadmap import read_roadmap
-from vrixel_sdlc.roadmap.initiative import check_draft, parse_draft
-from vrixel_sdlc.roadmap.record import parse_initiative, parse_release
-from vrixel_sdlc.roadmap.views import product_roadmap
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.knowledge import render
+from valxel_sdlc.roadmap import read_roadmap
+from valxel_sdlc.roadmap.initiative import check_draft, parse_draft
+from valxel_sdlc.roadmap.record import parse_initiative, parse_release
+from valxel_sdlc.roadmap.views import product_roadmap
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUEST = ("Register walk-in patients at the front desk; Capture consent during registration; "
@@ -67,7 +67,7 @@ def test_an_initiative_is_drafted_checked_approved_at_g0_and_recorded_in_git(tmp
     eng.decide(iid, g0["interrupt_id"], {"decision": "approve", "approver": "maria-po"})
     v = eng.view(iid)
     assert v["status"] == "approved" and v["record_pr"]["url"]
-    pr = next(p for p in svc.github.prs.values() if p["branch"] == f"vrixel/{iid}")
+    pr = next(p for p in svc.github.prs.values() if p["branch"] == f"valxel/{iid}")
     record = parse_initiative(svc.github.files[("acme-clinic/cln-governance", pr["branch"], f"roadmap/initiatives/{iid}.md")])
     assert record["status"] == "approved" and record["goal"] == "GOAL-CLN-1" and record["budget_usd"] > 0
     assert len(record["candidates"]) == 3
@@ -80,14 +80,14 @@ def test_an_initiative_is_drafted_checked_approved_at_g0_and_recorded_in_git(tmp
 def test_a_new_goal_from_an_initiative_is_measurable(tmp_path, gov_root):
     import yaml
 
-    from vrixel_sdlc.outcomes import parse_metric
+    from valxel_sdlc.outcomes import parse_metric
 
     eng, svc = make(tmp_path, gov_root)
     path = gov_root / "acme-clinic" / "cln-governance" / "roadmap" / "goals.yaml"
     before = yaml.safe_load(path.read_text())["goals"]
     iid = approved_initiative(eng, title="Night shift handover", request="Hand over open tasks between night "
                               "and day nurses; Flag overdue handovers", product="CLN")
-    pr = next(p for p in svc.github.prs.values() if p["branch"] == f"vrixel/{iid}")
+    pr = next(p for p in svc.github.prs.values() if p["branch"] == f"valxel/{iid}")
     goals = yaml.safe_load(svc.github.files[("acme-clinic/cln-governance", pr["branch"], "roadmap/goals.yaml")])["goals"]
     assert [g["id"] for g in goals[: len(before)]] == [g["id"] for g in before]  # the existing goals are kept
     new = goals[-1]
@@ -117,7 +117,7 @@ def test_revise_and_drop_at_g0(tmp_path, gov_root):
     assert "Put the waiting queue" in v["content"] and v["status"] == "awaiting_approval"
     eng.decide(iid, gate(eng, iid, "g0")["interrupt_id"], {"decision": "abort", "approver": "po", "feedback": "not now"})
     assert eng.view(iid)["status"] == "dropped"
-    assert not [p for p in svc.github.prs.values() if p["branch"] == f"vrixel/{iid}"]
+    assert not [p for p in svc.github.prs.values() if p["branch"] == f"valxel/{iid}"]
 
 
 def test_initiative_checks():
@@ -206,9 +206,9 @@ def test_a_launch_group_ships_dark_and_turns_on_together(tmp_path, gov_root):
     eng.decide(rid, g["interrupt_id"], {"decision": "approve", "approver": "rm"})
     assert eng.view(rid)["status"] == "shipped"
     assert eng.view(a)["release"]["flag_on"] is True and eng.view(b)["release"]["flag_on"] is True
-    files = [p for (repo, br, p) in svc.github.files if br == f"vrixel/{rid}"]
+    files = [p for (repo, br, p) in svc.github.files if br == f"valxel/{rid}"]
     assert files == [f"roadmap/releases/{rid}.md"]
-    rec = parse_release(svc.github.files[("acme-farm/farm-governance", f"vrixel/{rid}", f"roadmap/releases/{rid}.md")])
+    rec = parse_release(svc.github.files[("acme-farm/farm-governance", f"valxel/{rid}", f"roadmap/releases/{rid}.md")])
     assert rec["status"] == "shipped" and rec["approved_by"] == "rm" and rec["features"] == [a, b]
 
 

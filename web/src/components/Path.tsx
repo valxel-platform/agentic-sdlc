@@ -77,7 +77,7 @@ export function NotifyPanel({ threadId, watching }: { threadId: string; watching
         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} onBlur={() => email !== p.email && save({ email })}
           placeholder="you@example.com" />
       </label>
-      {!p.channels.email && !p.channels.chat && <p className="small faint">No email or chat channel is set up yet: ask whoever runs the tool to set VRIXEL_SMTP_HOST or VRIXEL_NOTIFY_WEBHOOK.</p>}
+      {!p.channels.email && !p.channels.chat && <p className="small faint">No email or chat channel is set up yet: ask whoever runs the tool to set VALXEL_SMTP_HOST or VALXEL_NOTIFY_WEBHOOK.</p>}
       {p.channels.chat && <p className="small faint">Your team's chat channel is told too.</p>}
       {err && <p className="error-note small" role="alert">{err}</p>}
     </section>

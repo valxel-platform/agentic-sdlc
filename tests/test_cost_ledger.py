@@ -12,15 +12,15 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.finops import collect as fc
-from vrixel_sdlc.finops.ledger import FOCUS_COLUMNS, CostRecord, InMemoryCostLedger, focus_csv
-from vrixel_sdlc.finops.views import product_rollup
-from vrixel_sdlc.ops import cost
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.finops import collect as fc
+from valxel_sdlc.finops.ledger import FOCUS_COLUMNS, CostRecord, InMemoryCostLedger, focus_csv
+from valxel_sdlc.finops.views import product_rollup
+from valxel_sdlc.ops import cost
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 D0 = datetime(2026, 11, 2, tzinfo=timezone.utc)
@@ -45,11 +45,11 @@ def test_records_are_upserted_by_key_and_export_as_focus():
     rows = list(csv.DictReader(io.StringIO(focus_csv([rec("e", category="environment", basis="allocated", usd=3)]))))
     assert tuple(rows[0]) == FOCUS_COLUMNS
     assert rows[0]["BilledCost"] == "0.0" and rows[0]["EffectiveCost"] == "3.0"  # an allocation isn't billed
-    assert rows[0]["ProviderName"] == "OpenChoreo" and json.loads(rows[0]["Tags"]) == {"vrixel:product": "FARM"}
+    assert rows[0]["ProviderName"] == "OpenChoreo" and json.loads(rows[0]["Tags"]) == {"valxel:product": "FARM"}
 
 
 def test_ci_minutes_are_billed_per_job_rounded_up_by_runner():
-    from vrixel_sdlc.integrations.github import StubGitHub
+    from valxel_sdlc.integrations.github import StubGitHub
 
     gh = StubGitHub()
     at = "2026-11-02T10:00:00+00:00"
@@ -101,7 +101,7 @@ def test_aws_spend_follows_the_feature_tag_and_the_release():
 
 @pytest.fixture
 def engine(tmp_path, monkeypatch):
-    monkeypatch.setenv("VRIXEL_COST_RATES", json.dumps({"people_hour_usd": 120, "platform_monthly_usd": 3000}))
+    monkeypatch.setenv("VALXEL_COST_RATES", json.dumps({"people_hour_usd": 120, "platform_monthly_usd": 3000}))
     root = tmp_path / "governance"
     shutil.copytree(EXAMPLES, root)
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "artifacts",

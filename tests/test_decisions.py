@@ -7,9 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from test_api import CLN_TEAMS, SECRET, sign_in, wait_idle
-from vrixel_sdlc import decisions
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc import decisions
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.web.auth import AuthConfig
 
 DOC = """# Walk-in intake
 

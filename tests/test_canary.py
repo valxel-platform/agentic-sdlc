@@ -6,10 +6,10 @@ import shutil
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc import pilot
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.services import build_services, default_canary
+from valxel_sdlc import pilot
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.services import build_services, default_canary
 
 
 @pytest.fixture
@@ -24,9 +24,9 @@ def candidate(settings, tmp_path):
 
 
 def engine_with_canary(settings, monkeypatch, candidate, percent="50", classes="general"):
-    monkeypatch.setenv("VRIXEL_CANARY_CONFIG_DIR", str(candidate))
-    monkeypatch.setenv("VRIXEL_CANARY_PERCENT", percent)
-    monkeypatch.setenv("VRIXEL_CANARY_DATA_CLASSES", classes)
+    monkeypatch.setenv("VALXEL_CANARY_CONFIG_DIR", str(candidate))
+    monkeypatch.setenv("VALXEL_CANARY_PERCENT", percent)
+    monkeypatch.setenv("VALXEL_CANARY_DATA_CLASSES", classes)
     return FeatureEngine(build_services(settings), InMemorySaver())
 
 
@@ -64,16 +64,16 @@ def test_regulated_lanes_and_hotfixes_stay_on_the_config_in_use(settings, monkey
 
 
 def test_a_bad_canary_refuses_to_start(settings, monkeypatch, candidate):
-    monkeypatch.setenv("VRIXEL_CANARY_CONFIG_DIR", str(candidate))
-    monkeypatch.setenv("VRIXEL_CANARY_PERCENT", "60")
+    monkeypatch.setenv("VALXEL_CANARY_CONFIG_DIR", str(candidate))
+    monkeypatch.setenv("VALXEL_CANARY_PERCENT", "60")
     with pytest.raises(ValueError, match="at most 50"):
         default_canary(settings, None)
-    monkeypatch.setenv("VRIXEL_CANARY_PERCENT", "10")
+    monkeypatch.setenv("VALXEL_CANARY_PERCENT", "10")
     p = candidate / "models.yaml"
     p.write_text(p.read_text().replace("  release:    { runtime: generic,     model: anthropic/claude-sonnet-5-5 }\n", ""))
     with pytest.raises(ValueError, match="lacks roles release"):
         default_canary(settings, None)
-    monkeypatch.setenv("VRIXEL_CANARY_PERCENT", "0")
+    monkeypatch.setenv("VALXEL_CANARY_PERCENT", "0")
     assert default_canary(settings, None) is None
 
 
@@ -82,7 +82,7 @@ def test_canary_sessions_are_traced_under_the_candidates_config_version(settings
     from opentelemetry.sdk.trace.export import SimpleSpanProcessor
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-    from vrixel_sdlc.telemetry import Telemetry, TelemetryConfig
+    from valxel_sdlc.telemetry import Telemetry, TelemetryConfig
 
     eng = engine_with_canary(settings, monkeypatch, candidate, percent="50")
     exporter, provider = InMemorySpanExporter(), TracerProvider()
@@ -95,5 +95,5 @@ def test_canary_sessions_are_traced_under_the_candidates_config_version(settings
         eng.index.add(f"FARM-FEAT-{i}", "FARM", f"placeholder {i}", i)
     got = eng.create(product_id="FARM", title="Offline crop log")
     assert got == fid and eng.view(fid)["config_variant"] == "canary"
-    versions = {s.attributes["vrixel.config_version"] for s in exporter.get_finished_spans()}
+    versions = {s.attributes["valxel.config_version"] for s in exporter.get_finished_spans()}
     assert versions == {eng.services.canary.gateway.config_version}

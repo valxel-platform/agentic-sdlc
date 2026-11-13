@@ -9,14 +9,14 @@
 # Severities, lowest to highest: info, low, medium, high, critical.
 
 sources:
-  github-checks: vrixel_sdlc.quality.sources:GitHubChecks             # check runs and statuses by name
-  github-code-scanning: vrixel_sdlc.quality.sources:GitHubCodeScanning  # SARIF alerts (CodeQL, Semgrep, Trivy, Snyk, ...)
-  github-dependency-review: vrixel_sdlc.quality.sources:GitHubDependencyReview  # vulnerable dependencies a PR adds
-  new-dependencies: vrixel_sdlc.dependencies:NewDependencies                    # packages a PR adds: real, not brand new, licensed
-  github-secret-scanning: vrixel_sdlc.quality.sources:GitHubSecretScanning      # open secret alerts in the repo
-  openchoreo-workflow: vrixel_sdlc.quality.sources:OpenChoreoWorkflowTasks      # steps inside the OpenChoreo build
-  acceptance-runs: vrixel_sdlc.quality.sources:AcceptanceRuns                   # the product acceptance repo's run per feature
-  screen-scans: vrixel_sdlc.screens:ScreenScans                                 # axe and screenshots of the built screens
+  github-checks: valxel_sdlc.quality.sources:GitHubChecks             # check runs and statuses by name
+  github-code-scanning: valxel_sdlc.quality.sources:GitHubCodeScanning  # SARIF alerts (CodeQL, Semgrep, Trivy, Snyk, ...)
+  github-dependency-review: valxel_sdlc.quality.sources:GitHubDependencyReview  # vulnerable dependencies a PR adds
+  new-dependencies: valxel_sdlc.dependencies:NewDependencies                    # packages a PR adds: real, not brand new, licensed
+  github-secret-scanning: valxel_sdlc.quality.sources:GitHubSecretScanning      # open secret alerts in the repo
+  openchoreo-workflow: valxel_sdlc.quality.sources:OpenChoreoWorkflowTasks      # steps inside the OpenChoreo build
+  acceptance-runs: valxel_sdlc.quality.sources:AcceptanceRuns                   # the product acceptance repo's run per feature
+  screen-scans: valxel_sdlc.screens:ScreenScans                                 # axe and screenshots of the built screens
 
 # The recommended profile: a common industry baseline (OWASP SAMM / NIST SSDF practices, the
 # test pyramid). Tools in `match` are the defaults we suggest, not requirements.
@@ -53,7 +53,7 @@ suites:
     source: github-checks
     match: { checks: ["e2e*", "playwright*", "cypress*"] }
     required: true
-  # Product acceptance tests (vrixel_sdlc.acceptance): the feature end to end across the repos it
+  # Product acceptance tests (valxel_sdlc.acceptance): the feature end to end across the repos it
   # changes, run from the product's acceptance repo once the whole change set is deployed. For
   # change sets touching min_repos runtime repos or more, in products that have an acceptance repo.
   # Every acceptance criterion needs a passing test. budget_s: a run that takes longer is reported.
@@ -73,7 +73,7 @@ suites:
     required: true
     min_repos: 2
     budget_s: 900
-  # The built screens (vrixel_sdlc.screens): after the staging deploy, each screen the approved UX
+  # The built screens (valxel_sdlc.screens): after the staging deploy, each screen the approved UX
   # spec names is opened with the staging test account, scanned with axe at desktop and phone widths,
   # and screenshotted for G6. Serious and critical WCAG 2.1 AA violations block the release (VX-9).
   screens:
@@ -83,10 +83,10 @@ suites:
     applies_to: screens
     block_on: high              # axe 'serious' and 'critical'
     required: true
-  # Performance (vrixel_sdlc.performance): run only for the repositories whose change needs them,
+  # Performance (valxel_sdlc.performance): run only for the repositories whose change needs them,
   # by the tool's rules (a hot path, a migration, an upgrade: smoke; a contract change, a new event
   # handler, a design that adds traffic: full). Each repo's templates run them; the tool labels the
-  # PR (vrixel:perf-smoke, vrixel:perf-full) and asks for the staging run after deploying.
+  # PR (valxel:perf-smoke, valxel:perf-full) and asks for the staging run after deploying.
   perf-smoke:
     kind: test
     stage: pr

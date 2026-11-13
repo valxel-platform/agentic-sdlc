@@ -31,7 +31,7 @@ export function AgentSessions({ sessions, caption, traced }: { sessions: AgentSe
         </tbody>
       </table>
       {!anyLink && traced !== false && (
-        <p className="small muted">Traces aren't linked: set VRIXEL_OTEL_ENDPOINT and VRIXEL_TRACE_URL to open each session.</p>
+        <p className="small muted">Traces aren't linked: set VALXEL_OTEL_ENDPOINT and VALXEL_TRACE_URL to open each session.</p>
       )}
     </div>
   );

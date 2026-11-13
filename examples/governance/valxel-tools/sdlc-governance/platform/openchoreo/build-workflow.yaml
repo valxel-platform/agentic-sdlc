@@ -1,0 +1,86 @@
+# The platform's image build (OpenChoreo workflow plane, Argo Workflows). The Valxel SDLC triggers it
+# only for merge commits that passed the pipeline's gates (components are created with autoBuild off),
+# and reads its steps by name: scan-image (suite `container`), sbom, sign and attest-provenance (suite
+# `provenance`). A build missing any of them doesn't reach an environment.
+#
+#   build-image -> push (by digest) -> scan-image (fails on high or critical CVEs)
+#   -> sbom (CycloneDX) -> sign (cosign, the build system's KMS key) -> attest-provenance (SLSA v1,
+#      and the SBOM as an attestation, both signed with the same key)
+#
+# The signing key is an AWS KMS key only the workflow plane's service account may use
+# (awskms:///alias/valxel-build-signing); the data planes verify with its public key
+# (admission-policy.yaml). Dry-run on your installation first: written against OpenChoreo 1.x and
+# Argo Workflows 3.x documentation, not applied to a live install.
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterWorkflow
+metadata:
+  name: docker
+spec:
+  schema:
+    parameters:
+      repository: { type: string }
+      commit: { type: string }
+      image: { type: string }          # registry/repository, without a tag
+  runTemplate:
+    apiVersion: argoproj.io/v1alpha1
+    kind: Workflow
+    spec:
+      serviceAccountName: valxel-build    # IRSA role: push to the registry, use the signing key
+      entrypoint: build
+      arguments:
+        parameters:
+          - { name: repository, value: "${parameters.repository}" }
+          - { name: commit, value: "${parameters.commit}" }
+          - { name: image, value: "${parameters.image}" }
+      templates:
+        - name: build
+          steps:
+            - - { name: checkout, template: checkout }
+            - - { name: build-image, template: build-image }
+            - - { name: push, template: push }
+            - - { name: scan-image, template: scan-image }
+            - - { name: sbom, template: sbom }
+            - - { name: sign, template: sign }
+            - - { name: attest-provenance, template: attest-provenance }
+        - name: checkout
+          container:
+            image: alpine/git:2.47.2@sha256:REPLACE_WITH_DIGEST
+            command: [sh, -c]
+            args: ["git clone --depth 1 https://github.com/{{workflow.parameters.repository}} /work/src && cd /work/src && git fetch --depth 1 origin {{workflow.parameters.commit}} && git checkout {{workflow.parameters.commit}}"]
+        - name: build-image
+          container:
+            image: moby/buildkit:v0.23.2-rootless@sha256:REPLACE_WITH_DIGEST
+            command: [buildctl-daemonless.sh]
+            args: ["build", "--frontend", "dockerfile.v0", "--local", "context=/work/src", "--local", "dockerfile=/work/src",
+                   "--output", "type=oci,dest=/work/image.tar", "--opt", "build-arg:VCS_REF={{workflow.parameters.commit}}"]
+        - name: push
+          container:
+            image: gcr.io/go-containerregistry/crane:v0.20.6@sha256:REPLACE_WITH_DIGEST
+            command: [sh, -c]
+            # Everything after this step refers to the image by its digest, never a tag.
+            args: ["crane push /work/image.tar {{workflow.parameters.image}}:{{workflow.parameters.commit}} --image-refs /work/digest"]
+        - name: scan-image
+          container:
+            image: aquasec/trivy:0.65.0@sha256:REPLACE_WITH_DIGEST
+            command: [sh, -c]
+            args: ["trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed $(cat /work/digest)"]
+        - name: sbom
+          container:
+            image: anchore/syft:v1.30.0@sha256:REPLACE_WITH_DIGEST
+            command: [sh, -c]
+            args: ["syft $(cat /work/digest) -o cyclonedx-json=/work/sbom.cdx.json"]
+        - name: sign
+          container:
+            image: gcr.io/projectsigstore/cosign:v2.5.3@sha256:REPLACE_WITH_DIGEST
+            command: [sh, -c]
+            args: ["cosign sign --yes --key awskms:///alias/valxel-build-signing -a repo={{workflow.parameters.repository}} -a commit={{workflow.parameters.commit}} $(cat /work/digest)"]
+        - name: attest-provenance
+          container:
+            image: gcr.io/projectsigstore/cosign:v2.5.3@sha256:REPLACE_WITH_DIGEST
+            command: [sh, -c]
+            args:
+              - >-
+                printf '{"buildDefinition":{"buildType":"https://valxel.io/openchoreo-docker@v1","externalParameters":{"repository":"%s","commit":"%s"}},"runDetails":{"builder":{"id":"https://valxel.io/workflow-plane"}}}'
+                {{workflow.parameters.repository}} {{workflow.parameters.commit}} > /work/provenance.json
+                && cosign attest --yes --key awskms:///alias/valxel-build-signing --type slsaprovenance1 --predicate /work/provenance.json $(cat /work/digest)
+                && cosign attest --yes --key awskms:///alias/valxel-build-signing --type cyclonedx --predicate /work/sbom.cdx.json $(cat /work/digest)

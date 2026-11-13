@@ -1,6 +1,6 @@
 """Traceability: metrics -> goals -> criteria -> tasks -> PRs -> acceptance -> deployments, and back."""
 
-from vrixel_sdlc import traceability
+from valxel_sdlc import traceability
 
 PRD = """# PRD: x
 ## Goals
@@ -76,8 +76,8 @@ def test_the_engine_traces_a_released_feature(engine, client=None):
 def test_the_api_serves_the_trace_and_the_reverse_lookup(engine):
     from fastapi.testclient import TestClient
 
-    from vrixel_sdlc.api.app import create_app
-    from vrixel_sdlc.web.auth import AuthConfig
+    from valxel_sdlc.api.app import create_app
+    from valxel_sdlc.web.auth import AuthConfig
 
     fid = engine.start(product_id="FARM", title="Field notes")["feature_id"]
     engine.auto_drive(fid)

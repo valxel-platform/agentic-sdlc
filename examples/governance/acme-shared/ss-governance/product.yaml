@@ -1,4 +1,4 @@
-# Shared services governance manifest, read by the Vrixel SDLC tool.
+# Shared services governance manifest, read by the Valxel SDLC tool.
 # Shared services ship as versioned libraries and frameworks. They own no runtime: every
 # consuming product runs them in its own infrastructure, so this manifest declares no runtime.
 product_id: SS

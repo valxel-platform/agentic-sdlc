@@ -9,12 +9,12 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from vrixel_sdlc import traceability
-from vrixel_sdlc.agents.parse import parse_ac_goals, parse_acs, parse_cases, parse_nfrs
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.evaluators import checks
-from vrixel_sdlc.ops.changes import verify
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc import traceability
+from valxel_sdlc.agents.parse import parse_ac_goals, parse_acs, parse_cases, parse_nfrs
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.evaluators import checks
+from valxel_sdlc.ops.changes import verify
+from valxel_sdlc.web.auth import AuthConfig
 
 PRD = """# PRD: Crop log
 ## Goals
@@ -104,8 +104,8 @@ def test_test_cases_name_a_requirement_a_kind_and_a_checkable_test():
 # ---------------------------------------------------------------- tests on the branch
 
 def test_a_planned_test_missing_from_the_branch_goes_back_to_its_coder(engine, monkeypatch):
-    from vrixel_sdlc.agents import templates
-    from vrixel_sdlc.graph import phase
+    from valxel_sdlc.agents import templates
+    from valxel_sdlc.graph import phase
 
     real, calls = templates.stub_tests, {"n": 0}
 
@@ -196,7 +196,7 @@ def test_only_traceability_approvers_can_override_through_the_api(engine, blocke
 
 
 def test_a_hotfix_is_shown_its_gaps_but_not_held(engine, monkeypatch):
-    from vrixel_sdlc.graph.pipeline import release_traceability
+    from valxel_sdlc.graph.pipeline import release_traceability
 
     monkeypatch.setattr(traceability, "case_status", lambda *a: "pending")
     fid = engine.start(product_id="FARM", title="Offline crop log", description="x")["feature_id"]
@@ -210,7 +210,7 @@ def test_a_hotfix_is_shown_its_gaps_but_not_held(engine, monkeypatch):
 # ---------------------------------------------------------------- the tracker
 
 def test_the_tracker_is_reconciled_and_drift_warns_or_blocks(engine):
-    from vrixel_sdlc.graph.pipeline import release_traceability
+    from valxel_sdlc.graph.pipeline import release_traceability
 
     fid = engine.start(product_id="FARM", title="Offline crop log", description="x")["feature_id"]
     to_g6(engine, fid)
