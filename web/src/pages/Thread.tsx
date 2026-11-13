@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Md } from "../components/Md";
 import { api, ApiError, type InitiativeView, type PendingItem, type ReleaseView, type ReviewView } from "../api";
 import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
@@ -108,14 +107,14 @@ export function InitiativePage() {
         {!v.pending.some((p) => p.gate === "g0" && p.can_decide) && (
           <section className="panel" aria-labelledby="h-draft">
             <h2 id="h-draft" className="section-title">The initiative</h2>
-            <div className="md pad">{v.content ? <Markdown remarkPlugins={[remarkGfm]}>{v.content}</Markdown> : <p className="faint">The agent is drafting it.</p>}</div>
+            <div className="md pad">{v.content ? <Md>{v.content}</Md> : <p className="faint">The agent is drafting it.</p>}</div>
           </section>
         )}
         {v.research && (
           <section className="panel" aria-labelledby="h-research">
             <details>
               <summary><h2 id="h-research" className="section-title" style={{ display: "inline" }}>The research behind it</h2></summary>
-              <div className="md pad"><Markdown remarkPlugins={[remarkGfm]}>{v.research.split("\n").slice(1).join("\n")}</Markdown></div>
+              <div className="md pad"><Md>{v.research.split("\n").slice(1).join("\n")}</Md></div>
             </details>
           </section>
         )}
@@ -178,8 +177,8 @@ export function ReleasePage() {
         <section className="panel" aria-labelledby="h-notes">
           <h2 id="h-notes" className="section-title">Release notes and evidence</h2>
           <div className="md pad">
-            {v.notes ? <Markdown remarkPlugins={[remarkGfm]}>{v.notes}</Markdown> : <p className="faint">Written once every feature is ready.</p>}
-            {v.evidence && <><h3>Evidence</h3><Markdown remarkPlugins={[remarkGfm]}>{v.evidence}</Markdown></>}
+            {v.notes ? <Md>{v.notes}</Md> : <p className="faint">Written once every feature is ready.</p>}
+            {v.evidence && <><h3>Evidence</h3><Md>{v.evidence}</Md></>}
           </div>
         </section>
       </div>
@@ -229,7 +228,7 @@ export function ReviewPage() {
       {v.preview && (done || v.pending.every((p) => !p.can_decide)) && (
         <section className="panel" aria-labelledby="h-evidence">
           <h2 id="h-evidence" className="section-title">The evidence</h2>
-          <div className="pad md"><Markdown remarkPlugins={[remarkGfm]}>{v.preview}</Markdown></div>
+          <div className="pad md"><Md>{v.preview}</Md></div>
         </section>
       )}
     </>

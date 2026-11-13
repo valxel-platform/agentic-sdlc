@@ -471,6 +471,7 @@ export interface InceptionView extends Omit<ThreadBase, "kind"> {
   brief: string; architecture: string; roadmap: string;
   reports: Partial<Record<"brief" | "architecture" | "roadmap" | "research", InceptionReport>>;
   research?: string;
+  diagrams?: (Diagram & { diagram: "context" | "deployment" })[];  // published for the product gate
   setup: { product_id?: string; governance_repo?: string; steps?: InceptionSetupStep[]; ok?: boolean };
   council: string[];
 }

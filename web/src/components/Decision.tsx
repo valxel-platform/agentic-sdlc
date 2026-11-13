@@ -4,8 +4,7 @@ import { api, PROFILE_HELP, PROFILE_LABEL, type AgentNote, type AgentEvals, type
 import { CommentableDoc, DecisionBrief } from "./DecisionBrief";
 import { Mockups } from "./Mockups";
 import { ScreensBuilt } from "./ScreensBuilt";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Md } from "../components/Md";
 import { ACTION_LABEL, ARTIFACTS, GATES, HORIZONS, MODELS, PHASES, RISK, SEVERITY, gateLabel, money, threadPath } from "../vocab";
 import { ArtifactBody } from "./Artifact";
 import { QualityTable } from "./Quality";
@@ -342,7 +341,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
       {item.spec_preview && (
         <details open>
           <summary>The spec you approve with this design (express: no separate spec gate)</summary>
-          <div className="evidence md"><Markdown remarkPlugins={[remarkGfm]}>{item.spec_preview}</Markdown></div>
+          <div className="evidence md"><Md>{item.spec_preview}</Md></div>
         </details>
       )}
 
@@ -425,7 +424,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
             <dt>Features</dt><dd>{(item.features ?? []).map((f, n) => <span key={f}>{n > 0 && ", "}<Link to={threadPath(f)}>{f}</Link></span>)}</dd>
             {(item.dropped ?? []).length > 0 && (<><dt>Dropped</dt><dd>{item.dropped!.join(", ")} (stopped before the release)</dd></>)}
           </dl>
-          {item.evidence && (<><h3>Evidence</h3><div className="md small"><Markdown remarkPlugins={[remarkGfm]}>{item.evidence}</Markdown></div></>)}
+          {item.evidence && (<><h3>Evidence</h3><div className="md small"><Md>{item.evidence}</Md></div></>)}
         </div>
       )}
 
@@ -445,7 +444,7 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
           <h3 style={{ marginBottom: 8 }}>{item.gate === "g0" ? "Initiative draft" : item.gate === "incident" ? "Triage"
             : item.gate === "postmortem" ? "Postmortem" : item.gate === "brief" ? "Product brief"
             : item.gate === "product" ? "Product architecture and roadmap" : reviewGate ? "The evidence" : "Release notes"}</h3>
-          <div className="evidence md"><Markdown remarkPlugins={[remarkGfm]}>{item.preview}</Markdown></div>
+          <div className="evidence md"><Md>{item.preview}</Md></div>
         </div>
       )}
 

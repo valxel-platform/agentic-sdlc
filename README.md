@@ -1656,6 +1656,20 @@ If the change touches a lane whose data class doesn't allow the tool (a Farm app
 PHI shared-services lane, say), the diagram stays in the HLD and isn't published. A failed
 publish never fails the phase.
 
+**Product architecture diagrams.** In inception, the architect draws three Mermaid diagrams:
+a context diagram (people, outside services, every component and resource), a deployment
+diagram (OpenChoreo's shared control plane and the product's non-production and production data
+planes, with each running component in both), and a sequence for each Load journey with its
+failure path. The checks hold each one to the text. The two flowcharts are published for the
+product gate with the product's diagram tool, or for a new product with
+`inception.diagrams` in registry.yaml. Before setup a new product has no repo, so draw.io links
+open the editor, and setup commits the `.drawio` files to `architecture/diagrams/` in the
+governance repo.
+
+**Diagrams on the page.** Gate pages and documents draw every `mermaid` block (the HLD's
+diagram and flows, and the product architecture's diagrams) as a picture, with its source
+underneath. Mermaid runs in strict mode, so the agent-written source can't run scripts.
+
 **Work tracking.** After every step of a feature, the engine reconciles the product's Jira or
 OpenProject project with the feature.
 

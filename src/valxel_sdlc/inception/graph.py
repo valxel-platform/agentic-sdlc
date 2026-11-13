@@ -52,6 +52,7 @@ class InceptionState(TypedDict, total=False):
     feedback: Annotated[dict, merge_dict]  # doc -> what the gate asked to change
     status: Annotated[str, last]  # researching | drafting_brief | brief_gate | drafting_plan | product_gate | set_up | dropped
     gate_decisions: Annotated[list[dict], operator.add]
+    diagrams: Annotated[list[dict], operator.add]  # the architecture's published diagrams, each version
     events: Annotated[list[dict], operator.add]
     setup: Annotated[dict, last]
     cost_usd: Annotated[float, operator.add]
@@ -95,7 +96,7 @@ def build_inception_graph(services, checkpointer=None):
         report = (state.get("reports") or {})
         findings = [f for doc in extra.pop("docs") for f in (report.get(doc) or {}).get("findings", [])]
         packet = {"type": "gate", "gate": name, "kind": "inception", "phase": name, "feature_id": state["inception_id"],
-                  "product_id": PRODUCT_ID, "title": state["title"], "preview": preview[:20000], "findings": findings,
+                  "product_id": PRODUCT_ID, "title": state["title"], "preview": preview[:40000], "findings": findings,
                   "approvers": council(services), "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
                   "budget_usd": float((services.settings.inception or {}).get("budget_usd") or 0), "allowed": list(DECISIONS),
                   **extra}
@@ -130,6 +131,13 @@ def build_inception_graph(services, checkpointer=None):
                   "status": "product_gate", "feedback": {"plan": ""},
                   "events": [event("architecture", a.status, f"{a.attempts} attempt(s)", findings=a.findings)]}
         if a.status == "passed":
+            from . import diagrams
+
+            version = len({d.get("version") for d in state.get("diagrams") or []}) + 1
+            text, published, evs = diagrams.publish(services, v, state["brief"], a.text, version)
+            update |= {"architecture": text, "diagrams": published}
+            update["events"] += evs
+            a.text = text
             r = draft(services, v, "roadmap", brief=state["brief"], architecture=a.text, feedback=fb,
                       previous=state.get("roadmap", "") if fb else "")
             update |= {"roadmap": r.text, "reports": {"architecture": _report(a), "roadmap": _report(r)},

@@ -266,10 +266,11 @@ def parse_copy(ux: str) -> dict[str, list[str]]:
     return out
 
 
-def parse_sequences(hld: str) -> list[dict]:
-    """'## Flows': each mermaid sequenceDiagram: its title line, participants and whether it shows a failure."""
+def parse_sequences(hld: str, heading: str = "Flows") -> list[dict]:
+    """'## Flows' (or another section): each mermaid sequenceDiagram: its title line, participants
+    and whether it shows a failure."""
     out = []
-    for block in re.findall(r"```mermaid\n(.*?)\n```", section(hld, "Flows"), re.S):
+    for block in re.findall(r"```mermaid\n(.*?)\n```", section(hld, heading), re.S):
         lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
         if not lines or not lines[0].startswith("sequenceDiagram"):
             out.append({"ok": False, "participants": [], "failure": False, "title": ""})

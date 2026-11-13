@@ -3,6 +3,7 @@ each as a pull request, so the platform owners review the setup before it takes 
 
     <org>/<prefix>governance     product.yaml, constitution.md, context.md, CODEOWNERS,
                                  architecture/brief.md, architecture/product-architecture.md,
+                                 architecture/diagrams/*.drawio (draw.io products),
                                  roadmap/goals.yaml, roadmap/initiatives/<PID>-INI-<n>.md
     the tool's config repo       config/registry.yaml gains the product's line
 
@@ -195,6 +196,9 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
     except Exception:
         plat = {}
     files = governance_files(vision, brief, architecture, roadmap, approved_by, research, plat)
+    from .diagrams import drawio_files
+
+    files.update(drawio_files(services, vision, architecture))
 
     def step(name: str, fn) -> dict:
         try:

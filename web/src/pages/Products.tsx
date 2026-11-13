@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Md } from "../components/Md";
 import { api, ApiError, type InceptionReport, type InceptionSummary, type InceptionView, type Me, type Station } from "../api";
 import { useLive } from "../live";
 import { Rail } from "../components/Rail";
@@ -222,7 +221,7 @@ export function InceptionPage() {
         <div className="artifact-body" style={{ maxHeight: "none" }}>
           {tab !== "setup" && (
             docs[tab]
-              ? <><Report r={v.reports[tab as keyof typeof v.reports]} /><div className="md"><Markdown remarkPlugins={[remarkGfm]}>{docs[tab]}</Markdown></div></>
+              ? <><Report r={v.reports[tab as keyof typeof v.reports]} /><div className="md"><Md>{docs[tab]}</Md></div></>
               : <p className="muted" style={{ paddingTop: 12 }}>{tab === "research" ? "An agent is researching the problem and the market." : tab === "brief" ? "Agents are writing the brief." : "Written after the brief gate approves the brief."}</p>
           )}
           {tab === "setup" && (

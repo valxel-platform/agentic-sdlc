@@ -46,6 +46,9 @@ inception:
   starters: [valxel-platform/product-council]
   council: [valxel-platform/product-council]
   budget_usd: 50        # what agents may spend writing one product's three documents
+  # Where a new product's architecture diagrams are published for the product gate (an existing
+  # product uses its own tools.diagrams). drawio: an editor link now, .drawio files at setup.
+  diagrams: { provider: drawio }
 
 products:
   CLN: { kind: product, org: acme-clinic,             repo: cln-governance, ref: main, data_class: phi,      workspace: wrkspc-clinic }

@@ -49,7 +49,7 @@ def thread_view(engine, thread_id: str) -> dict:
     if kind == "inception":
         return out | {"vision": s.get("vision") or {}, "brief": s.get("brief", ""), "architecture": s.get("architecture", ""),
                       "roadmap": s.get("roadmap", ""), "reports": s.get("reports") or {}, "setup": s.get("setup") or {},
-                      "research": s.get("research", ""),
+                      "research": s.get("research", ""), "diagrams": s.get("diagrams") or [],
                       "council": list((engine.services.settings.inception or {}).get("council") or [])}
     if kind == "review":
         return out | {"initiative_id": s.get("initiative_id", ""), "why": s.get("why", ""), "preview": s.get("preview", ""),

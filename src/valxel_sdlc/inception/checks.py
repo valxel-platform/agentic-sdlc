@@ -97,7 +97,7 @@ def _scale(text: str) -> list[str]:
 
 
 def architecture(text: str, ctx: dict) -> list[str]:
-    out = _needs(text, ("Context", "Components", "Load", "Scaling", "Failure", "NFRs", "ADRs"))
+    out = _needs(text, ("Context", "Components", "Load", "Scaling", "Failure", "NFRs", "ADRs", *DIAGRAMS))
     if ctx.get("existing"):
         out += _needs(text, ("Current state", "Gap"))
     prefix, org = ctx.get("prefix", ""), ctx.get("org", "")
@@ -175,6 +175,94 @@ def architecture(text: str, ctx: dict) -> list[str]:
         out += p["findings"]
     if dc in ("phi", "payments") and not re.search(r"\baudit", text, re.I):
         out.append(f"{dc} data: say where the audit records go (constitution VX-15)")
+    out += diagrams(text, named, [r["name"] for r in parse_resources(text) if r.get("type")])
+    return out
+
+
+# ------------------------------------------------------------------------- architecture diagrams
+
+DIAGRAMS = ("Context diagram", "Deployment diagram", "Journey flows")
+NOT_DEPLOYED = ("library", "mobile")  # built and published, but nothing of theirs runs in a data plane
+OUTSIDE = ("user", "person", "people", "browser", "phone", "idp", "gateway", "kafka", "aws", "openchoreo")
+
+
+def _flowchart(body: str):
+    """The section's mermaid flowchart, parsed; empty unless it is one."""
+    from ..integrations.diagrams import Flowchart, extract_mermaid, parse_flowchart
+
+    source = extract_mermaid(body)
+    return parse_flowchart(source) if re.match(r"(flowchart|graph)\b", source) else Flowchart()
+
+
+def _named(name: str, text: str) -> bool:
+    """`name` as a whole word in `text` ('api' in 'api_prod' or 'api (scales)', not in 'api-admin')."""
+    return re.search(rf"(?<![a-z0-9-]){re.escape(name.lower())}(?![a-z0-9-])", text.lower()) is not None
+
+
+def diagrams(text: str, comps: list[dict], resources: list[str]) -> list[str]:
+    """The product gate reviews pictures, so each diagram must parse and agree with the text: the
+    context shows every component and resource, the deployment places each running component in both
+    data planes, and every Load journey has a flow with what happens when a step fails."""
+    from .. import capacity
+    from ..agents.parse import parse_sequences
+    from ..integrations.diagrams import extract_mermaid
+
+    out: list[str] = []
+    names = [c["name"] for c in comps]
+    seen = ""  # the context diagram's ids and labels: who may appear in a journey
+    if section(text, "Context diagram"):
+        fc = _flowchart(section(text, "Context diagram"))
+        if not fc.nodes:
+            out.append("Context diagram: write a mermaid flowchart with a node for each component and resource")
+        else:
+            seen = " ".join(f"{nid} {n['label']}" for nid, n in fc.nodes.items())
+            out += [f"Context diagram: doesn't show {n}" for n in names + resources if not _named(n, seen)]
+            if not fc.edges:
+                out.append("Context diagram: draw who calls whom (edges such as web --> api)")
+    if section(text, "Deployment diagram"):
+        fc = _flowchart(section(text, "Deployment diagram"))
+        planes: dict[str, str] = {}
+        for gid, label in fc.groups.items():
+            lab = f"{gid} {label}".lower()
+            kind = ("control" if "control plane" in lab else
+                    "nonprod" if re.search(r"non-?prod|pre-?prod|\bdev\b|staging", lab) else
+                    "prod" if "prod" in lab else "")
+            if kind:
+                planes[gid] = kind
+        if not fc.nodes:
+            out.append("Deployment diagram: write a mermaid flowchart with a subgraph for each data plane")
+        else:
+            kinds = set(planes.values())
+            if "control" not in kinds:
+                out.append("Deployment diagram: show OpenChoreo's shared control plane as a subgraph")
+            for kind, label in (("nonprod", "non-production (dev, staging)"), ("prod", "production")):
+                if kind not in kinds:
+                    out.append(f"Deployment diagram: no subgraph for the {label} data plane")
+                    continue
+                inside = " ".join(f"{nid} {n['label']}" for nid, n in fc.nodes.items() if planes.get(n["group"]) == kind)
+                out += [f"Deployment diagram: {c['name']} isn't in the {label} data plane" for c in comps
+                        if c["role"] not in NOT_DEPLOYED and not _named(c["name"], inside)]
+    if section(text, "Journey flows"):
+        seqs = parse_sequences(text, "Journey flows")
+        if re.search(r"(?m)^\s*[\w-]+\s*-[-)x>]*>?>?[+-]?\s*[\w-]+\s*:.*;", extract_mermaid(section(text, "Journey flows"))):
+            out.append("Journey flows: a message has ';', which ends the line in Mermaid; use a comma")
+        if not seqs or not all(s["ok"] for s in seqs):
+            out.append("Journey flows: write each journey as a mermaid sequenceDiagram")
+        else:
+            titles = {s["title"].split(":", 1)[0].strip(): s for s in seqs if s["title"]}
+            for j in capacity.journeys(text):
+                if j.get("id") and j["id"] not in titles:
+                    out.append(f"Journey flows: no sequence titled '{j['id']}: ...' for the journey {j['id']} under Load")
+            allowed = names + resources + list(OUTSIDE)
+            for s in seqs:
+                name = s["title"] or "a journey"
+                strangers = [p for p in s["participants"] if not any(_named(p, a) or _named(a, p) for a in allowed)
+                             and not (seen and _named(p, seen))]
+                if strangers:
+                    out.append(f"Journey flows ({name}): {', '.join(strangers)} isn't a component, a resource or a "
+                               "node of the context diagram")
+                if not s["failure"]:
+                    out.append(f"Journey flows ({name}): show what happens when a step fails (an 'alt' block)")
     return out
 
 
