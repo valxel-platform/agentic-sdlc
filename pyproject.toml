@@ -33,7 +33,6 @@ dev = ["pytest>=8", "httpx>=0.27", "pyjwt[crypto]>=2.8", "mcp>=1.10", "opentelem
 
 [project.scripts]
 valxel = "valxel_sdlc.cli:main"
-vrixel = "valxel_sdlc.cli:main"  # the name before the rename; remove with valxel_sdlc.legacy
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/valxel_sdlc"]
