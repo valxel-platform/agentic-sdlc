@@ -12,7 +12,7 @@ RUN npm run build
 # (config/plugins.yaml), so moving it goes through the config repo's evals; this default must name
 # the same commit (tests/test_plugins.py checks), and CI builds with the config's. CI also checks
 # that every skill the phases name is in them.
-FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f AS plugins
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS plugins
 ARG KNOWLEDGE_WORK_PLUGINS_REF=e605d8ddbfb688da57dfaaceebd93f12a64ef1d3
 ADD --keep-git-dir=false https://github.com/anthropics/knowledge-work-plugins.git#${KNOWLEDGE_WORK_PLUGINS_REF} /upstream
 COPY plugins /src/plugins
@@ -22,7 +22,7 @@ RUN /src/plugins/prepare.sh /upstream /src/plugins/valxel /plugins \
  && echo "${KNOWLEDGE_WORK_PLUGINS_REF}" > /plugins/REF
 
 # Stage 3: OpenAI's Codex CLI, for roles that run on the codex runtime (models.yaml).
-FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f AS codex
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS codex
 ARG CODEX_VERSION=0.167.0
 # The download must match this checksum (moving the version moves both, by pull request).
 ADD --checksum=sha256:9d64836106d5b374e90ee4454c7ebcde7ca7106558bd7e41a34b9f26ebda251a \
