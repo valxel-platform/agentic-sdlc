@@ -1,7 +1,7 @@
 {
   "name": "valxel-sdlc-web",
   "private": true,
-  "license": "Apache-2.0",
+  "license": "BUSL-1.1",
   "version": "0.2.0",
   "type": "module",
   "scripts": {
