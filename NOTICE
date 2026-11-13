@@ -1,6 +1,9 @@
 Valxel SDLC
 Copyright 2026 Valxel
 
+Licensed under the Business Source License 1.1 (see LICENSE); each version becomes
+available under the Apache License 2.0 three years after its release.
+
 This product includes software developed by Valxel (https://github.com/valxel-platform).
 
 The container image includes Anthropic's knowledge-work-plugins (Product Management, Engineering

@@ -2301,6 +2301,23 @@ tests/             pipeline, gateway, governance, API, Postgres durability
 
 ## License
 
-Valxel SDLC is licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).
-Contributions are accepted under the same license. The license gives no rights to the Valxel name
-or logo.
+Valxel SDLC is source-available under the [Business Source License 1.1](LICENSE). Each release
+becomes open source under the Apache License 2.0 three years after it is published. See
+[NOTICE](NOTICE).
+
+**Free to use in production** for individuals; for organizations with fewer than 250 people
+(employees and contractors, affiliates included) and under US$10M annual revenue; and for
+schools and nonprofits. Anyone may read, change and test the code, at any size. The one use the
+license never grants for free is offering Valxel to others as a hosted or managed service.
+Building your own software with it, including software for clients, is not that.
+
+**Larger organizations** need a commercial license for production use. It gives the same
+features at a published yearly price; there is no separate enterprise edition. Pricing and how to
+buy are coming soon; until then, open an issue to ask.
+
+Versions up to and including 0.1.0 (commit `dd8b60f` and earlier) were published under the
+Apache License 2.0 and remain under it.
+
+The method, templates and platform files in the other `valxel-platform` repositories are MIT
+licensed. Contributions are accepted under each repository's license. No license gives rights to
+the Valxel name or logo.
