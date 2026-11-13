@@ -46,7 +46,7 @@ defaults:
   # App identity, so "another person must approve" rules would only block them. A product that
   # wants GitHub reviews as well raises repo_standards.required_approvals.
   ruleset:
-    name: vrixel-default-branch
+    name: valxel-default-branch
     required_approvals: 0
     code_owner_review: false
     dismiss_stale_reviews: false
@@ -57,7 +57,7 @@ defaults:
     # the tool posts once every gate the change needs is approved (G1, G2, G3 or G4, and G5 for
     # high-risk and regulated changes). It is pinned to the platform's GitHub App, so nobody else
     # can set it: a pull request that didn't come through the pipeline needs an admin to merge it.
-    gates_check: vrixel/gates
+    gates_check: valxel/gates
     block_force_push: true
     block_deletion: true
     up_to_date_before_merge: false         # true makes every merge wait for a rebase; auto-merge handles it
@@ -65,65 +65,65 @@ defaults:
     # Repository admins may merge a pull request whose checks haven't passed (never push directly).
     admin_bypass: pull_request             # pull_request | always | none
   # Release tags (v1.2.3) can't be moved or deleted once pushed.
-  tag_ruleset: { name: vrixel-release-tags, pattern: "v*" }
+  tag_ruleset: { name: valxel-release-tags, pattern: "v*" }
   # Gate approver teams and the access they get on the new repo.
   team_access:
     g5: maintain        # tech leads
     g4: push            # architects
     security: push
     g2: pull            # product owners
-  topics: [vrixel, "{product}", "{role}"]
-  # Organization custom properties; an org-level ruleset can target vrixel_managed=true.
-  properties: { vrixel_managed: "true", vrixel_product: "{product}", vrixel_data_class: "{data_class}" }
+  topics: [valxel, "{product}", "{role}"]
+  # Organization custom properties; an org-level ruleset can target valxel_managed=true.
+  properties: { valxel_managed: "true", valxel_product: "{product}", valxel_data_class: "{data_class}" }
   # Files every repo carries; the reconciler reports any that are missing. CODEOWNERS may be in
   # .github/, the root or docs/ (wherever GitHub reads it).
   files: [.github/CODEOWNERS, .github/dependabot.yml, SECURITY.md]
 
-# Repos that belong to no lane but follow the same standards (`vrixel repos check`). Lane repos
+# Repos that belong to no lane but follow the same standards (`valxel repos check`). Lane repos
 # come from each governance manifest, and each product's governance repo from registry.yaml.
 #   kind: template    a golden-path template; marked as a template, checks of the role it serves
 #   kind: governance  reviewed by its owners (CODEOWNERS); no CI checks
 #   kind: tool        the tools org's own code
 platform_repos:
-  vrixel-tools/agentic-sdlc: { kind: tool, product: platform, required_checks: [test, web] }
-  vrixel-tools/sdlc-governance: { kind: governance, product: platform }
-  vrixel-tools/template-service: { kind: template, role: provider }
-  vrixel-tools/template-web: { kind: template, role: consumer }
-  vrixel-tools/template-library: { kind: template, role: library }
-  vrixel-tools/template-agent: { kind: template, role: agent }
-  vrixel-tools/template-mcp-server: { kind: template, role: mcp-server }
-  vrixel-tools/template-event-worker: { kind: template, role: event-worker }
-  vrixel-tools/template-acceptance: { kind: template, role: acceptance }
-  vrixel-tools/template-bff: { kind: template, role: bff }
-  vrixel-tools/template-mobile: { kind: template, role: mobile }
-  vrixel-tools/platform-security: { kind: tool, product: platform, required_checks: [test] }
+  valxel-platform/agentic-sdlc: { kind: tool, product: platform, required_checks: [test, web] }
+  valxel-platform/sdlc-governance: { kind: governance, product: platform }
+  valxel-platform/template-service: { kind: template, role: provider }
+  valxel-platform/template-web: { kind: template, role: consumer }
+  valxel-platform/template-library: { kind: template, role: library }
+  valxel-platform/template-agent: { kind: template, role: agent }
+  valxel-platform/template-mcp-server: { kind: template, role: mcp-server }
+  valxel-platform/template-event-worker: { kind: template, role: event-worker }
+  valxel-platform/template-acceptance: { kind: template, role: acceptance }
+  valxel-platform/template-bff: { kind: template, role: bff }
+  valxel-platform/template-mobile: { kind: template, role: mobile }
+  valxel-platform/platform-security: { kind: tool, product: platform, required_checks: [test] }
 
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in
-# vrixel-tools: Java 21 + Spring Boot (service and event worker), React + TypeScript (web), Java
+# valxel-platform: Java 21 + Spring Boot (service and event worker), React + TypeScript (web), Java
 # library, and Python for agentic work: a LangGraph workflow agent and an MCP server.
 roles:
   provider:
-    template: vrixel-tools/template-service
+    template: valxel-platform/template-service
     required_checks: [unit, contract, CodeQL]
     openchoreo: { component_type: deployment/service, workflow: docker }
   consumer:
-    template: vrixel-tools/template-web
+    template: valxel-platform/template-web
     required_checks: [unit, contract, CodeQL]
     openchoreo: { component_type: deployment/web-app, workflow: docker }
   # Keeps a data store from the product's events (VX-16): Kafka in, Postgres or an index out.
   event-worker:
-    template: vrixel-tools/template-event-worker
+    template: valxel-platform/template-event-worker
     required_checks: [unit, CodeQL]          # unit runs the integration tests (Postgres and Kafka in containers)
     # No public endpoint, only health and metrics. If your OpenChoreo has no worker type, define one
     # (a Deployment with no Endpoint) or use deployment/service.
     openchoreo: { component_type: deployment/worker, workflow: docker }
   mcp-server:
-    template: vrixel-tools/template-mcp-server
+    template: valxel-platform/template-mcp-server
     required_checks: [unit, CodeQL]
     openchoreo: { component_type: deployment/service, workflow: docker }
   agent:
-    template: vrixel-tools/template-agent
+    template: valxel-platform/template-agent
     required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR
     # Its own OpenChoreo type (platform/openchoreo/component-types.yaml): no Kubernetes token in the
     # pod, a read-only file system, non-root with no added privileges, and network only to the
@@ -134,16 +134,16 @@ roles:
   # Keycloak realm, tokens kept server-side, the web app and its API on one origin. Its only
   # external endpoint for the web app (VX-17).
   bff:
-    template: vrixel-tools/template-bff
+    template: valxel-platform/template-bff
     required_checks: [unit, CodeQL]          # unit runs the sign-in flow against a fake realm and Redis
     openchoreo: { component_type: deployment/service, workflow: docker }
   # An iOS and Android app (React Native, Expo; offline-first). Not deployed: each stage asks the
   # repo's release workflow to build it (test builds and Maestro in dev and staging, TestFlight and
   # Play's internal track in staging, the stores in production), then the Play rollout widens
-  # step by step, each step after min_hours and a crash-free check (vrixel_sdlc.store). It calls
+  # step by step, each step after min_hours and a crash-free check (valxel_sdlc.store). It calls
   # the product's API through the BFF's /mobile route.
   mobile:
-    template: vrixel-tools/template-mobile
+    template: valxel-platform/template-mobile
     required_checks: [unit, contract, CodeQL]
     openchoreo: null
     rollout: { steps: [0.1, 0.5, 1.0], min_hours: 24, step_timeout_hours: 96, recheck_hours: 6 }
@@ -151,11 +151,11 @@ roles:
   # tests for every feature, browser tests when a web app changes. One per product; not deployed:
   # the pipeline runs it against each environment after the change set is deployed.
   acceptance:
-    template: vrixel-tools/template-acceptance
+    template: valxel-platform/template-acceptance
     required_checks: [unit, CodeQL]          # unit: the fixtures' own tests and the catalog check
     openchoreo: null
   library:
-    template: vrixel-tools/template-library
+    template: valxel-platform/template-library
     required_checks: [unit, CodeQL]
     openchoreo: null                       # libraries publish packages; no runtime component
 

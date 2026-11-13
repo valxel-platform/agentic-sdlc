@@ -2,7 +2,7 @@
 
 import pytest
 
-from vrixel_sdlc.integrations.packages import GitHubPackages, StubPackageRegistry, next_rc, next_version
+from valxel_sdlc.integrations.packages import GitHubPackages, StubPackageRegistry, next_rc, next_version
 
 REPO = "acme-shared/ss-audit-framework"
 

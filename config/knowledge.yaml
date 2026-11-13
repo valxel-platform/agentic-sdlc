@@ -9,13 +9,13 @@
 # are not read back as truth.
 
 sources:
-  architecture: vrixel_sdlc.knowledge.sources:GovernanceArchitecture   # architecture/ in the governance repo
-  contracts: vrixel_sdlc.knowledge.sources:RepoOpenApi                  # api/openapi.yaml in provider repos
-  capabilities: vrixel_sdlc.knowledge.sources:CatalogCapabilities       # live and in-flight capabilities
-  features: vrixel_sdlc.knowledge.sources:ProductFeatures              # features run so far: released, in progress, stopped
-  roadmap: vrixel_sdlc.knowledge.sources:ProductRoadmap                # goals, initiatives and releases (roadmap/ in Git)
-  incidents: vrixel_sdlc.knowledge.sources:RecentIncidents             # recent production incidents and their causes
-  design: vrixel_sdlc.design_record:GovernanceDesign                    # design/ in the governance repo: tokens, components, screens
+  architecture: valxel_sdlc.knowledge.sources:GovernanceArchitecture   # architecture/ in the governance repo
+  contracts: valxel_sdlc.knowledge.sources:RepoOpenApi                  # api/openapi.yaml in provider repos
+  capabilities: valxel_sdlc.knowledge.sources:CatalogCapabilities       # live and in-flight capabilities
+  features: valxel_sdlc.knowledge.sources:ProductFeatures              # features run so far: released, in progress, stopped
+  roadmap: valxel_sdlc.knowledge.sources:ProductRoadmap                # goals, initiatives and releases (roadmap/ in Git)
+  incidents: valxel_sdlc.knowledge.sources:RecentIncidents             # recent production incidents and their causes
+  design: valxel_sdlc.design_record:GovernanceDesign                    # design/ in the governance repo: tokens, components, screens
 
 settings:
   architecture_dir: architecture

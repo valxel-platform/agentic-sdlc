@@ -1,6 +1,6 @@
-# Vrixel SDLC
+# Valxel SDLC
 
-Vrixel SDLC is an agentic software development lifecycle built on LangGraph. Agents built from
+Valxel SDLC is an agentic software development lifecycle built on LangGraph. Agents built from
 the Product, Design and Engineering plugin skills take a feature from idea to production. Humans
 decide at six gates, and an escalation path takes over a phase when agents are stuck.
 
@@ -28,7 +28,7 @@ open http://localhost:8080             # web interface
 open http://localhost:8080/docs        # interactive API
 ```
 
-Compose starts with development sign-in (`VRIXEL_AUTH=dev`): type any GitHub login and tick the
+Compose starts with development sign-in (`VALXEL_AUTH=dev`): type any GitHub login and tick the
 teams to act as, for example `acme-clinic/product-owners`. Use GitHub sign-in for anything shared
 (see [Web interface](#web-interface)).
 
@@ -36,19 +36,19 @@ teams to act as, for example `acme-clinic/product-owners`. Use GitHub sign-in fo
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # in memory; set VRIXEL_TEST_DATABASE_URL for the Postgres test
-vrixel demo --product CLN --fault spec=1 --revise
+pytest                                   # in memory; set VALXEL_TEST_DATABASE_URL for the Postgres test
+valxel demo --product CLN --fault spec=1 --revise
 
 (cd web && npm ci && npm run build)      # build the web interface into web/dist
-VRIXEL_AUTH=dev VRIXEL_SESSION_SECRET=$(openssl rand -hex 32) \
-  uvicorn --factory vrixel_sdlc.api.app:create_app --port 8080 --reload
+VALXEL_AUTH=dev VALXEL_SESSION_SECRET=$(openssl rand -hex 32) \
+  uvicorn --factory valxel_sdlc.api.app:create_app --port 8080 --reload
 ```
 
 For frontend work, run the API as above and `cd web && npm run dev`. Vite serves the app on
 port 5173 and proxies `/api` to port 8080. To fill a fresh stub-mode server with features at different stages, run
 `python web/scripts/seed.py` (it signs in as `demo` through development sign-in).
 
-`vrixel demo` runs one feature through every phase, auto-approving gates. `--fault spec=1` makes
+`valxel demo` runs one feature through every phase, auto-approving gates. `--fault spec=1` makes
 the first PRD defective, so the evaluator loop fixes it, and `--revise` sends the design back once
 at G3.
 
@@ -78,17 +78,17 @@ Three screens, all updated live over server-sent events (`/api/events`):
   follows it and lists each choice it made itself, and the G3 critic checks the design against it.
   People can turn the round off ("Changes what people see") or fill the brief in directly.
 
-  Files can be attached (screenshots, PDFs, text): see `vrixel_sdlc/attachments.py`. Until the intent
+  Files can be attached (screenshots, PDFs, text): see `valxel_sdlc/attachments.py`. Until the intent
   is submitted they count as the strictest data class, and the intake agent sees only their names.
 
 ### Sign-in and who can decide
 
-GitHub sign-in uses an OAuth app owned by `vrixel-tools`:
+GitHub sign-in uses an OAuth app owned by `valxel-platform`:
 
 1. In the org's settings, open Developer settings, OAuth Apps, New OAuth App. Set the callback
-   URL to `<VRIXEL_PUBLIC_URL>/api/auth/callback`.
-2. Set `VRIXEL_AUTH=github`, `VRIXEL_GITHUB_OAUTH_CLIENT_ID`, `VRIXEL_GITHUB_OAUTH_CLIENT_SECRET`,
-   `VRIXEL_PUBLIC_URL` and a random `VRIXEL_SESSION_SECRET` of at least 32 characters.
+   URL to `<VALXEL_PUBLIC_URL>/api/auth/callback`.
+2. Set `VALXEL_AUTH=github`, `VALXEL_GITHUB_OAUTH_CLIENT_ID`, `VALXEL_GITHUB_OAUTH_CLIENT_SECRET`,
+   `VALXEL_PUBLIC_URL` and a random `VALXEL_SESSION_SECRET` of at least 32 characters.
 3. Each product org approves the OAuth app (org settings, Third-party access) so team membership
    is visible.
 
@@ -104,7 +104,7 @@ HttpOnly session cookie and discards the GitHub token.
 The API records the signed-in login as the approver; a request body cannot override it.
 
 Run as many replicas as you like behind one load balancer, all on the same Postgres
-(`src/vrixel_sdlc/cluster.py`). Nothing routes a person back to the same replica:
+(`src/valxel_sdlc/cluster.py`). Nothing routes a person back to the same replica:
 
 - **One run per feature.** The replica that moves a feature, incident, release or initiative on
   holds its Postgres advisory lock while it runs. Another replica asked to move it on at the same
@@ -126,7 +126,7 @@ Without a database (development) everything is in memory: run one process.
 The products in this repo (Clinic records, Farm app, Shop, Dental, Payments platform and Shared
 services, in the `acme-*` orgs) are fictional. They exist so the tests and the demo exercise every
 data class and lane shape. To run the tool for your own products, put your `registry.yaml` (and
-the rest of `config/`) in a private repo and point `VRIXEL_CONFIG_DIR` at it.
+the rest of `config/`) in a private repo and point `VALXEL_CONFIG_DIR` at it.
 
 The tool lives in the tools org. It holds no product constitutions or product settings: each
 product owns a governance repo in its own GitHub organization, and the tool reads it. Governance
@@ -134,7 +134,7 @@ repos are named after the product id: `cln-governance`, `farm-governance`, `ss-g
 (`repo:` in `config/registry.yaml`; that name is the default when it's left out).
 
 ```
-vrixel-tools/                          tools org
+valxel-platform/                          tools org
   agentic-sdlc                         this repo: registry.yaml points at every governance repo
   sdlc-governance                      platform/constitution.md (VX- articles)
 acme-clinic/                           one org per product; each owns its runtime
@@ -224,12 +224,12 @@ those SHAs, so a feature runs under one constitution from intake to release. Ame
 while it runs apply to the next feature. `constitution_version` records both commits, for example
 `platform@1.0.0#ba05394+cln@1.0.0#a1b2c3d`.
 
-**Access.** Set `VRIXEL_GOVERNANCE_SOURCE=github` and choose one of these:
+**Access.** Set `VALXEL_GOVERNANCE_SOURCE=github` and choose one of these:
 - *GitHub App (recommended).* Install one app in the tools org and every product org, with
-  read access to Contents. Set `VRIXEL_GITHUB_APP_ID` and `VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE`.
+  read access to Contents. Set `VALXEL_GITHUB_APP_ID` and `VALXEL_GITHUB_APP_PRIVATE_KEY_FILE`.
   The tool mints a short-lived `contents:read` token per org.
-- *Tokens.* `VRIXEL_GITHUB_TOKEN__<ORG>` per org (upper case, `-` as `_`), or one
-  `VRIXEL_GITHUB_TOKEN`.
+- *Tokens.* `VALXEL_GITHUB_TOKEN__<ORG>` per org (upper case, `-` as `_`), or one
+  `VALXEL_GITHUB_TOKEN`.
 
 The same app can later open PRs in product repos, scoped per org.
 
@@ -264,8 +264,8 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 
 | Area | Setting |
 | --- | --- |
-| Source | Generated from the role's template (`vrixel-tools/template-service`, `-web`, `-bff`, `-library`, `-event-worker`, `-mcp-server`, `-agent`, `-acceptance`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
-| Name | The template's name replaced by the component's in the files the template lists in `.vrixel/identity` (its Workload, app and component name), so its logs, traces and error reports name it |
+| Source | Generated from the role's template (`valxel-platform/template-service`, `-web`, `-bff`, `-library`, `-event-worker`, `-mcp-server`, `-agent`, `-acceptance`), public. Public repos get rulesets, auto-merge, CodeQL and secret scanning on any GitHub plan; secrets and patient data never go in a repo |
+| Name | The template's name replaced by the component's in the files the template lists in `.valxel/identity` (its Workload, app and component name), so its logs, traces and error reports name it |
 | Merging | Squash only, titled after the pull request; branches deleted after merge; auto-merge and "Update branch" on |
 | Features | No wiki, projects or discussions: work lives in the tracker, docs in the repo |
 | Security | Dependency graph, Dependabot alerts and security updates, secret scanning with push protection, CodeQL default setup |
@@ -273,7 +273,7 @@ already, and have an ADR that names it. G4 shows exactly what approval will crea
 | Release tags | `v*` tags can't be moved or deleted |
 | Ownership | CODEOWNERS from the gate approvers (tech leads own everything; security owns the high-risk paths) |
 | Access | Teams from the approvers: tech leads maintain, architects and security push, product owners read |
-| Labels | Topics, and org custom properties (`vrixel_managed`, `vrixel_product`, `vrixel_data_class`) that org-level rulesets can target |
+| Labels | Topics, and org custom properties (`valxel_managed`, `valxel_product`, `valxel_data_class`) that org-level rulesets can target |
 | Runtime | An OpenChoreo component in the product's project (none for libraries), with auto-build and auto-deploy off so every change goes through the gates |
 | Governance | A pull request to the product's governance repo adding the repo to `product.yaml` |
 
@@ -293,15 +293,15 @@ repo_standards:
 ```
 
 **Setup once per org.**
-1. Publish the templates named in `config/repos.yaml` to `vrixel-tools` and mark each one a
+1. Publish the templates named in `config/repos.yaml` to `valxel-platform` and mark each one a
    template repository: `template-service` and `template-event-worker` (Java 21, Spring Boot),
    `template-web` (React, TypeScript), `template-library` (Java), `template-mcp-server` and
    `template-agent` (Python).
    Their CI jobs are named for the required checks
    (`unit`, `contract`) and post `unit / report`-style statuses the quality suites read; their
    `post-deploy.yml` runs integration, e2e and smoke suites when the pipeline dispatches
-   `vrixel-deployed` after a deployment is ready.
-2. Create the custom properties `vrixel_managed`, `vrixel_product` and `vrixel_data_class` in each
+   `valxel-deployed` after a deployment is ready.
+2. Create the custom properties `valxel_managed`, `valxel_product` and `valxel_data_class` in each
    product org (optional, for org-level rulesets).
 3. Install the GitHub App on all repositories of each product org (so it sees repos it creates)
    with administration, contents, pull requests, security events, secret scanning alerts,
@@ -318,11 +318,11 @@ keep the data stores from those events, and any store can be rebuilt by replayin
 
 | Role | Template | Required checks | What it is |
 | --- | --- | --- | --- |
-| `provider` | `vrixel-tools/template-service` | `unit`, `contract`, `CodeQL` | Versioned API; commands publish CloudEvents with `Events.publish` (idempotent producer, acks=all, keyed by record id); 503 and no change when Kafka doesn't confirm |
-| `event-worker` | `vrixel-tools/template-event-worker` | `unit`, `CodeQL` | Applies events to Postgres (or an index) once and in order: event ids recorded in the same transaction, rows keep their Kafka position, retries then a dead-letter topic; integration tests against real Postgres and Kafka |
+| `provider` | `valxel-platform/template-service` | `unit`, `contract`, `CodeQL` | Versioned API; commands publish CloudEvents with `Events.publish` (idempotent producer, acks=all, keyed by record id); 503 and no change when Kafka doesn't confirm |
+| `event-worker` | `valxel-platform/template-event-worker` | `unit`, `CodeQL` | Applies events to Postgres (or an index) once and in order: event ids recorded in the same transaction, rows keep their Kafka position, retries then a dead-letter topic; integration tests against real Postgres and Kafka |
 
 An HLD with event workers has an `## Events` section, one line per event type
-(`- vrixel.<entity>.<what happened>.v1: <who publishes it, who applies it>`). Coders are told to
+(`- valxel.<entity>.<what happened>.v1: <who publishes it, who applies it>`). Coders are told to
 publish or apply those events, reviewers check VX-16, and the build fails if a named event isn't
 published or applied by any task. Services coordinate through events; a central orchestrator needs
 an ADR.
@@ -334,8 +334,8 @@ like any other repo and the provision step creates them on the golden path:
 
 | Role | Template | Required checks | What it is |
 | --- | --- | --- | --- |
-| `mcp-server` | `vrixel-tools/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
-| `agent` | `vrixel-tools/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
+| `mcp-server` | `valxel-platform/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
+| `agent` | `valxel-platform/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
 
 Roles merge and deploy in dependency order: library, provider, event-worker, mcp-server, agent, consumer, bff, acceptance (merged, never deployed).
 The `evals` quality suite reads the agent's `evals / report` status on every PR (recorded model
@@ -437,7 +437,7 @@ marks superseded ones, and logs the change in the overview. People merge it.
 
 A new product, or an existing one that never had a product-level design, starts with three
 documents, each written by an agent, checked by machine and by the critic, and revised until both
-pass (`vrixel_sdlc/inception/`):
+pass (`valxel_sdlc/inception/`):
 
 1. **Product brief** (strategist): the problem, users, goals with numeric measures, non-goals, scope,
    the volumes (`## Scale`: how many at launch and after a year, how busy the busiest hour is), the
@@ -457,7 +457,7 @@ pass (`vrixel_sdlc/inception/`):
    every goal is served, every component is built, budgets fit the brief's, and (for a new product)
    the first initiative is a thin working version through at least two components.
 
-Before the brief, a **research note** (`vrixel_sdlc/research.py`): who has the problem, how they solve
+Before the brief, a **research note** (`valxel_sdlc/research.py`): who has the problem, how they solve
 it today (alternatives and their public pricing), market signals, and the evidence as numbered
 claims, each with a confidence and a source (a web page it read, the request, an attachment, or
 "unsourced" at low confidence), plus the assumptions the plan bets on, each with a test. The person
@@ -480,9 +480,9 @@ approved every call runs as PHI, so only models under a BAA see the vision.
 From the command line, in stub mode by default (`--mode live` for real models):
 
 ```bash
-vrixel inception --vision vision.md --org acme-water --out out            # the brief, for the brief gate
-vrixel inception --vision vision.md --org acme-water --brief out/BRIEF.md --out out   # architecture and roadmap
-vrixel inception --product FARM --vision next.md --out farm               # an existing product
+valxel inception --vision vision.md --org acme-water --out out            # the brief, for the brief gate
+valxel inception --vision vision.md --org acme-water --brief out/BRIEF.md --out out   # architecture and roadmap
+valxel inception --product FARM --vision next.md --out farm               # an existing product
 ```
 
 A vision is Markdown: `# Name`, the idea, then optional `## Goals` (`- <outcome> (measure: <metric>)`),
@@ -493,20 +493,20 @@ findings, the critic's checklist, cost) land in `--out`.
 `config/registry.yaml`): the agents write the brief, and the **brief gate** waits in Decisions for
 the product council (`inception.council`). Approving it starts the architecture and roadmap; the
 **product gate** shows both, with the monthly cost. Sending a gate back redrafts with the feedback;
-stopping writes nothing. Approving the product gate runs setup (`vrixel_sdlc/inception/setup.py`):
+stopping writes nothing. Approving the product gate runs setup (`valxel_sdlc/inception/setup.py`):
 
 - creates `<org>/<prefix>governance` and opens a pull request with `product.yaml` (approver teams per
   gate, `repo_prefix`, a per-feature budget), a starter constitution, `context.md`, `CODEOWNERS`,
   `architecture/brief.md`, `architecture/product-architecture.md`, `roadmap/goals.yaml` and one file
   per initiative with its candidate features;
-- opens a pull request on the config repo (`VRIXEL_CONFIG_REPO`) adding the product to
+- opens a pull request on the config repo (`VALXEL_CONFIG_REPO`) adding the product to
   `config/registry.yaml` (without one, the line to add is shown);
 - lists the approver teams an org admin needs to create;
 - records the capacity plan as `runtime/capacity.yaml`, and sets up the product's environments (below).
 
 ### Capacity and environments
 
-The agents write the assumptions; code does the arithmetic (`vrixel_sdlc/capacity.py`), so no
+The agents write the assumptions; code does the arithmetic (`valxel_sdlc/capacity.py`), so no
 replica count is a model's guess. From the brief's volumes and the architecture's load per journey,
 with the platform's tiers, headroom and starting throughput per role (`platform/capacity.yaml` in
 the platform governance repo) and the catalog's database sizes, it works out for each component the
@@ -530,11 +530,11 @@ working hours, with a database that pauses when idle (Aurora Serverless v2 at 0 
 All products share one OpenChoreo control plane, workflow plane and non-production observability
 plane. Each product gets two data planes of its own (non-production and production) and its own
 production observability plane, so production logs never leave it. At the product gate, setup
-proposes those clusters to the platform's infrastructure repo (`VRIXEL_INFRA_REPO`, from the
+proposes those clusters to the platform's infrastructure repo (`VALXEL_INFRA_REPO`, from the
 platform's `openchoreo/clusters.yaml` template); once the platform registers them, it creates the
 product's project, dev and staging on the non-production data plane, production on the production
 data plane (for the person who approved the gate, never an agent), and the pipeline. Until then the
-step waits; `vrixel environments --product CLN --approver maria` finishes it.
+step waits; `valxel environments --product CLN --approver maria` finishes it.
 
 Every deployment then carries its environment's part of `runtime/capacity.yaml`: replicas, CPU and
 memory in the release binding, and the platform's `autoscaler` trait's range where there is one
@@ -545,10 +545,10 @@ launch the plan keeps moving, always by a pull request people merge:
   `## Performance`) shows G4 the maximums it raises, and the release proposes them;
 - staging's load test runs at what staging's pods should take and reports what one pod handled;
   after three tests the median replaces the starting figure;
-- `vrixel capacity --product CLN --observed busy.json` reviews production: the busy hour over half
+- `valxel capacity --product CLN --observed busy.json` reviews production: the busy hour over half
   the stage's capacity on 5 days in a fortnight proposes the next stage, an autoscaler at its
   maximum proposes a higher one, a month under a fifth proposes stepping down; and
-  `vrixel capacity --product CLN --step growth --reason "contract promises 99.9%"` proposes a step
+  `valxel capacity --product CLN --step growth --reason "contract promises 99.9%"` proposes a step
   with its cost before and after.
 
 When both merge and the tool reloads its config, the initiatives are on the Roadmap page ready to
@@ -604,8 +604,8 @@ nothing (the owner types the number in).
 ```yaml
 tools:
   metrics:
-    sql: {}                       # DSN: platform secret VRIXEL_METRICS_DSN_<PRODUCT_ID>
-    prometheus: { url: https://prometheus.cln.example.com }   # token: VRIXEL_PROMETHEUS_TOKEN_<ID>
+    sql: {}                       # DSN: platform secret VALXEL_METRICS_DSN_<PRODUCT_ID>
+    prometheus: { url: https://prometheus.cln.example.com }   # token: VALXEL_PROMETHEUS_TOKEN_<ID>
     min_cell: 11                  # counts 1-10 show as "under 11": fixed at 11+ for PHI, off by default otherwise
 ```
 
@@ -619,9 +619,9 @@ payments data (config/tools.yaml). Inception writes every goal with a `manual` m
 brief's measure, so a new product is measurable from day one.
 
 ```
-vrixel outcomes check CLN                         # every goal's metric, and what's wrong with it
-vrixel outcomes read CLN GOAL-CLN-1 --days 30     # one reading, recorded (--dry-run: not recorded)
-vrixel outcomes record CLN GOAL-CLN-2 --value 3.1 --n 812 --start 2026-10-01 --end 2026-11-01
+valxel outcomes check CLN                         # every goal's metric, and what's wrong with it
+valxel outcomes read CLN GOAL-CLN-1 --days 30     # one reading, recorded (--dry-run: not recorded)
+valxel outcomes record CLN GOAL-CLN-2 --value 3.1 --n 812 --start 2026-10-01 --end 2026-11-01
 ```
 
 **Features that say what they move.** The brief names the product goal a feature moves
@@ -634,7 +634,7 @@ The HLD names the repo that records each event, the coder records it with its te
 (`ProductEvents.record` in the Java service and worker, `events.record` in the Python agent and
 MCP server, `track` in the web and mobile apps, relayed by the BFF) and says so in the patch summary, and after staging passes
 the tool counts the events from the templates' per-minute summary line
-(`vrixel.events {"checkin_completed": 12}`, read through the OpenChoreo observer). G6 shows which
+(`valxel.events {"checkin_completed": 12}`, read through the OpenChoreo observer). G6 shows which
 fired and which never did: a goal fed only by silent events can't be measured once it ships.
 
 **Readouts after release.** Once a feature reaches everyone (the pipeline's finalize step), the
@@ -721,7 +721,7 @@ tools:
       production: production
 ```
 
-The platform holds one Flipt client token per product in `VRIXEL_FLIPT_TOKEN_<PRODUCT_ID>`
+The platform holds one Flipt client token per product in `VALXEL_FLIPT_TOKEN_<PRODUCT_ID>`
 (a static token in the product's Flipt config, allowed to read and change that namespace).
 
 | When | What happens to the flag |
@@ -756,15 +756,15 @@ release. Everything else is a person's decision.
 
 | Source | Endpoint | Auth |
 | --- | --- | --- |
-| Prometheus (Alertmanager webhook; SLO burn-rate and error alerts) | `POST /api/signals/alertmanager` | `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
-| Sentry (internal integration: issues created or regressed, alert rules) | `POST /api/signals/sentry` | `Sentry-Hook-Signature`, HMAC with `VRIXEL_SENTRY_CLIENT_SECRET` |
-| Support tickets (any tool that can post JSON) | `POST /api/signals/ticket` | `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
-| OpenChoreo alert rules (log, metric and FinOps budget rules; webhook channel without `payloadTemplate`) | `POST /api/signals/openchoreo` | channel header `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
-| CloudWatch alarms on AWS resources (each data plane's `AlarmRouting`: an EventBridge API destination) | `POST /api/signals/cloudwatch` | connection header `Authorization: Bearer $VRIXEL_SIGNALS_TOKEN` |
-| AWS Budgets (through an SNS topic) | `POST /api/signals/aws-budgets` | HTTPS subscription `https://vrixel:$VRIXEL_SIGNALS_TOKEN@<host>/api/signals/aws-budgets`; topic listed in `VRIXEL_AWS_BUDGET_TOPICS` |
+| Prometheus (Alertmanager webhook; SLO burn-rate and error alerts) | `POST /api/signals/alertmanager` | `Authorization: Bearer $VALXEL_SIGNALS_TOKEN` |
+| Sentry (internal integration: issues created or regressed, alert rules) | `POST /api/signals/sentry` | `Sentry-Hook-Signature`, HMAC with `VALXEL_SENTRY_CLIENT_SECRET` |
+| Support tickets (any tool that can post JSON) | `POST /api/signals/ticket` | `Authorization: Bearer $VALXEL_SIGNALS_TOKEN` |
+| OpenChoreo alert rules (log, metric and FinOps budget rules; webhook channel without `payloadTemplate`) | `POST /api/signals/openchoreo` | channel header `Authorization: Bearer $VALXEL_SIGNALS_TOKEN` |
+| CloudWatch alarms on AWS resources (each data plane's `AlarmRouting`: an EventBridge API destination) | `POST /api/signals/cloudwatch` | connection header `Authorization: Bearer $VALXEL_SIGNALS_TOKEN` |
+| AWS Budgets (through an SNS topic) | `POST /api/signals/aws-budgets` | HTTPS subscription `https://valxel:$VALXEL_SIGNALS_TOKEN@<host>/api/signals/aws-budgets`; topic listed in `VALXEL_AWS_BUDGET_TOPICS` |
 | People in the web app | "Report a problem" on the Incidents page | signed-in member of the product's org |
 
-Each signal is tied to a product (a `vrixel_product` label or tag, else its `component` matched to
+Each signal is tied to a product (a `valxel_product` label or tag, else its `component` matched to
 the product's repos and OpenChoreo components) and a severity (SEV1 to SEV4 from `severity` or the
 Sentry level). A signal joins the open incident for the same alert, issue or component; otherwise a
 firing one opens a new incident. Signals are stored in the platform database. A webhook answers as
@@ -792,9 +792,9 @@ Cost findings and requests to change what was built (a user report whose triage 
 intent change) never page: they wait in the tool for working hours.
 
 ```bash
-VRIXEL_PAGERDUTY_ROUTING_KEYS='{"CLN": "<integration key>", "PAY": "<integration key>"}'
-VRIXEL_PAGERDUTY_REGION=us          # or eu (events.eu.pagerduty.com)
-VRIXEL_PUBLIC_URL=https://sdlc.vrixel.dev   # pages link back to the incident here
+VALXEL_PAGERDUTY_ROUTING_KEYS='{"CLN": "<integration key>", "PAY": "<integration key>"}'
+VALXEL_PAGERDUTY_REGION=us          # or eu (events.eu.pagerduty.com)
+VALXEL_PUBLIC_URL=https://sdlc.valxel.dev   # pages link back to the incident here
 ```
 
 PagerDuty owns the schedules, notifications and escalation when nobody acknowledges; set each
@@ -804,7 +804,7 @@ neither PHI nor payment data: alert titles can quote exception messages, and Pag
 those products' data boundary. Sends go out in order on a background thread; throttling, server
 errors and network failures are retried for about two minutes. The incident page shows what was
 sent, and says so plainly when a product has no PagerDuty service or PagerDuty refused a page.
-Without `VRIXEL_PAGERDUTY_ROUTING_KEYS` (stub mode) nothing is sent.
+Without `VALXEL_PAGERDUTY_ROUTING_KEYS` (stub mode) nothing is sent.
 
 **The incident.**
 
@@ -883,7 +883,7 @@ The templates give every product the same instrumentation:
 | --- | --- | --- |
 | Traces | OpenTelemetry, exported over OTLP to the data plane's collector; incoming `traceparent` is honored and passed on, so one trace runs from the browser through services, agents, MCP servers and the LLM gateway. Agent spans follow the GenAI conventions and never carry prompt or result text. | every template |
 | Logs | JSON with `trace.id` and `span.id` | every template |
-| Audit | Who did what to which records, as CloudEvents (`vrixel.audit.v1`) on the product's Kafka audit topic. A request whose record Kafka doesn't acknowledge fails. | service, agent, MCP server, LLM gateway |
+| Audit | Who did what to which records, as CloudEvents (`valxel.audit.v1`) on the product's Kafka audit topic. A request whose record Kafka doesn't acknowledge fails. | service, agent, MCP server, LLM gateway |
 | Audit store | `ss-audit-sink` copies the topic into an append-only, hash-chained Postgres table (one consumer group) and archives it to object storage under Object Lock (another), so neither destination holds up the other; `audit-sink verify` checks the chain and `restore` rebuilds Postgres from the archive. | each product's runtime |
 
 The pipeline holds designs and builds to it. In PHI and payments products an HLD that changes a
@@ -893,13 +893,13 @@ and the build fails its check if an action the HLD names appears in no task.
 
 ## Keeping repos on the standards
 
-The provision step applies the standards to repos it creates; `vrixel repos` keeps every managed
+The provision step applies the standards to repos it creates; `valxel repos` keeps every managed
 repo on them afterwards, including ones created by hand:
 
 ```bash
-vrixel repos check                    # report drift; exits 1 if any repo needs fixing
-vrixel repos apply                    # change what differs (safe to repeat)
-vrixel repos check --repo acme-clinic/cln-governance --json
+valxel repos check                    # report drift; exits 1 if any repo needs fixing
+valxel repos apply                    # change what differs (safe to repeat)
+valxel repos check --repo acme-clinic/cln-governance --json
 ```
 
 Managed repos are each lane's repos (from its governance manifest), each lane's governance repo
@@ -915,9 +915,9 @@ but no required checks; templates are marked as templates and require their role
 
 The `repo-standards` workflow runs the check daily and fails when a repo drifts; run it by hand
 with `apply` to fix. It needs the platform's GitHub App installed in every org with administration
-rights (secrets `VRIXEL_GITHUB_APP_ID`, `VRIXEL_GITHUB_APP_PRIVATE_KEY`); the App also needs
-organization custom properties (admin) to define `vrixel_managed`, `vrixel_product` and
-`vrixel_data_class`.
+rights (secrets `VALXEL_GITHUB_APP_ID`, `VALXEL_GITHUB_APP_PRIVATE_KEY`); the App also needs
+organization custom properties (admin) to define `valxel_managed`, `valxel_product` and
+`valxel_data_class`.
 
 ## Delivery: GitHub and OpenChoreo
 
@@ -932,15 +932,15 @@ join ─ provision ─ plan ─ build ─ ci_wait ─ cs_env ─ cs_build_wait �
 
 | Step | GitHub | OpenChoreo |
 | --- | --- | --- |
-| Build | A change note per task (`.vrixel/changes/<feature>/<task>.md`) on `feature/<id>`; one PR per repo, found again by branch on retries; posts `vrixel/gates` pending on each PR | |
-| ci_wait | Waits until every check run and status on each PR head is green (except the tool's own `vrixel/` and `openchoreo/` statuses) | |
+| Build | A change note per task (`.valxel/changes/<feature>/<task>.md`) on `feature/<id>`; one PR per repo, found again by branch on retries; posts `valxel/gates` pending on each PR | |
+| ci_wait | Waits until every check run and status on each PR head is green (except the tool's own `valxel/` and `openchoreo/` statuses) | |
 | cs_env … cs_wait | Asks each repo to run its dev-stage suites, and the acceptance repo its tests, against the PR heads | Creates `cs-<feature>` on the dev data plane, builds each PR head, binds the builds and the feature's managed services there, waits until ready |
-| merge_train | Deletes the change set's environment. Posts `vrixel/gates` success (naming the gates approved), then merges exactly the commit the gates saw, in dependency order (libraries, providers, consumers); branch protection still applies. An abort posts `vrixel/gates` failure | Triggers a WorkflowRun on each merge commit; shared-lane repos publish packages instead |
+| merge_train | Deletes the change set's environment. Posts `valxel/gates` success (naming the gates approved), then merges exactly the commit the gates saw, in dependency order (libraries, providers, consumers); branch protection still applies. An abort posts `valxel/gates` failure | Triggers a WorkflowRun on each merge commit; shared-lane repos publish packages instead |
 | build_wait | Posts `openchoreo/build` on the merge commit | Waits for the WorkflowRuns |
 | deploy and wait | Posts `openchoreo/dev`, `openchoreo/staging`, `openchoreo/production` | Binds the latest release to the first environment, then promotes the same release; waits until each ReleaseBinding is ready |
 
 Waits are interrupts with `type: "external"`. They never reach the decision inbox. The engine
-checks them after every step, on a timer (`VRIXEL_WATCH_INTERVAL_S`), and when GitHub sends a
+checks them after every step, on a timer (`VALXEL_WATCH_INTERVAL_S`), and when GitHub sends a
 webhook. When one fails or times out:
 - **Red CI** goes back to the agents first. The failures go to the coder, only the failing repos'
   tasks are redone (their PRs get new commits), and CI runs again, up to the product's
@@ -957,10 +957,10 @@ webhook. When one fails or times out:
 A change set often spans repos: an API, the web app that calls it, a worker, the acceptance tests.
 CI tests each pull request on its own; only an environment running all of them shows whether they
 work together. So after CI passes, and before G5 or the merge, the pipeline gives the change set its
-own environment (`vrixel_sdlc/changeset_env.py`):
+own environment (`valxel_sdlc/changeset_env.py`):
 
 1. **Create** `cs-<feature id>` (for example `cs-farm-feat-12`) on the data plane of the product's
-   first environment, labelled `vrixel.io/change-set`. It is outside the deployment pipeline and is
+   first environment, labelled `valxel.io/change-set`. It is outside the deployment pipeline and is
    never promoted from.
 2. **Build** each runtime repo's pull request head in OpenChoreo. Libraries, acceptance tests and
    store apps aren't built here.
@@ -1025,20 +1025,20 @@ approver's name, and OpenChoreo's own authorization is the backstop.
 runtime:
   openchoreo_project: farm
   pipeline: [dev, staging, production]   # OpenChoreo environment names, first to last
-  namespace: vrixel                      # optional; defaults to config/tools.yaml
+  namespace: valxel                      # optional; defaults to config/tools.yaml
   components:                            # optional; defaults to the repo name
     acme-farm/farm-mobile: field-app
 ```
 
-**Going live** (`VRIXEL_DELIVERY=live`):
+**Going live** (`VALXEL_DELIVERY=live`):
 1. Grant the GitHub App, in each product org: contents, pull requests and commit statuses
    (write), checks (read). Subscribe it to check runs, check suites, statuses and pull requests,
-   with the webhook URL `<VRIXEL_PUBLIC_URL>/api/webhooks/github` and `VRIXEL_GITHUB_WEBHOOK_SECRET`.
+   with the webhook URL `<VALXEL_PUBLIC_URL>/api/webhooks/github` and `VALXEL_GITHUB_WEBHOOK_SECRET`.
 2. In OpenChoreo, give the confidential service client (`service_mcp_client` by default) a role
    that can trigger workflow runs, manage release bindings and create, list and delete
    environments in each product's project. Set
-   `VRIXEL_OPENCHOREO_MCP_URL` (`<api host>/mcp`), `VRIXEL_OPENCHOREO_TOKEN_URL` and
-   `VRIXEL_OPENCHOREO_CLIENT_SECRET`.
+   `VALXEL_OPENCHOREO_MCP_URL` (`<api host>/mcp`), `VALXEL_OPENCHOREO_TOKEN_URL` and
+   `VALXEL_OPENCHOREO_CLIENT_SECRET`.
 3. Create each product's OpenChoreo project, components and deployment pipeline to match
    `runtime`. Try a sandbox product first: with stub agents, the change notes alone make real PRs.
 
@@ -1121,7 +1121,7 @@ In stub delivery mode every suite passes with sample numbers; tests inject resul
 
 Every request carries two checked identities: the calling workload, proven by the mesh (Istio
 ambient mTLS), and the person or service it acts for, as a token from the product's Keycloak realm
-issued for the product. `vrixel-tools/platform-security` generates each product's realm and mesh
+issued for the product. `valxel-platform/platform-security` generates each product's realm and mesh
 policies from one spec.
 
 | Component | Template | What it enforces |
@@ -1143,7 +1143,7 @@ post-deploy tests run against the BFF's public URL.
 
 ## Supply chain: what goes into a build, and what may run
 
-**Agent sessions never hold the tool's credentials** (`vrixel_sdlc/sandbox.py`). Every session runs
+**Agent sessions never hold the tool's credentials** (`valxel_sdlc/sandbox.py`). Every session runs
 with an allowlisted environment (its model's key, locale, telemetry; every other variable the tool
 has is blanked, so the GitHub App key, database URL and webhook secrets aren't there), with every
 hook off (`disableAllHooks`, so a repository's `.claude/settings.json` runs nothing), and with Read
@@ -1151,9 +1151,9 @@ denied on the tool's own files and secrets. Shell commands run in Claude Code's 
 only the package registries and GitHub (`config/egress.yaml`); Codex runs in its workspace-write
 sandbox. npm, yarn and pnpm skip packages' install scripts. A coder works in its own checkout of its
 one repository, cloned with a token the App mints for that repository alone with `contents: write`:
-it can push its branch, and can't post the `vrixel/gates` status, change settings or reach another
-repository. Its folder is deleted when the session ends. `VRIXEL_AGENT_ENV_PASS` names any other
-variable a deployment's sessions need (e.g. `AWS_REGION` for Bedrock); `VRIXEL_AGENT_SANDBOX_WEAKER=1`
+it can push its branch, and can't post the `valxel/gates` status, change settings or reach another
+repository. Its folder is deleted when the session ends. `VALXEL_AGENT_ENV_PASS` names any other
+variable a deployment's sessions need (e.g. `AWS_REGION` for Bedrock); `VALXEL_AGENT_SANDBOX_WEAKER=1`
 uses Claude Code's weaker sandbox in containers that can't create user namespaces.
 
 **Only images the platform's build signed run** (`platform/openchoreo/` in the platform governance
@@ -1165,7 +1165,7 @@ reach an environment. Kyverno on every data plane admits only images signed by t
 provenance from one of the product's own repositories and an SBOM, and pins pods to the verified
 digest.
 
-**What a change adds is checked** (`vrixel_sdlc/dependencies.py`, suite `new-dependencies`): each
+**What a change adds is checked** (`valxel_sdlc/dependencies.py`, suite `new-dependencies`): each
 package must exist in its registry (a name nobody publishes is a model's invention), be at least 30
 days old (new names are where squatting happens) and carry an allowed license
 (`config/dependencies.yaml`); an OpenSSF Scorecard under 3 is reported. Dependency manifests are
@@ -1179,7 +1179,7 @@ checks the Codex download's checksum, and is scanned with an SBOM in CI.
 
 **What already runs is rescanned.** ECR's enhanced scanning (Amazon Inspector, continuous) rescans
 images whenever a CVE is published; an EventBridge rule on `Inspector2 Finding` sends findings to
-`POST /api/signals/inspector` (Bearer `VRIXEL_SIGNALS_TOKEN`). High and critical vulnerabilities in
+`POST /api/signals/inspector` (Bearer `VALXEL_SIGNALS_TOKEN`). High and critical vulnerabilities in
 running images open incidents for the component (critical with a fix: sev2), and a closed finding
 resolves its signal.
 
@@ -1205,9 +1205,9 @@ wrongly joined signal out (`/split`, "Not the same failure"), which opens its ow
 
 The templates tag every error report with `component`, the component's name, so an issue maps to
 its component whatever the Sentry or GlitchTip project is called. The name comes from the files a
-template lists in `.vrixel/identity` (its workload, app and component files): when the tool creates
+template lists in `.valxel/identity` (its workload, app and component files): when the tool creates
 a repo from a template, it replaces the template's name with the component's in each of them. Events
-may also carry `vrixel_product`; without it the component alone finds the product.
+may also carry `valxel_product`; without it the component alone finds the product.
 
 ## Error tracking: Sentry or self-hosted GlitchTip
 
@@ -1235,10 +1235,10 @@ GlitchTip takes the same Sentry SDKs the templates already use, so a component c
 OpenChoreo project (web, worker, Postgres; no Redis). Its alerts reach the tool through a webhook
 recipient per GlitchTip project:
 
-- `vrixel glitchtip-token PAY` prints the path, `/api/signals/glitchtip/PAY?token=…`. The token is
-  derived from `VRIXEL_SIGNALS_TOKEN` and opens that product's endpoint only (a webhook can't send
+- `valxel glitchtip-token PAY` prints the path, `/api/signals/glitchtip/PAY?token=…`. The token is
+  derived from `VALXEL_SIGNALS_TOKEN` and opens that product's endpoint only (a webhook can't send
   headers, so it is in the URL).
-- With an API token per product (`VRIXEL_GLITCHTIP_TOKENS='{"PAY": "…"}'`, scope `event:read`)
+- With an API token per product (`VALXEL_GLITCHTIP_TOKENS='{"PAY": "…"}'`, scope `event:read`)
   the tool reads each alerted issue's latest event for its `trace_id`, so a GlitchTip issue joins
   the same incident as the failures it caused elsewhere. The request goes only to the product's
   configured `url`.
@@ -1260,7 +1260,7 @@ never changes or removes a trait someone tuned.
 
 OpenChoreo evaluates the rules per environment and notifies the environment's default notification
 channel. Point that channel (a webhook, no `payloadTemplate`, header `Authorization: Bearer
-$VRIXEL_SIGNALS_TOKEN`) at `/api/signals/openchoreo` in every environment:
+$VALXEL_SIGNALS_TOKEN`) at `/api/signals/openchoreo` in every environment:
 
 | Environment | What happens |
 | --- | --- |
@@ -1280,7 +1280,7 @@ sides:
   component in OpenChoreo's traces, and failures it logs can drive OpenChoreo log alerts
   (`/api/signals/openchoreo`).
 - **From the service.** Every resource comes with its catalog type's standard CloudWatch alarms
-  (platform catalog `alarms`, built by the Compositions in `vrixel-tools/platform-resources`).
+  (platform catalog `alarms`, built by the Compositions in `valxel-platform/platform-resources`).
   Each data plane's `AlarmRouting` sends their state changes through EventBridge to
   `/api/signals/cloudwatch`. An alarm's description says whose it is (product, feature, resource,
   environment, the components that use it, severity).
@@ -1291,7 +1291,7 @@ sides:
 | Any other environment | Kept on the alarm board; G6 shows the approvers every alarm firing before production on the feature's resources or on resources its components use |
 
 G4 shows the alarms each AWS service comes with. Alarms are named with the data plane's prefix, so
-EventBridge sends only Vrixel's; other alarms in the account are ignored.
+EventBridge sends only Valxel's; other alarms in the account are ignored.
 
 ## Gradual releases
 
@@ -1316,7 +1316,7 @@ the rollout too, so off is off for everyone.
 **Users with it on against users with it off.** Time alone can miss a feature that hurts only
 the users who have it: at 5% its errors are a small share of the component's. The templates
 count, per flag, the work that evaluated it and how much failed, apart for users who got it on and
-off, and log one `vrixel.flag_cohorts {...}` line per flag a minute:
+off, and log one `valxel.flag_cohorts {...}` line per flag a minute:
 
 | Template | Counts | A failure is |
 |---|---|---|
@@ -1338,7 +1338,7 @@ swing a comparison. The BFF checks no flags of its own: it is a gateway that for
 services, which count their own requests, so counting there too would count the same request
 twice.
 
-The tool sums the lines from OpenChoreo's logs (`VRIXEL_OPENCHOREO_OBSERVER_URL`,
+The tool sums the lines from OpenChoreo's logs (`VALXEL_OPENCHOREO_OBSERVER_URL`,
 `ops/cohorts.py`) across the product's whole project, not only the feature's components: anything
 that checks the flag counts, including a component the feature didn't change. It compares each
 component (and the web and mobile apps) on its own, with a one-sided two-proportion z-test,
@@ -1390,9 +1390,9 @@ A record names who asked, who approved, what changed (components and their relea
 flags), the feature, release or incident behind it, the evidence (pull requests, the quality
 suites each stage ran, security findings accepted with an expiry, or for an incident the cause
 triage found), and whether it worked. Records are append-only and hash-chained: each carries the
-hash of the one before it, so an edited or deleted record breaks the chain. `vrixel changes verify`
+hash of the one before it, so an edited or deleted record breaks the chain. `valxel changes verify`
 (with `DATABASE_URL`) and the Changes page check it. In Postgres, grant the tool's role only
-INSERT and SELECT on `vrixel_changes`, so nothing it runs can rewrite history; the chain shows it if
+INSERT and SELECT on `valxel_changes`, so nothing it runs can rewrite history; the chain shows it if
 anything else does. Keep the database's backups for as long as your strictest regime needs the
 records (HIPAA documentation: six years).
 
@@ -1422,7 +1422,7 @@ tools:
     close: {state: "3", done: successful, failed: unsuccessful}             # your state model's values
 ```
 
-`VRIXEL_SERVICENOW_AUTH_<PRODUCT>` holds the Authorization header. The change_request's
+`VALXEL_SERVICENOW_AUTH_<PRODUCT>` holds the Authorization header. The change_request's
 `correlation_id` is the tool's change id, so a retry finds the one it made; the description carries
 what changed, who asked, the approvals per gate, the pull requests and the record's hash. Where the
 instance's state model won't let it be closed that way, it stays open and the Changes page says so,
@@ -1445,8 +1445,8 @@ environments live (`ops/inventory.py`); nothing is kept by hand:
 - The feature that created each one, the last 30 days of compute cost (components), the planned
   monthly cost from the platform catalog (AWS), and production against the environments before it.
 
-With `VRIXEL_AWS_INVENTORY_ROLE` set (a role of that name in each environment's account, allowed
-`tag:GetResources`), the tool also lists everything tagged `vrixel:product=<product>` there. That
+With `VALXEL_AWS_INVENTORY_ROLE` set (a role of that name in each environment's account, allowed
+`tag:GetResources`), the tool also lists everything tagged `valxel:product=<product>` there. That
 fills in ARNs, and anything tagged for the product that OpenChoreo doesn't know is shown as
 unmanaged, for someone to adopt or remove. Once a day the tool keeps each product's counts per
 environment (`GET /api/inventory/<product>/history`) to show the trend.
@@ -1466,16 +1466,16 @@ watcher collects hourly from each source; collecting again replaces figures rath
 | Acceptance tests | GitHub Actions runs dispatched for the feature (their run name carries the feature id) | build |
 | Builds | OpenChoreo build runs × build-plane minute rate; EAS store builds when a rate is set | build |
 | Dev and staging environments | OpenChoreo FinOps, each component's daily cost, shared among the features deployed there that day by the hours each was there; the rest is the product's | build / run |
-| AWS services | Cost Explorer by `vrixel:product` and `vrixel:feature` tags per environment account: a feature's spend is build until release and run after; untagged is the product's | build / run |
+| AWS services | Cost Explorer by `valxel:product` and `valxel:feature` tags per environment account: a feature's spend is build until release and run after; untagged is the product's | build / run |
 | Production compute | OpenChoreo FinOps, each production component | run |
 | Incident triage | the usage ledger, incident threads | run |
 | People at gates | active minutes at each gate × hourly rate (off unless set) | build |
 | Shared platform | OpenChoreo, observability and this tool's monthly cost, split by products' production compute (off unless set) | run |
 
-Rates are set in `VRIXEL_COST_RATES` (JSON): `github_minute_usd` per OS (set from your plan),
+Rates are set in `VALXEL_COST_RATES` (JSON): `github_minute_usd` per OS (set from your plan),
 `build_minute_usd`, `eas_build_usd`, `people_hour_usd`, `platform_monthly_usd`. Sources:
-`VRIXEL_OPENCHOREO_OBSERVER_URL` (the `finops-opencost` module), and `VRIXEL_AWS_COST_EXPLORER=1` with
-the `aws` extra and `ce:GetCostAndUsage` (activate `vrixel:product` and `vrixel:feature` as cost
+`VALXEL_OPENCHOREO_OBSERVER_URL` (the `finops-opencost` module), and `VALXEL_AWS_COST_EXPLORER=1` with
+the `aws` extra and `ce:GetCostAndUsage` (activate `valxel:product` and `valxel:feature` as cost
 allocation tags in the payer account).
 
 **Where it shows.** Every gate packet carries the feature's build cost so far, by category. The
@@ -1486,12 +1486,12 @@ against what G4 approved, with a FOCUS CSV download for finance and BI tools
 `GET /api/features/{id}/cost`).
 
 **Held to the plan.** G4 approves a feature's AWS services with planning costs per environment;
-that is its cost plan. 7 and 30 days after release (`VRIXEL_COST_REVIEW_DAYS`) the tool compares
+that is its cost plan. 7 and 30 days after release (`VALXEL_COST_REVIEW_DAYS`) the tool compares
 its AWS spend with the plan as a monthly run-rate, and its production components' compute with the
-week before release. Spend more than `VRIXEL_COST_TOLERANCE` (default 20%) and $5/month over
+week before release. Spend more than `VALXEL_COST_TOLERANCE` (default 20%) and $5/month over
 becomes a cost signal in the incident flow: SEV2 for production AWS at twice the plan or more,
 SEV3 otherwise. OpenChoreo budget alert rules and AWS Budgets (named
-`vrixel-<product id>-<environment>`) arrive as cost signals the same way.
+`valxel-<product id>-<environment>`) arrive as cost signals the same way.
 
 Not counted yet: in-product agents' model spend outside this tool's gateway, and SaaS bills
 (Sentry, store fees).
@@ -1500,19 +1500,19 @@ phase and model) against the feature's budget, and each gate records the people'
 
 **Running it.** G4 approves a feature's AWS services with their planning cost per environment; that
 becomes the feature's cost plan. After release the tool reviews the feature (by default 7 and 30 days
-after, `VRIXEL_COST_REVIEW_DAYS`):
+after, `VALXEL_COST_REVIEW_DAYS`):
 
 | What | Source | Compared with |
 | --- | --- | --- |
-| The feature's AWS resources, per environment | AWS Cost Explorer: tag `vrixel:feature` in the environment's account (`VRIXEL_AWS_COST_EXPLORER=1`, the `aws` extra, `ce:GetCostAndUsage`) | The G4 plan, as a monthly run-rate |
-| Its components' compute in production | OpenChoreo FinOps (`finops-opencost` module) through the Observer cost API (`VRIXEL_OPENCHOREO_OBSERVER_URL`) | The same components the week before release |
+| The feature's AWS resources, per environment | AWS Cost Explorer: tag `valxel:feature` in the environment's account (`VALXEL_AWS_COST_EXPLORER=1`, the `aws` extra, `ce:GetCostAndUsage`) | The G4 plan, as a monthly run-rate |
+| Its components' compute in production | OpenChoreo FinOps (`finops-opencost` module) through the Observer cost API (`VALXEL_OPENCHOREO_OBSERVER_URL`) | The same components the week before release |
 
-Spend more than `VRIXEL_COST_TOLERANCE` (default 20%) and $5/month above the comparison becomes a
+Spend more than `VALXEL_COST_TOLERANCE` (default 20%) and $5/month above the comparison becomes a
 cost signal in the incident flow: SEV2 for production AWS at twice the plan or more, SEV3 otherwise.
 Budgets are the second line: OpenChoreo budget alert rules per component, and AWS Budgets per
-product account named `vrixel-<product id>-<environment>`, arrive as cost signals the same way.
+product account named `valxel-<product id>-<environment>`, arrive as cost signals the same way.
 
-`vrixel:feature` and `vrixel:product` must be activated as cost allocation tags in the payer
+`valxel:feature` and `valxel:product` must be activated as cost allocation tags in the payer
 account; Cost Explorer data lags by about a day. Each review is stored, and served at
 `GET /api/features/{id}/cost` (build cost, plan, reviews) and `GET /api/costs/{product}` (each
 feature's build cost and run-rate, with totals). The feature page shows the plan against the latest
@@ -1524,7 +1524,7 @@ compute and shared platform costs allocated to products.
 Features that need a managed service get it from the platform's AWS catalog
 (`platform/aws-resources.yaml` in sdlc-governance): DynamoDB, Kinesis, SQS, S3, SNS, and RDS
 PostgreSQL and ElastiCache Valkey through OpenChoreo's Crossplane provisioner. Each type is an
-OpenChoreo ClusterResourceType backed by a Crossplane Composition in `vrixel-tools/platform-resources`,
+OpenChoreo ClusterResourceType backed by a Crossplane Composition in `valxel-platform/platform-resources`,
 with encryption, private access, backups and tags built in. People approve; agents do the rest:
 
 | Step | Who | What |
@@ -1553,7 +1553,7 @@ queue's ordering replaces stored data, so the design check refuses it and a pers
 A mobile app (role `mobile`) is released, not deployed: people install a build and keep it for
 months, and every build goes through the stores. The pipeline is the same up to the merge; then,
 instead of OpenChoreo, each stage asks the app's repo to release the merge commit
-(`vrixel-release`, `release.yml` from `template-mobile`) and waits for the status it posts:
+(`valxel-release`, `release.yml` from `template-mobile`) and waits for the status it posts:
 
 | Stage | The app's repo | Waits for |
 | --- | --- | --- |
@@ -1577,7 +1577,7 @@ minimum passes every version that used the old shape.
 
 Each repo tests itself (unit, contract, its own post-deploy suites). A feature that changes two or
 more runtime repos is also tested **end to end, across repos**, from the product's acceptance repo
-(role `acceptance`, one per product, from `vrixel-tools/template-acceptance`: Playwright Test in
+(role `acceptance`, one per product, from `valxel-platform/template-acceptance`: Playwright Test in
 TypeScript). Add it to the product's `repos:` to turn this on.
 
 - **Backend and frontend.** The `api` project tests through the components' APIs and events (no
@@ -1593,10 +1593,10 @@ TypeScript). Add it to the product's `repos:` to turn this on.
 - **Plans extend before adding.** The planner sees the catalog. The plan's `## Acceptance tests`
   section says per criterion `extend`, `replace` or `add`; adding a test whose coverage an existing
   test of the same kind (API or browser) already has is rejected unless the line says `because:`;
-  extending or replacing a test that doesn't exist is rejected. `vrixel acceptance review --product CLN` lists tests already covered by
+  extending or replacing a test that doesn't exist is rejected. `valxel acceptance review --product CLN` lists tests already covered by
   another, for merging; the repo's nightly full run does the same and reports slow tests.
 - **Runs after the whole change set is deployed.** In dev, then staging, the pipeline asks the
-  acceptance repo (`repository_dispatch: vrixel-acceptance`) to run the merged tests with every
+  acceptance repo (`repository_dispatch: valxel-acceptance`) to run the merged tests with every
   component's URL, the feature's flag on for test users, and a selection: the feature's tests,
   every test that reaches a changed component, plus `@critical` journeys in staging. The full
   regression runs nightly and before release trains, not per feature.
@@ -1614,10 +1614,10 @@ never writes to Backstage.
 
 The pipeline fills only what it knows (the GitHub slug, the product as `system`, the OpenChoreo
 project and component, a type from the repo's role, the product owners' team as `owner`) and adds
-the feature's capability to the `vrixel.io/capabilities` annotation. It keeps everything else: a
+the feature's capability to the `valxel.io/capabilities` annotation. It keeps everything else: a
 description, links, `dependsOn`, an `API` entity, or a type, owner or lifecycle someone changed.
 The tool's own catalog (Postgres) still holds capabilities while they are designed and in flight,
-which Backstage doesn't model (`vrixel_sdlc/catalog_info.py`).
+which Backstage doesn't model (`valxel_sdlc/catalog_info.py`).
 
 ## Diagrams and work tracking
 
@@ -1706,7 +1706,7 @@ performance:
 ```
 
 **Which test** each repo of a change set needs is decided when its pull request opens, by fixed
-rules (`vrixel_sdlc/performance.py`):
+rules (`valxel_sdlc/performance.py`):
 
 | Level | When | What runs |
 | --- | --- | --- |
@@ -1719,7 +1719,7 @@ Only APIs (`provider`) and web apps (`consumer`) have a staging load test. A BFF
 The HLD's Performance section (expected load, new traffic, data growth, journeys) feeds the rules;
 data growth flags the nightly soak test. The reviewer agent lists performance risks it sees (an
 N+1 query, a call inside a loop, an unbounded read): any raises the level to at least smoke. Agents
-only raise a level. The tool labels the PR (`vrixel:perf-smoke`, `vrixel:perf-full`), which runs
+only raise a level. The tool labels the PR (`valxel:perf-smoke`, `valxel:perf-full`), which runs
 the template's `perf-smoke` job, and asks for the staging load test with the post-deploy run
 (`performance` in the dispatch). Both suites read only the repos that need them, and G5 and G6
 show each repo's level and why. A failed performance suite goes back to the agents like any red
@@ -1758,13 +1758,13 @@ layers, its JSON reply, its caps) is the same whichever vendor runs it.
   beside the review in the build summary, with whether the two agree);
   `second_opinion_blocking: true` makes its blocking findings block the merge.
 - **Optional vendors.** Roles used only as a fallback or second opinion turn off, with a warning,
-  when their provider isn't configured (`OPENAI_API_KEY`, `VRIXEL_SELFHOSTED_URL`) or their model
+  when their provider isn't configured (`OPENAI_API_KEY`, `VALXEL_SELFHOSTED_URL`) or their model
   has no price under `prices`. Every model that runs needs a price, so feature budgets hold
   whichever vendor does the work; self-hosted models are priced at zero (paid for as infrastructure).
 - **Codex sessions** get the phase's skills, constitution, product and feature context first in
   the prompt (through stdin), then the task. Codex reads Claude-format plugins, so the same
-  skills-only plugins are installed for it in the image (`/opt/vrixel/codex-home`, a plugin
-  marketplace over `/opt/vrixel/plugins`); each session starts from a copy of that home, sees every
+  skills-only plugins are installed for it in the image (`/opt/valxel/codex-home`, a plugin
+  marketplace over `/opt/valxel/plugins`); each session starts from a copy of that home, sees every
   plugin skill by name and reads one when it needs it, unless `on_demand` is off for the role or
   the config pins plugins other than the image's (plugin commands, such as
   `product-management:brainstorm`, reach it only through the pasted skills). Sessions reply with the stage's JSON schema
@@ -1812,10 +1812,10 @@ practices are ours too.
 
 ## Agent traces: what each session did
 
-Every agent session is an OpenTelemetry span, `vrixel.agent <phase>/<role>`, carrying the feature,
+Every agent session is an OpenTelemetry span, `valxel.agent <phase>/<role>`, carrying the feature,
 product, phase, role, task, attempt, data class and config version, plus OpenTelemetry's GenAI
 attributes (operation, agent, model, provider). Each session's own telemetry nests under it, so one
-trace shows the whole session (`vrixel_sdlc/telemetry.py`):
+trace shows the whole session (`valxel_sdlc/telemetry.py`):
 
 - **Claude Code** sessions export a span per turn, model request, tool call and subagent, and an
   event per tool result. The tool gives each session the OTLP settings, its resource attributes and
@@ -1836,19 +1836,19 @@ for every class. PHI and payments go above `none` only when `content_store_baa: 
 tool sets each content switch explicitly for every session, so nothing inherited from the container
 turns content on.
 
-**Where traces go.** The tool sends OTLP/HTTP to `VRIXEL_OTEL_ENDPOINT`, a collector the platform
+**Where traces go.** The tool sends OTLP/HTTP to `VALXEL_OTEL_ENDPOINT`, a collector the platform
 runs, which routes them: structure for every lane to OpenChoreo's observability plane (next to the
 product's own traces, in the portal's Traces tab), and to the platform's self-hosted Langfuse for
 session views, eval datasets and people's labels, with content only for the lanes allowed it (the
-collector, Langfuse and the routing live in platform-foundation). `VRIXEL_TRACE_URL` is the link
-template, e.g. `https://langfuse.example.com/project/vrixel/traces/{trace_id}`. Without an endpoint,
+collector, Langfuse and the routing live in platform-foundation). `VALXEL_TRACE_URL` is the link
+template, e.g. `https://langfuse.example.com/project/valxel/traces/{trace_id}`. Without an endpoint,
 or without the OpenTelemetry SDK (`pip install '.[telemetry]'`, included in `live`), nothing is
 exported and strict mode warns.
 
 ## Evals of the tool's own agents
 
 A change to the models, prompts or settings the agents run with is checked against past work
-before it merges (`vrixel_sdlc/evals.py`).
+before it merges (`valxel_sdlc/evals.py`).
 
 **Cases come from history.** When a document phase (discovery, spec, design, architecture, plan)
 finishes, the tool keeps an eval case: what the agent was given (the request, the parent
@@ -1865,29 +1865,29 @@ pairwise judgment against the approved version, and cost and time. The compariso
 cases under the config in use and the candidate and fails when a rate drops by more than
 `max_drop` (5 points by default) or, if set, cost rises more than `max_cost_increase`.
 
-- **Pull requests to the config repo** (`VRIXEL_CONFIG_REPO`, e.g. `vrixel-tools/sdlc-config`): the
+- **Pull requests to the config repo** (`VALXEL_CONFIG_REPO`, e.g. `valxel-platform/sdlc-config`): the
   GitHub App's `pull_request` webhook makes the tool replay the newest labelled cases (5 per phase,
-  `VRIXEL_EVAL_CASES_PER_PHASE`; up to `VRIXEL_EVAL_BUDGET_USD`, 20 by default, per config) under
-  the PR's config and its base, and post `vrixel / evals` on the head commit. Make it a required
+  `VALXEL_EVAL_CASES_PER_PHASE`; up to `VALXEL_EVAL_BUDGET_USD`, 20 by default, per config) under
+  the PR's config and its base, and post `valxel / evals` on the head commit. Make it a required
   check. The run happens where the cases and the model keys are, never in the config repo's CI.
   `GET /api/evals/runs/{id}` has the full comparison; `POST /api/evals/runs` starts one for the
-  teams in `VRIXEL_EVAL_APPROVERS`.
-- **From the command line:** `vrixel eval export --product FARM --out cases.jsonl` and
-  `vrixel eval run --config path/to/candidate/config [--baseline-config ...] [--pairwise]` (cases
+  teams in `VALXEL_EVAL_APPROVERS`.
+- **From the command line:** `valxel eval export --product FARM --out cases.jsonl` and
+  `valxel eval run --config path/to/candidate/config [--baseline-config ...] [--pairwise]` (cases
   from the database, `DATABASE_URL`, or `--cases FILE`; exits 1 on a regression).
 - **Data classes.** Only `general` cases are used unless you ask for others
-  (`--data-class`, `VRIXEL_EVAL_DATA_CLASSES`); a regulated case still reaches only the providers its
+  (`--data-class`, `VALXEL_EVAL_DATA_CLASSES`); a regulated case still reaches only the providers its
   data class allows.
-- **Langfuse.** With `VRIXEL_LANGFUSE_URL`, `VRIXEL_LANGFUSE_PUBLIC_KEY` and
-  `VRIXEL_LANGFUSE_SECRET_KEY`, each run writes one dataset per phase (`vrixel/<phase>`), links the
+- **Langfuse.** With `VALXEL_LANGFUSE_URL`, `VALXEL_LANGFUSE_PUBLIC_KEY` and
+  `VALXEL_LANGFUSE_SECRET_KEY`, each run writes one dataset per phase (`valxel/<phase>`), links the
   run's traces to the items and scores them; documents go to Langfuse only for `general` cases.
 
 ### Trying a config on some features first: the canary
 
 A model, prompt or setting change that passed its evals can run on a share of new features before it
-replaces the config in use. Point `VRIXEL_CANARY_CONFIG_DIR` at the candidate config directory (laid
-out like `config/`) and set `VRIXEL_CANARY_PERCENT` (1 to 50). Each new feature is assigned once, by
-its id, and keeps its config to the end; hotfixes, and lanes outside `VRIXEL_CANARY_DATA_CLASSES`
+replaces the config in use. Point `VALXEL_CANARY_CONFIG_DIR` at the candidate config directory (laid
+out like `config/`) and set `VALXEL_CANARY_PERCENT` (1 to 50). Each new feature is assigned once, by
+its id, and keeps its config to the end; hotfixes, and lanes outside `VALXEL_CANARY_DATA_CLASSES`
 (`general` by default), always use the config in use. A canary feature's agents, critic and
 fallbacks all run under the candidate, and every model call, ledger row and trace carries its config
 version, so the pilot report's **By configuration** table compares the canary with the rest on
@@ -1928,7 +1928,7 @@ The pipeline reads agents' work by machine, so the shapes are fixed and every re
 
 ## The pilot: measuring the 85/15 goal
 
-Vrixel's goal is agents doing 85% of the work and people 15%. A feature created with **Pilot
+Valxel's goal is agents doing 85% of the work and people 15%. A feature created with **Pilot
 feature** ticked (intake, or `pilot: true` on `POST /api/features`) is measured for that, and the
 trial rules run beside it in shadow: they decide nothing, and what they would have decided is
 recorded next to what really happened.
@@ -1961,7 +1961,7 @@ approvals, rework, escalations) rather than the share alone.
   `critic_threshold` would have decided.
 
 **The report.** The web app's Pilot page, `GET /api/reports/pilot?product_id=FARM` (JSON, or
-`&format=markdown`), or `vrixel pilot-report FARM` against the tool's database.
+`&format=markdown`), or `valxel pilot-report FARM` against the tool's database.
 
 **Running it.** Pick a product with general data and no shared lanes, and take 5 to 10 features of
 different sizes through to production, ticking Pilot feature on each. Decide in the web app (so the
@@ -1991,7 +1991,7 @@ The report judges the agents by what happened next, using data the pipeline alre
 
 Not every change needs discovery and a UX design. Whoever starts the work picks a profile (the New
 intent page asks when the product allows more than one); the gates that matter stay whatever the
-profile (`vrixel_sdlc/profiles.py`):
+profile (`valxel_sdlc/profiles.py`):
 
 | Profile | Runs | Gates people decide |
 | --- | --- | --- |
@@ -2019,7 +2019,7 @@ workflow:
 
 A reviewer can't see what an agent took as given, where it departed from the brief, which options
 it weighed or what it wasn't sure of. So every document ends with an `## Agent notes` section, and
-the coder's reply carries the same notes for each pull request (`vrixel_sdlc/diary.py`):
+the coder's reply carries the same notes for each pull request (`valxel_sdlc/diary.py`):
 
 ```
 ## Agent notes
@@ -2043,7 +2043,7 @@ deployments per repo. `GET /api/features/{id}/trace` reads them into one matrix,
 page shows it: each requirement with its goal, design, tasks and test cases and their status, pull
 requests, acceptance results and where it runs, the production incidents on its components, and the
 gaps in the chain. Nothing is stored twice, so the matrix is always what the pipeline has now
-(`vrixel_sdlc/traceability.py`). `GET /api/features/{id}/trace.csv` exports one row per test case.
+(`valxel_sdlc/traceability.py`). `GET /api/features/{id}/trace.csv` exports one row per test case.
 
 **In the spec.** Each criterion names the goal it serves, and NFRs are requirements in their own
 right, with a kind and a measurable target:
@@ -2192,13 +2192,13 @@ effect once the other is also decided. An earlier approval of the other gate sti
   caching (exact-prefix match at breakpoints, TTL refreshed on hits, isolated per workspace). Use
   `simulate_faults` on intake, for example `{"spec": 1, "build": 1}`, to exercise loops and
   escalations.
-- **live**: `pip install -e ".[live]"`, then set `VRIXEL_MODE=live` and `ANTHROPIC_API_KEY`. Roles
+- **live**: `pip install -e ".[live]"`, then set `VALXEL_MODE=live` and `ANTHROPIC_API_KEY`. Roles
   with `runtime: claude_code` run through the Claude Agent SDK; others call the Claude API through
-  the gateway. Skills come from the plugins in `VRIXEL_SKILLS_DIR` (`<plugin>/skills/<skill>/SKILL.md`,
+  the gateway. Skills come from the plugins in `VALXEL_SKILLS_DIR` (`<plugin>/skills/<skill>/SKILL.md`,
   or `<plugin>/commands/<skill>.md`). The image installs Anthropic's Product Management,
   Engineering and Design plugins ([knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins),
-  pinned by commit in `config/plugins.yaml`) and ours, `plugins/vrixel` (the critics' skills), at
-  `/opt/vrixel/plugins`, skills and commands only: `plugins/prepare.sh` leaves out each plugin's
+  pinned by commit in `config/plugins.yaml`) and ours, `plugins/valxel` (the critics' skills), at
+  `/opt/valxel/plugins`, skills and commands only: `plugins/prepare.sh` leaves out each plugin's
   connectors (`.mcp.json`: Slack, Linear, Atlassian and others) and hooks, so an agent working on
   product code reaches no outside tool through a plugin. Live mode refuses to start while a skill a
   phase uses is missing; CI checks the pinned commit has them all. Live mode is not covered by the
@@ -2206,19 +2206,19 @@ effect once the other is also decided. An earlier approval of the other gate sti
 
   **The plugin pin is config.** Moving `knowledge_work_plugins.ref` in `config/plugins.yaml`
   changes every agent's instructions, so it goes the way a model or prompt change does: a pull
-  request to the config repo, replayed against past documents (`vrixel / evals`), and if wanted
+  request to the config repo, replayed against past documents (`valxel / evals`), and if wanted
   the canary. A config that pins a commit other than the image's (an eval run's candidate, the
   canary) gets its own copy at that commit, fetched once from GitHub and laid out by
   `plugins/prepare.sh` like the image's. The Dockerfile's `KNOWLEDGE_WORK_PLUGINS_REF` names the
   same commit (a test checks; CI builds with the config's), the image records it in
-  `/opt/vrixel/plugins/REF`, and strict mode warns when the two differ. The ref must be a full
-  commit sha. Changes to our own plugin (`plugins/vrixel`) ship with the tool and are not replayed.
+  `/opt/valxel/plugins/REF`, and strict mode warns when the two differ. The ref must be a full
+  commit sha. Changes to our own plugin (`plugins/valxel`) ship with the tool and are not replayed.
 
   **Skills a session loads by itself.** Besides the skills its phase pastes in, a session sees
   every installed skill by name and may load one. `on_demand` in `config/plugins.yaml` turns that
   off for the roles you list (for example the critic, so it judges against its checklist only).
   Whatever a session does load is recorded as `extra_skills`: on its ledger rows, on its trace
-  (`vrixel.extra_skills`), and in the feature's agent sessions, which G5 and G6 show.
+  (`valxel.extra_skills`), and in the feature's agent sessions, which G5 and G6 show.
 
   A Claude Code session starts from Claude Code's own system prompt (the `claude_code` preset:
   tool use, safety) with the layers L2-L5 appended: the phase's skills in full, the
@@ -2230,14 +2230,14 @@ effect once the other is also decided. An earlier approval of the other gate sti
   connector, hook or other outside tool. Keep the appended layers under about
   120 KB: the SDK passes them as one process argument, and the runtime warns before the limit.
 
-- **strict**: set `VRIXEL_STRICT=1` in production. The switches above are independent, and some
+- **strict**: set `VALXEL_STRICT=1` in production. The switches above are independent, and some
   fall back quietly: a Jira, OpenProject or Lucid server without credentials runs as an offline
   stand-in, a product's flags run in memory, no `DATABASE_URL` keeps everything in memory. Strict
-  mode refuses to start while any of them would, and lists each one: `VRIXEL_MODE`,
-  `VRIXEL_DELIVERY`, `VRIXEL_AUTH` and `VRIXEL_GOVERNANCE_SOURCE` not live, no database, and per
+  mode refuses to start while any of them would, and lists each one: `VALXEL_MODE`,
+  `VALXEL_DELIVERY`, `VALXEL_AUTH` and `VALXEL_GOVERNANCE_SOURCE` not live, no database, and per
   product a diagram or tracker without credentials, Flipt without its token, or ServiceNow without
-  `VRIXEL_SERVICENOW_AUTH_<ID>`. What runs but can't be checked (a shared library that declares no
-  package) is logged as a warning. `/api/healthz` reports `strict` (`vrixel_sdlc/strict.py`).
+  `VALXEL_SERVICENOW_AUTH_<ID>`. What runs but can't be checked (a shared library that declares no
+  package) is logged as a warning. `/api/healthz` reports `strict` (`valxel_sdlc/strict.py`).
 
 ## Replacing the stubs
 
@@ -2256,7 +2256,7 @@ Have compliance counsel review the regulatory constitution articles.
 ```
 config/            knowledge.yaml (design knowledge sources), repos.yaml (golden path for new repos), quality.yaml (test and security suites, floors per data class), tools.yaml (MCP servers, tools allowed per data class), registry.yaml (governance repo per product, platform limits), models.yaml (role registry)
 examples/governance/  sample governance repos for the tools org and each product org
-src/vrixel_sdlc/
+src/valxel_sdlc/
   governance/      sources (local, GitHub), GitHub App tokens, manifest validation, pinned loader
   graph/           pipeline (supervisor, gates, escalations, merge train), phase subgraphs
   agents/          roster, prompt-layer builder, stub templates, section parsers
@@ -2279,13 +2279,13 @@ src/vrixel_sdlc/
   roadmap/         goals, initiatives (G0) and releases: record, workflows, views
   ops/             production signals, incidents, hotfixes and intent changes
   events.py        live-update bus
-  cli.py           vrixel demo
+  cli.py           valxel demo
 web/               React app: decisions, features, intake
 tests/             pipeline, gateway, governance, API, Postgres durability
 ```
 
 ## License
 
-Vrixel SDLC is licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).
-Contributions are accepted under the same license. The license gives no rights to the Vrixel name
+Valxel SDLC is licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).
+Contributions are accepted under the same license. The license gives no rights to the Valxel name
 or logo.

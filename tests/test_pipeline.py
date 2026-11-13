@@ -1,7 +1,7 @@
 import pytest
 
 from conftest import approve
-from vrixel_sdlc.graph import InvalidDecision
+from valxel_sdlc.graph import InvalidDecision
 
 ALL_KINDS = {"OPP", "PRD", "UX", "MOCKUPS", "HLD", "PLAN", "BUILD", "REL", "OPS"}
 
@@ -186,11 +186,11 @@ def test_apx_merges_library_before_provider_before_consumer(engine):
 
 def _gates_statuses(services, pr):
     return [s["state"] for s in services.github.statuses
-            if s["context"] == "vrixel/gates" and s["repo"] == pr["repo"] and s["sha"] == pr["head_sha"]]
+            if s["context"] == "valxel/gates" and s["repo"] == pr["repo"] and s["sha"] == pr["head_sha"]]
 
 
 def test_github_sees_when_the_gates_have_passed(engine, services):
-    """Each pull request carries vrixel/gates: pending while the pipeline decides, success just
+    """Each pull request carries valxel/gates: pending while the pipeline decides, success just
     before the merge train merges the exact commit the gates saw."""
     fid = engine.start(product_id="CLN", title="Consent check on intake")["feature_id"]
     for gate in ("g1", "g2", "g3", "g4"):
@@ -201,7 +201,7 @@ def test_github_sees_when_the_gates_have_passed(engine, services):
     v = approve(engine, fid, "g5")
     for pr in v["pull_requests"].values():
         assert _gates_statuses(services, pr) == ["pending", "success"]
-    done = next(s for s in services.github.statuses if s["context"] == "vrixel/gates" and s["state"] == "success")
+    done = next(s for s in services.github.statuses if s["context"] == "valxel/gates" and s["state"] == "success")
     assert "G1, G2, G3, G4, G5 approved" in done["description"]
 
 
@@ -217,7 +217,7 @@ def test_an_aborted_change_fails_its_gates_status(engine, services):
 
 
 def test_the_merge_train_merges_only_what_the_gates_saw(services):
-    from vrixel_sdlc.integrations.github import GitHubError
+    from valxel_sdlc.integrations.github import GitHubError
 
     gh = services.github
     pr = gh.open_pr(repo="o/r", branch="b", title="t", body="b", files=[], labels=[])

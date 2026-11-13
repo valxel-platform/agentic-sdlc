@@ -1,6 +1,6 @@
 """How far the critic can be trusted, and what each config version's work led to."""
 
-from vrixel_sdlc import pilot
+from valxel_sdlc import pilot
 
 from conftest import approve
 

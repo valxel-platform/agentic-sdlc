@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.ops.alarms import InMemoryAlarmBoard, for_feature
-from vrixel_sdlc.ops.alert_rules import AlertRulesError, load, missing, traits_for
-from vrixel_sdlc.ops.signals import from_openchoreo
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.ops.alarms import InMemoryAlarmBoard, for_feature
+from valxel_sdlc.ops.alert_rules import AlertRulesError, load, missing, traits_for
+from valxel_sdlc.ops.signals import from_openchoreo
+from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-RULES = EXAMPLES / "vrixel-tools" / "sdlc-governance" / "platform" / "alert-rules.yaml"
+RULES = EXAMPLES / "valxel-platform" / "sdlc-governance" / "platform" / "alert-rules.yaml"
 
 
 def test_the_platform_rules_become_traits_per_component():
@@ -112,8 +112,8 @@ def test_the_board_ignores_other_components():
 def test_the_openchoreo_adapter_patches_only_the_missing_traits():
     from mcp.server import MCPServer
 
-    from vrixel_sdlc.integrations.mcp_client import McpHttp
-    from vrixel_sdlc.integrations.openchoreo import OpenChoreoMcp
+    from valxel_sdlc.integrations.mcp_client import McpHttp
+    from valxel_sdlc.integrations.openchoreo import OpenChoreoMcp
 
     server = MCPServer("openchoreo")
     st = {"traits": [{"name": "observability-alert-rule", "kind": "ClusterTrait", "instanceName": "api-memory",
@@ -129,11 +129,11 @@ def test_the_openchoreo_adapter_patches_only_the_missing_traits():
         st["traits"] = traits
         return {"metadata": {"name": component_name}}
 
-    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
+    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="valxel")
     wanted = traits_for(load(RULES.read_text()), "api")
     assert oc.ensure_traits(component="org/api", traits=wanted, project="farm") == ["api-exceptions",
                                                                                      "api-exception-surge"]
     [(ns, comp, traits)] = st["patches"]
-    assert (ns, comp) == ("vrixel", "api") and traits[0]["parameters"] == {"tuned": True} and len(traits) == 3
+    assert (ns, comp) == ("valxel", "api") and traits[0]["parameters"] == {"tuned": True} and len(traits) == 3
     assert oc.ensure_traits(component="org/api", traits=wanted, project="farm") == []
     assert len(st["patches"]) == 1

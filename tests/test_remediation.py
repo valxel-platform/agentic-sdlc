@@ -9,16 +9,16 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.governance.loader import GovernanceError
-from vrixel_sdlc.ops import incident as incident_mod
-from vrixel_sdlc.ops import paging, remediation
-from vrixel_sdlc.ops.signals import from_alertmanager, from_openchoreo
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.governance.loader import GovernanceError
+from valxel_sdlc.ops import incident as incident_mod
+from valxel_sdlc.ops import paging, remediation
+from valxel_sdlc.ops.signals import from_alertmanager, from_openchoreo
+from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-POLICY = EXAMPLES / "vrixel-tools" / "sdlc-governance" / "platform" / "remediation.yaml"
+POLICY = EXAMPLES / "valxel-platform" / "sdlc-governance" / "platform" / "remediation.yaml"
 CLN = "acme-clinic/cln-governance"
 NOW = datetime(2026, 11, 6, 22, 0, tzinfo=timezone.utc)
 

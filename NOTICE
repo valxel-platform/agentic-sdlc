@@ -1,8 +1,8 @@
-Vrixel SDLC
-Copyright 2026 Vrixel
+Valxel SDLC
+Copyright 2026 Valxel
 
-This product includes software developed by Vrixel (https://github.com/vrixel-tools).
+This product includes software developed by Valxel (https://github.com/valxel-platform).
 
 The container image includes Anthropic's knowledge-work-plugins (Product Management, Engineering
 and Design), https://github.com/anthropics/knowledge-work-plugins, licensed under the Apache
-License 2.0; its license is at /opt/vrixel/plugins/LICENSE.knowledge-work-plugins in the image.
+License 2.0; its license is at /opt/valxel/plugins/LICENSE.knowledge-work-plugins in the image.

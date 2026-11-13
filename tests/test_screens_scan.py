@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from vrixel_sdlc import screens
-from vrixel_sdlc.agents.parse import parse_screen_routes
-from vrixel_sdlc.quality import evaluate
+from valxel_sdlc import screens
+from valxel_sdlc.agents.parse import parse_screen_routes
+from valxel_sdlc.quality import evaluate
 
 SUMMARY = """3 screens
 - S1 /checkin: passed; desktop: CLN-FEAT-1/staging/S1-desktop.png; phone: CLN-FEAT-1/staging/S1-phone.png
@@ -54,7 +54,7 @@ def test_staging_scans_the_web_screens_from_the_acceptance_repo():
 
 
 def test_the_wait_checker_asks_for_the_scan_once_with_the_urls():
-    from vrixel_sdlc.waits import WaitChecker
+    from valxel_sdlc.waits import WaitChecker
 
     sent = []
     svc = SimpleNamespace(github=SimpleNamespace(dispatch=lambda **kw: sent.append(kw)))
@@ -65,7 +65,7 @@ def test_the_wait_checker_asks_for_the_scan_once_with_the_urls():
     results = [{"repo": "acme/web", "url": "https://web.staging"}]
     w._start_post_deploy(packet, results)
     w._start_post_deploy(packet, results)
-    [d] = [x for x in sent if x["event_type"] == "vrixel-screens"]
+    [d] = [x for x in sent if x["event_type"] == "valxel-screens"]
     assert d["repo"] == "acme/acc" and d["payload"]["env"] == {"web": "https://web.staging"}
     assert d["payload"]["check"] == "screens / CLN-FEAT-1 / staging"
 
@@ -92,14 +92,14 @@ def test_screenshots_are_served_from_the_scanning_repo_to_members_only():
     got = []
     svc = SimpleNamespace(github=SimpleNamespace(get_bytes=lambda **kw: got.append(kw) or b"PNG"))
     assert screens.screenshot(svc, state, "S1", "desktop") == b"PNG"
-    assert got[0] == {"repo": "acme/acc", "path": "CLN-FEAT-1/staging/S1-desktop.png", "ref": "vrixel-screens"}
+    assert got[0] == {"repo": "acme/acc", "path": "CLN-FEAT-1/staging/S1-desktop.png", "ref": "valxel-screens"}
     assert screens.screenshot(svc, state, "S9", "desktop") is None
     bad = {**state, "quality": {"staging": {"suites": [{**row, "details": {"screens": {"S1": {"desktop": "../x.png"}}}}]}}}
     assert screens.screenshot(svc, bad, "S1", "desktop") is None
 
 
 def test_a_screen_that_did_not_load_fails_the_suite_even_with_findings():
-    from vrixel_sdlc import screens
+    from valxel_sdlc import screens
 
     summary = ("- S1 /c/: passed; desktop: F/staging/S1-desktop.png\n"
                "- S1 serious color-contrast: low contrast\n"

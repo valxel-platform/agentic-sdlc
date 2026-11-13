@@ -4,7 +4,7 @@ No profile skips architecture, G5 for risky changes, or G6. Defects are not a pr
 import pytest
 
 from conftest import approve
-from vrixel_sdlc import profiles
+from valxel_sdlc import profiles
 
 
 def gates_asked(engine, fid):

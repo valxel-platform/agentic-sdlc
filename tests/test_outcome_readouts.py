@@ -10,11 +10,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from test_api import CLN_TEAMS, SECRET, sign_in
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.outcomes import Metric, Reading
-from vrixel_sdlc.outcomes import read as rd
-from vrixel_sdlc.outcomes import readouts as ro
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.outcomes import Metric, Reading
+from valxel_sdlc.outcomes import read as rd
+from valxel_sdlc.outcomes import readouts as ro
+from valxel_sdlc.web.auth import AuthConfig
 
 
 def released_feature(engine):
@@ -145,7 +145,7 @@ def test_the_roadmap_shows_outcomes_and_owners_enter_numbers(client, engine):
 # ------------------------------------------------------------------ step 4: flag comparisons
 
 def test_goal_events_are_compared_on_against_off():
-    from vrixel_sdlc.ops import cohorts
+    from valxel_sdlc.ops import cohorts
 
     def side(req, n):
         return {"requests": req, "errors": 0, "slow": 0, "events": {"checkin_completed": n}}
@@ -168,10 +168,10 @@ def test_each_rollout_step_reports_the_goal_events_and_never_stops_for_them(tmp_
 
     from langgraph.checkpoint.memory import InMemorySaver
 
-    from vrixel_sdlc.config import load_settings
-    from vrixel_sdlc.engine import FeatureEngine
-    from vrixel_sdlc.ops import cohorts, rollout
-    from vrixel_sdlc.services import build_services
+    from valxel_sdlc.config import load_settings
+    from valxel_sdlc.engine import FeatureEngine
+    from valxel_sdlc.ops import cohorts, rollout
+    from valxel_sdlc.services import build_services
 
     monkeypatch.setattr(rollout, "COMPRESS_IN_STUB", False)
     clock = {"t": datetime.now(timezone.utc)}

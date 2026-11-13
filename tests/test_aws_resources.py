@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc import resources
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.services import build_services
+from valxel_sdlc import resources
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-CATALOG = resources.load_catalog((EXAMPLES / "vrixel-tools/sdlc-governance/platform/aws-resources.yaml").read_text())
+CATALOG = resources.load_catalog((EXAMPLES / "valxel-platform/sdlc-governance/platform/aws-resources.yaml").read_text())
 REPOS = [{"name": "o/farm-api", "role": "provider"}, {"name": "o/farm-worker", "role": "event-worker"},
          {"name": "o/farm-web", "role": "consumer"}]
 AWS = {"region": "us-east-2", "accounts": {"dev": "1" * 12, "staging": "2" * 12, "production": "3" * 12}}
@@ -109,7 +109,7 @@ def test_g4_sees_the_cost_and_the_plan_gives_least_privilege():
     readings = next(p for p in plan if p["name"] == "readings")
     writer = next(c for c in readings["parameters"]["consumers"] if c["component"] == "farm-api")
     assert "kinesis:PutRecord" in writer["actions"] and "kinesis:GetRecords" not in writer["actions"]
-    assert readings["owner"] == "farm-api" and readings["parameters"]["tags"]["vrixel:feature"] == "FARM-1"
+    assert readings["owner"] == "farm-api" and readings["parameters"]["tags"]["valxel:feature"] == "FARM-1"
     state = next(p for p in plan if p["name"] == "field-state")
     assert state["parameters"]["indexes"] == ["by-farm:farm_id", "by-crop:crop_id"]  # the ResourceType's list
 
@@ -245,11 +245,11 @@ def fake_openchoreo_resources():
 
 
 def test_the_openchoreo_adapter_creates_binds_and_promotes_resources():
-    from vrixel_sdlc.integrations.mcp_client import McpHttp
-    from vrixel_sdlc.integrations.openchoreo import OpenChoreoMcp
+    from valxel_sdlc.integrations.mcp_client import McpHttp
+    from valxel_sdlc.integrations.openchoreo import OpenChoreoMcp
 
     server, st = fake_openchoreo_resources()
-    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
+    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="valxel")
     params = {"partition_key": "id", "consumers": []}
     assert oc.apply_resource(name="field-state", type="dynamodb-table", parameters=params, project="farm") == {
         "name": "field-state", "release": "field-state-r1", "change": "created"}

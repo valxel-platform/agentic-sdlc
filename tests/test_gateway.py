@@ -2,11 +2,11 @@ import dataclasses
 
 import pytest
 
-from vrixel_sdlc.agents.parse import parse_acs
-from vrixel_sdlc.config import RoleConfig
-from vrixel_sdlc.evaluators import run_checks
-from vrixel_sdlc.gateway import CallTags, InMemoryLedger, ModelGateway, PolicyViolation, PromptLayers, StubProvider
-from vrixel_sdlc.gateway.pricing import estimate_cost
+from valxel_sdlc.agents.parse import parse_acs
+from valxel_sdlc.config import RoleConfig
+from valxel_sdlc.evaluators import run_checks
+from valxel_sdlc.gateway import CallTags, InMemoryLedger, ModelGateway, PolicyViolation, PromptLayers, StubProvider
+from valxel_sdlc.gateway.pricing import estimate_cost
 
 
 def layers(**kw):

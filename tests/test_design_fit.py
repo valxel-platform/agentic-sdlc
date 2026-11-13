@@ -3,9 +3,9 @@ design and architecture are checked to fit together before the plan."""
 
 from __future__ import annotations
 
-from vrixel_sdlc import fit
-from vrixel_sdlc.agents.parse import parse_screens, parse_tasks
-from vrixel_sdlc.evaluators.checks import _screens
+from valxel_sdlc import fit
+from valxel_sdlc.agents.parse import parse_screens, parse_tasks
+from valxel_sdlc.evaluators.checks import _screens
 
 UX = "# UX spec: x\n## Screens\n- S1: Field list\n- S2: Field detail\n## States\n- Loading, empty, error\n"
 HLD_UI = "## Affected repos\n- acme-farm/farm-api (provider)\n- acme-farm/farm-web (consumer)\n"
@@ -45,7 +45,7 @@ def test_the_plan_and_the_coder_get_the_approved_ux(engine):
     assert web and web[0]["screens"] == ["S1", "S2"]
     prompts = [r for r in engine.services.ledger.records(v["feature_id"]) if r.phase == "build"]
     assert prompts  # the build ran; the instruction itself is checked below
-    from vrixel_sdlc.graph.phase import ux_instruction
+    from valxel_sdlc.graph.phase import ux_instruction
 
     line = ux_instruction({"parent_texts": {"UX": UX}}, {"role": "consumer", "screens": ["S1"]})
     assert "S1 (Field list)" in line and "word for word" in line

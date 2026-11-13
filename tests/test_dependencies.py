@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from vrixel_sdlc import dependencies as deps
-from vrixel_sdlc.graph.phase import risk_tier
+from valxel_sdlc import dependencies as deps
+from valxel_sdlc.graph.phase import risk_tier
 
 NOW = datetime(2026, 11, 12, tzinfo=timezone.utc).timestamp()
 REGISTRY = {

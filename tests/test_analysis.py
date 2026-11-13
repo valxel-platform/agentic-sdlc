@@ -11,15 +11,15 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.integrations.openchoreo_agents import HttpAgents, StubAgents, default_rca
-from vrixel_sdlc.ops import paging, remediation
-from vrixel_sdlc.ops.signals import from_alertmanager, from_openchoreo
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.integrations.openchoreo_agents import HttpAgents, StubAgents, default_rca
+from valxel_sdlc.ops import paging, remediation
+from valxel_sdlc.ops.signals import from_alertmanager, from_openchoreo
+from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-POLICY = EXAMPLES / "vrixel-tools" / "sdlc-governance" / "platform" / "remediation.yaml"
+POLICY = EXAMPLES / "valxel-platform" / "sdlc-governance" / "platform" / "remediation.yaml"
 
 
 @pytest.fixture
@@ -131,7 +131,7 @@ def test_the_analysis_is_waited_for_then_given_up_on(tmp_path, root, monkeypatch
         def now(cls, tz=None):
             return real.now(tz) + timedelta(minutes=9)
 
-    monkeypatch.setattr("vrixel_sdlc.engine.datetime", Later)
+    monkeypatch.setattr("valxel_sdlc.engine.datetime", Later)
     eng.poke_now(iid)
     assert gate(eng, iid)
     assert "didn't finish in time" in urgent(svc)[0]["payload"]["custom_details"]["why on-call"]

@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUEST = ("Register walk-in patients at the front desk; Capture consent during registration; "
@@ -71,7 +71,7 @@ def test_features_start_together_or_in_order(made):
 
 
 def test_a_new_product_starts_its_first_feature_once_registered(made, monkeypatch):
-    from vrixel_sdlc.inception import Vision
+    from valxel_sdlc.inception import Vision
 
     eng, svc = made
     tid = eng.create_inception(Vision(name="Aqua Watch", org="acme-water", vision="Small farms lose crops because "

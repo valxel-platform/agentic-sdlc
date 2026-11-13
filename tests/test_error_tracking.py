@@ -9,17 +9,17 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.cli import main as cli
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.governance.loader import GovernanceError
-from vrixel_sdlc.ops import error_tracking as et
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.cli import main as cli
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.governance.loader import GovernanceError
+from valxel_sdlc.ops import error_tracking as et
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-POLICY = et.load_policy((EXAMPLES / "vrixel-tools" / "sdlc-governance" / "platform" / "error-tracking.yaml").read_text())
+POLICY = et.load_policy((EXAMPLES / "valxel-platform" / "sdlc-governance" / "platform" / "error-tracking.yaml").read_text())
 TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
 
 
@@ -31,7 +31,7 @@ def rt(provider, region="us-east-2", **extra):
     (rt("glitchtip", url="https://errors.pay.example.dev"), "payments", None),
     (rt("sentry"), "payments", "must be glitchtip (payments)"),
     (rt("sentry", region="ap-south-1"), "general", "must be glitchtip (india)"),
-    (rt("glitchtip", region="ap-south-1", url="https://errors.cln.vrixel.in"), "phi", None),
+    (rt("glitchtip", region="ap-south-1", url="https://errors.cln.valxel.in"), "phi", None),
     (rt("sentry"), "phi", "needs a signed BAA"),
     (rt("sentry", baa=True), "phi", None),
     (rt("sentry"), "general", None),
@@ -99,7 +99,7 @@ def test_a_glitchtip_alert_is_a_signal_and_learns_its_trace():
 
 def test_the_webhook_takes_the_products_own_token(engine, monkeypatch, capsys):
     eng, _ = engine
-    monkeypatch.setenv("VRIXEL_SIGNALS_TOKEN", "s3cret")
+    monkeypatch.setenv("VALXEL_SIGNALS_TOKEN", "s3cret")
     client = TestClient(create_app(eng, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
     good = et.token_for("PAY")
     assert good and good != et.token_for("CLN")
@@ -111,12 +111,12 @@ def test_the_webhook_takes_the_products_own_token(engine, monkeypatch, capsys):
 
     assert cli(["glitchtip-token", "PAY"]) == 0
     assert capsys.readouterr().out.strip() == f"/api/signals/glitchtip/PAY?token={good}"
-    monkeypatch.delenv("VRIXEL_SIGNALS_TOKEN")
+    monkeypatch.delenv("VALXEL_SIGNALS_TOKEN")
     assert cli(["glitchtip-token", "PAY"]) == 2
 
 
 def test_runtime_calls_reach_the_call_graph(tmp_path):
-    from vrixel_sdlc.ops.correlate import graph_for
+    from valxel_sdlc.ops.correlate import graph_for
 
     root = tmp_path / "governance"
     shutil.copytree(EXAMPLES, root)

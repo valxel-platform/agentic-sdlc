@@ -8,12 +8,12 @@ import yaml
 from fastapi.testclient import TestClient
 
 from test_api import SECRET, sign_in, wait_idle
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.governance.manifest import parse_manifest
-from vrixel_sdlc.inception import setup
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.governance.manifest import parse_manifest
+from valxel_sdlc.inception import setup
+from valxel_sdlc.web.auth import AuthConfig
 
-COUNCIL = ["vrixel-tools/product-council"]
+COUNCIL = ["valxel-platform/product-council"]
 BODY = {"name": "Aqua Watch", "org": "acme-water",
         "vision": "Small farms lose crops because nobody sees soil moisture until too late. Alert the manager's phone.",
         "goals": ["Fewer dry-field incidents (measure: under 2 a month per farm)",
@@ -53,7 +53,7 @@ def test_only_starters_begin_and_only_the_council_decides(client, engine):
 
 
 def test_two_gates_then_setup_opens_the_pull_requests(client, engine, services, monkeypatch):
-    monkeypatch.setenv("VRIXEL_CONFIG_REPO", "vrixel-tools/sdlc-config")
+    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-platform/sdlc-config")
     sign_in(client, "lead", teams=COUNCIL)
     tid = client.post("/api/inceptions", json=BODY).json()["feature_id"]
     decide(client, engine, tid, "revise", feedback="Name agronomists as users too")
@@ -72,7 +72,7 @@ def test_two_gates_then_setup_opens_the_pull_requests(client, engine, services, 
     files = {path for (repo, branch, path) in gh.files if repo == "acme-water/aw-governance"}
     assert {"product.yaml", "constitution.md", "roadmap/goals.yaml", "roadmap/initiatives/AW-INI-1.md",
             "architecture/product-architecture.md", "runtime/capacity.yaml"} <= files
-    registry = gh.files[("vrixel-tools/sdlc-config", "vrixel/register-aw", "config/registry.yaml")]
+    registry = gh.files[("valxel-platform/sdlc-config", "valxel/register-aw", "config/registry.yaml")]
     assert "AW: { kind: product, org: acme-water, repo: aw-governance" in registry
     assert [st["step"] for st in s["steps"]] == ["governance_repo", "governance_pr", "registry_pr", "clusters_pr",
                                                  "environments", "teams"]
@@ -81,7 +81,7 @@ def test_two_gates_then_setup_opens_the_pull_requests(client, engine, services, 
     assert by["clusters_pr"]["skipped"] and by["environments"]["waiting"] == ["aw-nonprod", "aw-prod"]
     import yaml
 
-    manifest = yaml.safe_load(gh.files[("acme-water/aw-governance", "vrixel/inception", "product.yaml")])
+    manifest = yaml.safe_load(gh.files[("acme-water/aw-governance", "valxel/inception", "product.yaml")])
     assert manifest["runtime"]["stage"] == "pilot" and manifest["runtime"]["data_planes"]["production"] == "aw-prod"
 
 
@@ -119,9 +119,9 @@ def test_an_existing_product_gets_one_pull_request(client, engine, services):
 
 
 def test_the_records_setup_writes_load_as_a_product(services):
-    from vrixel_sdlc.config import RegistryEntry, RepoPointer
-    from vrixel_sdlc.inception import Vision
-    from vrixel_sdlc.inception.run import run
+    from valxel_sdlc.config import RegistryEntry, RepoPointer
+    from valxel_sdlc.inception import Vision
+    from valxel_sdlc.inception.run import run
 
     v = Vision(name="Aqua Watch", org="acme-water", vision="Alert farm managers when fields run dry.",
                goals=["Fewer dry fields (measure: under 2 a month)"], users=["Farm managers"], budget_usd=1500)

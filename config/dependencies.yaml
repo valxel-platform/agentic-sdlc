@@ -1,4 +1,4 @@
-# What a package a change adds must meet (vrixel_sdlc.dependencies, suite `new-dependencies`).
+# What a package a change adds must meet (valxel_sdlc.dependencies, suite `new-dependencies`).
 # Products tighten these in their own quality settings; loosening is a config change, reviewed.
 min_age_days: 30          # first published at least this long ago (new names are where squatting happens)
 min_scorecard: 3.0        # OpenSSF Scorecard of its source repository, when it has one

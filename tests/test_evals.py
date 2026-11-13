@@ -9,10 +9,10 @@ from pathlib import Path
 import yaml
 from fastapi.testclient import TestClient
 
-from vrixel_sdlc import cli, evals
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.integrations import StubGitHub
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc import cli, evals
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.integrations import StubGitHub
+from valxel_sdlc.web.auth import AuthConfig
 
 from conftest import approve
 
@@ -64,7 +64,7 @@ def test_a_worse_config_is_a_regression(engine, services, monkeypatch):
     released_with_a_revision(engine)
     cases = services.evals.cases(product_id="FARM")
     base = evals.run(evals.services_for(services.settings), cases)
-    from vrixel_sdlc.evaluators import critic
+    from valxel_sdlc.evaluators import critic
 
     real = critic.stub_verdict
     monkeypatch.setattr(critic, "stub_verdict", lambda content, phase="", items=None: real("", phase, items))  # quotes nothing
@@ -94,7 +94,7 @@ def test_the_cli_exports_and_runs_from_a_file(engine, services, tmp_path, capsys
 def test_a_config_pull_request_gets_an_eval_status(engine, services, monkeypatch):
     released_with_a_revision(engine)
     gh = StubGitHub()
-    repo = "vrixel-tools/sdlc-config"
+    repo = "valxel-platform/sdlc-config"
     models = yaml.safe_load((Path(services.settings.config_dir) / "models.yaml").read_text())
     gh.files[(repo, "head1", "config/models.yaml")] = yaml.safe_dump(models)
     gate = evals.ConfigGate(services, gh, config_repo=repo, public_url="https://sdlc.example", background=False)
@@ -102,17 +102,17 @@ def test_a_config_pull_request_gets_an_eval_status(engine, services, monkeypatch
     done = gate.runs[run["id"]]
     assert done["status"] == "passed" and done["comparison"]["ok"] and done["comparison"]["cases"] > 0
     states = [(s["state"], s["context"]) for s in gh.statuses if s["sha"] == "head1"]
-    assert states == [("pending", "vrixel / evals"), ("success", "vrixel / evals")]
+    assert states == [("pending", "valxel / evals"), ("success", "valxel / evals")]
     assert gh.statuses[-1]["url"] == f"https://sdlc.example/api/evals/runs/{run['id']}"
 
 
 def test_the_webhook_starts_a_run_and_the_api_shows_it(engine, services, monkeypatch):
     released_with_a_revision(engine)
-    monkeypatch.setenv("VRIXEL_CONFIG_REPO", "vrixel-tools/sdlc-config")
-    monkeypatch.setenv("VRIXEL_GITHUB_WEBHOOK_SECRET", "s3cret")
-    monkeypatch.setenv("VRIXEL_EVAL_APPROVERS", "vrixel-tools/platform")
+    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-platform/sdlc-config")
+    monkeypatch.setenv("VALXEL_GITHUB_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("VALXEL_EVAL_APPROVERS", "valxel-platform/platform")
     with TestClient(create_app(engine, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None)) as c:
-        body = json.dumps({"action": "synchronize", "repository": {"full_name": "vrixel-tools/sdlc-config"},
+        body = json.dumps({"action": "synchronize", "repository": {"full_name": "valxel-platform/sdlc-config"},
                            "pull_request": {"head": {"sha": "abc123", "ref": "cheaper-critic"}, "base": {"sha": ""},
                                             "user": {"login": "ana"}}}).encode()
         sig = "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
@@ -127,7 +127,7 @@ def test_the_webhook_starts_a_run_and_the_api_shows_it(engine, services, monkeyp
         assert c.get(f"/api/evals/runs/{run_id}").json()["status"] == "passed"
         assert c.get("/api/evals/runs").json()[0]["id"] == run_id
         assert c.post("/api/evals/runs", json={"ref": "abc123"}).status_code == 403
-        c.post("/api/auth/dev-login", json={"login": "ana", "teams": ["vrixel-tools/platform"]})
+        c.post("/api/auth/dev-login", json={"login": "ana", "teams": ["valxel-platform/platform"]})
         assert c.post("/api/evals/runs", json={"ref": "abc123"}).status_code == 202
 
 
@@ -159,4 +159,4 @@ def test_langfuse_gets_datasets_runs_and_scores_with_content_only_for_general_ca
     items = [b for p, b in sent if p == "dataset-items"]
     assert items[0]["input"]["parents"] and items[1]["input"] == {"case": cases[1].id}  # no PHI content leaves
     assert ("dataset-run-items", {"runName": "run-1", "datasetItemId": cases[0].id.replace(":", "-"), "traceId": "t0"}) in sent
-    assert {b["name"] for p, b in sent if p == "scores"} == {"vrixel.passed", "vrixel.must_met"}
+    assert {b["name"] for p, b in sent if p == "scores"} == {"valxel.passed", "valxel.must_met"}

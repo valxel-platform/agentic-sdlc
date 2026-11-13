@@ -4,7 +4,7 @@ tries run out or nothing the feature changed is to blame."""
 
 from test_quality import drive_gates, engine_for, gov_root, sql_injection  # noqa: F401
 
-from vrixel_sdlc.quality import SuiteResult
+from valxel_sdlc.quality import SuiteResult
 
 MOBILE = "acme-farm/farm-mobile"
 
@@ -94,7 +94,7 @@ def test_security_findings_in_ci_go_to_the_agents_first(tmp_path, gov_root):
 
 
 def test_a_failure_outside_the_change_goes_straight_to_people(tmp_path, gov_root):
-    from vrixel_sdlc.graph.pipeline import failing_repos
+    from valxel_sdlc.graph.pipeline import failing_repos
 
     state = {"tasks": [{"id": "TASK-1", "repo": "o/api", "acs": ["AC-1"]}]}
     assert failing_repos(state, {"results": [{"repo": "resource:orders", "state": "failure"}]}) == []

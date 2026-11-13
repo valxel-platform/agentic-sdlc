@@ -8,14 +8,14 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.graph import InvalidDecision
-from vrixel_sdlc.ops.correlate import CallGraph, trace_ids, traces_in_logs
-from vrixel_sdlc.ops.signals import from_alertmanager, from_openchoreo, from_sentry
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.graph import InvalidDecision
+from valxel_sdlc.ops.correlate import CallGraph, trace_ids, traces_in_logs
+from valxel_sdlc.ops.signals import from_alertmanager, from_openchoreo, from_sentry
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 API, WEB = "acme-clinic/cln-intake-api", "acme-clinic/cln-web"
@@ -36,7 +36,7 @@ def web_error(trace=TRACE, issue="9001", at="2026-11-06T18:00:00Z"):
     return {"action": "triggered", "data": {"event": {
         "issue_id": issue, "title": "ApiError: API 503", "level": "error", "culprit": "App.submit",
         "project": {"slug": "cln-web"}, "lastSeen": at, "environment": "production",
-        "tags": [["vrixel_product", "CLN"], ["trace_id", trace], ["endpoint", "GET /api/v1/greetings"],
+        "tags": [["valxel_product", "CLN"], ["trace_id", trace], ["endpoint", "GET /api/v1/greetings"],
                  ["status", "503"]]}}}
 
 
@@ -44,7 +44,7 @@ def api_error(trace=TRACE, issue="9100", at="2026-11-06T18:01:00Z"):
     return {"action": "triggered", "data": {"event": {
         "issue_id": issue, "title": "DataAccessResourceFailureException", "level": "error",
         "project": {"slug": "cln-intake-api"}, "lastSeen": at, "environment": "production",
-        "tags": [["vrixel_product", "CLN"], ["trace_id", trace]]}}}
+        "tags": [["valxel_product", "CLN"], ["trace_id", trace]]}}}
 
 
 def test_traces_and_the_call_graph():
@@ -90,7 +90,7 @@ def test_a_signal_tying_two_incidents_merges_them(eng):
     [a] = eng.ingest(from_alertmanager({"alerts": [{"status": "firing", "fingerprint": "w1",
                                                      "startsAt": "2026-11-06T10:00:00Z",
                                                      "labels": {"alertname": "WebErrors", "severity": "warning",
-                                                                "component": "cln-web", "vrixel_product": "CLN"}}]}))
+                                                                "component": "cln-web", "valxel_product": "CLN"}}]}))
     [b] = eng.ingest(from_sentry(api_error(at="2026-11-06T12:00:00Z")))  # 2 hours later: separate
     assert a != b
     # A web error (joining the web alert's incident) that names the API error's request ties them.

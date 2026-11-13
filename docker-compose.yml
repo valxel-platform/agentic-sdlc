@@ -2,13 +2,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: vrixel
-      POSTGRES_PASSWORD: vrixel
-      POSTGRES_DB: vrixel
+      POSTGRES_USER: valxel
+      POSTGRES_PASSWORD: valxel
+      POSTGRES_DB: valxel
     ports: ["5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vrixel -d vrixel"]
+      test: ["CMD-SHELL", "pg_isready -U valxel -d valxel"]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -16,51 +16,51 @@ services:
   api:
     build: .
     environment:
-      DATABASE_URL: postgresql://vrixel:vrixel@postgres:5432/vrixel
-      VRIXEL_MODE: ${VRIXEL_MODE:-stub}
-      VRIXEL_STRICT: ${VRIXEL_STRICT:-0}
-      VRIXEL_OTEL_ENDPOINT: ${VRIXEL_OTEL_ENDPOINT:-}   # OTLP/HTTP collector for agent session traces
-      VRIXEL_OTEL_HEADERS: ${VRIXEL_OTEL_HEADERS:-}
-      VRIXEL_TRACE_URL: ${VRIXEL_TRACE_URL:-}           # e.g. https://langfuse.example.com/project/vrixel/traces/{trace_id}
-      VRIXEL_CONFIG_REPO: ${VRIXEL_CONFIG_REPO:-}       # config PRs are evaluated against past work (vrixel / evals)
-      VRIXEL_CANARY_CONFIG_DIR: ${VRIXEL_CANARY_CONFIG_DIR:-}   # a candidate config a share of new features runs with
-      VRIXEL_CANARY_PERCENT: ${VRIXEL_CANARY_PERCENT:-0}
-      VRIXEL_EVAL_APPROVERS: ${VRIXEL_EVAL_APPROVERS:-}
-      VRIXEL_LANGFUSE_URL: ${VRIXEL_LANGFUSE_URL:-}
-      VRIXEL_LANGFUSE_PUBLIC_KEY: ${VRIXEL_LANGFUSE_PUBLIC_KEY:-}
-      VRIXEL_LANGFUSE_SECRET_KEY: ${VRIXEL_LANGFUSE_SECRET_KEY:-}   # 1 in production: refuse to start while anything runs as a stand-in
+      DATABASE_URL: postgresql://valxel:valxel@postgres:5432/valxel
+      VALXEL_MODE: ${VALXEL_MODE:-stub}
+      VALXEL_STRICT: ${VALXEL_STRICT:-0}
+      VALXEL_OTEL_ENDPOINT: ${VALXEL_OTEL_ENDPOINT:-}   # OTLP/HTTP collector for agent session traces
+      VALXEL_OTEL_HEADERS: ${VALXEL_OTEL_HEADERS:-}
+      VALXEL_TRACE_URL: ${VALXEL_TRACE_URL:-}           # e.g. https://langfuse.example.com/project/valxel/traces/{trace_id}
+      VALXEL_CONFIG_REPO: ${VALXEL_CONFIG_REPO:-}       # config PRs are evaluated against past work (valxel / evals)
+      VALXEL_CANARY_CONFIG_DIR: ${VALXEL_CANARY_CONFIG_DIR:-}   # a candidate config a share of new features runs with
+      VALXEL_CANARY_PERCENT: ${VALXEL_CANARY_PERCENT:-0}
+      VALXEL_EVAL_APPROVERS: ${VALXEL_EVAL_APPROVERS:-}
+      VALXEL_LANGFUSE_URL: ${VALXEL_LANGFUSE_URL:-}
+      VALXEL_LANGFUSE_PUBLIC_KEY: ${VALXEL_LANGFUSE_PUBLIC_KEY:-}
+      VALXEL_LANGFUSE_SECRET_KEY: ${VALXEL_LANGFUSE_SECRET_KEY:-}   # 1 in production: refuse to start while anything runs as a stand-in
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # local reads examples/governance; github reads each product org's governance repo.
-      VRIXEL_GOVERNANCE_SOURCE: ${VRIXEL_GOVERNANCE_SOURCE:-local}
-      VRIXEL_GITHUB_APP_ID: ${VRIXEL_GITHUB_APP_ID:-}
-      VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE: ${VRIXEL_GITHUB_APP_PRIVATE_KEY_FILE:-}
-      VRIXEL_GITHUB_TOKEN: ${VRIXEL_GITHUB_TOKEN:-}
+      VALXEL_GOVERNANCE_SOURCE: ${VALXEL_GOVERNANCE_SOURCE:-local}
+      VALXEL_GITHUB_APP_ID: ${VALXEL_GITHUB_APP_ID:-}
+      VALXEL_GITHUB_APP_PRIVATE_KEY_FILE: ${VALXEL_GITHUB_APP_PRIVATE_KEY_FILE:-}
+      VALXEL_GITHUB_TOKEN: ${VALXEL_GITHUB_TOKEN:-}
       # Web sign-in. dev lets you pick any login and teams (local only); github uses OAuth.
-      VRIXEL_AUTH: ${VRIXEL_AUTH:-dev}
-      VRIXEL_SESSION_SECRET: ${VRIXEL_SESSION_SECRET:-local-dev-only-session-secret-change-me-0000}
-      VRIXEL_PUBLIC_URL: ${VRIXEL_PUBLIC_URL:-http://localhost:8080}
-      VRIXEL_GITHUB_OAUTH_CLIENT_ID: ${VRIXEL_GITHUB_OAUTH_CLIENT_ID:-}
-      VRIXEL_GITHUB_OAUTH_CLIENT_SECRET: ${VRIXEL_GITHUB_OAUTH_CLIENT_SECRET:-}
+      VALXEL_AUTH: ${VALXEL_AUTH:-dev}
+      VALXEL_SESSION_SECRET: ${VALXEL_SESSION_SECRET:-local-dev-only-session-secret-change-me-0000}
+      VALXEL_PUBLIC_URL: ${VALXEL_PUBLIC_URL:-http://localhost:8080}
+      VALXEL_GITHUB_OAUTH_CLIENT_ID: ${VALXEL_GITHUB_OAUTH_CLIENT_ID:-}
+      VALXEL_GITHUB_OAUTH_CLIENT_SECRET: ${VALXEL_GITHUB_OAUTH_CLIENT_SECRET:-}
       # Diagram and work-tracking MCP servers (config/tools.yaml). Unset = offline stand-ins.
-      VRIXEL_LUCID_MCP_AUTH: ${VRIXEL_LUCID_MCP_AUTH:-}
-      VRIXEL_ATLASSIAN_MCP_AUTH: ${VRIXEL_ATLASSIAN_MCP_AUTH:-}
-      VRIXEL_ATLASSIAN_CLOUD_ID: ${VRIXEL_ATLASSIAN_CLOUD_ID:-}
-      VRIXEL_OPENPROJECT_MCP_URL: ${VRIXEL_OPENPROJECT_MCP_URL:-}
-      VRIXEL_OPENPROJECT_MCP_AUTH: ${VRIXEL_OPENPROJECT_MCP_AUTH:-}
+      VALXEL_LUCID_MCP_AUTH: ${VALXEL_LUCID_MCP_AUTH:-}
+      VALXEL_ATLASSIAN_MCP_AUTH: ${VALXEL_ATLASSIAN_MCP_AUTH:-}
+      VALXEL_ATLASSIAN_CLOUD_ID: ${VALXEL_ATLASSIAN_CLOUD_ID:-}
+      VALXEL_OPENPROJECT_MCP_URL: ${VALXEL_OPENPROJECT_MCP_URL:-}
+      VALXEL_OPENPROJECT_MCP_AUTH: ${VALXEL_OPENPROJECT_MCP_AUTH:-}
       # Delivery: stub keeps PRs, builds and deployments in memory; live uses GitHub and OpenChoreo.
-      VRIXEL_DELIVERY: ${VRIXEL_DELIVERY:-stub}
-      VRIXEL_GITHUB_WEBHOOK_SECRET: ${VRIXEL_GITHUB_WEBHOOK_SECRET:-}
+      VALXEL_DELIVERY: ${VALXEL_DELIVERY:-stub}
+      VALXEL_GITHUB_WEBHOOK_SECRET: ${VALXEL_GITHUB_WEBHOOK_SECRET:-}
       # Production signals: Alertmanager and ticket webhooks (Bearer token), Sentry (client secret).
-      VRIXEL_SIGNALS_TOKEN: ${VRIXEL_SIGNALS_TOKEN:-}
-      VRIXEL_SENTRY_CLIENT_SECRET: ${VRIXEL_SENTRY_CLIENT_SECRET:-}
-      # One Flipt client token per product with tools.flags, e.g. VRIXEL_FLIPT_TOKEN_CLN.
-      VRIXEL_FLIPT_TOKEN_CLN: ${VRIXEL_FLIPT_TOKEN_CLN:-}
-      VRIXEL_WATCH_INTERVAL_S: ${VRIXEL_WATCH_INTERVAL_S:-30}
-      VRIXEL_OPENCHOREO_MCP_URL: ${VRIXEL_OPENCHOREO_MCP_URL:-}
-      VRIXEL_OPENCHOREO_TOKEN_URL: ${VRIXEL_OPENCHOREO_TOKEN_URL:-}
-      VRIXEL_OPENCHOREO_CLIENT_ID: ${VRIXEL_OPENCHOREO_CLIENT_ID:-service_mcp_client}
-      VRIXEL_OPENCHOREO_CLIENT_SECRET: ${VRIXEL_OPENCHOREO_CLIENT_SECRET:-}
-      VRIXEL_OPENCHOREO_CONSOLE_URL: ${VRIXEL_OPENCHOREO_CONSOLE_URL:-}
+      VALXEL_SIGNALS_TOKEN: ${VALXEL_SIGNALS_TOKEN:-}
+      VALXEL_SENTRY_CLIENT_SECRET: ${VALXEL_SENTRY_CLIENT_SECRET:-}
+      # One Flipt client token per product with tools.flags, e.g. VALXEL_FLIPT_TOKEN_CLN.
+      VALXEL_FLIPT_TOKEN_CLN: ${VALXEL_FLIPT_TOKEN_CLN:-}
+      VALXEL_WATCH_INTERVAL_S: ${VALXEL_WATCH_INTERVAL_S:-30}
+      VALXEL_OPENCHOREO_MCP_URL: ${VALXEL_OPENCHOREO_MCP_URL:-}
+      VALXEL_OPENCHOREO_TOKEN_URL: ${VALXEL_OPENCHOREO_TOKEN_URL:-}
+      VALXEL_OPENCHOREO_CLIENT_ID: ${VALXEL_OPENCHOREO_CLIENT_ID:-service_mcp_client}
+      VALXEL_OPENCHOREO_CLIENT_SECRET: ${VALXEL_OPENCHOREO_CLIENT_SECRET:-}
+      VALXEL_OPENCHOREO_CONSOLE_URL: ${VALXEL_OPENCHOREO_CONSOLE_URL:-}
     ports: ["8080:8080"]
     volumes: [artifacts:/data/artifacts]
     depends_on:

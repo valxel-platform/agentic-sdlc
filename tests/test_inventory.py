@@ -8,12 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.ops import inventory
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.ops import inventory
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 DESC = "Keep each field's latest state in DynamoDB"
@@ -83,11 +83,11 @@ def test_aws_tags_fill_in_arns_and_show_what_nobody_manages(eng):
     released(eng)
     arn = "arn:aws:dynamodb:us-east-2:333333333333:table/farm-field-log"
     pages = {"333333333333": [
-        {"ResourceTagMappingList": [{"ResourceARN": arn, "Tags": [{"Key": "vrixel:resource", "Value": "field-log-dynamodb"}]}],
+        {"ResourceTagMappingList": [{"ResourceARN": arn, "Tags": [{"Key": "valxel:resource", "Value": "field-log-dynamodb"}]}],
          "PaginationToken": "next"},
         {"ResourceTagMappingList": [
             {"ResourceARN": "arn:aws:iam::333333333333:role/farm-field-api", "Tags": []},  # a workload identity
-            {"ResourceARN": "arn:aws:s3:::farm-old-exports", "Tags": [{"Key": "vrixel:feature", "Value": "FARM-FEAT-0"}]}]}]}
+            {"ResourceARN": "arn:aws:s3:::farm-old-exports", "Tags": [{"Key": "valxel:feature", "Value": "FARM-FEAT-0"}]}]}]}
     clients = {acct: FakeTagging(p) for acct, p in pages.items()}
 
     def client_for(account, region):
@@ -95,7 +95,7 @@ def test_aws_tags_fill_in_arns_and_show_what_nobody_manages(eng):
             raise PermissionError("role not set up in dev")
         return clients.get(account) or FakeTagging([{"ResourceTagMappingList": []}])
 
-    eng.services.aws_tags = inventory.AwsTags(client_for=client_for, role="vrixel-inventory")
+    eng.services.aws_tags = inventory.AwsTags(client_for=client_for, role="valxel-inventory")
     inv = eng.inventory("FARM")
     table = next(r for r in inv["items"] if r["name"] == "field-log-dynamodb" and r["env"] == "production")
     assert table["ids"]["arn"] == arn
@@ -103,7 +103,7 @@ def test_aws_tags_fill_in_arns_and_show_what_nobody_manages(eng):
                                  "resource_tag": "", "feature": "FARM-FEAT-0"}]
     assert inv["aws"] == "partly checked" and "AWS dev (111111111111): PermissionError" in inv["problems"][0]
     assert clients["333333333333"].calls[1]["PaginationToken"] == "next"
-    assert clients["333333333333"].calls[0]["TagFilters"] == [{"Key": "vrixel:product", "Values": ["FARM"]}]
+    assert clients["333333333333"].calls[0]["TagFilters"] == [{"Key": "valxel:product", "Values": ["FARM"]}]
 
 
 def test_daily_snapshots_and_the_api(eng):
@@ -124,8 +124,8 @@ def test_daily_snapshots_and_the_api(eng):
 def test_the_live_adapter_reads_bindings_and_never_secret_values():
     from mcp.server import MCPServer
 
-    from vrixel_sdlc.integrations.mcp_client import McpHttp
-    from vrixel_sdlc.integrations.openchoreo import OpenChoreoMcp
+    from valxel_sdlc.integrations.mcp_client import McpHttp
+    from valxel_sdlc.integrations.openchoreo import OpenChoreoMcp
 
     server = MCPServer("openchoreo")
 
@@ -146,7 +146,7 @@ def test_the_live_adapter_reads_bindings_and_never_secret_values():
                             "outputs": [{"name": "endpoint", "value": "db.internal:5432"},
                                         {"name": "password", "secretKeyRef": {"name": "db-conn", "key": "password"}}]}}]
 
-    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="vrixel")
+    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="valxel")
     assert oc.component_bindings(component="org/api", project="farm") == [
         {"env": "production", "release": "api-7", "state": "ready", "binding": "api-production"},
         {"env": "dev", "release": "x-8", "state": "failed", "binding": "api-dev"}]

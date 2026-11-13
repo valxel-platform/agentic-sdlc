@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from vrixel_sdlc.agents.parse import parse_copy, parse_flow, parse_screen_apps, parse_screens, parse_sequences
-from vrixel_sdlc.evaluators.checks import _flows, _ux_structure
+from valxel_sdlc.agents.parse import parse_copy, parse_flow, parse_screen_apps, parse_screens, parse_sequences
+from valxel_sdlc.evaluators.checks import _flows, _ux_structure
 
 REPOS = [{"name": "acme/web", "role": "consumer"}, {"name": "acme/api", "role": "provider"}]
 UX = """## Screens

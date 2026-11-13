@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.governance.errors import GovernanceError
-from vrixel_sdlc.graph.phase import flag_findings
-from vrixel_sdlc.integrations.flags import FliptError, FliptFlags, NoFlags, ProductFlags, flag_key
-from vrixel_sdlc.ops.signals import from_alertmanager
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.governance.errors import GovernanceError
+from valxel_sdlc.graph.phase import flag_findings
+from valxel_sdlc.integrations.flags import FliptError, FliptFlags, NoFlags, ProductFlags, flag_key
+from valxel_sdlc.ops.signals import from_alertmanager
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 FARM_FLAGS = """
@@ -91,7 +91,7 @@ def make(tmp_path, gov_root, *, flipt=None, live=False, token="t0ken"):
         def product_flags(pid):
             p = svc.snapshot(pid).product
             return p.tools.get("flags") or {}, p.runtime or {}
-        svc.flags = ProductFlags(product_flags, live=live, env={"VRIXEL_FLIPT_TOKEN_FARM": token} if token else {},
+        svc.flags = ProductFlags(product_flags, live=live, env={"VALXEL_FLIPT_TOKEN_FARM": token} if token else {},
                                  transport_for=lambda url, tok: flipt)
     return FeatureEngine(svc, InMemorySaver()), svc
 
@@ -266,7 +266,7 @@ def test_the_tool_turns_a_flipt_flag_off(tmp_path, gov_root):
     with_flipt(gov_root)
     # No OpenChoreo analysis here (live delivery, no agents): the platform lets the tool act on the
     # release suspect alone.
-    pol = gov_root / "vrixel-tools" / "sdlc-governance" / "platform" / "remediation.yaml"
+    pol = gov_root / "valxel-platform" / "sdlc-governance" / "platform" / "remediation.yaml"
     pol.write_text(pol.read_text().replace("without_analysis: page", "without_analysis: suspects"))
     fake = FakeFlipt()
     eng, _ = make(tmp_path, gov_root, flipt=fake, live=True)

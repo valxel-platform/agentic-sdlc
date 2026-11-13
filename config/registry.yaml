@@ -1,4 +1,4 @@
-# Product registry for the Vrixel SDLC tool (lives in the tools org).
+# Product registry for the Valxel SDLC tool (lives in the tools org).
 #
 # The tool does NOT carry product constitutions or product settings. Each product keeps a
 # governance repo in its own GitHub organization:
@@ -8,7 +8,7 @@
 # The tool reads them at feature intake and pins the commit SHA for the feature's lifetime.
 #
 # The products below are fictional examples (examples/governance). A real deployment keeps its
-# own registry in a private config directory and sets VRIXEL_CONFIG_DIR.
+# own registry in a private config directory and sets VALXEL_CONFIG_DIR.
 #
 # Only what the platform must control stays here: where each governance repo is, the
 # product's data class (it decides which model providers may see its data), its API
@@ -20,7 +20,7 @@ governance:
   github_api: https://api.github.com
 
 platform:
-  org: vrixel-tools
+  org: valxel-platform
   repo: sdlc-governance
   ref: main
   constitution_path: platform/constitution.md
@@ -40,11 +40,11 @@ limits:
 #                them in its own runtime, so a shared lane owns no environments.
 # A shared lane serves regulated products, so its data class is phi: changes to it always go
 # through G5, and only providers approved for PHI see its code.
-# Product inception (vrixel_sdlc.inception): who may start one, and the fixed product council that
+# Product inception (valxel_sdlc.inception): who may start one, and the fixed product council that
 # decides both of its gates (the brief gate, then the product gate). GitHub teams or logins.
 inception:
-  starters: [vrixel-tools/product-council]
-  council: [vrixel-tools/product-council]
+  starters: [valxel-platform/product-council]
+  council: [valxel-platform/product-council]
   budget_usd: 50        # what agents may spend writing one product's three documents
 
 products:

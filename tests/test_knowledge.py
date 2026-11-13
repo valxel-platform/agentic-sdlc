@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.governance.sources import GitHubSource
-from vrixel_sdlc.knowledge import design_review, render
-from vrixel_sdlc.knowledge.contracts import parse_openapi
-from vrixel_sdlc.knowledge.record import mark_superseded, parse_adr, render_adr
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.governance.sources import GitHubSource
+from valxel_sdlc.knowledge import design_review, render
+from valxel_sdlc.knowledge.contracts import parse_openapi
+from valxel_sdlc.knowledge.record import mark_superseded, parse_adr, render_adr
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 API = "acme-clinic/cln-intake-api"
@@ -285,7 +285,7 @@ def test_the_tool_knows_every_feature_it_ran_and_where_it_got_to(tmp_path, gov_r
 
 
 def test_duplicates_are_caught_whatever_state_the_original_is_in(tmp_path, gov_root):
-    from vrixel_sdlc.duplicates import DuplicateIntent
+    from valxel_sdlc.duplicates import DuplicateIntent
 
     eng, _ = make(tmp_path, gov_root)
     first = eng.start(product_id="CLN", title="Consent capture at intake",

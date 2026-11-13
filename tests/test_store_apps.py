@@ -9,14 +9,14 @@ import pytest
 import yaml
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc import store, waits
-from vrixel_sdlc.agents.templates import _endpoint_lines
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.evaluators.checks import _endpoints
-from vrixel_sdlc.graph.phase import security_instruction
-from vrixel_sdlc.repo_roles import REPO_ORDER
-from vrixel_sdlc.services import build_services
+from valxel_sdlc import store, waits
+from valxel_sdlc.agents.templates import _endpoint_lines
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.evaluators.checks import _endpoints
+from valxel_sdlc.graph.phase import security_instruction
+from valxel_sdlc.repo_roles import REPO_ORDER
+from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 APP, BFF = "acme-farm/farm-mobile", "acme-farm/farm-bff"
@@ -72,7 +72,7 @@ def rollout_wait(engine, fid):
     return next((p for p in engine.pending(fid) if p["type"] == "external" and p["wait"] == "rollout"), None)
 
 
-def released(services, kind="vrixel-release"):
+def released(services, kind="valxel-release"):
     return [d for d in services.github.dispatches if d["event_type"] == kind and d["repo"] == APP]
 
 
@@ -85,20 +85,20 @@ def test_a_store_app_is_released_at_each_stage_then_rolled_out(engine, services,
     stages = [(d["payload"]["stage"], d["payload"]["sha"], d["payload"]["actor"]) for d in released(services)]
     sha = prs[APP]["merge_sha"]
     assert stages == [("dev", sha, "agent:dev"), ("staging", sha, "agent:staging"), ("production", sha, "auto-approver")]
-    assert not [d for d in services.github.dispatches if d["event_type"] == "vrixel-deployed" and d["repo"] == APP]
+    assert not [d for d in services.github.dispatches if d["event_type"] == "valxel-deployed" and d["repo"] == APP]
 
     # Production is submitted; the first step waits a day for the store's vitals.
     w = rollout_wait(engine, fid)
     assert w is not None and w["targets"][0]["context"] == "rollout / 10%"
     assert datetime.fromisoformat(w["targets"][0]["not_before"]) > datetime.now(timezone.utc) + timedelta(hours=23)
     check_waits(engine, fid)
-    assert not released(services, "vrixel-rollout")  # not before its time
+    assert not released(services, "valxel-rollout")  # not before its time
 
     clock = Clock(monkeypatch)
     for _ in store.DEFAULT_ROLLOUT["steps"]:
         clock.hours(25)
         check_waits(engine, fid)
-    steps = [d["payload"] for d in released(services, "vrixel-rollout")]
+    steps = [d["payload"] for d in released(services, "valxel-rollout")]
     assert [p["fraction"] for p in steps] == ["0.1", "0.5", "1.0"]
     assert {p["sha"] for p in steps} == {sha}
     s = engine.graph.get_state(engine._config(fid)).values
@@ -111,7 +111,7 @@ def test_an_unhealthy_release_is_halted_and_goes_to_people(engine, services, mon
     services.github.release_result = "failure"
     Clock(monkeypatch).hours(25)
     check_waits(engine, fid)
-    halts = [d for d in released(services, "vrixel-rollout") if d["payload"].get("halt")]
+    halts = [d for d in released(services, "valxel-rollout") if d["payload"].get("halt")]
     assert len(halts) == 1
     esc = next(p for p in engine.pending(fid) if p["type"] == "escalation")
     assert esc["wait"] == "rollout" and "crash-free" in " ".join(esc["findings"])
@@ -120,7 +120,7 @@ def test_an_unhealthy_release_is_halted_and_goes_to_people(engine, services, mon
     services.github.release_result = "success"
     engine.decide(fid, esc["interrupt_id"], {"decision": "retry", "approver": "rm"})
     check_waits(engine, fid)
-    retried = [d["payload"]["context"] for d in released(services, "vrixel-rollout") if not d["payload"].get("halt")]
+    retried = [d["payload"]["context"] for d in released(services, "valxel-rollout") if not d["payload"].get("halt")]
     assert retried == ["rollout / 10%", "rollout / 10% (attempt 2)"]
     s = engine.graph.get_state(engine._config(fid)).values
     assert s["rollout"]["step"] == 1 and s["rollout"]["history"] == [

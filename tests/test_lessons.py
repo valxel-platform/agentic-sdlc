@@ -7,12 +7,12 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from conftest import approve
-from vrixel_sdlc import lessons
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.governance.errors import GovernanceError
-from vrixel_sdlc.graph import InvalidDecision
-from vrixel_sdlc.services import build_services
+from valxel_sdlc import lessons
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.governance.errors import GovernanceError
+from valxel_sdlc.graph import InvalidDecision
+from valxel_sdlc.services import build_services
 
 ROOT = Path(__file__).resolve().parents[1]
 FARM_GOV = "acme-farm/farm-governance"
@@ -234,8 +234,8 @@ def test_the_web_api_takes_remember_and_lists_lessons(eng):
     from fastapi.testclient import TestClient
 
     from test_api import SECRET, sign_in, wait_idle
-    from vrixel_sdlc.api.app import create_app
-    from vrixel_sdlc.web.auth import AuthConfig
+    from valxel_sdlc.api.app import create_app
+    from valxel_sdlc.web.auth import AuthConfig
 
     with TestClient(create_app(eng, auth=AuthConfig(mode="dev", secret=SECRET), web_dist=None)) as client:
         teams = ["acme-farm/product-owners"]

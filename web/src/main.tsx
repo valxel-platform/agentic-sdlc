@@ -30,7 +30,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
   return (
     <div className="shell">
       <header className="side">
-        <div className="brand"><Mark /> Vrixel SDLC</div>
+        <div className="brand"><Mark /> Valxel SDLC</div>
         <nav className="nav" aria-label="Main">
           <NavLink to="/inbox">Decisions {mine > 0 && <span className="count" aria-label={`${mine} waiting on you`}>{mine}</span>}</NavLink>
           <NavLink to="/roadmap">Roadmap</NavLink>

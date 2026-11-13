@@ -6,18 +6,18 @@ import uuid
 
 import pytest
 
-DB = os.environ.get("VRIXEL_TEST_DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DB, reason="set VRIXEL_TEST_DATABASE_URL to run Postgres tests")
+DB = os.environ.get("VALXEL_TEST_DATABASE_URL")
+pytestmark = pytest.mark.skipif(not DB, reason="set VALXEL_TEST_DATABASE_URL to run Postgres tests")
 
 
 def _engine(settings, pool):
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    from vrixel_sdlc.engine import FeatureEngine, PostgresIndex
-    from vrixel_sdlc.gateway import PostgresLedger
-    from vrixel_sdlc.services import build_services
+    from valxel_sdlc.engine import FeatureEngine, PostgresIndex
+    from valxel_sdlc.gateway import PostgresLedger
+    from valxel_sdlc.services import build_services
 
-    from vrixel_sdlc.integrations.catalog import PostgresCatalog
+    from valxel_sdlc.integrations.catalog import PostgresCatalog
 
     saver = PostgresSaver(pool)
     saver.setup()
@@ -31,7 +31,7 @@ def test_threads_survive_a_restart_and_usage_is_persisted(settings):
 
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
         with pool.connection() as conn:
-            conn.execute("DROP TABLE IF EXISTS vrixel_features")
+            conn.execute("DROP TABLE IF EXISTS valxel_features")
         title = f"Durable feature {uuid.uuid4().hex[:6]}"
         first = _engine(settings, pool)
         v = first.start(product_id="CLN", title=title)
@@ -54,12 +54,12 @@ def test_released_features_and_the_duplicate_check_survive_a_restart(settings):
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    from vrixel_sdlc.duplicates import DuplicateIntent
+    from valxel_sdlc.duplicates import DuplicateIntent
 
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
         with pool.connection() as conn:
-            conn.execute("DROP TABLE IF EXISTS vrixel_features")
-            conn.execute("DROP TABLE IF EXISTS vrixel_capabilities")
+            conn.execute("DROP TABLE IF EXISTS valxel_features")
+            conn.execute("DROP TABLE IF EXISTS valxel_capabilities")
         first = _engine(settings, pool)
         fid = first.start(product_id="CLN", title="Medication reconciliation at discharge")["feature_id"]
         assert first.auto_drive(fid)["status"] == "done"
@@ -78,11 +78,11 @@ def test_initiatives_and_releases_share_the_index_and_survive_a_restart(settings
 
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
         with pool.connection() as conn:
-            conn.execute("DROP TABLE IF EXISTS vrixel_features")
+            conn.execute("DROP TABLE IF EXISTS valxel_features")
             # An index created before initiatives existed: no kind column yet.
-            conn.execute("""CREATE TABLE vrixel_features (feature_id TEXT PRIMARY KEY, product_id TEXT NOT NULL,
+            conn.execute("""CREATE TABLE valxel_features (feature_id TEXT PRIMARY KEY, product_id TEXT NOT NULL,
                             title TEXT NOT NULL, seq INT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())""")
-            conn.execute("INSERT INTO vrixel_features VALUES ('CLN-FEAT-1', 'CLN', 'Old feature', 1, now())")
+            conn.execute("INSERT INTO valxel_features VALUES ('CLN-FEAT-1', 'CLN', 'Old feature', 1, now())")
         first = _engine(settings, pool)
         iid = first.create_initiative(product_id="CLN", title="Walk-in intake",
                                       request="Register walk-in patients; Capture consent at registration")
@@ -99,16 +99,16 @@ def test_incidents_and_their_signals_survive_a_restart(settings):
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    from vrixel_sdlc.ops.signals import PostgresSignalStore, from_alertmanager
+    from valxel_sdlc.ops.signals import PostgresSignalStore, from_alertmanager
 
     alert = {"alerts": [{"status": "firing", "fingerprint": "pg1", "startsAt": "2026-11-03T21:00:00Z",
                          "labels": {"alertname": "HighErrorRate", "severity": "critical", "component": "cln-intake-api"},
                          "annotations": {"summary": "5xx"}}]}
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
         with pool.connection() as conn:
-            conn.execute("DROP TABLE IF EXISTS vrixel_signals")
-            conn.execute("DROP TABLE IF EXISTS vrixel_unmatched_signals")
-            conn.execute("DROP TABLE IF EXISTS vrixel_features")
+            conn.execute("DROP TABLE IF EXISTS valxel_signals")
+            conn.execute("DROP TABLE IF EXISTS valxel_unmatched_signals")
+            conn.execute("DROP TABLE IF EXISTS valxel_features")
         first = _engine(settings, pool)
         first.services.signals = PostgresSignalStore(pool)
         [iid] = first.ingest(from_alertmanager(alert))
@@ -131,8 +131,8 @@ def test_cost_records_and_reviews_persist():
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    from vrixel_sdlc.finops.ledger import CostRecord, PostgresCostLedger
-    from vrixel_sdlc.ops.cost import PostgresCostReviews
+    from valxel_sdlc.finops.ledger import CostRecord, PostgresCostLedger
+    from valxel_sdlc.ops.cost import PostgresCostReviews
 
     pid = f"P{uuid.uuid4().hex[:6]}"
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
@@ -154,7 +154,7 @@ def test_alarm_states_persist():
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    from vrixel_sdlc.ops.alarms import PostgresAlarmBoard
+    from valxel_sdlc.ops.alarms import PostgresAlarmBoard
 
     pid = f"P{uuid.uuid4().hex[:6]}"
     sig = {"fingerprint": f"cloudwatch:1:{pid}", "product_id": pid, "status": "firing", "env": "staging",
@@ -174,7 +174,7 @@ def test_incident_signals_move_between_incidents():
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    from vrixel_sdlc.ops.signals import PostgresSignalStore
+    from valxel_sdlc.ops.signals import PostgresSignalStore
 
     pid = f"P{uuid.uuid4().hex[:6]}"
     sig = {"fingerprint": "f1", "component": "web", "title": "t", "status": "firing"}
@@ -194,14 +194,14 @@ def test_the_change_log_chains_in_postgres_and_shows_tampering():
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    from vrixel_sdlc.ops import changes
-    from vrixel_sdlc.ops.inventory import PostgresSnapshots
+    from valxel_sdlc.ops import changes
+    from valxel_sdlc.ops.inventory import PostgresSnapshots
 
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
         with pool.connection() as conn:
-            conn.execute("DROP TABLE IF EXISTS vrixel_changes")
-            conn.execute("DROP TABLE IF EXISTS vrixel_change_incidents")
-            conn.execute("DROP TABLE IF EXISTS vrixel_inventory_snapshots")
+            conn.execute("DROP TABLE IF EXISTS valxel_changes")
+            conn.execute("DROP TABLE IF EXISTS valxel_change_incidents")
+            conn.execute("DROP TABLE IF EXISTS valxel_inventory_snapshots")
         log = changes.PostgresChangeLog(pool)
 
         def rec(key, product="CLN"):
@@ -219,7 +219,7 @@ def test_the_change_log_chains_in_postgres_and_shows_tampering():
         assert [(x["change_id"], x["incident_id"], x["product_id"]) for x in log.links("CLN")] == [
             ("CHG-1", "CLN-INC-1", "CLN")]
         with pool.connection() as conn:
-            conn.execute("UPDATE vrixel_changes SET data = jsonb_set(data, '{summary}', '\"edited\"') WHERE id = 'CHG-1'")
+            conn.execute("UPDATE valxel_changes SET data = jsonb_set(data, '{summary}', '\"edited\"') WHERE id = 'CHG-1'")
         assert changes.verify(log.all()) == {"ok": False, "records": 2, "broken_at": "CHG-1"}
 
         snaps = PostgresSnapshots(pool)
@@ -233,11 +233,11 @@ def test_servicenow_receipts_are_kept_in_postgres():
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    from vrixel_sdlc.ops.servicenow import PostgresReceipts
+    from valxel_sdlc.ops.servicenow import PostgresReceipts
 
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
         with pool.connection() as conn:
-            conn.execute("DROP TABLE IF EXISTS vrixel_change_receipts")
+            conn.execute("DROP TABLE IF EXISTS valxel_change_receipts")
         store = PostgresReceipts(pool)
         store.put("CHG-1", {"status": "queued"})
         store.put("CHG-1", {"status": "closed", "number": "CHG0030001"})
@@ -249,15 +249,15 @@ def test_pilot_effort_and_the_ledgers_new_columns_persist():
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    from vrixel_sdlc.gateway import PostgresLedger
-    from vrixel_sdlc.gateway.ledger import UsageRecord
-    from vrixel_sdlc.pilot import PostgresEffortStore
+    from valxel_sdlc.gateway import PostgresLedger
+    from valxel_sdlc.gateway.ledger import UsageRecord
+    from valxel_sdlc.pilot import PostgresEffortStore
 
     fid = f"FARM-FEAT-{uuid.uuid4().hex[:8]}"
     with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
         with pool.connection() as conn:  # an older ledger table, without the new columns
-            conn.execute("ALTER TABLE IF EXISTS vrixel_usage DROP COLUMN IF EXISTS config_version")
-            conn.execute("ALTER TABLE IF EXISTS vrixel_usage DROP COLUMN IF EXISTS duration_s")
+            conn.execute("ALTER TABLE IF EXISTS valxel_usage DROP COLUMN IF EXISTS config_version")
+            conn.execute("ALTER TABLE IF EXISTS valxel_usage DROP COLUMN IF EXISTS duration_s")
         ledger = PostgresLedger(pool)
         ledger.record(UsageRecord(ts="2026-11-09T10:00:00+00:00", product_id="FARM", feature_id=fid, phase="spec",
                                   role="spec", runtime="generic", provider="anthropic", model="m", workspace="w",

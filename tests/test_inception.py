@@ -8,9 +8,9 @@ import json
 
 import pytest
 
-from vrixel_sdlc import cli
-from vrixel_sdlc.inception import Vision, checks, formats
-from vrixel_sdlc.inception.run import context_for, draft, platform, run
+from valxel_sdlc import cli
+from valxel_sdlc.inception import Vision, checks, formats
+from valxel_sdlc.inception.run import context_for, draft, platform, run
 
 VISION = """# Aqua Watch
 

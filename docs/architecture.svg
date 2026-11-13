@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="920" viewBox="0 0 1200 920" role="img" aria-labelledby="dg-title dg-desc">
-        <title id="dg-title">Vrixel SDLC, high-level architecture</title>
+        <title id="dg-title">Valxel SDLC, high-level architecture</title>
         <desc id="dg-desc">People, production signals and GitHub webhooks enter the tool's API. The engine runs three kinds of LangGraph workflows (roadmap, feature pipeline, incidents), which use agents through a model gateway and a production policy, and act through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, work trackers, AWS and the catalog. Governance repos are read and pinned. Products built from the templates are deployed and send signals back.</desc>
         <style>
 svg {
@@ -81,7 +81,7 @@ svg { background: var(--surface); }
 
         <!-- Center: the tool -->
         <rect class="frame" x="262" y="24" width="628" height="704" rx="12"/>
-        <text class="frame-t" x="278" y="44">VRIXEL SDLC: ONE SERVICE, ONE POSTGRES</text>
+        <text class="frame-t" x="278" y="44">VALXEL SDLC: ONE SERVICE, ONE POSTGRES</text>
 
         <rect class="tool" x="276" y="56" width="600" height="84" rx="8"/>
         <text class="h" x="292" y="80">API and web app</text>

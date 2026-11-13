@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Vrixel SDLC Architecture</title>
+<title>Valxel SDLC Architecture</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=Public+Sans:wght@400;600&family=JetBrains+Mono:wght@400&display=swap">
@@ -130,7 +130,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
 
 <div class="wrap">
   <header>
-    <h1>Vrixel SDLC Architecture</h1>
+    <h1>Valxel SDLC Architecture</h1>
     <p class="lede">One service that takes a feature from idea to production and keeps it healthy there. Agents do the work, people decide at gates, and every product's own governance repo sets the rules the tool must follow.</p>
     <div class="key" aria-label="Colour key">
       <span><i class="k-amber"></i>People and their decisions</span>
@@ -142,7 +142,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
   <figure>
     <div class="diagram">
       <svg viewBox="0 0 1200 920" role="img" aria-labelledby="dg-title dg-desc">
-        <title id="dg-title">Vrixel SDLC, high-level architecture</title>
+        <title id="dg-title">Valxel SDLC, high-level architecture</title>
         <desc id="dg-desc">People, production signals and GitHub webhooks enter the tool's API. The engine runs three kinds of LangGraph workflows (roadmap, feature pipeline, incidents), which use agents through a model gateway and a production policy, and act through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, work trackers, AWS and the catalog. Governance repos are read and pinned. Products built from the templates are deployed and send signals back.</desc>
         <defs>
           <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
@@ -175,7 +175,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
 
         <!-- Center: the tool -->
         <rect class="frame" x="262" y="24" width="628" height="704" rx="12"/>
-        <text class="frame-t" x="278" y="44">VRIXEL SDLC: ONE SERVICE, ONE POSTGRES</text>
+        <text class="frame-t" x="278" y="44">VALXEL SDLC: ONE SERVICE, ONE POSTGRES</text>
 
         <rect class="tool" x="276" y="56" width="600" height="84" rx="8"/>
         <text class="h" x="292" y="80">API and web app</text>

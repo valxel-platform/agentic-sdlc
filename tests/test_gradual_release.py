@@ -9,12 +9,12 @@ from pathlib import Path
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.integrations.flags import FliptFlags
-from vrixel_sdlc.ops import rollout
-from vrixel_sdlc.ops.signals import from_alertmanager
-from vrixel_sdlc.services import build_services
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.integrations.flags import FliptFlags
+from valxel_sdlc.ops import rollout
+from valxel_sdlc.ops.signals import from_alertmanager
+from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 
@@ -139,7 +139,7 @@ def test_flipt_gets_a_threshold_rollout_and_off_means_off_for_everyone():
     f = FliptFlags(fake, namespace="cln", environments={"production": "production"})
     f.set_percent("f", 5, actor="rm")
     assert fake.flag["enabled"] is False and fake.flag["rollouts"] == [
-        {"type": "THRESHOLD_ROLLOUT_TYPE", "description": "vrixel gradual release",
+        {"type": "THRESHOLD_ROLLOUT_TYPE", "description": "valxel gradual release",
          "threshold": {"percentage": 5.0, "value": True}}]
     assert f.percent("f") == 5.0 and f.get("f") is True
     f.set("f", False, actor="agent:remediate")  # an incident's flag off
@@ -196,15 +196,15 @@ def test_a_flag_turned_off_stops_the_launch_for_the_release_managers(eng, real_t
 
 # --------------------------------------------------------------------------- comparing on against off
 
-from vrixel_sdlc.ops import cohorts  # noqa: E402
-from vrixel_sdlc.ops import paging  # noqa: E402
+from valxel_sdlc.ops import cohorts  # noqa: E402
+from valxel_sdlc.ops import paging  # noqa: E402
 
 
 def test_the_summary_lines_add_up_and_the_test_is_conservative():
     f = "cln.f"
     lines = [cohorts.line(f, (100, 1), (900, 4)), cohorts.line(f, (120, 0), (880, 5)), cohorts.line("other", (5, 5), (5, 0)),
-             '{"message": "vrixel.flag_cohorts {\\"flag\\": \\"cln.f\\", \\"on\\": {\\"requests\\": 10, \\"errors\\": 0}, '
-             '\\"off\\": {\\"requests\\": 10, \\"errors\\": 0}}"}', "unrelated", "vrixel.flag_cohorts {not json"]
+             '{"message": "valxel.flag_cohorts {\\"flag\\": \\"cln.f\\", \\"on\\": {\\"requests\\": 10, \\"errors\\": 0}, '
+             '\\"off\\": {\\"requests\\": 10, \\"errors\\": 0}}"}', "unrelated", "valxel.flag_cohorts {not json"]
     got = cohorts.parse(lines, [f])[f]
     assert got == {"on": {"requests": 230, "errors": 1, "slow": 0, "events": {}},
                    "off": {"requests": 1790, "errors": 9, "slow": 0, "events": {}}, "lines": 3, "timed": 0}

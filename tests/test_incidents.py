@@ -12,14 +12,14 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.knowledge import render
-from vrixel_sdlc.ops import incident as incident_mod
-from vrixel_sdlc.ops.signals import from_alertmanager, from_sentry, from_ticket, resolve_product
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.knowledge import render
+from valxel_sdlc.ops import incident as incident_mod
+from valxel_sdlc.ops.signals import from_alertmanager, from_sentry, from_ticket, resolve_product
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 API = "acme-clinic/cln-intake-api"
@@ -65,7 +65,7 @@ def test_signals_are_normalized():
     assert from_alertmanager(alert(status="resolved"))[0]["status"] == "resolved"
     [s] = from_sentry({"action": "created", "data": {"issue": {
         "id": "42", "title": "TypeError in consent form", "level": "error", "project": {"slug": "cln-web"},
-        "web_url": "https://sentry.io/i/42", "tags": [["vrixel_product", "CLN"]]}}}, "issue")
+        "web_url": "https://sentry.io/i/42", "tags": [["valxel_product", "CLN"]]}}}, "issue")
     assert (s["severity"], s["product_id"], s["component"], s["fingerprint"]) == ("sev2", "CLN", "cln-web", "sentry:42")
     [t] = from_ticket({"product_id": "CLN", "title": "Can't edit consent", "description": "x", "reporter": "fd-1"})
     assert t["source"] == "ticket" and t["severity"] == "sev3" and t["labels"]["reporter"] == "fd-1"
@@ -186,7 +186,7 @@ def test_recovery_leads_to_a_postmortem_recorded_in_git(tmp_path, gov_root, monk
     eng.decide(iid, pm["interrupt_id"], {"decision": "approve", "approver": "oncall-1"})
     v = eng.view(iid)
     assert v["status"] == "closed"
-    assert ("acme-clinic/cln-governance", f"vrixel/{iid}", f"incidents/{iid}.md") in svc.github.files
+    assert ("acme-clinic/cln-governance", f"valxel/{iid}", f"incidents/{iid}.md") in svc.github.files
     # closed: a new firing of the same alert opens a new incident
     [again] = eng.ingest(from_alertmanager(alert()))
     assert again != iid
@@ -273,8 +273,8 @@ def test_webhooks_and_reporting_a_problem(tmp_path, gov_root, monkeypatch):
     client = TestClient(create_app(eng, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None))
     body = json.dumps(alert())
     assert client.post("/api/signals/alertmanager", content=body).status_code == 404  # not configured
-    monkeypatch.setenv("VRIXEL_SIGNALS_TOKEN", "t0k")
-    monkeypatch.setenv("VRIXEL_SENTRY_CLIENT_SECRET", "s3c")
+    monkeypatch.setenv("VALXEL_SIGNALS_TOKEN", "t0k")
+    monkeypatch.setenv("VALXEL_SENTRY_CLIENT_SECRET", "s3c")
     assert client.post("/api/signals/alertmanager", content=body, headers={"authorization": "Bearer no"}).status_code == 401
     r = client.post("/api/signals/alertmanager", content=body, headers={"authorization": "Bearer t0k"})
     assert r.status_code == 202 and r.json()["incidents"] == ["CLN-INC-1"]
@@ -297,12 +297,12 @@ def test_webhooks_and_reporting_a_problem(tmp_path, gov_root, monkeypatch):
 def test_a_signal_for_no_product_is_kept_with_why_for_the_platform_team(tmp_path, gov_root, monkeypatch):
     """Not dropped: a mislabelled alert or an unregistered component shows up where the platform
     team can fix its source."""
-    from vrixel_sdlc.ops.signals import from_openchoreo
+    from valxel_sdlc.ops.signals import from_openchoreo
 
     eng, _ = make(tmp_path, gov_root)
     assert eng.ingest(from_alertmanager(alert(component="billing-cron"))) == []
     assert eng.ingest(from_alertmanager({"alerts": [{"status": "firing", "fingerprint": "x", "labels": {
-        "alertname": "Down", "vrixel_product": "NOPE"}}]})) == []
+        "alertname": "Down", "valxel_product": "NOPE"}}]})) == []
     assert eng.ingest(from_openchoreo({"alertName": "errors", "namespace": "default", "project": "ghost",
                                        "component": "", "environment": "production"})) == []
     assert eng.ingest(from_ticket({"title": "Something broke"})) == []
@@ -322,7 +322,7 @@ def test_a_signal_for_no_product_is_kept_with_why_for_the_platform_team(tmp_path
     assert client.get("/api/signals/unmatched").status_code == 401
     client.post("/api/auth/dev-login", json={"login": "maria", "orgs": ["acme-clinic"]})
     assert client.get("/api/signals/unmatched").status_code == 403  # could be any product's: platform team only
-    client.post("/api/auth/dev-login", json={"login": "platform-owner", "orgs": ["vrixel-tools"]})
+    client.post("/api/auth/dev-login", json={"login": "platform-owner", "orgs": ["valxel-platform"]})
     r = client.get("/api/signals/unmatched?limit=2").json()
     assert r["count"] == 2 and r["signals"][0]["source"] == "ticket"
     assert set(r["signals"][1]) >= {"title", "reason", "received_at", "fingerprint"}

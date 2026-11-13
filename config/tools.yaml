@@ -7,34 +7,34 @@ servers:
   # admin must enable MCP access for the account.
   lucid:
     url: https://mcp.lucid.app/mcp
-    url_env: VRIXEL_LUCID_MCP_URL            # optional override
+    url_env: VALXEL_LUCID_MCP_URL            # optional override
     auth_header: Authorization
-    auth_env: VRIXEL_LUCID_MCP_AUTH          # e.g. "Bearer <api key>"
+    auth_env: VALXEL_LUCID_MCP_AUTH          # e.g. "Bearer <api key>"
   # Atlassian Rovo MCP server (Jira). Needs the read_jira, write_jira and search_jira scopes.
   atlassian:
     url: https://mcp.atlassian.com/v1/mcp
-    url_env: VRIXEL_ATLASSIAN_MCP_URL        # optional override
+    url_env: VALXEL_ATLASSIAN_MCP_URL        # optional override
     auth_header: Authorization
-    auth_env: VRIXEL_ATLASSIAN_MCP_AUTH      # e.g. "Basic <base64 email:api-token>"
+    auth_env: VALXEL_ATLASSIAN_MCP_AUTH      # e.g. "Basic <base64 email:api-token>"
     settings:
-      cloud_id_env: VRIXEL_ATLASSIAN_CLOUD_ID # optional; looked up from the token when unset
+      cloud_id_env: VALXEL_ATLASSIAN_CLOUD_ID # optional; looked up from the token when unset
   # OpenProject's built-in MCP server (17.2+, Enterprise add-on) at <instance>/mcp.
   openproject:
-    url_env: VRIXEL_OPENPROJECT_MCP_URL      # e.g. https://openproject.example.com/mcp
+    url_env: VALXEL_OPENPROJECT_MCP_URL      # e.g. https://openproject.example.com/mcp
     auth_header: Authorization
-    auth_env: VRIXEL_OPENPROJECT_MCP_AUTH    # e.g. "Bearer <api token>"
+    auth_env: VALXEL_OPENPROJECT_MCP_AUTH    # e.g. "Bearer <api token>"
   # OpenChoreo control plane MCP server (<api host>/mcp). The pipeline signs in as OpenChoreo's
   # confidential service client (client-credentials grant), whose role should allow builds and
   # deployments; OpenChoreo's own authorization is the backstop for VX-3.
   openchoreo:
-    url_env: VRIXEL_OPENCHOREO_MCP_URL       # e.g. https://api.openchoreo.example.com/mcp
+    url_env: VALXEL_OPENCHOREO_MCP_URL       # e.g. https://api.openchoreo.example.com/mcp
     auth: client_credentials
     settings:
-      token_url_env: VRIXEL_OPENCHOREO_TOKEN_URL       # the identity provider's /oauth2/token
-      client_id_env: VRIXEL_OPENCHOREO_CLIENT_ID       # default service_mcp_client
-      client_secret_env: VRIXEL_OPENCHOREO_CLIENT_SECRET
-      scope_env: VRIXEL_OPENCHOREO_SCOPE               # optional
-      console_url_env: VRIXEL_OPENCHOREO_CONSOLE_URL   # optional, links runs to the console
+      token_url_env: VALXEL_OPENCHOREO_TOKEN_URL       # the identity provider's /oauth2/token
+      client_id_env: VALXEL_OPENCHOREO_CLIENT_ID       # default service_mcp_client
+      client_secret_env: VALXEL_OPENCHOREO_CLIENT_SECRET
+      scope_env: VALXEL_OPENCHOREO_SCOPE               # optional
+      console_url_env: VALXEL_OPENCHOREO_CONSOLE_URL   # optional, links runs to the console
       namespace: default                               # products may set runtime.namespace
 
 providers:
@@ -46,19 +46,19 @@ providers:
     openproject: { server: openproject }
   # Feature flags. Each product runs its own Flipt (v2) in its own runtime and names it in
   # product.yaml (tools.flags.url); the platform holds one client token per product in
-  # VRIXEL_FLIPT_TOKEN_<PRODUCT_ID>, allowed to read and change that product's flags.
+  # VALXEL_FLIPT_TOKEN_<PRODUCT_ID>, allowed to read and change that product's flags.
   flags:
-    flipt: { token_env_prefix: VRIXEL_FLIPT_TOKEN_ }
+    flipt: { token_env_prefix: VALXEL_FLIPT_TOKEN_ }
   change_management:
-    servicenow: { auth_env_prefix: VRIXEL_SERVICENOW_AUTH_ }   # the organization's own ServiceNow
-  # Where goal metrics are read (vrixel_sdlc.outcomes). Queries run read-only and return one
+    servicenow: { auth_env_prefix: VALXEL_SERVICENOW_AUTH_ }   # the organization's own ServiceNow
+  # Where goal metrics are read (valxel_sdlc.outcomes). Queries run read-only and return one
   # aggregate; manual entry needs no provider. sql and prometheus are the product's own (its read
   # replica, the Prometheus behind its OpenTelemetry collector); PostHog is optional, for teams
   # that already use it.
   metrics:
-    sql: { secret_env_prefix: VRIXEL_METRICS_DSN_ }
-    prometheus: { secret_env_prefix: VRIXEL_PROMETHEUS_TOKEN_ }
-    posthog: { secret_env_prefix: VRIXEL_POSTHOG_KEY_ }
+    sql: { secret_env_prefix: VALXEL_METRICS_DSN_ }
+    prometheus: { secret_env_prefix: VALXEL_PROMETHEUS_TOKEN_ }
+    posthog: { secret_env_prefix: VALXEL_POSTHOG_KEY_ }
 
 # Which providers may receive content from a lane of each data class. Agents never put PHI or
 # card data in diagrams or tickets, but design detail of regulated systems still leaves the

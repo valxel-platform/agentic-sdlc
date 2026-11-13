@@ -7,11 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from test_api import SECRET, sign_in, wait_idle
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.evaluators import rubrics
-from vrixel_sdlc.graph.phase import document_tail
-from vrixel_sdlc.intake import DELEGATED, Draft, IntakeAgent
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.evaluators import rubrics
+from valxel_sdlc.graph.phase import document_tail
+from valxel_sdlc.intake import DELEGATED, Draft, IntakeAgent
+from valxel_sdlc.web.auth import AuthConfig
 
 
 @pytest.fixture

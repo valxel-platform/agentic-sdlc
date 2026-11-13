@@ -7,9 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from test_api import SECRET, sign_in, wait_idle
-from vrixel_sdlc.api.app import create_app
-from vrixel_sdlc.intake import AGENT_PROPOSES, Draft, research_said, size_of, size_said
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc.api.app import create_app
+from valxel_sdlc.intake import AGENT_PROPOSES, Draft, research_said, size_of, size_said
+from valxel_sdlc.web.auth import AuthConfig
 
 
 @pytest.fixture
@@ -114,7 +114,7 @@ def test_a_new_product_needs_an_inception_starter(client, engine):
     s = say(client, sid, "It's a new product")
     assert "inception starters" in s["messages"][-1]["text"] and not s["ready"]
 
-    s = start(client, login="sunil", teams=["vrixel-tools/product-council"], orgs=["acme-farm"])
+    s = start(client, login="sunil", teams=["valxel-platform/product-council"], orgs=["acme-farm"])
     sid = s["id"]
     say(client, sid, "A booking app for small vet practices")
     s = say(client, sid, "It's a new product")
@@ -133,7 +133,7 @@ def test_a_new_product_needs_an_inception_starter(client, engine):
 
 
 def test_a_bad_org_is_asked_again(client):
-    s = start(client, login="sunil", teams=["vrixel-tools/product-council"], orgs=["acme-farm"])
+    s = start(client, login="sunil", teams=["valxel-platform/product-council"], orgs=["acme-farm"])
     sid = s["id"]
     say(client, sid, "A booking app for small vet practices")
     say(client, sid, "It's a new product")

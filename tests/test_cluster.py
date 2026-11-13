@@ -1,6 +1,6 @@
 """Several replicas: one runs a thread at a time and every replica can tell; one watches; GitHub is
 asked once; live updates and intake chats reach every replica. Postgres tests need
-VRIXEL_TEST_DATABASE_URL (CI starts one); the in-memory ones always run."""
+VALXEL_TEST_DATABASE_URL (CI starts one); the in-memory ones always run."""
 
 import asyncio
 import os
@@ -8,10 +8,10 @@ import uuid
 
 import pytest
 
-from vrixel_sdlc.cluster import MemoryCluster, Notes
+from valxel_sdlc.cluster import MemoryCluster, Notes
 
-DB = os.environ.get("VRIXEL_TEST_DATABASE_URL")
-needs_db = pytest.mark.skipif(not DB, reason="set VRIXEL_TEST_DATABASE_URL to run Postgres tests")
+DB = os.environ.get("VALXEL_TEST_DATABASE_URL")
+needs_db = pytest.mark.skipif(not DB, reason="set VALXEL_TEST_DATABASE_URL to run Postgres tests")
 
 
 def test_in_one_process_a_thread_runs_once_and_notes_are_kept():
@@ -63,7 +63,7 @@ def pool():
 def test_one_replica_holds_a_thread_and_a_dead_one_lets_go(pool):
     import psycopg
 
-    from vrixel_sdlc.cluster import PostgresCluster
+    from valxel_sdlc.cluster import PostgresCluster
 
     a, b = PostgresCluster(pool, DB), PostgresCluster(pool, DB)
     fid = f"T-{uuid.uuid4().hex[:8]}"
@@ -82,7 +82,7 @@ def test_one_replica_holds_a_thread_and_a_dead_one_lets_go(pool):
 
 @needs_db
 def test_one_replica_watches_and_another_takes_over(pool):
-    from vrixel_sdlc.cluster import PostgresCluster
+    from valxel_sdlc.cluster import PostgresCluster
 
     role = f"watcher-{uuid.uuid4().hex[:6]}"
     a, b = PostgresCluster(pool, DB), PostgresCluster(pool, DB)
@@ -93,7 +93,7 @@ def test_one_replica_watches_and_another_takes_over(pool):
 
 @needs_db
 def test_claims_and_notes_are_shared(pool):
-    from vrixel_sdlc.cluster import PostgresCluster
+    from valxel_sdlc.cluster import PostgresCluster
 
     a, b = PostgresCluster(pool, DB), PostgresCluster(pool, DB)
     key = f"dispatch:{uuid.uuid4()}"
@@ -108,21 +108,21 @@ def test_claims_and_notes_are_shared(pool):
 
 @needs_db
 def test_github_is_asked_once_whichever_replica_checks(pool, services):
-    from vrixel_sdlc.cluster import PostgresCluster
-    from vrixel_sdlc.waits import WaitChecker
+    from valxel_sdlc.cluster import PostgresCluster
+    from valxel_sdlc.waits import WaitChecker
 
     since = str(uuid.uuid4())
     packet = {"feature_id": "F", "wait": "staging", "since": since, "quality": {"targets": [
         {"repo": "o/svc", "sha": "1", "perf": "none"}]}}
     for _ in range(2):
         WaitChecker(services, PostgresCluster(pool, DB))._start_post_deploy(packet, [{"repo": "o/svc", "url": "u"}])
-    sent = [d for d in services.github.dispatches if d["event_type"] == "vrixel-deployed"]
+    sent = [d for d in services.github.dispatches if d["event_type"] == "valxel-deployed"]
     assert len(sent) == 1
 
 
 @needs_db
 def test_live_updates_reach_every_replica(pool):
-    from vrixel_sdlc.events import PostgresBus
+    from valxel_sdlc.events import PostgresBus
 
     here, there = PostgresBus(pool, DB), PostgresBus(pool, DB)
 
@@ -142,7 +142,7 @@ def test_live_updates_reach_every_replica(pool):
 
 @needs_db
 def test_an_intake_chat_continues_on_another_replica(pool):
-    from vrixel_sdlc.intake import PostgresIntakeStore
+    from valxel_sdlc.intake import PostgresIntakeStore
 
     a, b = PostgresIntakeStore(pool), PostgresIntakeStore(pool)
     owner = f"u-{uuid.uuid4().hex[:6]}"

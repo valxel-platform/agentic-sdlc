@@ -9,13 +9,13 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import InMemorySaver
 
-from vrixel_sdlc import cli, pilot
-from vrixel_sdlc.api.app import create_app, record_review_effort
-from vrixel_sdlc.config import load_settings
-from vrixel_sdlc.engine import FeatureEngine
-from vrixel_sdlc.ops.signals import from_alertmanager
-from vrixel_sdlc.services import build_services
-from vrixel_sdlc.web.auth import AuthConfig
+from valxel_sdlc import cli, pilot
+from valxel_sdlc.api.app import create_app, record_review_effort
+from valxel_sdlc.config import load_settings
+from valxel_sdlc.engine import FeatureEngine
+from valxel_sdlc.ops.signals import from_alertmanager
+from valxel_sdlc.services import build_services
+from valxel_sdlc.web.auth import AuthConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -86,7 +86,7 @@ def test_human_share_counts_decisions_reviews_and_agents_time(eng, monkeypatch):
               "review": {"id": 11, "state": "approved"}}
     record_review_effort(eng, "pull_request_review", review)
     record_review_effort(eng, "pull_request_review_comment", {**review, "action": "created", "comment": {"id": 12}})
-    record_review_effort(eng, "pull_request_review", {**review, "sender": {"login": "vrixel[bot]", "type": "Bot"}})
+    record_review_effort(eng, "pull_request_review", {**review, "sender": {"login": "valxel[bot]", "type": "Bot"}})
     record_review_effort(eng, "pull_request_review", {**review, "pull_request": {"head": {"ref": "main"}}})
     f = pilot.feature_report(eng, fid)
     gates = sum(d["active_minutes"] for d in v["gate_decisions"])
