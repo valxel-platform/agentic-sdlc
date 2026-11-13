@@ -135,6 +135,14 @@ class GitHub(Protocol):
                       event: str | None = None) -> list[dict]: ...
 
 
+def legacy_name(name: str) -> str:
+    """The name a valxel-* event or valxel/* status had before the rename, for repos not yet moved
+    over (valxel_sdlc.legacy); '' for any other name."""
+    from ..legacy import legacy_name as _old
+
+    return _old(name)
+
+
 class StubGitHub:
     def __init__(self) -> None:
         self.prs: dict[str, dict] = {}
@@ -492,6 +500,9 @@ class GitHubRest:
         if url:
             body["target_url"] = url
         self._call("POST", repo, f"/statuses/{sha}", body)
+        old = legacy_name(context)
+        if old:  # repos whose ruleset still requires the name from before the rename (valxel_sdlc.legacy)
+            self._call("POST", repo, f"/statuses/{sha}", {**body, "context": old})
 
     def _maybe(self, repo: str, path: str) -> list | None:
         """GitHub answers 404 or 403 when a security feature is off for the repo."""
@@ -689,3 +700,6 @@ class GitHubRest:
     def dispatch(self, *, repo, event_type, payload) -> None:
         """repository_dispatch: starts the repo's post-deploy workflow (templates ship one)."""
         self._call("POST", repo, "/dispatches", {"event_type": event_type, "client_payload": payload})
+        old = legacy_name(event_type)
+        if old:  # repos created from the templates before the rename listen for the old name instead
+            self._call("POST", repo, "/dispatches", {"event_type": old, "client_payload": payload})

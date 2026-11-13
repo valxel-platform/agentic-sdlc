@@ -6,6 +6,10 @@
                   time the tool connects, so an existing deployment keeps its data
     signals       alerts labelled vrixel_product still find their product (vrixel_sdlc.ops.signals)
     CLI           `vrixel` still runs `valxel`
+    GitHub        the valxel/gates status is also posted as vrixel/gates (rulesets that still require
+                  it), and each valxel-* repository_dispatch is also sent as vrixel-* (repos created
+                  from the templates before the rename listen for that); a repo listens for one
+                  name or the other, so each event still runs once
 
 Remove this module once nothing sets the old names.
 """
@@ -63,3 +67,11 @@ def rename_tables(conn) -> list[str]:
 def rename_in(pool) -> list[str]:
     with pool.connection() as conn:
         return rename_tables(conn)
+
+
+def legacy_name(name: str) -> str:
+    """valxel/gates -> vrixel/gates, valxel-deployed -> vrixel-deployed; '' for anything else."""
+    for new, old in (("valxel/", "vrixel/"), ("valxel-", "vrixel-")):
+        if name.startswith(new):
+            return old + name[len(new):]
+    return ""
