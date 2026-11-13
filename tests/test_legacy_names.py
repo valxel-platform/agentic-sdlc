@@ -38,3 +38,18 @@ def test_old_tables_are_renamed_once_and_keep_their_rows():
         assert conn.execute("SELECT v FROM valxel_legacy_probe").fetchone()[0] == "kept"
         assert legacy.rename_tables(conn) == []  # nothing left to do
         conn.execute("DROP TABLE valxel_legacy_probe")
+
+
+def test_github_hears_both_names_until_every_repo_has_moved_over():
+    from valxel_sdlc.integrations.github import GitHubRest
+
+    calls = []
+    gh = GitHubRest.__new__(GitHubRest)
+    gh._call = lambda method, repo, path, body=None: calls.append((path, body.get("context") or body.get("event_type")))
+    gh.set_status(repo="acme/x", sha="abc", context="valxel/gates", state="success", description="ok")
+    gh.set_status(repo="acme/x", sha="abc", context="release / dev", state="success", description="ok")
+    gh.dispatch(repo="acme/x", event_type="valxel-deployed", payload={})
+    assert calls == [("/statuses/abc", "valxel/gates"), ("/statuses/abc", "vrixel/gates"),
+                     ("/statuses/abc", "release / dev"), ("/dispatches", "valxel-deployed"),
+                     ("/dispatches", "vrixel-deployed")]
+    assert legacy.legacy_name("valxel-screens") == "vrixel-screens" and legacy.legacy_name("unit") == ""
