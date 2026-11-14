@@ -89,18 +89,15 @@ def _acceptance(args: argparse.Namespace, github=None) -> int:
 
 
 def _admin_github(settings):
-    import os
-    from pathlib import Path
 
-    from .governance.sources import GitHubAppTokenProvider
     from .integrations.github import PROVISIONING_PERMISSIONS, GitHubRest
 
-    missing = [v for v in ("VALXEL_GITHUB_APP_ID", "VALXEL_GITHUB_APP_PRIVATE_KEY_FILE") if not os.environ.get(v)]
-    if missing:
-        raise SystemExit(f"valxel repos needs the GitHub App: set {', '.join(missing)}")
-    tokens = GitHubAppTokenProvider(os.environ["VALXEL_GITHUB_APP_ID"],
-                                    Path(os.environ["VALXEL_GITHUB_APP_PRIVATE_KEY_FILE"]).read_text(),
-                                    api=settings.github_api, permissions=PROVISIONING_PERMISSIONS)
+    from .signing import github_app_configured, github_app_tokens
+
+    if not github_app_configured():
+        raise SystemExit("valxel repos needs the GitHub App: set VALXEL_GITHUB_APP_ID and a key "
+                         "(VALXEL_GITHUB_APP_KMS_KEY_ID, VALXEL_GITHUB_APP_PRIVATE_KEY or VALXEL_GITHUB_APP_PRIVATE_KEY_FILE)")
+    tokens = github_app_tokens(api=settings.github_api, permissions=PROVISIONING_PERMISSIONS)
     return GitHubRest(tokens, api=settings.github_api)
 
 

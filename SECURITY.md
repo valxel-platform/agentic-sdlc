@@ -27,13 +27,31 @@ Pull requests only, reviewed by the platform owners (`CODEOWNERS`), with `test`,
 CodeQL required; secret scanning with push protection; Dependabot alerts and security updates;
 and a daily check that every managed repo is on the standards (`repo-standards` workflow).
 
+## Where secrets come from
+
+`VALXEL_SECRET_STORE` chooses the store (`valxel_sdlc.secret_ring`):
+
+| Store | Reads | For |
+| --- | --- | --- |
+| `aws` | AWS Secrets Manager: `<prefix>/platform/<NAME>`, `<prefix>/products/<product>/<NAME>` for a product's own secrets, `<prefix>/orgs/<org>/<NAME>`; current and previous are `AWSCURRENT` and `AWSPREVIOUS`. `VALXEL_SECRET_PREFIX`, default `valxel`. Cached for a minute. | Valxel Cloud: scope each tenant's access by path |
+| `files` | `VALXEL_SECRETS_DIR/<NAME>` and `<NAME>.previous` | Any other cloud or Vault, through the Secrets Store CSI driver, External Secrets or Vault Agent |
+| `env` | `<NAME>` and `<NAME>_PREVIOUS` | Laptops and tests |
+
+With `aws` or `files`, strict mode refuses to start while a secret is still in the environment,
+and in live mode without a store it warns. The process reaches AWS with its own role, never a
+stored key.
+
+The GitHub App's key can stay in AWS KMS: import it as a sign-only key and set
+`VALXEL_GITHUB_APP_KMS_KEY_ID`; the tool asks KMS to sign each token and never holds the key.
+Otherwise it reads `VALXEL_GITHUB_APP_PRIVATE_KEY` from the store, or the file
+`VALXEL_GITHUB_APP_PRIVATE_KEY_FILE` (`valxel_sdlc.signing`).
+
 ## Rotating secrets
 
 The secrets the tool checks or signs with are key rings (`valxel_sdlc.secret_ring`): a current
 value and, during a rotation, the previous one. Checks accept either; signing uses the current.
-Each is read from `VALXEL_SECRETS_DIR/<NAME>` and `<NAME>.previous` when that folder has it (as a
-secret manager mounts them; changes are picked up without a restart), otherwise from `<NAME>` and
-`<NAME>_PREVIOUS` in the environment.
+Each is read from the store above; changes are picked up without a restart. In AWS Secrets Manager,
+its own rotation keeps the old value as `AWSPREVIOUS`, so both stay valid until the next rotation.
 
 | Secret | Rotate by |
 | --- | --- |

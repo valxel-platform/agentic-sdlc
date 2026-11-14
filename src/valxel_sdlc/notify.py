@@ -169,7 +169,7 @@ def _smtp(to: str, subject: str, text: str) -> None:
     with smtplib.SMTP(host, int(os.environ.get("VALXEL_SMTP_PORT", "587")), timeout=10) as s:
         s.starttls()
         if os.environ.get("VALXEL_SMTP_USER"):
-            s.login(os.environ["VALXEL_SMTP_USER"], os.environ.get("VALXEL_SMTP_PASSWORD", ""))
+            s.login(os.environ["VALXEL_SMTP_USER"], _smtp_password())
         s.send_message(m)
 
 
@@ -179,3 +179,9 @@ def _webhook(text: str) -> None:
         return
     req = Request(url, data=json.dumps({"text": text}).encode(), headers={"Content-Type": "application/json"})
     urlopen(req, timeout=10).read()  # noqa: S310 - the operator's own webhook
+
+
+def _smtp_password() -> str:
+    from .secret_ring import get
+
+    return get("VALXEL_SMTP_PASSWORD")

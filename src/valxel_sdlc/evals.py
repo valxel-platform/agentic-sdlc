@@ -426,9 +426,10 @@ class Langfuse:
 
     @staticmethod
     def from_env(env=None) -> "Langfuse | None":
-        import os
 
-        env = env if env is not None else os.environ
+        from .secret_ring import environ
+
+        env = env if env is not None else environ()
         url, pk, sk = env.get("VALXEL_LANGFUSE_URL"), env.get("VALXEL_LANGFUSE_PUBLIC_KEY"), env.get("VALXEL_LANGFUSE_SECRET_KEY")
         return Langfuse(url, pk, sk) if url and pk and sk else None
 

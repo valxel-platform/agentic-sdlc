@@ -51,8 +51,7 @@ def provider_ready(settings: Settings, provider: str, runtime: str = "generic") 
     pc = settings.providers.get(provider)
     if pc is not None:
         return pc.configured()
-    import os
-    return runtime == "codex" and provider == "openai" and bool(os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+    return runtime == "codex" and provider == "openai" and bool(_key("CODEX_API_KEY") or _key("OPENAI_API_KEY"))
 
 
 def available_roles(settings: Settings) -> set[str]:
@@ -119,3 +118,9 @@ def second_opinion(settings: Settings, available: set[str], role: str, data_clas
 def _allowed(settings: Settings, provider: str, data_class: str) -> bool:
     allowed = settings.data_classes.get(data_class, [])
     return "*" in allowed or provider in allowed
+
+
+def _key(name: str) -> str:
+    from .secret_ring import get
+
+    return get(name)

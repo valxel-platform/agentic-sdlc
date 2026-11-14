@@ -25,7 +25,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import re
 from datetime import datetime, timezone
 
@@ -149,6 +148,12 @@ def enrich(signal: dict, base_url: str, token: str, opener=None) -> dict:
 
 def api_token(product_id: str) -> str:
     try:
-        return str((json.loads(os.environ.get("VALXEL_GLITCHTIP_TOKENS") or "{}") or {}).get(product_id) or "")
+        return str((json.loads(_glitchtip_tokens() or "{}") or {}).get(product_id) or "")
     except ValueError:
         return ""
+
+
+def _glitchtip_tokens() -> str:
+    from ..secret_ring import get
+
+    return get("VALXEL_GLITCHTIP_TOKENS")

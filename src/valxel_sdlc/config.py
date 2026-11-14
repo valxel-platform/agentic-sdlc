@@ -62,6 +62,12 @@ class ProductConfig:
     repo_prefix: str = ""
 
 
+def _secret(name: str) -> str:
+    from .secret_ring import get
+
+    return get(name)
+
+
 @dataclass(frozen=True)
 class ServerConfig:
     """A remote MCP server the platform holds credentials for (config/tools.yaml)."""
@@ -73,12 +79,19 @@ class ServerConfig:
     settings: dict = field(default_factory=dict)
 
     def auth_value(self) -> str:
-        return os.environ.get(self.auth_env, "") if self.auth_env else ""
+        from .secret_ring import get
+
+        return get(self.auth_env) if self.auth_env else ""
 
     def setting(self, key: str) -> str:
-        """A server setting, read from the environment variable named by `<key>_env`."""
+        """A server setting, read from the environment variable named by `<key>_env` (a secret,
+        such as `client_secret`, through the secret store)."""
+        from .secret_ring import environ, get
+
         env = self.settings.get(f"{key}_env")
-        return os.environ.get(env, "") if env else str(self.settings.get(key, ""))
+        if not env:
+            return str(self.settings.get(key, ""))
+        return get(env) if ("secret" in key or ("token" in key and "url" not in key)) else environ().get(env, "")
 
 
 @dataclass(frozen=True)
@@ -191,7 +204,9 @@ class ProviderConfig:
         return (os.environ.get(self.base_url_env, "") if self.base_url_env else self.base_url).rstrip("/")
 
     def api_key(self) -> str:
-        return os.environ.get(self.api_key_env, "") if self.api_key_env else ""
+        from .secret_ring import get
+
+        return get(self.api_key_env) if self.api_key_env else ""
 
     def configured(self) -> bool:
         return bool(self.url()) and (not self.api_key_env or bool(self.api_key()))
@@ -288,7 +303,7 @@ def load_settings(
     }
     settings = Settings(
         mode=(mode or os.environ.get("VALXEL_MODE") or "stub").lower(),
-        database_url=database_url if database_url is not None else os.environ.get("DATABASE_URL"),
+        database_url=database_url if database_url is not None else (_secret("DATABASE_URL") or None),
         artifact_dir=art_dir,
         config_dir=cfg_dir,
         governance_source=(governance_source or os.environ.get("VALXEL_GOVERNANCE_SOURCE") or gov.get("source", "local")).lower(),

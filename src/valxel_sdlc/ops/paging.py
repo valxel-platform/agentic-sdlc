@@ -203,7 +203,9 @@ class PagerDutyPager(RecordingPager):
 
 def from_env(public_url: str, opener=None) -> RecordingPager:
     """PagerDuty when VALXEL_PAGERDUTY_ROUTING_KEYS is set; otherwise a pager that records only."""
-    raw = os.environ.get("VALXEL_PAGERDUTY_ROUTING_KEYS") or ""
+    from ..secret_ring import get
+
+    raw = get("VALXEL_PAGERDUTY_ROUTING_KEYS")
     try:
         keys = {str(k): str(v) for k, v in (json.loads(raw) if raw.strip() else {}).items() if v}
     except (ValueError, AttributeError) as exc:
