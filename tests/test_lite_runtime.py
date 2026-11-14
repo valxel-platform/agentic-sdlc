@@ -290,3 +290,74 @@ def test_docker_cli_reports_failures():
         return subprocess.CompletedProcess(args, 1, "", "Cannot connect to the Docker daemon")
     with pytest.raises(DockerError, match="Cannot connect"):
         DockerCli(runner=fail).ps("p")
+
+
+# ------------------------------------------------------------------ builds from the OpenChoreo build plane
+
+def fake_build_plane():
+    from mcp.server import MCPServer
+
+    server = MCPServer("openchoreo")
+    st = {"phase": "Running", "latest": "emr-web-a1b2", "image": DIGEST}
+
+    @server.tool()
+    def trigger_workflow_run(namespace_name: str, project_name: str, component_name: str, commit: str = "") -> dict:
+        return {"name": f"{component_name}-run-1"}
+
+    @server.tool()
+    def get_workflow_run_status(namespace_name: str, run_name: str) -> dict:
+        ok = st["phase"] == "Succeeded"
+        return {"status": {"conditions": [{"type": "WorkflowSucceeded", "status": "True"}] if ok else []}}
+
+    @server.tool()
+    def get_component(namespace_name: str, project_name: str, component_name: str) -> dict:
+        return {"status": {"latestRelease": {"name": st["latest"]}}}
+
+    @server.tool()
+    def get_component_release(namespace_name: str, project_name: str, component_name: str, release_name: str) -> dict:
+        return {"metadata": {"name": release_name},
+                "spec": {"workload": {"containers": {"main": {"image": st["image"], "env": []}}}}}
+
+    return server, st
+
+
+def test_lite_releases_come_from_the_openchoreo_build_plane():
+    from valxel_sdlc.integrations.github import StubGitHub
+    from valxel_sdlc.integrations.mcp_client import McpHttp
+    from valxel_sdlc.integrations.openchoreo import OpenChoreoMcp
+    from valxel_sdlc.lite.builds import OpenChoreoBuilds
+
+    server, st = fake_build_plane()
+    oc = OpenChoreoMcp(McpHttp("openchoreo", server), default_namespace="valxel")
+    gh = StubGitHub()
+    gh.files[("acme/emr-web", "c0ffee", "workload.yaml")] = yaml.safe_dump(WEB)
+    vm = StubDocker()
+    rt = ComposeRuntime(default=vm, builds=OpenChoreoBuilds(oc, gh))
+    rt.register_component(component="acme/emr-web", project="emr", namespace="valxel", component_type="web",
+                          workflow="build", repo_url="https://github.com/acme/emr-web", branch="main")
+    run = rt.run_workflow(component="acme/emr-web", ref="c0ffee", kind="main")
+    assert rt.run_status(run_id=run["run_id"], component="acme/emr-web")["status"] == "running"
+    st["phase"] = "Succeeded"
+    done = rt.run_status(run_id=run["run_id"], component="acme/emr-web")
+    assert (done["status"], done["release"]) == ("succeeded", "emr-web-r1")
+    rt.promote(component="acme/emr-web", env="dev", actor="agent:a", actor_type="agent")
+    svc = vm.applied["emr-dev"]["services"]["emr-web"]
+    assert svc["image"] == DIGEST and svc["networks"] == {"to-emr-web": {"aliases": ["emr-web"]}}
+
+
+def test_a_build_without_a_workload_file_fails_clearly():
+    from valxel_sdlc.integrations.github import StubGitHub
+    from valxel_sdlc.integrations.mcp_client import McpHttp
+    from valxel_sdlc.integrations.openchoreo import OpenChoreoMcp
+    from valxel_sdlc.lite.builds import OpenChoreoBuilds
+
+    server, st = fake_build_plane()
+    st["phase"] = "Succeeded"
+    builds = OpenChoreoBuilds(OpenChoreoMcp(McpHttp("openchoreo", server)), StubGitHub())
+    run = builds.start(component="acme/emr-web", ref="c0ffee", kind="main", repo_url="", project="emr")
+    s = builds.status(run_id=run["run_id"], component="acme/emr-web", ref="c0ffee", project="emr")
+    assert s["status"] == "failed" and "no workload.yaml at c0ffee" in s["message"]
+    st["image"] = "ghcr.io/acme/emr-web:latest"
+    from valxel_sdlc.integrations.mcp_client import McpError
+    with pytest.raises(McpError, match="pinned by digest"):
+        builds.status(run_id=run["run_id"], component="acme/emr-web", ref="c0ffee", project="emr")

@@ -5,7 +5,7 @@ The OpenChoreo model maps onto one or two VMs:
     OpenChoreo                      lite mode
     data plane (cluster)            a VM, reached through the Docker CLI (`hosts`, by data plane name)
     environment                     a Compose project, `<project>-<env>`, on its data plane's VM
-    WorkflowRun -> ComponentRelease a CI build -> a release: image digest + workload.yaml (`Builds`)
+    WorkflowRun -> ComponentRelease an OpenChoreo build -> a release: image digest + workload.yaml (`Builds`)
     ReleaseBinding                  the release a component runs in an environment, with its history
     change-set environment          another Compose project on the VM of the environment it copies
 
@@ -181,13 +181,18 @@ class ComposeRuntime:
     def run_workflow(self, *, component, ref, kind, project=None, namespace=None) -> dict:
         def fn(data):
             c = data["components"].get(component) or {}
-            run = self.builds.start(component=component, ref=ref, kind=kind, repo_url=c.get("repo_url", ""))
+            run = self.builds.start(component=component, ref=ref, kind=kind, repo_url=c.get("repo_url", ""),
+                                    project=project or c.get("project"), namespace=namespace or c.get("namespace"))
             data["runs"][run["run_id"]] = {"component": component, "ref": ref, "kind": kind, "release": ""}
             return {"run_id": run["run_id"], "status": "running", "url": run.get("url", "")}
         return self._change(fn)
 
     def run_status(self, *, run_id, component, project=None, namespace=None) -> dict:
-        s = self.builds.status(run_id=run_id, component=component)
+        known = self._read()
+        c = known["components"].get(component) or {}
+        s = self.builds.status(run_id=run_id, component=component,
+                               ref=(known["runs"].get(run_id) or {}).get("ref", ""),
+                               project=project or c.get("project"), namespace=namespace or c.get("namespace"))
 
         def fn(data):
             run = data["runs"].setdefault(run_id, {"component": component, "ref": "", "kind": "", "release": ""})
@@ -197,11 +202,12 @@ class ComposeRuntime:
                     raise ValueError(f"{component}: build {run_id} succeeded without an image digest")
                 name = f"{short(component)}-r{len(rel) + 1}"
                 rel.append({"name": name, "image": s["image"], "workload": s.get("workload") or {},
-                            "ref": run["ref"], "run_id": run_id, "created": _now()})
+                            "ref": run["ref"], "run_id": run_id, "created": _now(),
+                            **({"openchoreo_release": s["openchoreo_release"]} if s.get("openchoreo_release") else {})})
                 run["release"] = name
             return run["release"]
         release = self._change(fn)
-        out = {k: v for k, v in s.items() if k not in ("workload", "image")}
+        out = {k: v for k, v in s.items() if k not in ("workload", "image", "openchoreo_release")}
         return {**out, **({"release": release} if release else {})}
 
     # ------------------------------------------------------------------ the deployment pipeline
