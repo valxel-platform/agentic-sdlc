@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valxel SDLC: high-level design</title>
+<link rel="icon" href="assets/favicon.png">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<header class="topbar"><div class="inner">
+  <img src="assets/valxel-mark.png" alt=""><span class="brand">VALXEL</span>
+  <nav><a href="index.html">Docs</a><a href="hld.html" aria-current="page">High-level design</a><a href="architecture-diagram.html">Architecture diagram</a><a href="https://github.com/valxel-platform/agentic-sdlc">GitHub</a></nav>
+</div></header>
+<div class="hero">
+  <img src="assets/valxel-banner.jpg" alt="Valxel: Innovating Across Life, Systems, Future">
+  <div class="title">
+    <h1>Valxel SDLC: high-level design</h1>
+    <p>An agentic software development lifecycle: agents do the work, people decide at gates.</p>
+    <div class="meta">As of November 14, 2026 · includes the security changes in review (#90, #91) · <a href="architecture.md">architecture.md</a> in the repo wins where the two differ</div>
+  </div>
+</div>
+
+<div class="layout">
+<aside class="toc"><h2>Contents</h2><ol>
+  <li><a href="#purpose">Purpose and scope</a></li>
+  <li><a href="#context">System context</a></li>
+  <li><a href="#architecture">Architecture</a></li>
+  <li><a href="#inception">Product inception</a></li>
+  <li><a href="#lifecycle">Feature lifecycle</a></li>
+  <li><a href="#components">Components</a></li>
+  <li><a href="#data">Data and state</a></li>
+  <li><a href="#deployment">Runtime and deployment</a></li>
+  <li><a href="#governance">Governance, change, FinOps</a></li>
+  <li><a href="#security">Security architecture</a></li>
+  <li><a href="#quality">Quality attributes and open items</a></li>
+</ol></aside>
+
+<article>
+<section id="purpose">
+<h2>Purpose and scope</h2>
+<p>Valxel SDLC is an agentic software development lifecycle. It takes a product from a vision to a roadmap, takes each feature from an idea to production, and handles production incidents. Agents do the work, and people decide at gates. The goal is that people spend about 15% of the effort and agents 85%.</p>
+<p>This page describes the tool as built in <code>valxel-platform/agentic-sdlc</code>. The <a href="https://github.com/valxel-platform/agentic-sdlc#readme">README</a> has the detail for each part.</p>
+<h3>Who uses it</h3>
+<ul>
+  <li><strong>Founders and product owners</strong> describe a product or a feature, and approve the brief, the roadmap, the spec (G0–G2) and production goals.</li>
+  <li><strong>Designers and architects</strong> approve the design (G3) and the architecture (G4), or take a phase over.</li>
+  <li><strong>Engineers and security reviewers</strong> approve high-risk changes (G5) and see what agents built.</li>
+  <li><strong>Release managers</strong> approve production and the rollout plan (G6).</li>
+  <li><strong>On-call</strong> is paged only when the tool can't resolve an incident itself.</li>
+</ul>
+<h3>Design principles</h3>
+<ol>
+  <li><strong>Agents work, people decide.</strong> Gates G0–G6 wait for approvers named in the product's governance repo. Three failed evaluator loops, or a spent budget, hand a phase to a person.</li>
+  <li><strong>Products own their rules.</strong> The tool keeps no product settings. It reads each product's governance repo and pins it by commit for the life of a feature. Products can tighten the platform's rules, never loosen them.</li>
+  <li><strong>Production stays human.</strong> Promotion is a person's decision at G6. The tool may act alone only to turn off a recent flag or roll back a recent release, when the policy allows it and the analysis agrees.</li>
+  <li><strong>The data class picks the model.</strong> The model gateway routes health and payments work only to providers covered for it.</li>
+  <li><strong>Every integration is an interface.</strong> Each outside system has an offline stand-in, so the whole pipeline runs deterministically in tests, and live mode swaps in real systems one at a time.</li>
+  <li><strong>Everything leaves a record:</strong> decisions, production changes, model calls, cost and traces, for audit and for learning.</li>
+</ol>
+</section>
+
+<section id="context">
+<h2>System context</h2>
+<figure><img src="assets/hld-context.png" alt="People decide through the tool; agents work through GitHub, OpenChoreo and AWS"><figcaption>System context: people, the tool, and the systems it works through.</figcaption></figure>
+<p>People reach the tool only through its web app (and the API behind it). The tool reaches everything else through an interface per system:</p>
+<ul>
+  <li><strong>GitHub:</strong> product code, pull requests and CI, plus each org's governance repo, read through a GitHub App. Webhooks tell the tool when CI finishes or a pull request changes.</li>
+  <li><strong>OpenChoreo</strong>, the internal developer platform: it builds images, deploys them to each product's environments, and runs the observability plane. Production signals come back from it and from error tracking.</li>
+  <li><strong>AWS:</strong> each product's infrastructure (EKS clusters, managed databases), plus the tool's own KMS keys, Secrets Manager and budget alerts.</li>
+  <li><strong>Model providers</strong>, only through the tool's model gateway, which applies the data-class rules.</li>
+  <li><strong>Operations and work tools:</strong> feature flags (Flipt), paging (PagerDuty), change records (ServiceNow), error tracking (Sentry or GlitchTip), work tracking (Jira or OpenProject) and diagrams (Lucid or draw.io).</li>
+</ul>
+</section>
+
+<section id="architecture">
+<h2>Architecture</h2>
+<figure><img src="assets/hld-components.png" alt="One service runs the workflows; a separate worker holds the admin rights"><figcaption>The service, its parts, the provisioning worker and the database. The <a href="architecture-diagram.html">full architecture diagram</a> adds the external systems and every flow.</figcaption></figure>
+<p>The tool is one Python service and one Postgres database, plus a small provisioning worker. Every workflow is a LangGraph graph. Each step is checkpointed in Postgres, so a feature can wait days at a gate, or on CI or a deploy, and resume after a restart. Several replicas can run side by side: an advisory lock per thread keeps one replica on a feature at a time, an elected watcher checks external waits, and live updates go through Postgres <code>NOTIFY</code>.</p>
+<p>The provisioning worker is the same image run as <code>valxel provisioner</code>, in its own process with its own AWS role. It is the only process that can sign for the GitHub App with administration rights.</p>
+<p><strong>How a request moves through it:</strong> a person acts in the web app; the API records the decision and resumes the waiting graph; the graph runs agents through the gateway and acts through the integrations. When it has to wait (for a person, CI, a deploy or the worker), it checkpoints and stops. Webhooks and the waits watcher wake it again.</p>
+</section>
+
+<section id="inception">
+<h2>Product inception: from a vision to a set-up product</h2>
+<p>A new product starts as an inception thread (<code>INCEPTION-PRD-&lt;n&gt;</code>). Both of its gates belong to the product council, named in the registry (<code>inception.council</code>). The product doesn't exist in the registry until setup's pull requests merge.</p>
+<ol>
+  <li><strong>Research.</strong> It runs once and covers the market, competitors and users. The brief cites it, and the brief gate shows it.</li>
+  <li><strong>Brief.</strong> Agents draft the product brief: id, org, users, goals with measures, data class, budget and capacity tier.</li>
+  <li><strong>Brief gate.</strong> The council approves, sends the brief back with feedback, or drops it.</li>
+  <li><strong>Plan.</strong> Agents draft the architecture, then the roadmap. The architecture includes the deployment diagram, the flows as sequence diagrams, and a capacity and cost plan per stage; its diagrams are published to Lucid or draw.io for reviewers. The roadmap sets goals, initiatives and releases.</li>
+  <li><strong>Product gate.</strong> The council approves the architecture and roadmap together, sends them back, or drops the product.</li>
+  <li><strong>Setup</strong>, each step recorded and safe to repeat:
+    <ul>
+      <li><strong>Governance repo:</strong> created through the provisioning worker. Its pull request carries <code>product.yaml</code>, the constitution, context, goals, initiatives and the capacity plan.</li>
+      <li><strong>Registry:</strong> a pull request adds the product to <code>config/registry.yaml</code> in the config repo.</li>
+      <li><strong>Environments, full mode:</strong> a pull request for the product's two clusters, then its OpenChoreo project, environments and pipeline once both data planes register.</li>
+      <li><strong>Environments, lite mode:</strong> a project with dev and staging on Valxel's shared non-production plane. No clusters, and no production until go-live.</li>
+      <li><strong>Approver teams:</strong> listed for an org admin to create.</li>
+    </ul>
+  </li>
+</ol>
+<p>From then on, the product's governance repo is the source of truth. Features start from the roadmap's initiatives (G0) or from the intake chat.</p>
+</section>
+
+<section id="lifecycle">
+<h2>Feature lifecycle</h2>
+<figure><img src="assets/hld-lifecycle.png" alt="Agents run every phase; people approve at gates G1 to G6"><figcaption>Phases, gates and the escalation path.</figcaption></figure>
+<p>One feature is one thread, across every repo it touches. Each phase is a subgraph: an agent produces, deterministic checks run, then a critic in a fresh context scores the work against a checklist, and the phase loops until it passes or escalates.</p>
+<table>
+  <thead><tr><th>Gate</th><th>Who decides</th><th>What they approve</th></tr></thead>
+  <tbody>
+    <tr><td>G0</td><td>Product owners</td><td>An initiative from the roadmap becomes a feature</td></tr>
+    <tr><td>G1</td><td>Product owners</td><td>Discovery: the problem, users and measure</td></tr>
+    <tr><td>G2</td><td>Product owners</td><td>The spec and acceptance criteria</td></tr>
+    <tr><td>G3</td><td>Designers</td><td>The design (decided as a pair with G4)</td></tr>
+    <tr><td>G4</td><td>Architects</td><td>The architecture, new repos and resources</td></tr>
+    <tr><td>G5</td><td>Engineers, security</td><td>High-risk or regulated changes only</td></tr>
+    <tr><td>G6</td><td>Release managers</td><td>Production and the rollout plan</td></tr>
+  </tbody>
+</table>
+<p>At each gate a person can approve, send it back with feedback, take the phase over (their version becomes the document), or stop the feature. Every decision records who, when and how many active minutes, which is how the tool measures the 15% human share. For small, low-risk changes, the <strong>express</strong> profile skips discovery and UX design: G4 approves the spec with the architecture, while architecture, G5 for risky changes and G6 always stay. Products opt in, and express never applies to health or payments products.</p>
+<p>After G4, the provision step creates any new repos through the provisioning worker. The planner splits work into tasks, with one coder agent per task and one reviewer per pull request. Failures in CI, the build, dev or staging go back to the coders of the repos they point at. The merge train merges libraries first, then providers, then consumers. OpenChoreo deploys to dev and staging, and after G6 the flag steps through 5, 25, 50 and 100%. It holds on nearby incidents, and stops if users with the flag on fail more than users without it.</p>
+</section>
+
+<section id="components">
+<h2>Components</h2>
+<p>All paths are under <code>src/valxel_sdlc/</code>.</p>
+<table>
+  <thead><tr><th>Component</th><th>Where</th><th>Responsibility</th></tr></thead>
+  <tbody>
+    <tr><td>Web app and API</td><td><code>web/</code> (React), <code>api/app.py</code> (FastAPI)</td><td>Decisions, features, intake chat, roadmap; sign-in; GitHub, Sentry and production-signal webhooks; live updates over server-sent events</td></tr>
+    <tr><td>Sign-in</td><td><code>web/auth.py</code></td><td>GitHub OAuth; signed sessions; matching people to the approver teams in each product's governance</td></tr>
+    <tr><td>Engine</td><td><code>engine.py</code>, <code>waits.py</code>, <code>cluster.py</code></td><td>Starts features, lists the inbox, applies decisions; resumes threads when CI, builds, deploys or the worker finish; one replica per thread</td></tr>
+    <tr><td>Feature pipeline</td><td><code>graph/pipeline.py</code>, <code>graph/phase.py</code></td><td>Phases, gates and escalations; parallel design and architecture; build fan-out; merge train; release and rollout</td></tr>
+    <tr><td>Inception</td><td><code>inception/</code></td><td>Research, brief, architecture and roadmap, the two council gates, and product setup</td></tr>
+    <tr><td>Roadmap</td><td><code>roadmap/</code></td><td>Goals, initiatives (G0) and releases</td></tr>
+    <tr><td>Agents</td><td><code>agents/</code>, <code>runtime/</code>, <code>sandbox.py</code></td><td>Roles and plugin skills per phase; Claude Code and Codex sessions in a sandbox (environment allowlist, network allowlist, no hooks); one coder per task</td></tr>
+    <tr><td>Evaluators</td><td><code>evaluators/</code></td><td>Deterministic checks first, then a checklist critic in a fresh context, with its quotes checked against the document</td></tr>
+    <tr><td>Model gateway</td><td><code>gateway/</code></td><td>Role-to-model registry, data-class allowlist, cache-first prompt layout, usage ledger</td></tr>
+    <tr><td>Governance</td><td><code>governance/</code></td><td>Reads each product's governance repo and the platform's, validates <code>product.yaml</code>, pins both by commit per feature</td></tr>
+    <tr><td>Provisioning</td><td><code>provisioning.py</code>, <code>provision_queue.py</code></td><td>New repos from templates with the platform's standards; the queue and the provisioning worker's checks</td></tr>
+    <tr><td>Delivery</td><td><code>integrations/github.py</code>, <code>integrations/openchoreo.py</code>, <code>lite/</code></td><td>Pull requests, CI and merges; builds, environments, promotion and rollback through OpenChoreo, or through Docker Compose on a VM in lite mode</td></tr>
+    <tr><td>Operations</td><td><code>ops/</code></td><td>Production signals, incidents, correlation with recent changes, remediation policy, paging, ServiceNow, change log, resource inventory</td></tr>
+    <tr><td>Cost</td><td><code>finops/</code>, <code>gateway/ledger.py</code></td><td>Model spend per feature and phase; production cost per feature from FinOps</td></tr>
+    <tr><td>Knowledge</td><td><code>knowledge/</code>, <code>duplicates.py</code></td><td>The architecture record, API contracts, design checks, and finding requests the product already has</td></tr>
+    <tr><td>Quality</td><td><code>quality/</code>, <code>performance.py</code>, <code>acceptance.py</code></td><td>Test and security suites and their floors per data class; performance budgets; acceptance tests across repos</td></tr>
+    <tr><td>Secrets and signing</td><td><code>secret_ring.py</code>, <code>signing.py</code>, <code>strict.py</code></td><td>Secret stores, key rings for rotation, KMS signing for the GitHub Apps, and refusing an unsafe production start</td></tr>
+  </tbody>
+</table>
+</section>
+
+<section id="data">
+<h2>Data and state</h2>
+<p>The tool keeps as little as it can, and nothing that belongs to a product. Products' rules, plans and records live in their own Git repos; the tool's database holds what it needs to run and to account for its work.</p>
+<table>
+  <thead><tr><th>Data</th><th>Where</th><th>Kept for</th></tr></thead>
+  <tbody>
+    <tr><td>Workflow state: every feature, inception and incident thread, step by step</td><td>Postgres (LangGraph checkpoints)</td><td>Resuming after restarts; the feature's history</td></tr>
+    <tr><td>Gate decisions: who, when, active minutes, feedback</td><td>In the thread state</td><td>Audit; measuring the human share</td></tr>
+    <tr><td>Usage ledger: one row per model call (role, model, tokens, cache, cost)</td><td>Postgres</td><td>Cost per feature and phase; cache-hit rate</td></tr>
+    <tr><td>Change log: every production change, hash-chained</td><td>Postgres, plus a ServiceNow receipt where used</td><td>Change management; looking back after incidents</td></tr>
+    <tr><td>Capability catalog, lessons, intake chats, provisioning queue</td><td>Postgres</td><td>Reuse, learning from corrections, the worker's queue</td></tr>
+    <tr><td>Product governance: <code>product.yaml</code>, constitution, goals, initiatives, capacity, ADRs, postmortems</td><td>Each product's governance repo</td><td>The product's own rules; pinned per feature by commit</td></tr>
+    <tr><td>Platform rules: constitutions, templates, quality floors, model routing</td><td>The tools org's config repos</td><td>Rules every product inherits</td></tr>
+    <tr><td>Documents agents write (PRD, design, HLD, plans)</td><td>Artifacts, linked from the thread; ADRs and records go to Git</td><td>Review at gates; the product's knowledge</td></tr>
+    <tr><td>Lite mode runtime state</td><td>A file per product today; Postgres before outside customers</td><td>What runs on each VM</td></tr>
+    <tr><td>Secrets</td><td>Secret store (AWS Secrets Manager or mounted files); App keys in KMS</td><td>Never in the database or the code</td></tr>
+  </tbody>
+</table>
+<p><strong>Events into the tool:</strong> GitHub webhooks (CI, pull requests), production signals (Alertmanager, error tracking, tickets, AWS alarms and budgets) and people's decisions. <strong>Events out:</strong> pull requests and merges, deploys, flag changes, pages, change records and live updates to the web app.</p>
+<p>Products themselves follow constitution VX-16: they change state Kafka first, and event workers keep each data store from those events, so any store can be rebuilt by replaying its topics.</p>
+</section>
+
+<section id="deployment">
+<h2>Runtime and deployment</h2>
+<figure><img src="assets/hld-deployment.png" alt="Valxel runs the tool and the control plane; products run in the customer's account"><figcaption>Valxel Cloud, full mode and lite mode.</figcaption></figure>
+<p><strong>Valxel Cloud</strong> runs the tool (API process, provisioning worker, Postgres, secrets and KMS keys), OpenChoreo's control and build planes, and a shared non-production plane. Customers' products run in the customer's own AWS account, in one of two modes, set per product in <code>product.yaml</code> (<code>runtime.mode</code>):</p>
+<ul>
+  <li><strong>Full mode:</strong> two EKS clusters per product, registered with OpenChoreo as data planes: non-production (dev, staging, change-set environments) and production. Managed databases come from the platform's AWS catalog. Each product picks a capacity tier from 1 to 3; every product's pilot stage is held to tier 3 (99.5%, 4-hour recovery, at most a day of lost data).</li>
+  <li><strong>Lite mode:</strong> for small customers at the pilot stage. While the product is built, Valxel hosts its dev and staging on the shared plane, for up to 90 days (then go live, pay about $79 a month to extend, or pause). At go-live, a person moves everything to the customer's VM, with the same images and nothing rebuilt. The tool then deploys there as Docker Compose projects over SSH, through <code>ComposeRuntime</code>, which implements the same interface as OpenChoreo. Production can have a VM of its own.</li>
+</ul>
+<p><strong>Self-hosted:</strong> organizations under 250 people and $10M revenue may run the tool themselves for free (BUSL 1.1 with an additional use grant; Apache 2.0 after three years). The same image runs there, with secrets from mounted files or Vault instead of AWS.</p>
+<p><strong>Modes of the tool itself:</strong> <code>stub</code> (offline and deterministic: every integration has a stand-in) and <code>live</code>. <code>VALXEL_STRICT=1</code> refuses to start in production while anything would quietly fall back to a stand-in or an unsafe setting.</p>
+<p class="callout">Pilot-stage cost estimates: about $470 a month for full mode, $115 for one lite VM, $172 with production on its own VM.</p>
+</section>
+
+<section id="governance">
+<h2>Governance, change management and FinOps</h2>
+<h3>Governance as code</h3>
+<ul>
+  <li><strong>The platform's constitution</strong> (VX articles, such as VX-3 for human production, VX-7 for data-class routing, VX-16 for Kafka-first products and VX-17 for who may call whom) applies to every product.</li>
+  <li><strong>Each product's governance repo</strong> adds its own constitution and <code>product.yaml</code>: repos, approver teams, budget, thresholds, high-risk paths, runtime, dependencies on shared services and workflow profiles. A product may tighten the platform's rules, never loosen them.</li>
+  <li><strong>Pinning:</strong> a feature pins both by commit when it starts, so a rule change mid-flight can't change what was approved.</li>
+  <li><strong>Lessons:</strong> proposed as governance pull requests; once merged, pinned into prompts and the critic's checklist.</li>
+</ul>
+<h3>Change management</h3>
+<p>Every production change is recorded with what changed, who or what made it (a person at G6, or the tool under the remediation policy) and why. The record is hash-chained in the change log and gets a ServiceNow receipt where the product uses ServiceNow. Incidents correlate with recent changes, and look-backs read the same log.</p>
+<h3>Incidents</h3>
+<ul>
+  <li><strong>Investigation:</strong> production signals join an open incident or open one; OpenChoreo's root-cause agent investigates while the tool correlates recent changes.</li>
+  <li><strong>Mitigation:</strong> when the policy allows and the analysis agrees, the tool turns off a recent flag or rolls back a recent release, and records it.</li>
+  <li><strong>Paging:</strong> on-call is paged urgently only if the tool can't act, its action fails, or the failure continues.</li>
+  <li><strong>Afterwards:</strong> the fix returns through the pipeline as a hotfix, and the postmortem is drafted into the governance repo.</li>
+</ul>
+<h3>FinOps</h3>
+<ul>
+  <li><strong>Building cost:</strong> the usage ledger prices every model call by role, phase and feature, with cache hits.</li>
+  <li><strong>Running cost:</strong> OpenChoreo's FinOps data and AWS Cost Explorer give each feature's production cost, in a FOCUS-format ledger beside its build cost.</li>
+  <li><strong>Budgets:</strong> budgets per product stop agents when spent (an escalation), and AWS Budgets alerts arrive as production signals.</li>
+  <li><strong>Lite mode:</strong> the VM's price shared across environments and features by container CPU time (planned).</li>
+</ul>
+</section>
+
+<section id="security">
+<h2>Security architecture</h2>
+<table>
+  <thead><tr><th>Concern</th><th>Design</th></tr></thead>
+  <tbody>
+    <tr><td>People</td><td>GitHub sign-in; signed session cookies; approval rights come from the teams each product's governance names; production and go-live need a person (VX-3)</td></tr>
+    <tr><td>Agents</td><td>Each session runs with an environment allowlist, a network allowlist, hooks off and no package install scripts; a coder gets a GitHub token for its one repo, <code>contents: write</code> only, for at most an hour; documents and requests reach agents as marked untrusted content</td></tr>
+    <tr><td>GitHub</td><td>Two Apps: Delivery (no administration) for the API process, Provisioning (administration) for the provisioning worker only; each App's key stays in KMS, and each key's policy names the one role that may sign</td></tr>
+    <tr><td>Secrets</td><td>One secret store (AWS Secrets Manager in Valxel Cloud; mounted files or Vault when self-hosted), scoped per product; key rings so every secret rotates without downtime; strict mode refuses published, weak or environment-held secrets</td></tr>
+    <tr><td>Data</td><td>The gateway routes health and payments work only to model providers covered for it (VX-7); products' services reach only what they declare (VX-17)</td></tr>
+    <tr><td>Webhooks</td><td>HMAC or bearer checks in constant time, accepting the current and previous secret during a rotation</td></tr>
+    <tr><td>Supply chain</td><td>Base images pinned by digest, Python packages by hash; product builds scanned, signed, with SBOMs and provenance; images deployed by digest</td></tr>
+    <tr><td>Audit</td><td>Gate decisions, the hash-chained change log, the usage ledger and agent traces</td></tr>
+  </tbody>
+</table>
+<p><strong>Rotation:</strong> 15 of the 22 secret kinds can rotate with no person involved, as pre-approved standard changes. A person steps in only where a provider's web console is the only way to make a key, for emergencies, and for a quarterly review: about 5% of the work.</p>
+<p><strong>Still open before outside customers:</strong> lite mode's secrets and per-VM SSH keys, keeping real model keys out of agent sessions, per-product signal tokens and replay protection, re-checking approvers at G4–G6, rate limits and security headers, and an outside penetration test.</p>
+</section>
+
+<section id="quality">
+<h2>Quality attributes, constraints and open items</h2>
+<table>
+  <thead><tr><th>Attribute</th><th>How the design meets it</th></tr></thead>
+  <tbody>
+    <tr><td>Durability</td><td>Every workflow step is checkpointed in Postgres; threads wait days for people, CI or deploys and resume after restarts</td></tr>
+    <tr><td>Scale</td><td>Stateless replicas behind a load balancer; an advisory lock per thread, an elected watcher for external waits, live updates over Postgres <code>NOTIFY</code>; coder agents fan out per task</td></tr>
+    <tr><td>Testability</td><td>Every integration has an offline stand-in, so the whole pipeline runs deterministically in tests; evals replay past documents against a changed model, prompt or plugin pin, and a canary tries a config on some features first</td></tr>
+    <tr><td>Cost control</td><td>A cache-first prompt layout, model routing per role, budgets per product that hand work to a person when spent, and lite mode for small customers</td></tr>
+    <tr><td>Portability</td><td>Interfaces for the runtime (OpenChoreo or Docker Compose), the secret store (AWS, files or env) and signing (KMS or a key); several model vendors</td></tr>
+    <tr><td>Human share</td><td>Active minutes recorded at every decision; the pilot report measures it against the 15% goal</td></tr>
+  </tbody>
+</table>
+<p><strong>Constraints:</strong> Python and LangGraph for the service, React for the web app, Postgres as the only database, GitHub for code and governance, OpenChoreo on AWS EKS for products in full mode, and AWS for lite VMs (for now).</p>
+<h3>Open items</h3>
+<ul>
+  <li><strong>The end-to-end demo</strong> on real AWS and OpenChoreo comes before investor pitches; if cloud access keeps blocking it, the demo runs in lite mode.</li>
+  <li><strong>Lite mode, remaining parts:</strong> resources, the installer, the 90-day cap, cost sharing, design checks and monitoring on the VM.</li>
+  <li><strong>Security:</strong> the remaining items above, then the rotation agent.</li>
+  <li><strong>Admin page:</strong> approvers are configured through governance files today.</li>
+</ul>
+</section>
+</article>
+</div>
+
+<footer><div class="inner"><img src="assets/valxel-mark.png" alt=""><span>Valxel · Innovating Across Life · Systems · Future</span><span style="margin-left:auto"><a href="https://github.com/valxel-platform/agentic-sdlc" style="color:#c9d4f2">valxel-platform/agentic-sdlc</a></span></div></footer>
+</body>
+</html>

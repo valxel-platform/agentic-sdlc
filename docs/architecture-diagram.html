@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valxel SDLC: architecture diagram</title>
+<link rel="icon" href="assets/favicon.png">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  .diagram { max-width: 1440px; margin: 0 auto; padding: 28px 24px 56px; }
+  .diagram figure { background: #fbfaf8; border: 1px solid var(--rule); border-radius: 14px; padding: 18px; margin: 0; }
+  .diagram figure svg { border: 0; border-radius: 0; background: transparent; }
+
+  :root { --bg: #fbfaf8; --fg: #1f1e1c; --muted: #6b6862; --line: #a9a59c; --frame: #c9c5bc; --accent: #2f6fdb; --accent-fill: rgba(47,111,219,0.10); --box: #ffffff; }
+  .box { fill: var(--box); stroke: var(--line); stroke-width: 1.25; }
+  .main { fill: var(--accent-fill); stroke: var(--accent); stroke-width: 2; }
+  .frame { fill: none; stroke: var(--frame); stroke-width: 1; stroke-dasharray: 6 5; }
+  .edge { fill: none; stroke: var(--line); stroke-width: 1.4; }
+  .back { fill: none; stroke: var(--line); stroke-width: 1.4; stroke-dasharray: 5 4; }
+  .head { fill: var(--line); }
+  text { fill: var(--fg); font-size: 13px; }
+  .name { font-weight: 600; font-size: 14px; }
+  .frame-name { font-weight: 600; font-size: 12px; fill: var(--muted); }
+  .line { font-size: 12px; fill: var(--muted); }
+  .ink { font-size: 12px; fill: var(--fg); }
+  .label { font-size: 11.5px; fill: var(--muted); font-style: italic; }
+  .legend { font-size: 12px; fill: var(--muted); }
+</style>
+</head>
+<body>
+<header class="topbar"><div class="inner">
+  <img src="assets/valxel-mark.png" alt=""><span class="brand">VALXEL</span>
+  <nav><a href="index.html">Docs</a><a href="hld.html">High-level design</a><a href="architecture-diagram.html" aria-current="page">Architecture diagram</a><a href="https://github.com/valxel-platform/agentic-sdlc">GitHub</a></nav>
+</div></header>
+<div class="hero">
+  <img src="assets/valxel-banner.jpg" alt="Valxel: Innovating Across Life, Systems, Future">
+  <div class="title">
+    <h1>Valxel SDLC: architecture diagram</h1>
+    <p>One API process runs the workflows and acts through GitHub, OpenChoreo and operations tools. A separate provisioning worker holds the repo admin rights. Products run in the customer's AWS account, in full or lite mode.</p>
+    <div class="meta">Read with the <a href="hld.html">high-level design</a>.</div>
+  </div>
+</div>
+<main class="diagram">
+<figure>
+<svg viewBox="0 60 1400 930" role="img" aria-label="Valxel SDLC architecture: one API process runs the workflows and acts through GitHub, OpenChoreo and operations tools; a separate provisioning worker holds the repo admin rights; products run in the customer's AWS account">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" class="head"/></marker>
+</defs>
+
+<!-- frames -->
+<rect class="frame" x="240" y="80" width="760" height="880" rx="10"/>
+<text class="frame-name" x="256" y="102">VALXEL CLOUD (Valxel's AWS account)</text>
+<rect class="frame" x="260" y="120" width="500" height="600" rx="10"/>
+<text class="frame-name" x="276" y="142">API process (same image, any number of replicas)</text>
+<rect class="frame" x="1040" y="520" width="330" height="240" rx="10"/>
+<text class="frame-name" x="1056" y="542">FULL MODE (customer's AWS): OpenChoreo deploys</text>
+<rect class="frame" x="1040" y="800" width="330" height="140" rx="10"/>
+<text class="frame-name" x="1056" y="822">LITE MODE after go-live: Docker over SSH</text>
+
+<!-- edges -->
+<path class="edge" d="M210 188H280" marker-end="url(#arrow)"/>
+<text class="label" x="216" y="180">decide</text>
+<path class="edge" d="M520 188H548" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path class="edge" d="M640 220V260" marker-end="url(#arrow)"/>
+<text class="label" x="648" y="245">resume threads</text>
+<path class="edge" d="M350 364V410" marker-end="url(#arrow)"/>
+<text class="label" x="358" y="392">run phases</text>
+<path class="edge" d="M420 457H440" marker-end="url(#arrow)"/>
+<path class="edge" d="M670 364V410" marker-end="url(#arrow)"/>
+<text class="label" x="678" y="392">pin rules</text>
+<path class="edge" d="M510 504V524H772V100H1040" marker-end="url(#arrow)"/>
+<text class="label" x="800" y="93">model calls, routed by data class</text>
+<path class="edge" d="M740 585H790V265H1040" marker-end="url(#arrow)"/>
+<text class="label" x="800" y="258">PRs, merges, governance reads</text>
+<path class="back" d="M1040 210H740" marker-end="url(#arrow)"/>
+<text class="label" x="800" y="228">webhooks: CI, pull requests</text>
+<path class="edge" d="M980 315H1040" marker-end="url(#arrow)"/>
+<path class="edge" d="M740 615H800" marker-end="url(#arrow)"/>
+<path class="edge" d="M890 612V690" marker-end="url(#arrow)"/>
+<text class="label" x="898" y="660">deploys</text>
+<path class="edge" d="M980 580H1060" marker-end="url(#arrow)"/>
+<path class="edge" d="M1010 580V690H1060" marker-end="url(#arrow)"/>
+<path class="edge" d="M740 645H990V875H1060" marker-end="url(#arrow)"/>
+<path class="edge" d="M280 675H250V828H210" marker-end="url(#arrow)"/>
+<text class="label" x="30" y="750">flags, pages, change records</text>
+<path class="edge" d="M510 720V840" marker-end="url(#arrow)"/>
+<text class="label" x="518" y="790">checkpoints, ledger, provisioning queue</text>
+
+<!-- people -->
+<rect class="box" x="30" y="160" width="180" height="136" rx="8"/>
+<text class="name" x="46" y="184">People</text>
+<text class="ink" x="46" y="204">Product owners: G0 to G2</text>
+<text class="ink" x="46" y="220">Designers: G3</text>
+<text class="ink" x="46" y="236">Architects: G4</text>
+<text class="ink" x="46" y="252">Engineers, security: G5</text>
+<text class="ink" x="46" y="268">Release managers: G6</text>
+<text class="ink" x="46" y="284">On-call: when paged</text>
+
+<!-- ops tools -->
+<rect class="box" x="30" y="760" width="180" height="136" rx="8"/>
+<text class="name" x="46" y="784">Operations tools</text>
+<text class="line" x="46" y="804">Flipt (feature flags)</text>
+<text class="line" x="46" y="820">PagerDuty</text>
+<text class="line" x="46" y="836">ServiceNow</text>
+<text class="line" x="46" y="852">Sentry or GlitchTip</text>
+<text class="line" x="46" y="868">Jira or OpenProject</text>
+<text class="line" x="46" y="884">Lucid or draw.io</text>
+
+<!-- API process -->
+<rect class="box" x="280" y="156" width="240" height="64" rx="8"/>
+<text class="name" x="296" y="180">Web app (React)</text>
+<text class="line" x="296" y="200">Decisions, features, intake chat</text>
+<rect class="box" x="548" y="156" width="192" height="64" rx="8"/>
+<text class="name" x="564" y="180">API (FastAPI)</text>
+<text class="line" x="564" y="200">Sign-in, webhooks, SSE</text>
+
+<rect class="main" x="280" y="260" width="460" height="104" rx="8"/>
+<text class="name" x="296" y="284">Workflow engine (LangGraph, checkpointed)</text>
+<text class="ink" x="296" y="304">Inception: research, brief, architecture, roadmap, setup</text>
+<text class="ink" x="296" y="320">Feature pipeline: phases, gates G0 to G6, merge train, rollout</text>
+<text class="ink" x="296" y="336">Roadmap and releases; incidents, remediation, hotfixes</text>
+<text class="ink" x="296" y="352">Waits watcher: CI, deploys, the worker, go-live</text>
+
+<rect class="box" x="280" y="410" width="140" height="94" rx="8"/>
+<text class="name" x="296" y="434">Agents</text>
+<text class="line" x="296" y="454">Roles and skills</text>
+<text class="line" x="296" y="470">Claude Code, Codex</text>
+<text class="line" x="296" y="486">Sandboxed sessions</text>
+<rect class="box" x="440" y="410" width="140" height="94" rx="8"/>
+<text class="name" x="456" y="434">Model gateway</text>
+<text class="line" x="456" y="454">Data-class routing</text>
+<text class="line" x="456" y="470">Prompt caching</text>
+<text class="line" x="456" y="486">Usage ledger</text>
+<rect class="box" x="600" y="410" width="140" height="94" rx="8"/>
+<text class="name" x="616" y="434">Governance</text>
+<text class="line" x="616" y="454">Reads governance</text>
+<text class="line" x="616" y="470">Pins by commit</text>
+<text class="line" x="616" y="486">Constitutions</text>
+
+<rect class="box" x="280" y="540" width="460" height="160" rx="8"/>
+<text class="name" x="296" y="562">Integrations: one interface each, stub or live</text>
+<text class="ink" x="296" y="589">GitHub client (Delivery App, no admin rights)</text>
+<text class="ink" x="296" y="619">OpenChoreo client (full mode, hosted lite)</text>
+<text class="ink" x="296" y="649">ComposeRuntime (lite mode after go-live)</text>
+<text class="ink" x="296" y="679">Flags, paging, change records, trackers, diagrams</text>
+
+<!-- Valxel Cloud right column -->
+<rect class="box" x="800" y="120" width="180" height="72" rx="8"/>
+<text class="name" x="816" y="144">AWS KMS</text>
+<text class="line" x="816" y="164">Delivery key: API, worker</text>
+<text class="line" x="816" y="180">Provisioning key: worker</text>
+
+<rect class="box" x="800" y="300" width="180" height="120" rx="8"/>
+<text class="name" x="816" y="324">Provisioning worker</text>
+<text class="line" x="816" y="344">valxel provisioner</text>
+<text class="line" x="816" y="360">Own AWS role, no inbound</text>
+<text class="line" x="816" y="376">Provisioning GitHub App</text>
+<text class="line" x="816" y="392">Checks every request</text>
+<text class="line" x="816" y="408">Queue in Postgres</text>
+
+<rect class="box" x="800" y="444" width="180" height="64" rx="8"/>
+<text class="name" x="816" y="468">Secrets Manager</text>
+<text class="line" x="816" y="488">Per-product paths</text>
+
+<rect class="box" x="800" y="540" width="180" height="72" rx="8"/>
+<text class="name" x="816" y="564">OpenChoreo</text>
+<text class="line" x="816" y="584">Control plane</text>
+<text class="line" x="816" y="600">Build plane</text>
+
+<rect class="box" x="800" y="690" width="180" height="72" rx="8"/>
+<text class="name" x="816" y="714">Shared non-production</text>
+<text class="line" x="816" y="734">Lite dev and staging</text>
+<text class="line" x="816" y="750">while building, 90 days</text>
+
+<rect class="box" x="260" y="840" width="720" height="70" rx="8"/>
+<text class="name" x="276" y="864">Postgres</text>
+<text class="line" x="276" y="884">Workflow checkpoints, usage ledger, change log (hash-chained), catalog, lessons, provisioning queue, intake chats</text>
+
+<!-- externals -->
+<rect class="box" x="1040" y="72" width="330" height="64" rx="8"/>
+<text class="name" x="1056" y="96">Model providers</text>
+<text class="line" x="1056" y="116">Anthropic, OpenAI, others by config</text>
+
+<rect class="box" x="1040" y="180" width="330" height="160" rx="8"/>
+<text class="name" x="1056" y="204">GitHub</text>
+<text class="line" x="1056" y="224">Product repos, pull requests, CI</text>
+<text class="line" x="1056" y="240">Governance repos (one per product)</text>
+<text class="line" x="1056" y="256">Config repo, repo templates</text>
+<text class="line" x="1056" y="290">Delivery App: works inside repos</text>
+<text class="line" x="1056" y="306">Provisioning App: creates and configures</text>
+<text class="line" x="1056" y="322">repos (worker only)</text>
+
+<rect class="box" x="1060" y="560" width="290" height="70" rx="8"/>
+<text class="name" x="1076" y="584">Non-production cluster</text>
+<text class="line" x="1076" y="604">dev, staging, change-set environments</text>
+<rect class="box" x="1060" y="660" width="290" height="70" rx="8"/>
+<text class="name" x="1076" y="684">Production cluster</text>
+<text class="line" x="1076" y="704">tier 1 to 3; alerts and errors flow back</text>
+
+<rect class="box" x="1060" y="840" width="290" height="70" rx="8"/>
+<text class="name" x="1076" y="864">VM, Docker Compose</text>
+<text class="line" x="1076" y="884">dev, staging, production; optional prod VM</text>
+
+<!-- legend -->
+<line class="edge" x1="30" y1="944" x2="70" y2="944" marker-end="url(#arrow)"/>
+<text class="legend" x="80" y="948">calls or acts on</text>
+<line class="back" x1="30" y1="970" x2="70" y2="970" marker-end="url(#arrow)"/>
+<text class="legend" x="80" y="974">events back to the API</text>
+</svg>
+<figcaption>
+  People act only through the web app. The API records decisions and resumes the waiting workflow thread. The engine runs agents in sandboxed sessions; every model call goes through the gateway, which routes by data class and records cost. The engine acts on the world through the integrations. The GitHub client uses the Delivery App, which has no administration rights. Repo creation goes on a queue in Postgres, and the separate provisioning worker runs it with the Provisioning App, after checking each request against governance. Each App's key stays in KMS, and only its own role can sign with it. Full-mode products deploy through OpenChoreo to two clusters in the customer's AWS account. Lite products are hosted on Valxel's shared plane while built, then run on the customer's VM after go-live. Webhooks, alerts and error reports come back to the API as events and wake the threads waiting on them.
+</figcaption>
+</figure>
+</main>
+<footer><div class="inner"><img src="assets/valxel-mark.png" alt=""><span>Valxel · Innovating Across Life · Systems · Future</span><span style="margin-left:auto"><a href="https://github.com/valxel-platform/agentic-sdlc" style="color:#c9d4f2">valxel-platform/agentic-sdlc</a></span></div></footer>
+</body>
+</html>

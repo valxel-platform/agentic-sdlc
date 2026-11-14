@@ -15,6 +15,9 @@ The diagram is [architecture.svg](architecture.svg). [architecture.html](archite
 same page with the flows and rules laid out together: download it or serve the `docs/` folder
 with GitHub Pages to view it in a browser.
 
+The GitHub Pages site also has a branded [high-level design](hld.html) and the
+[full architecture diagram](architecture-diagram.html), starting from [index.html](index.html).
+
 ## How work moves through it
 
 **Idea to production**: one feature thread, across every repo it touches.

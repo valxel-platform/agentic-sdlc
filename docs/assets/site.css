@@ -1,0 +1,79 @@
+/* Valxel docs: shared styles for the GitHub Pages site (docs/). */
+:root {
+  --navy: #0a1633;
+  --navy-2: #0f1f47;
+  --cyan: #22d3ee;
+  --blue: #2563eb;
+  --ink: #16181d;
+  --muted: #5b6070;
+  --rule: #e3e6ee;
+  --paper: #ffffff;
+  --tint: #f5f7fb;
+  --accent-fill: rgba(37, 99, 235, 0.08);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; color: var(--ink); background: var(--tint);
+  font: 16px/1.6 "Inter", ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, monospace; background: #eef1f7; padding: 1px 5px; border-radius: 4px; }
+
+/* Top bar and banner */
+.topbar { background: var(--navy); position: sticky; top: 0; z-index: 10; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.topbar .inner { max-width: 1240px; margin: 0 auto; padding: 10px 24px; display: flex; align-items: center; gap: 14px; }
+.topbar img { height: 30px; width: auto; }
+.topbar .brand { color: #fff; font-weight: 600; letter-spacing: 0.08em; font-size: 15px; }
+.topbar nav { margin-left: auto; display: flex; gap: 20px; }
+.topbar nav a { color: #c9d4f2; font-size: 14px; }
+.topbar nav a:hover, .topbar nav a[aria-current="page"] { color: #fff; text-decoration: none; }
+.hero { background: var(--navy); }
+.hero img { display: block; width: 100%; max-width: 1600px; height: auto; margin: 0 auto; }
+.hero .title { max-width: 1240px; margin: 0 auto; padding: 4px 24px 34px; color: #fff; }
+.hero h1 { margin: 0; font-size: 34px; line-height: 1.2; letter-spacing: -0.01em; }
+.hero p { margin: 8px 0 0; color: #b9c6ea; max-width: 820px; }
+.hero a { color: var(--cyan); }
+.hero .meta { margin-top: 12px; font-size: 13px; color: #8fa0cf; }
+
+/* Layout */
+.layout { max-width: 1240px; margin: 0 auto; padding: 32px 24px 64px; display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 36px; }
+.toc { position: sticky; top: 72px; align-self: start; font-size: 14px; }
+.toc h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 10px; }
+.toc ol { list-style: none; margin: 0; padding: 0; border-left: 2px solid var(--rule); }
+.toc li a { display: block; padding: 5px 0 5px 14px; color: var(--muted); }
+.toc li a:hover { color: var(--blue); text-decoration: none; }
+article { background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 36px 44px; min-width: 0; }
+article section + section { margin-top: 44px; padding-top: 8px; border-top: 1px solid var(--rule); }
+article h2 { font-size: 24px; margin: 16px 0 12px; scroll-margin-top: 80px; }
+article h3 { font-size: 18px; margin: 24px 0 8px; }
+article p, article li { max-width: 78ch; }
+article ul, article ol { padding-left: 22px; }
+article li { margin: 4px 0; }
+figure { margin: 22px 0; }
+figure img, figure svg { width: 100%; height: auto; display: block; border: 1px solid var(--rule); border-radius: 10px; background: #fff; }
+figcaption { font-size: 13px; color: var(--muted); margin-top: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 14px 0; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--rule); }
+th { background: var(--tint); font-weight: 600; }
+.callout { background: var(--accent-fill); border-left: 3px solid var(--blue); padding: 12px 16px; border-radius: 6px; margin: 16px 0; }
+
+/* Cards on the index */
+.cards { max-width: 1240px; margin: 0 auto; padding: 36px 24px 64px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+.card { background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+.card h2 { margin: 0; font-size: 19px; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+.card a.go { margin-top: auto; font-weight: 600; }
+.card .bar { height: 4px; width: 48px; border-radius: 2px; background: linear-gradient(90deg, var(--cyan), var(--blue)); }
+
+footer { background: var(--navy); color: #8fa0cf; font-size: 13px; }
+footer .inner { max-width: 1240px; margin: 0 auto; padding: 22px 24px; display: flex; gap: 12px; align-items: center; }
+footer img { height: 22px; }
+
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+  .toc { position: static; }
+  article { padding: 24px 20px; }
+  .topbar nav { display: none; }
+}
