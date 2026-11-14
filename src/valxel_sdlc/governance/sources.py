@@ -144,9 +144,9 @@ class EnvTokenProvider:
     """VALXEL_GITHUB_TOKEN__<ORG> (org upper-cased, '-' as '_'), else VALXEL_GITHUB_TOKEN."""
 
     def __init__(self, env: dict[str, str] | None = None) -> None:
-        import os
+        from ..secret_ring import environ
 
-        self.env = env if env is not None else os.environ
+        self.env = env if env is not None else environ()
 
     def token(self, org: str) -> str:
         key = "VALXEL_GITHUB_TOKEN__" + org.upper().replace("-", "_")
@@ -170,9 +170,11 @@ class GitHubAppTokenProvider:
     installation token per org, narrowed to `permissions` (contents:read for governance reads;
     the delivery adapter asks for more). Requires `pip install .[github]`."""
 
-    def __init__(self, app_id: str, private_key_pem: str, *, api: str = "https://api.github.com", opener=None,
+    def __init__(self, app_id: str, private_key_pem, *, api: str = "https://api.github.com", opener=None,
                  clock: Callable[[], float] = time.time, permissions: dict[str, str] | None = None) -> None:
         self.app_id = str(app_id)
+        # A PEM string, or a Signer (valxel_sdlc.signing) that signs without handing over the key,
+        # e.g. AWS KMS.
         self.key = private_key_pem
         self.api = api.rstrip("/")
         self.opener = opener or build_opener()
@@ -185,7 +187,12 @@ class GitHubAppTokenProvider:
         import jwt  # lazy: optional dependency
 
         now = int(self.clock())
-        return jwt.encode({"iat": now - 60, "exp": now + 540, "iss": self.app_id}, self.key, algorithm="RS256")
+        claims = {"iat": now - 60, "exp": now + 540, "iss": self.app_id}
+        if not isinstance(self.key, str):
+            from ..signing import jwt_rs256
+
+            return jwt_rs256(claims, self.key)
+        return jwt.encode(claims, self.key, algorithm="RS256")
 
     def _call(self, method: str, path: str, bearer: str, body: dict | None = None) -> dict:
         data = json.dumps(body).encode() if body is not None else None

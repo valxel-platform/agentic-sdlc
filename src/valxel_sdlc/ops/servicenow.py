@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 import urllib.parse
@@ -119,7 +118,9 @@ class ServiceNowReceipts:
 
         self.spec_for = spec_for  # product id -> the product's tools.change_management, or None
         self.store = store
-        self.env = env if env is not None else os.environ
+        from ..secret_ring import environ
+
+        self.env = env if env is not None else environ()
         self.opener = opener or build_opener()
         self.delays = delays
         self._queue = ThreadPoolExecutor(max_workers=1, thread_name_prefix="servicenow")

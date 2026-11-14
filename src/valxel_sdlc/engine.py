@@ -98,7 +98,9 @@ class PostgresIndex:
 
 def openchoreo_auth():
     """The tool's OpenChoreo client-credentials token, for OpenChoreo's agents (when configured)."""
-    url, secret = os.environ.get("VALXEL_OPENCHOREO_TOKEN_URL", ""), os.environ.get("VALXEL_OPENCHOREO_CLIENT_SECRET", "")
+    from .secret_ring import get
+
+    url, secret = os.environ.get("VALXEL_OPENCHOREO_TOKEN_URL", ""), get("VALXEL_OPENCHOREO_CLIENT_SECRET")
     if not (url and secret):
         return None
     from .integrations.mcp_client import ClientCredentials
@@ -137,6 +139,10 @@ class FeatureEngine:
             from .pilot import InMemoryEffortStore
 
             services.effort = InMemoryEffortStore()
+        if getattr(services, "provision_queue", None) is None:
+            from .provision_queue import InMemoryProvisionQueue
+
+            services.provision_queue = InMemoryProvisionQueue()
         if getattr(services, "lessons", None) is None:
             from .lessons import InMemoryLessonStore
 

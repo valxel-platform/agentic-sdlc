@@ -268,6 +268,10 @@ def build_services(
     svc.knowledge = default_knowledge(svc)
     svc.flags = default_flags(settings, svc)
     svc.provisioner = default_provisioner(settings, github, openchoreo)
+    from .provision_queue import QueuedProvisioner, split
+
+    if split():  # repos are created by `valxel provisioner`, with its own GitHub App (security S4)
+        svc.provisioner = QueuedProvisioner(svc)
     # Lite mode (valxel_sdlc.lite): live lite products deploy through their VM runtime, everything
     # else through OpenChoreo. On for instances that make lite products, or when asked.
     import os as _os
@@ -326,7 +330,9 @@ def default_flags(settings: Settings, svc: Services):
         return (product.tools or {}).get("flags") or {}, product.runtime or {}
 
     spec = (settings.tools.providers.get("flags", {}).get("flipt") or {})
-    return ProductFlags(product_flags, live=os.environ.get("VALXEL_DELIVERY", "stub").lower() == "live",
+    from .secret_ring import environ
+
+    return ProductFlags(product_flags, live=os.environ.get("VALXEL_DELIVERY", "stub").lower() == "live", env=environ(),
                         token_prefix=spec.get("token_env_prefix", "VALXEL_FLIPT_TOKEN_"))
 
 
@@ -334,17 +340,20 @@ def default_provisioner(settings: Settings, github, openchoreo):
     """Live delivery creates repos with its own, broader GitHub App token (administration:write),
     used only by the provision step; stubs share the in-memory GitHub."""
     import os
-    from pathlib import Path
 
     from .provisioning import RepoProvisioner
 
     if os.environ.get("VALXEL_DELIVERY", "stub").lower() == "live":
-        from .governance.sources import GitHubAppTokenProvider
         from .integrations.github import PROVISIONING_PERMISSIONS, GitHubRest
 
-        tokens = GitHubAppTokenProvider(os.environ["VALXEL_GITHUB_APP_ID"],
-                                        Path(os.environ["VALXEL_GITHUB_APP_PRIVATE_KEY_FILE"]).read_text(),
-                                        api=settings.github_api, permissions=PROVISIONING_PERMISSIONS)
+        from .provision_queue import split
+        from .signing import github_app_configured, github_app_tokens
+
+        if split():
+            return None  # the worker provisions (QueuedProvisioner is set below)
+        # Inline: the Provisioning App if configured, else the one App (strict mode refuses this).
+        app = "provisioner" if github_app_configured(app="provisioner") else "delivery"
+        tokens = github_app_tokens(api=settings.github_api, permissions=PROVISIONING_PERMISSIONS, app=app)
         return RepoProvisioner(GitHubRest(tokens, api=settings.github_api), openchoreo)
     return RepoProvisioner(github, openchoreo)
 
@@ -433,15 +442,17 @@ def default_delivery(settings: Settings) -> tuple[GitHub, OpenChoreo]:
     """VALXEL_DELIVERY=live opens real pull requests and runs real builds and deployments;
     anything else keeps both in memory. Live mode needs the GitHub App and OpenChoreo settings."""
     import os
-    from pathlib import Path
 
     if os.environ.get("VALXEL_DELIVERY", "stub").lower() != "live":
         return StubGitHub(), StubOpenChoreo()
-    from .governance.sources import GitHubAppTokenProvider
     from .integrations.github import DELIVERY_PERMISSIONS, GitHubRest
     from .integrations.openchoreo import OpenChoreoMcp
 
-    missing = [v for v in ("VALXEL_GITHUB_APP_ID", "VALXEL_GITHUB_APP_PRIVATE_KEY_FILE") if not os.environ.get(v)]
+    from .signing import github_app_configured, github_app_tokens
+
+    missing = [] if github_app_configured() else [
+        "VALXEL_GITHUB_APP_ID and a key (VALXEL_GITHUB_APP_KMS_KEY_ID, VALXEL_GITHUB_APP_PRIVATE_KEY or "
+        "VALXEL_GITHUB_APP_PRIVATE_KEY_FILE)"]
     oc = settings.tools.servers.get("openchoreo")
     secret = oc.setting("client_secret") if oc else ""
     if not oc or not oc.url:
@@ -452,9 +463,7 @@ def default_delivery(settings: Settings) -> tuple[GitHub, OpenChoreo]:
         missing.append("VALXEL_OPENCHOREO_CLIENT_SECRET")
     if missing:
         raise DeliveryConfigError(f"VALXEL_DELIVERY=live needs {', '.join(missing)}")
-    tokens = GitHubAppTokenProvider(os.environ["VALXEL_GITHUB_APP_ID"],
-                                    Path(os.environ["VALXEL_GITHUB_APP_PRIVATE_KEY_FILE"]).read_text(),
-                                    api=settings.github_api, permissions=DELIVERY_PERMISSIONS)
+    tokens = github_app_tokens(api=settings.github_api, permissions=DELIVERY_PERMISSIONS)
     creds = ClientCredentials(oc.setting("token_url"), oc.setting("client_id") or "service_mcp_client", secret,
                               scope=oc.setting("scope"))
     server = McpHttp("openchoreo", oc.url, auth=creds)

@@ -212,9 +212,11 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
         gov = services.settings.entry(vision.product_id).governance.full_name
     else:
         gov = i["governance_repo"]
-        step("governance_repo", lambda: {"repo": gov, "result": gh.create_repo(
-            repo=gov, template=None, private=False,
-            description=f"{vision.name}: governance (product.yaml, constitution, roadmap, architecture)")})
+        description = f"{vision.name}: governance (product.yaml, constitution, roadmap, architecture)"
+        queued = getattr(services.provisioner, "create_governance_repo", None)  # security S4: the worker creates it
+        step("governance_repo", lambda: {"repo": gov, "result": queued(
+            product_id=i["product_id"], repo=gov, private=False, description=description, inception_id=thread_id)
+            if callable(queued) else gh.create_repo(repo=gov, template=None, private=False, description=description)})
 
     def governance_pr() -> dict:
         for path, content in files.items():

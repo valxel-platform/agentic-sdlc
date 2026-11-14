@@ -114,7 +114,9 @@ class AnthropicProvider:
         if client is None:
             import anthropic  # lazy: only in live mode
 
-            client = anthropic.Anthropic()
+            from ..secret_ring import get
+
+            client = anthropic.Anthropic(**({"api_key": get("ANTHROPIC_API_KEY")} if get("ANTHROPIC_API_KEY") else {}))
         self._client = client
 
     def complete(self, req: ModelRequest) -> ModelResponse:

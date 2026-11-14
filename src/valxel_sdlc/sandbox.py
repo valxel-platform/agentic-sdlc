@@ -85,10 +85,19 @@ def session_env(runtime: str, home: str, extra: dict | None = None, base: dict |
     """The environment a session runs with, as the full set of names the tool's process has:
     allowed names keep their values, every other name is blanked (the SDK merges the parent's
     environment, so blanking is how a name is taken away)."""
+    from_process = base is None
     base = dict(os.environ if base is None else base)
     passed = set(SAFE) | set(MODEL_KEYS.get(runtime, ())) | {
         n.strip() for n in (base.get("VALXEL_AGENT_ENV_PASS") or "").split(",") if n.strip()}
     env = {k: (v if k in passed else "") for k, v in base.items()}
+    if from_process:  # model credentials kept in the secret store rather than the environment
+        from .secret_ring import current, is_secret
+
+        for k in MODEL_KEYS.get(runtime, ()):
+            if is_secret(k) and not env.get(k):
+                v = current(k)
+                if v:
+                    env[k] = v
     env.update({"HOME": home, "TMPDIR": str(Path(home) / "tmp"), **NO_SCRIPTS, **(extra or {})})
     return env
 

@@ -14,7 +14,6 @@ of turning a flag off. With stub delivery, products without Flipt get in-memory 
 from __future__ import annotations
 
 import json
-import os
 import re
 import threading
 import urllib.error
@@ -257,7 +256,9 @@ class ProductFlags:
                  token_prefix: str = "VALXEL_FLIPT_TOKEN_") -> None:
         self._product_flags = product_flags  # product id -> (tools.flags, runtime) or None
         self.live = live
-        self.env = env if env is not None else os.environ
+        from ..secret_ring import environ
+
+        self.env = env if env is not None else environ()
         self.transport_for = transport_for or urllib_transport
         self.token_prefix = token_prefix
         self.stub = StubFlags()
