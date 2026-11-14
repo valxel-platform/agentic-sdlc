@@ -297,6 +297,17 @@ def make_gate(gate: str, services):
                     preset = {"decision": "approve", "approver": res.get("approver", ""), "active_minutes": 0.0,
                               "feedback": f"Approved with release {rel['id']}"}
 
+        # A lite product hosted while it's built has no production yet: G6 waits for its go-live,
+        # then asks for approval as usual (valxel_sdlc.environments.hosted).
+        if gate == "g6" and preset is None:
+            from ..environments import hosted
+
+            if hosted(snap.product.runtime):
+                interrupt({"type": "external", "wait": "go_live", "product_id": state["product_id"],
+                           "feature_id": state["feature_id"], "since": now(),
+                           "label": (f"Waiting for {state['product_id']} to go live: Valxel hosts it while it's "
+                                     "built, so it has no production until it moves to the customer's VM")})
+
         limits = services.settings.limits
         history, sent_back = correction_history(state, phase), times_sent_back(state, phase)
         allowed = [x for x in GATE_DECISIONS if not (x == "revise" and sent_back >= limits.max_gate_revisions)]

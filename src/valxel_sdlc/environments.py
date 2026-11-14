@@ -18,6 +18,12 @@
       -> the release binding gets that environment's capacity from runtime/capacity.yaml
          (valxel_sdlc.capacity.binding_configs): replicas, CPU, memory, and the autoscaler's range
 
+A lite product (`runtime.mode: lite`) is hosted while it is built: no clusters of its own; its
+project, dev and staging live in Valxel's lite namespace on the shared non-production data plane
+(VALXEL_SHARED_DATA_PLANE, VALXEL_LITE_NAMESPACE), isolated from other products as OpenChoreo
+isolates projects. It has no production until it goes live on the customer's VM (lite mode, part
+4); until then its G6 waits for go-live.
+
 Every step is safe to repeat.
 """
 
@@ -35,15 +41,47 @@ AUTOSCALER = "autoscaler"  # the platform's ClusterTrait (platform/openchoreo/au
 AWAKE = "Mon-Fri 07:00-19:00 America/Chicago"
 
 
+MODES = ("full", "lite")
+LITE_PHASES = ("hosted", "live")
+
+
+def shared_plane() -> str:
+    """Valxel's shared non-production data plane, where lite products are hosted while built."""
+    return os.environ.get("VALXEL_SHARED_DATA_PLANE", "") or "valxel-shared-nonprod"
+
+
+def lite_namespace() -> str:
+    """The OpenChoreo namespace hosted lite products share; each is its own project in it."""
+    return os.environ.get("VALXEL_LITE_NAMESPACE", "") or "valxel-lite"
+
+
+def default_mode() -> str:
+    """The runtime mode new products get at their product gate (VALXEL_RUNTIME_MODE: full | lite)."""
+    mode = (os.environ.get("VALXEL_RUNTIME_MODE", "") or "full").lower()
+    return mode if mode in MODES else "full"
+
+
+def hosted(runtime: dict | None) -> bool:
+    """A lite product that hasn't gone live: Valxel hosts it, and it has no production yet."""
+    rt = runtime or {}
+    return rt.get("mode") == "lite" and (rt.get("phase") or "hosted") == "hosted"
+
+
 def names(product_id: str) -> dict:
     pid = product_id.lower()
     return {"project": pid, "non_production": f"{pid}-nonprod", "production": f"{pid}-prod",
             "observability": f"{pid}-observe", "pipeline": f"{pid}-pipeline"}
 
 
-def runtime_entry(product_id: str, tier: int) -> dict:
+def runtime_entry(product_id: str, tier: int, mode: str = "full", today: str = "") -> dict:
     """What product.yaml's runtime says about where the product runs."""
     n = names(product_id)
+    if mode == "lite":
+        # Hosted while built; `hosted_since` starts the 90-day hosted period.
+        return {"tier": tier, "stage": "pilot", "mode": "lite", "phase": "hosted", "hosted_since": today,
+                "namespace": lite_namespace(),
+                "data_planes": {"non_production": shared_plane()},
+                "observability": {"non_production": "shared"}}
     return {"tier": tier, "stage": "pilot",
             "data_planes": {"non_production": n["non_production"], "production": n["production"]},
             "observability": {"non_production": "shared", "production": n["observability"]}}
@@ -79,7 +117,8 @@ spec:
 
 
 def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: str | None = None,
-          template: str = "", zones: int = 2, thread_id: str = "", awake: str = AWAKE) -> list[dict]:
+          template: str = "", zones: int = 2, thread_id: str = "", awake: str = AWAKE,
+          mode: str = "full") -> list[dict]:
     """The product's clusters (a pull request) and its OpenChoreo project, environments and
     pipeline (when its data planes are registered). Returns the steps, like inception setup."""
     steps: list[dict] = []
@@ -94,6 +133,9 @@ def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: st
             steps.append({"step": name, "ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
     def clusters() -> dict:
+        if mode == "lite":
+            return {"skipped": True, "why": "lite mode: hosted on Valxel's shared non-production plane until it goes "
+                                            "live on the customer's VM; no clusters of its own"}
         files = cluster_files(product_id, tier, template or DEFAULT_TEMPLATE, zones, awake)
         if not infra_repo:
             return {"skipped": True, "files": sorted(files),
@@ -110,12 +152,34 @@ def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: st
         return {"url": pr["url"], "repo": infra_repo, "files": sorted(files)}
 
     step("clusters_pr", clusters)
-    step("environments", lambda: environments(services, product_id=product_id, approver=approver))
+    step("environments", lambda: environments(services, product_id=product_id, approver=approver, mode=mode))
     return steps
 
 
-def environments(services, *, product_id: str, approver: str) -> dict:
+def hosted_environments(services, *, product_id: str, approver: str) -> dict:
+    """A lite product while it is built: its project, dev and staging in the lite namespace on the
+    shared non-production data plane. No production: that comes with go-live, on the customer's VM."""
+    n, ns, plane = names(product_id), lite_namespace(), shared_plane()
+    oc = services.openchoreo
+    if not callable(getattr(oc, "ensure_environment", None)):
+        return {"skipped": True, "why": "this OpenChoreo client can't create environments"}
+    if oc.data_plane(name=plane, namespace=ns).get("state") != "ready":
+        return {"waiting": [plane],
+                "why": f"waiting for the shared data plane {plane} in namespace {ns}; the platform registers it "
+                       f"once for all lite products, then run `valxel environments --product {product_id}`"}
+    done = {"project": oc.ensure_project(project=n["project"], pipeline=n["pipeline"], namespace=ns),
+            "pipeline": oc.ensure_pipeline(name=n["pipeline"], stages=list(NON_PRODUCTION), namespace=ns)}
+    for env in NON_PRODUCTION:
+        done[env] = oc.ensure_environment(name=env, data_plane=plane, production=False, actor="agent:setup",
+                                          namespace=ns, labels={"valxel.io/plane": "shared"})
+    who = approver.split(",")[0].strip() or "unknown"
+    return {"created": done, "approved_by": who, "hosted": True, "namespace": ns}
+
+
+def environments(services, *, product_id: str, approver: str, mode: str = "full") -> dict:
     """The project, environments and pipeline, once both data planes are registered."""
+    if mode == "lite":
+        return hosted_environments(services, product_id=product_id, approver=approver)
     n = names(product_id)
     oc = services.openchoreo
     if not callable(getattr(oc, "ensure_environment", None)):

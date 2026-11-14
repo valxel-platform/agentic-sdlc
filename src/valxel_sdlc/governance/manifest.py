@@ -135,7 +135,19 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
                 problems.append("runtime.change_sets must be a mapping: {enabled: bool, required: bool, "
                                 "max_open: n >= 1, ttl_hours: n >= 1}")
                 change_sets = None
+        mode = str(runtime.get("mode") or "full")
+        phase = str(runtime.get("phase") or "hosted") if mode == "lite" else None
+        if mode not in ("full", "lite"):
+            problems.append(f"runtime.mode is full or lite, not {mode!r}")
+            mode = "full"
+        elif mode == "lite" and phase not in ("hosted", "live"):
+            problems.append(f"runtime.phase is hosted or live for a lite product, not {phase!r}")
+            phase = "hosted"
         runtime = {"openchoreo_project": str(runtime["openchoreo_project"]), "pipeline": pipeline,
+                   # Where it runs (valxel_sdlc.environments): full = its own clusters; lite = hosted on
+                   # Valxel's shared plane while built, then the customer's VM once live (valxel_sdlc.lite).
+                   "mode": mode, "phase": phase,
+                   "hosted_since": str(runtime.get("hosted_since") or "") if mode == "lite" else "",
                    # Each change set's own environment before merge (valxel_sdlc.changeset_env).
                    "change_sets": dict(change_sets) if change_sets else None,
                    # What the tool may do here by itself, narrowing platform/remediation.yaml.

@@ -401,8 +401,12 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
         from .environments import environments
         from .services import build_services
 
-        out = environments(build_services(load_settings(mode=args.mode)), product_id=args.product,
-                           approver=args.approver)
+        services = build_services(load_settings(mode=args.mode))
+        try:  # a lite product is hosted on the shared plane until it goes live
+            mode = (services.snapshot(args.product).product.runtime or {}).get("mode") or "full"
+        except Exception:
+            mode = "full"
+        out = environments(services, product_id=args.product, approver=args.approver, mode=mode)
         print(out.get("why") or f"Created for {out['approved_by']}: " + ", ".join(f"{k} {v}" for k, v in out["created"].items()))
         return 0 if not out.get("waiting") else 2
     if args.cmd == "capacity":
