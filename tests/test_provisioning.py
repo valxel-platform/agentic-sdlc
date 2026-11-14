@@ -61,6 +61,7 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     tpl = "valxel-platform/template-service"
     svc.github.files[(tpl, "main", ".valxel/identity")] = "# files that carry the template's name\nworkload.yaml\nsrc/main/resources/application.yaml\nmissing.txt\n"
     svc.github.files[(tpl, "main", "workload.yaml")] = "metadata:\n  name: template-service\n"
+    svc.github.files[(tpl, "main", "LICENSE")] = "MIT License\n\nCopyright (c) 2026 Valxel\n"
     svc.github.files[(tpl, "main", "src/main/resources/application.yaml")] = "spring:\n  application:\n    name: template-service\n"
     seen = {}
     v = approve_gates(eng, start_new_service(eng), seen)
@@ -85,6 +86,8 @@ def test_new_repo_is_created_on_the_golden_path_and_joins_the_change_set(tmp_pat
     short = NEW.split("/", 1)[1]
     assert svc.github.files[(NEW, "main", "workload.yaml")] == f"metadata:\n  name: {short}\n"
     assert f"name: {short}" in svc.github.files[(NEW, "main", "src/main/resources/application.yaml")]
+    # The template's MIT license is Valxel's, not the product's: the new repo doesn't keep it.
+    assert (NEW, "main", "LICENSE") not in svc.github.files and (tpl, "main", "LICENSE") in svc.github.files
 
     manifest = svc.github.files[("acme-clinic/cln-governance", "valxel/CLN-FEAT-1-repos", "product.yaml")]
     assert {"name": NEW, "role": "provider"} in yaml.safe_load(manifest)["repos"]
@@ -199,6 +202,8 @@ class FakeAdminApi:
         if m == "POST" and path.endswith("/generate"):
             self.repos.add(f"{body['owner']}/{body['name']}")
             return Resp(b"{}")
+        if m == "GET" and "/contents/LICENSE" in path:
+            return Resp(b'{"sha": "abc", "content": ""}')
         if m == "GET" and path.endswith("/rulesets"):
             return Resp(json.dumps(self.rulesets).encode())
         if m == "POST" and path.endswith("/rulesets"):
@@ -227,6 +232,8 @@ def test_github_admin_calls():
             "code_scanning_merge_protection": "high", "linear_history": True, "bypass_app_id": "12345"}
     gh.upsert_ruleset(repo="o/cln-x-service", branch="main", spec=spec)
     gh.upsert_ruleset(repo="o/cln-x-service", branch="main", spec=spec)
+    assert gh.delete_file(repo="o/cln-x-service", branch="main", path="LICENSE", message="m")
+    assert not gh.delete_file(repo="o/cln-x-service", branch="main", path="NOTICE", message="m")
 
     calls = [(m, p) for m, p, _ in api.calls]
     assert ("POST", "/repos/valxel-platform/template-service/generate") in calls
@@ -236,6 +243,8 @@ def test_github_admin_calls():
     assert ("PATCH", "/repos/o/cln-x-service/properties/values") in calls
     assert calls.count(("POST", "/repos/o/cln-x-service/rulesets")) == 1  # second run updates
     assert ("PUT", "/repos/o/cln-x-service/rulesets/9") in calls
+    gone = next(b for m, p, b in api.calls if m == "DELETE")
+    assert gone == {"message": "m", "sha": "abc", "branch": "main"}
     body = next(b for m, p, b in api.calls if m == "POST" and p.endswith("/rulesets"))
     rules = {r["type"]: r.get("parameters") for r in body["rules"]}
     assert rules["pull_request"]["required_approving_review_count"] == 2
