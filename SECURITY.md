@@ -46,6 +46,28 @@ The GitHub App's key can stay in AWS KMS: import it as a sign-only key and set
 Otherwise it reads `VALXEL_GITHUB_APP_PRIVATE_KEY` from the store, or the file
 `VALXEL_GITHUB_APP_PRIVATE_KEY_FILE` (`valxel_sdlc.signing`).
 
+## Repo administration: two GitHub Apps
+
+Creating repos and applying their settings (rulesets, security features, team access, custom
+properties) needs `administration` rights. A GitHub App's permissions belong to the App, so any
+process that can sign for it can mint an admin token. The tool therefore uses two Apps
+(`valxel_sdlc.provision_queue`):
+
+| App | Permissions | Who signs for it |
+| --- | --- | --- |
+| Delivery (`VALXEL_GITHUB_APP_*`) | contents, pull requests, statuses, checks, alerts; no administration | The API process |
+| Provisioning (`VALXEL_GITHUB_PROVISIONER_APP_*`) | administration, contents, pull requests, security settings, custom properties | Only `valxel provisioner`, a separate worker with its own AWS role |
+
+With `VALXEL_PROVISIONING=queue`, the API process puts provisioning requests on a queue and the
+pipeline waits; the worker creates the repos. The worker trusts governance, not the queue: a repo
+must be the plan G4 approved for that feature, recomputed from governance, and a governance repo
+must be the one its inception's product gate approved. A refused request comes back to the feature
+as a provisioning escalation.
+
+Keep each App's key in KMS, with a key policy that lets only its own process's role sign. Strict
+mode refuses to start an API process that creates repos itself or can reach the Provisioning App's
+key.
+
 ## Rotating secrets
 
 The secrets the tool checks or signs with are key rings (`valxel_sdlc.secret_ring`): a current

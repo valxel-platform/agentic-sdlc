@@ -268,6 +268,10 @@ def build_services(
     svc.knowledge = default_knowledge(svc)
     svc.flags = default_flags(settings, svc)
     svc.provisioner = default_provisioner(settings, github, openchoreo)
+    from .provision_queue import QueuedProvisioner, split
+
+    if split():  # repos are created by `valxel provisioner`, with its own GitHub App (security S4)
+        svc.provisioner = QueuedProvisioner(svc)
     # Lite mode (valxel_sdlc.lite): live lite products deploy through their VM runtime, everything
     # else through OpenChoreo. On for instances that make lite products, or when asked.
     import os as _os
@@ -342,9 +346,14 @@ def default_provisioner(settings: Settings, github, openchoreo):
     if os.environ.get("VALXEL_DELIVERY", "stub").lower() == "live":
         from .integrations.github import PROVISIONING_PERMISSIONS, GitHubRest
 
-        from .signing import github_app_tokens
+        from .provision_queue import split
+        from .signing import github_app_configured, github_app_tokens
 
-        tokens = github_app_tokens(api=settings.github_api, permissions=PROVISIONING_PERMISSIONS)
+        if split():
+            return None  # the worker provisions (QueuedProvisioner is set below)
+        # Inline: the Provisioning App if configured, else the one App (strict mode refuses this).
+        app = "provisioner" if github_app_configured(app="provisioner") else "delivery"
+        tokens = github_app_tokens(api=settings.github_api, permissions=PROVISIONING_PERMISSIONS, app=app)
         return RepoProvisioner(GitHubRest(tokens, api=settings.github_api), openchoreo)
     return RepoProvisioner(github, openchoreo)
 

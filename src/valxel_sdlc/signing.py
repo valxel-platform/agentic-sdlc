@@ -9,8 +9,13 @@ A `Signer` signs bytes with RSASSA-PKCS1-v1_5 and SHA-256 (RS256, what GitHub re
 Google Cloud KMS, Azure Key Vault and Vault's Transit engine sign RS256 the same way: each is
 another `Signer` with `sign(message)`.
 
-`github_app_signer()` picks one: VALXEL_GITHUB_APP_KMS_KEY_ID (a KMS key id or ARN), else the
-PEM in the secret store (VALXEL_GITHUB_APP_PRIVATE_KEY), else the file VALXEL_GITHUB_APP_PRIVATE_KEY_FILE.
+`github_app_signer(app=...)` picks one for each of the two GitHub Apps (valxel_sdlc.provision_queue):
+
+    delivery     VALXEL_GITHUB_APP_ID with VALXEL_GITHUB_APP_KMS_KEY_ID (a KMS key id or ARN), else the
+                 PEM VALXEL_GITHUB_APP_PRIVATE_KEY in the secret store, else the file
+                 VALXEL_GITHUB_APP_PRIVATE_KEY_FILE
+    provisioner  VALXEL_GITHUB_PROVISIONER_APP_ID with VALXEL_GITHUB_PROVISIONER_APP_KMS_KEY_ID, else
+                 VALXEL_GITHUB_PROVISIONER_PRIVATE_KEY, else VALXEL_GITHUB_PROVISIONER_PRIVATE_KEY_FILE
 """
 
 from __future__ import annotations
@@ -68,35 +73,64 @@ def jwt_rs256(claims: dict, signer: Signer) -> str:
     return f"{head}.{body}.{_b64(signer.sign(signing_input))}"
 
 
-def github_app_configured(env: Mapping[str, str] | None = None) -> bool:
+# The two GitHub Apps (valxel_sdlc.provision_queue): their settings' names.
+APPS = {
+    "delivery": "VALXEL_GITHUB_APP",
+    "provisioner": "VALXEL_GITHUB_PROVISIONER_APP",
+}
+
+
+def _names(app: str) -> dict:
+    base = APPS[app]
+    key = base.replace("_APP", "") if app == "provisioner" else "VALXEL_GITHUB_APP"
+    return {"id": f"{base}_ID", "kms": f"{base}_KMS_KEY_ID", "pem": f"{key}_PRIVATE_KEY",
+            "file": f"{key}_PRIVATE_KEY_FILE"}
+
+
+def github_app_configured(env: Mapping[str, str] | None = None, *, app: str = "delivery") -> bool:
     from .secret_ring import current
 
     env = env if env is not None else os.environ
-    return bool(env.get("VALXEL_GITHUB_APP_ID")) and bool(
-        env.get("VALXEL_GITHUB_APP_KMS_KEY_ID") or env.get("VALXEL_GITHUB_APP_PRIVATE_KEY_FILE")
-        or current("VALXEL_GITHUB_APP_PRIVATE_KEY", env))
+    n = _names(app)
+    return bool(env.get(n["id"])) and bool(env.get(n["kms"]) or env.get(n["file"]) or current(n["pem"], env))
 
 
-def github_app_signer(env: Mapping[str, str] | None = None) -> Signer:
+def github_app_signer(env: Mapping[str, str] | None = None, *, app: str = "delivery") -> Signer:
     from .secret_ring import current
 
     env = env if env is not None else os.environ
-    key_id = env.get("VALXEL_GITHUB_APP_KMS_KEY_ID", "")
+    n = _names(app)
+    key_id = env.get(n["kms"], "")
     if key_id:
         return KmsSigner(key_id, region=env.get("AWS_REGION", ""))
-    pem = current("VALXEL_GITHUB_APP_PRIVATE_KEY", env)
-    if not pem and env.get("VALXEL_GITHUB_APP_PRIVATE_KEY_FILE"):
-        pem = Path(env["VALXEL_GITHUB_APP_PRIVATE_KEY_FILE"]).read_text()
+    pem = current(n["pem"], env)
+    if not pem and env.get(n["file"]):
+        pem = Path(env[n["file"]]).read_text()
     if not pem:
-        raise RuntimeError("The GitHub App needs VALXEL_GITHUB_APP_KMS_KEY_ID, VALXEL_GITHUB_APP_PRIVATE_KEY in "
-                           "the secret store, or VALXEL_GITHUB_APP_PRIVATE_KEY_FILE")
+        raise RuntimeError(f"The {app} GitHub App needs {n['kms']}, {n['pem']} in the secret store, or {n['file']}")
     return RsaKeySigner(pem)
 
 
-def github_app_tokens(*, api: str, permissions: dict[str, str] | None = None, env: Mapping[str, str] | None = None):
-    """The GitHub App token provider, signing with whichever signer is configured."""
+def github_app_tokens(*, api: str, permissions: dict[str, str] | None = None, env: Mapping[str, str] | None = None,
+                      app: str = "delivery"):
+    """A GitHub App's token provider, signing with whichever signer is configured for it."""
     from .governance.sources import GitHubAppTokenProvider
 
     env = env if env is not None else os.environ
-    return GitHubAppTokenProvider(env["VALXEL_GITHUB_APP_ID"], github_app_signer(env), api=api,
+    return GitHubAppTokenProvider(env[_names(app)["id"]], github_app_signer(env, app=app), api=api,
                                   permissions=permissions)
+
+
+def provisioner_key_reachable(env: Mapping[str, str] | None = None) -> list[str]:
+    """Settings through which this process could sign for the Provisioning App."""
+    from .secret_ring import current
+
+    env = env if env is not None else os.environ
+    n = _names("provisioner")
+    out = [k for k in (n["kms"], n["file"]) if env.get(k)]
+    try:
+        if current(n["pem"], env):
+            out.append(n["pem"])
+    except Exception:
+        pass  # the store refuses this process: as it should
+    return out

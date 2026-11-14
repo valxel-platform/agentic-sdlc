@@ -94,10 +94,12 @@ def _admin_github(settings):
 
     from .signing import github_app_configured, github_app_tokens
 
-    if not github_app_configured():
+    # Changing repo settings needs administration: the Provisioning App when there is one (security S4).
+    app = "provisioner" if github_app_configured(app="provisioner") else "delivery"
+    if not github_app_configured(app=app):
         raise SystemExit("valxel repos needs the GitHub App: set VALXEL_GITHUB_APP_ID and a key "
                          "(VALXEL_GITHUB_APP_KMS_KEY_ID, VALXEL_GITHUB_APP_PRIVATE_KEY or VALXEL_GITHUB_APP_PRIVATE_KEY_FILE)")
-    tokens = github_app_tokens(api=settings.github_api, permissions=PROVISIONING_PERMISSIONS)
+    tokens = github_app_tokens(api=settings.github_api, permissions=PROVISIONING_PERMISSIONS, app=app)
     return GitHubRest(tokens, api=settings.github_api)
 
 
@@ -312,6 +314,10 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
                    help="Make the first N attempts of PHASE defective, e.g. spec=1")
     d.add_argument("--revise", action="store_true", help="Send the design back once at G3")
     d.add_argument("--artifacts", help="Directory for artifacts (default: a temp dir)")
+    pv = sub.add_parser("provisioner", help="Run the provisioning worker: create the repos the queue asks for, with "
+                                             "the Provisioning GitHub App, after checking each against governance")
+    pv.add_argument("--once", action="store_true", help="Run what's queued now, then stop")
+    pv.add_argument("--interval", type=float, default=5.0, help="Seconds between looks at the queue")
     r = sub.add_parser("repos", help="Check or apply the repo standards (config/repos.yaml) on every managed repo")
     r.add_argument("action", choices=["check", "apply"])
     r.add_argument("--repo", action="append", default=[], metavar="ORG/REPO", help="Only these repos")
@@ -414,6 +420,8 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
         out = environments(services, product_id=args.product, approver=args.approver, mode=mode)
         print(out.get("why") or f"Created for {out['approved_by']}: " + ", ".join(f"{k} {v}" for k, v in out["created"].items()))
         return 0 if not out.get("waiting") else 2
+    if args.cmd == "provisioner":
+        return _provisioner(args)
     if args.cmd == "go-live":
         from .config import load_settings
         from .lite.golive import go_live, retire_hosted
@@ -499,3 +507,35 @@ def _capacity(args) -> int:
     if not found:
         print("Production fits its stage: nothing to propose")
     return 0
+
+
+def _provisioner(args) -> int:
+    """The provisioning worker (security S4): its own process and AWS role, the only one that can
+    sign for the Provisioning App."""
+    import logging
+    import time as _time
+
+    from .api.app import create_engine_from_env
+    from .integrations.github import PROVISIONING_PERMISSIONS, GitHubRest
+    from .provision_queue import run_one
+    from .provisioning import RepoProvisioner
+    from .signing import github_app_configured, github_app_tokens
+
+    log = logging.getLogger("valxel.provisioner")
+    if not github_app_configured(app="provisioner"):
+        raise SystemExit("valxel provisioner needs the Provisioning App: VALXEL_GITHUB_PROVISIONER_APP_ID and "
+                         "VALXEL_GITHUB_PROVISIONER_APP_KMS_KEY_ID (or a key in the secret store)")
+    engine, _ = create_engine_from_env()
+    services = engine.services
+    tokens = github_app_tokens(api=services.settings.github_api, permissions=PROVISIONING_PERMISSIONS, app="provisioner")
+    github = GitHubRest(tokens, api=services.settings.github_api)
+    provisioner = RepoProvisioner(github, services.openchoreo)
+    while True:
+        ran = run_one(engine, services.provision_queue, provisioner, github)
+        if ran is not None:
+            log.info("provisioning %s %s: %s %s", ran["kind"], ran["payload"].get("repo"), ran["status"],
+                     ran.get("why") or ran.get("error") or "")
+            continue
+        if args.once:
+            return 0
+        _time.sleep(args.interval)
