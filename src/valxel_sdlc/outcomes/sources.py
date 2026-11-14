@@ -56,7 +56,9 @@ def _reading(product_id: str, metric: Metric, start: str, end: str, status: str,
 
 
 def secret(provider: str, product_id: str) -> str:
-    return os.environ.get(SECRET_PREFIX.get(provider, "") + product_id.upper(), "") if provider in SECRET_PREFIX else ""
+    from ..secret_ring import get
+
+    return get(SECRET_PREFIX[provider] + product_id.upper()) if provider in SECRET_PREFIX else ""
 
 
 # ------------------------------------------------------------------------------- SQL-like checks

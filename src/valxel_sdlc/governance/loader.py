@@ -9,10 +9,8 @@ governance repo meanwhile. Snapshots are cached by SHA.
 
 from __future__ import annotations
 
-import os
 import threading
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from ..config import ProductConfig, Settings
 from ..constitution import Constitution, ConstitutionError, compose
@@ -20,7 +18,6 @@ from .errors import GovernanceError
 from .manifest import parse_manifest
 from .sources import (
     EnvTokenProvider,
-    GitHubAppTokenProvider,
     GitHubSource,
     GovernanceSource,
     LocalSource,
@@ -185,10 +182,10 @@ def build_source(settings: Settings) -> GovernanceSource:
     if settings.governance_source == "local":
         return LocalSource(settings.governance_root)
     if settings.governance_source == "github":
-        app_id = os.environ.get("VALXEL_GITHUB_APP_ID")
-        key_file = os.environ.get("VALXEL_GITHUB_APP_PRIVATE_KEY_FILE")
-        if app_id and key_file:
-            tokens = GitHubAppTokenProvider(app_id, Path(key_file).read_text(), api=settings.github_api)
+        from ..signing import github_app_configured, github_app_tokens
+
+        if github_app_configured():
+            tokens = github_app_tokens(api=settings.github_api)
         else:
             tokens = EnvTokenProvider()
         return GitHubSource(tokens, api=settings.github_api)

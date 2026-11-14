@@ -130,7 +130,7 @@ class AuthConfig:
                                "Use 32+ random characters, e.g. `openssl rand -hex 32`")
         cfg = cls(mode=mode, secret=secret, from_store=from_store,
                   client_id=os.environ.get("VALXEL_GITHUB_OAUTH_CLIENT_ID", ""),
-                  client_secret=os.environ.get("VALXEL_GITHUB_OAUTH_CLIENT_SECRET", ""),
+                  client_secret=current("VALXEL_GITHUB_OAUTH_CLIENT_SECRET"),
                   public_url=(os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080").rstrip("/"))
         if mode == "github" and not (cfg.client_id and cfg.client_secret):
             raise RuntimeError("GitHub sign-in needs VALXEL_GITHUB_OAUTH_CLIENT_ID and VALXEL_GITHUB_OAUTH_CLIENT_SECRET")

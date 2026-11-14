@@ -43,6 +43,8 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
     if not s.database_url:
         out.append("DATABASE_URL is not set: features, the catalog and the audit trail are lost on restart")
     out += weak_secrets(env, database_url=s.database_url)
+    out += secrets_in_environment(env)
+    secret_env = _secret_env(env)
     modes = integration_modes(services)
     for pid in sorted(s.registry):
         try:
@@ -60,9 +62,31 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
                 out.append(f"{pid}: tools.flags names Flipt, but its flags run in memory "
                            f"(set VALXEL_FLIPT_TOKEN_{pid.upper()} and VALXEL_DELIVERY=live)")
         cm = tools.get("change_management") or {}
-        if cm.get("provider") == "servicenow" and not env.get(f"VALXEL_SERVICENOW_AUTH_{pid.upper()}"):
+        if cm.get("provider") == "servicenow" and not secret_env.get(f"VALXEL_SERVICENOW_AUTH_{pid.upper()}"):
             out.append(f"{pid}: tools.change_management names ServiceNow, but VALXEL_SERVICENOW_AUTH_{pid.upper()} is not set")
     return out
+
+
+def _secret_env(env):
+    from .secret_ring import environ
+
+    return environ(env)
+
+
+def secrets_in_environment(env) -> list[str]:
+    """With a secret store chosen, a secret left in the environment is readable by anything that
+    can read the process's environment: refuse it (valxel_sdlc.secret_ring)."""
+    from .secret_ring import in_environment, store_kind
+
+    try:
+        kind = store_kind(env)
+    except ValueError as exc:
+        return [str(exc)]
+    if kind == "env":
+        return []
+    names = in_environment(env)
+    return [f"VALXEL_SECRET_STORE is {kind}, but these secrets are also in the environment: {', '.join(names)}; "
+            "keep them only in the store"] if names else []
 
 
 def weak_secrets(env, *, database_url: str = "") -> list[str]:
@@ -100,6 +124,14 @@ def env_value(name: str) -> str:
 def known_gaps(services) -> list[str]:
     """What runs, but can't be checked: strict mode warns about these and starts anyway."""
     out = []
+    from .secret_ring import store_kind
+
+    try:
+        if services.settings.mode == "live" and store_kind() == "env":
+            out.append("VALXEL_SECRET_STORE is not set: secrets come from environment variables, which anything that "
+                       "can read the process's environment can read; use aws or files")
+    except ValueError:
+        pass  # stand_ins reports a bad VALXEL_SECRET_STORE
     if not env_value("VALXEL_CONFIG_REPO"):
         out.append("VALXEL_CONFIG_REPO is not set: changes to models and settings aren't evaluated against past "
                    "work before they merge")

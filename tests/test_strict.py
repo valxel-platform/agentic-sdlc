@@ -53,10 +53,14 @@ def test_the_default_setup_lists_every_stand_in(services):
     assert not any("drawio" in f for f in found)  # draw.io commits files to the repo: it has no stand-in
 
 
-def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services, monkeypatch):
+def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services, monkeypatch, tmp_path):
     monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-platform/sdlc-config")
+    monkeypatch.setenv("VALXEL_SECRET_STORE", "files")
+    monkeypatch.setenv("VALXEL_SECRETS_DIR", str(tmp_path))
+    (tmp_path / "VALXEL_SERVICENOW_AUTH_CLN").write_text("Basic x")
     live_ish(services)
-    gaps = strict.check(services, auth_mode="github", env=LIVE)
+    env = {"VALXEL_DELIVERY": "live", "VALXEL_SECRET_STORE": "files", "VALXEL_SECRETS_DIR": str(tmp_path)}
+    gaps = strict.check(services, auth_mode="github", env=env)
     assert gaps == []
     from valxel_sdlc.telemetry import Telemetry
 
@@ -98,7 +102,8 @@ def test_one_missing_token_is_enough_to_refuse(services, monkeypatch):
     services.snapshot = with_servicenow
     with pytest.raises(strict.StrictModeError, match="VALXEL_SERVICENOW_AUTH_CLN is not set"):
         strict.check(services, auth_mode="github", env={"VALXEL_DELIVERY": "live"})
-    assert strict.check(services, auth_mode="github", env=LIVE) == []
+    gaps = strict.check(services, auth_mode="github", env=LIVE)  # starts; only warns that secrets are env vars
+    assert [g.split(":")[0] for g in gaps] == ["VALXEL_SECRET_STORE is not set"]
 
 
 def test_the_server_refuses_to_start_in_strict_mode(monkeypatch, settings, services):

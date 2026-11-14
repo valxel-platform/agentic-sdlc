@@ -207,7 +207,9 @@ class CodexRuntime:
         provider = None
         extra_keys = {}
         if role.provider == "openai":
-            extra_keys["CODEX_API_KEY"] = os.environ.get("CODEX_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+            from ..secret_ring import get
+
+            extra_keys["CODEX_API_KEY"] = get("CODEX_API_KEY") or get("OPENAI_API_KEY")
         else:
             pc = settings.providers.get(role.provider)
             if pc is None:
