@@ -84,8 +84,11 @@ def check(runtime: dict | None, data_class: str, policy: dict) -> list[str]:
 
 
 def token_for(product_id: str, secret: str | None = None) -> str:
-    """The product's GlitchTip webhook token, derived from the signals token."""
-    secret = secret if secret is not None else os.environ.get("VALXEL_SIGNALS_TOKEN", "")
+    """The product's GlitchTip webhook token, derived from the (current) signals token."""
+    if secret is None:
+        from ..secret_ring import current
+
+        secret = current("VALXEL_SIGNALS_TOKEN")
     if not secret:
         return ""
     return hmac.new(secret.encode(), f"glitchtip:{product_id}".encode(), hashlib.sha256).hexdigest()[:40]
