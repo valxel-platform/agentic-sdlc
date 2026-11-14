@@ -42,6 +42,7 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("VALXEL_GOVERNANCE_SOURCE is not github: governance is read from local files")
     if not s.database_url:
         out.append("DATABASE_URL is not set: features, the catalog and the audit trail are lost on restart")
+    out += weak_secrets(env, database_url=s.database_url)
     modes = integration_modes(services)
     for pid in sorted(s.registry):
         try:
@@ -61,6 +62,34 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         cm = tools.get("change_management") or {}
         if cm.get("provider") == "servicenow" and not env.get(f"VALXEL_SERVICENOW_AUTH_{pid.upper()}"):
             out.append(f"{pid}: tools.change_management names ServiceNow, but VALXEL_SERVICENOW_AUTH_{pid.upper()} is not set")
+    return out
+
+
+def weak_secrets(env, *, database_url: str = "") -> list[str]:
+    """Secrets set to published examples or too weak to protect anything (valxel_sdlc.secret_ring)."""
+    from urllib.parse import urlsplit
+
+    from .secret_ring import values, weak, weak_password
+
+    out = []
+    for i, key in enumerate(values("VALXEL_SESSION_SECRET", env)):
+        why = weak(key)
+        if why:
+            which = "VALXEL_SESSION_SECRET" if i == 0 else "VALXEL_SESSION_SECRET's previous value"
+            out.append(f"{which} is {why}: anyone who knows it can sign in as anyone and approve any gate")
+    for name in ("VALXEL_GITHUB_WEBHOOK_SECRET", "VALXEL_SIGNALS_TOKEN", "VALXEL_SENTRY_CLIENT_SECRET"):
+        for key in values(name, env):
+            why = weak(key, min_length=20)
+            if why:
+                out.append(f"{name} is {why}")
+    if database_url:
+        try:
+            password = urlsplit(database_url).password or ""
+        except ValueError:
+            password = ""
+        why = weak_password(password) if password else ""  # none: IAM auth, a .pgpass or a socket
+        if why:
+            out.append(f"DATABASE_URL's password is {why}")
     return out
 
 

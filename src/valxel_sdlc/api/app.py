@@ -311,7 +311,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                oauth: GitHubOAuth | None = None, web_dist: Path | None = WEB_DIST) -> FastAPI:
     state: dict[str, Any] = {"engine": engine, "pool": None}
     auth = auth or AuthConfig.from_env()
-    signer = SessionSigner(auth.secret)
+    signer = SessionSigner(auth.ring())
     oauth = oauth or GitHubOAuth(auth)
     stores: dict[str, Any] = {"intakes": IntakeStore()}  # Postgres once the engine has a database
 
@@ -460,10 +460,11 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     def bearer_ok(request: Request) -> None:
         import hmac
 
-        token = os.environ.get("VALXEL_SIGNALS_TOKEN", "")
-        if not token:
+        from ..secret_ring import bearer_ok as ring_bearer_ok, values
+
+        if not values("VALXEL_SIGNALS_TOKEN"):
             raise HTTPException(404, "Signal webhooks are not configured")
-        if not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {token}"):
+        if not ring_bearer_ok("VALXEL_SIGNALS_TOKEN", request.headers.get("authorization", "")):
             raise HTTPException(401, "Bad token")
 
     # Webhooks answer within seconds (EventBridge gives up after 5): the signal is recorded and
@@ -495,12 +496,14 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
         from ..ops.signals import from_sentry
 
-        secret = os.environ.get("VALXEL_SENTRY_CLIENT_SECRET", "")
-        if not secret:
+        from ..secret_ring import any_matches, values
+
+        if not values("VALXEL_SENTRY_CLIENT_SECRET"):
             raise HTTPException(404, "Sentry webhooks are not configured")
         body = await request.body()
-        expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, request.headers.get("sentry-hook-signature", "")):
+        got = request.headers.get("sentry-hook-signature", "")
+        if not any_matches("VALXEL_SENTRY_CLIENT_SECRET", lambda secret: hmac.compare_digest(
+                hmac.new(secret.encode(), body, hashlib.sha256).hexdigest(), got)):
             raise HTTPException(401, "Bad signature")
         try:
             payload = json.loads(body or b"{}")
@@ -586,8 +589,11 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
         from ..ops import error_tracking as et
 
-        expected = et.token_for(product_id)
-        if not expected or not hmac.compare_digest(request.query_params.get("token", ""), expected):
+        from ..secret_ring import values
+
+        got = request.query_params.get("token", "")
+        expected = [et.token_for(product_id, v) for v in values("VALXEL_SIGNALS_TOKEN")]
+        if not expected or not any(hmac.compare_digest(got, e) for e in expected):
             raise HTTPException(401, "Bad token")
         try:
             snap = await run_in_threadpool(eng().services.snapshot, product_id)
@@ -643,13 +649,18 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
         from ..ops.signals import from_aws_budget
 
-        token = os.environ.get("VALXEL_SIGNALS_TOKEN", "")
+        from ..secret_ring import any_matches, values
+
         topics = {t.strip() for t in os.environ.get("VALXEL_AWS_BUDGET_TOPICS", "").split(",") if t.strip()}
-        if not token or not topics:
+        if not values("VALXEL_SIGNALS_TOKEN") or not topics:
             raise HTTPException(404, "AWS Budgets signals are not configured")
         auth = request.headers.get("authorization", "")
-        basic = "Basic " + base64.b64encode(f"valxel:{token}".encode()).decode()
-        if not (hmac.compare_digest(auth, f"Bearer {token}") or hmac.compare_digest(auth, basic)):
+
+        def accepted(token: str) -> bool:
+            basic = "Basic " + base64.b64encode(f"valxel:{token}".encode()).decode()
+            return hmac.compare_digest(auth, f"Bearer {token}") or hmac.compare_digest(auth, basic)
+
+        if not any_matches("VALXEL_SIGNALS_TOKEN", accepted):
             # SNS sends its credentials only after a challenge.
             return JSONResponse({"detail": "Bad credentials"}, status_code=401,
                                 headers={"WWW-Authenticate": 'Basic realm="valxel"'})
@@ -691,12 +702,14 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         import hashlib
         import hmac
 
-        secret = os.environ.get("VALXEL_GITHUB_WEBHOOK_SECRET", "")
-        if not secret:
+        from ..secret_ring import any_matches, values
+
+        if not values("VALXEL_GITHUB_WEBHOOK_SECRET"):
             raise HTTPException(404, "Webhooks are not configured")
         body = await request.body()
-        expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, request.headers.get("x-hub-signature-256", "")):
+        got = request.headers.get("x-hub-signature-256", "")
+        if not any_matches("VALXEL_GITHUB_WEBHOOK_SECRET", lambda secret: hmac.compare_digest(
+                "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest(), got)):
             raise HTTPException(401, "Bad signature")
         try:
             event = json.loads(body or b"{}")

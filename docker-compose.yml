@@ -5,7 +5,7 @@ services:
       POSTGRES_USER: valxel
       POSTGRES_PASSWORD: valxel
       POSTGRES_DB: valxel
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]   # this machine only; strict mode refuses the dev password
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U valxel -d valxel"]
@@ -37,7 +37,10 @@ services:
       VALXEL_GITHUB_TOKEN: ${VALXEL_GITHUB_TOKEN:-}
       # Web sign-in. dev lets you pick any login and teams (local only); github uses OAuth.
       VALXEL_AUTH: ${VALXEL_AUTH:-dev}
-      VALXEL_SESSION_SECRET: ${VALXEL_SESSION_SECRET:-local-dev-only-session-secret-change-me-0000}
+      # Required for github sign-in: 32+ random characters (`openssl rand -hex 32`). Unset in dev,
+      # the server makes one per start. VALXEL_SESSION_SECRET_PREVIOUS keeps sessions during a rotation.
+      VALXEL_SESSION_SECRET: ${VALXEL_SESSION_SECRET:-}
+      VALXEL_SESSION_SECRET_PREVIOUS: ${VALXEL_SESSION_SECRET_PREVIOUS:-}
       VALXEL_PUBLIC_URL: ${VALXEL_PUBLIC_URL:-http://localhost:8080}
       VALXEL_GITHUB_OAUTH_CLIENT_ID: ${VALXEL_GITHUB_OAUTH_CLIENT_ID:-}
       VALXEL_GITHUB_OAUTH_CLIENT_SECRET: ${VALXEL_GITHUB_OAUTH_CLIENT_SECRET:-}

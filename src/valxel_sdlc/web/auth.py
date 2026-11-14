@@ -56,22 +56,34 @@ def can_decide(user: User, item: dict) -> bool:
 
 
 class SessionSigner:
-    def __init__(self, secret: str) -> None:
-        if len(secret) < 32:
+    """Signs session cookies with the current key and accepts any key in the ring, so rotating
+    VALXEL_SESSION_SECRET signs no one out (valxel_sdlc.secret_ring). `secret` is a key, or a
+    function returning the ring, current first."""
+
+    def __init__(self, secret: str | Callable[[], list[str]], previous: tuple[str, ...] = ()) -> None:
+        self._ring = secret if callable(secret) else (lambda: [secret, *previous])
+        self._check(self._ring())
+
+    @staticmethod
+    def _check(keys: list[str]) -> list[str]:
+        if not keys or any(len(k) < 32 for k in keys):
             raise ValueError("VALXEL_SESSION_SECRET must be at least 32 characters")
-        self.key = secret.encode()
+        return keys
+
+    def _keys(self) -> list[bytes]:
+        return [k.encode() for k in self._check(self._ring())]
 
     def dumps(self, payload: dict) -> str:
         body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode().rstrip("=")
-        sig = hmac.new(self.key, body.encode(), hashlib.sha256).hexdigest()
+        sig = hmac.new(self._keys()[0], body.encode(), hashlib.sha256).hexdigest()
         return f"{body}.{sig}"
 
     def loads(self, token: str | None) -> dict | None:
         if not token or "." not in token:
             return None
         body, sig = token.rsplit(".", 1)
-        expected = hmac.new(self.key, body.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected):
+        if not any(hmac.compare_digest(sig, hmac.new(k, body.encode(), hashlib.sha256).hexdigest())
+                   for k in self._keys()):
             return None
         try:
             payload = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
@@ -100,16 +112,23 @@ class AuthConfig:
     client_id: str = ""
     client_secret: str = ""
     public_url: str = "http://localhost:8080"
+    from_store: bool = False  # the key ring is re-read from VALXEL_SECRETS_DIR or the environment
 
     @classmethod
     def from_env(cls) -> "AuthConfig":
+        from ..secret_ring import current, weak
+
         mode = (os.environ.get("VALXEL_AUTH") or "github").lower()
-        secret = os.environ.get("VALXEL_SESSION_SECRET") or ""
+        secret = current("VALXEL_SESSION_SECRET")
+        from_store = bool(secret)
         if not secret:
             if mode != "dev":
                 raise RuntimeError("Set VALXEL_SESSION_SECRET (32+ random characters) for GitHub sign-in")
             secret = secrets.token_hex(32)  # dev only: sessions reset on restart
-        cfg = cls(mode=mode, secret=secret,
+        elif mode != "dev" and weak(secret):
+            raise RuntimeError(f"VALXEL_SESSION_SECRET is {weak(secret)}: anyone could sign in as anyone. "
+                               "Use 32+ random characters, e.g. `openssl rand -hex 32`")
+        cfg = cls(mode=mode, secret=secret, from_store=from_store,
                   client_id=os.environ.get("VALXEL_GITHUB_OAUTH_CLIENT_ID", ""),
                   client_secret=os.environ.get("VALXEL_GITHUB_OAUTH_CLIENT_SECRET", ""),
                   public_url=(os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080").rstrip("/"))
@@ -118,6 +137,14 @@ class AuthConfig:
         if mode not in ("github", "dev"):
             raise RuntimeError(f"VALXEL_AUTH must be github or dev, not {mode!r}")
         return cfg
+
+    def ring(self) -> Callable[[], list[str]]:
+        """The session keys, current first: re-read on each use when they come from the store."""
+        if not self.from_store:
+            return lambda: [self.secret]
+        from ..secret_ring import values
+
+        return lambda: values("VALXEL_SESSION_SECRET") or [self.secret]
 
     @property
     def secure_cookies(self) -> bool:
