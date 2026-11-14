@@ -44,6 +44,7 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("DATABASE_URL is not set: features, the catalog and the audit trail are lost on restart")
     out += weak_secrets(env, database_url=s.database_url)
     out += secrets_in_environment(env)
+    out += provisioning_split(env)
     secret_env = _secret_env(env)
     modes = integration_modes(services)
     for pid in sorted(s.registry):
@@ -87,6 +88,23 @@ def secrets_in_environment(env) -> list[str]:
     names = in_environment(env)
     return [f"VALXEL_SECRET_STORE is {kind}, but these secrets are also in the environment: {', '.join(names)}; "
             "keep them only in the store"] if names else []
+
+
+def provisioning_split(env) -> list[str]:
+    """Repo administration belongs to the provisioning worker and its own GitHub App (security S4):
+    the API process must queue provisioning and must not be able to sign for that App."""
+    from .provision_queue import split
+    from .signing import provisioner_key_reachable
+
+    out = []
+    if env.get("VALXEL_DELIVERY", "stub").lower() == "live" and not split(env):
+        out.append("VALXEL_PROVISIONING is not queue: this process creates repos itself, with administration rights "
+                   "in every product org; run `valxel provisioner` with the Provisioning App instead")
+    reachable = provisioner_key_reachable(env)
+    if reachable:
+        out.append(f"this process can sign for the Provisioning App ({', '.join(reachable)}): only `valxel "
+                   "provisioner` may")
+    return out
 
 
 def weak_secrets(env, *, database_url: str = "") -> list[str]:

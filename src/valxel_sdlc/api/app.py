@@ -293,6 +293,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..lessons import PostgresLessonStore
 
         services.lessons = PostgresLessonStore(pool)
+        from ..provision_queue import PostgresProvisionQueue
+
+        services.provision_queue = PostgresProvisionQueue(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080")
         from ..cluster import PostgresCluster
@@ -458,7 +461,6 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
     # --- production signals ---
     def bearer_ok(request: Request) -> None:
-        import hmac
 
         from ..secret_ring import bearer_ok as ring_bearer_ok, values
 

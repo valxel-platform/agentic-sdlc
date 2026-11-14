@@ -184,6 +184,11 @@ class WaitChecker:
         if wait in ("release_ready", "release_train", "incident_recovery", "analysis_report", "flag_step"):  # resolved from the engine's own threads
             fn = getattr(self.services, "release_waits", None)
             return fn(packet) if callable(fn) else None
+        if wait == "provisioning":  # repos the provisioning worker is creating (security S4)
+            prov = getattr(self.services, "provisioner", None)
+            done = getattr(prov, "done", None)
+            return {"status": "success", "wait": wait, "at": now()} if callable(done) and done(
+                packet.get("request_ids") or []) else None
         if wait == "go_live":  # a hosted lite product's G6: over once product.yaml says it is live
             from .environments import hosted
 

@@ -938,10 +938,15 @@ def make_provision(services):
         src = services.governance.source
         manifest = src.read(gov.org, gov.repo, "product.yaml", src.resolve(gov.org, gov.repo, gov.ref)) or ""
         done = {r["repo"]: r for r in state.get("new_repos") or [] if r.get("status") == "provisioned"}
+        # With the provisioning worker (security S4), each person's retry is a new request.
+        extra = {"attempt": sum(1 for g in state.get("gate_decisions") or [] if g.get("gate") == "escalation:provisioning"
+                                and g.get("decision") == "retry")} if getattr(services.provisioner, "queued", False) else {}
         results = [done[p["repo"]] if p["repo"] in done else
                    services.provisioner.provision(snap.product, p, feature_id=state["feature_id"],
-                                                  governance_repo=gov.full_name, manifest_text=manifest)
+                                                  governance_repo=gov.full_name, manifest_text=manifest, **extra)
                    for p in plans]
+        if any(r["status"] == "queued" for r in results):  # the provisioning worker has them (security S4)
+            return Command(goto="provision_wait", update={"new_repos": results})
         events = [event("provision", "repo_provisioned", r["repo"], url=r["url"], governance_pr=r["governance_pr"])
                   for r in results if r["status"] == "provisioned" and r["repo"] not in done]
         failed = [r for r in results if r["status"] != "provisioned"]
@@ -973,7 +978,25 @@ def make_provision(services):
                                             "events": events + [event("provision", "resolved", d["feedback"],
                                                                       approver=d["approver"])]})
 
-    return provision, ("plan", "provision", END)
+    return provision, ("plan", "provision", "provision_wait", END)
+
+
+def make_provision_wait(services):
+    """Wait for the provisioning worker (security S4), then look again. Its own node, so resuming it
+    can't be mistaken for an answer to the provisioning escalation."""
+
+    def provision_wait(state: FeatureState) -> Command:
+        from ..provision_queue import WAIT
+
+        queued = [r for r in state.get("new_repos") or [] if r.get("status") == "queued"]
+        if queued:
+            interrupt({"type": "external", "wait": WAIT, "product_id": state["product_id"],
+                       "feature_id": state["feature_id"], "since": now(),
+                       "request_ids": [r["request_id"] for r in queued],
+                       "label": "Waiting for the provisioning worker to create " + ", ".join(r["repo"] for r in queued)})
+        return Command(goto="provision")
+
+    return provision_wait, ("provision",)
 
 
 def oc_target(lane, repo: str) -> dict:
@@ -1919,6 +1942,8 @@ def build_pipeline(services, checkpointer=None):
     g.add_node("fit_gate", node, destinations=dest)
     node, dest = make_provision(services)
     g.add_node("provision", node, destinations=dest)
+    node, dest = make_provision_wait(services)
+    g.add_node("provision_wait", node, destinations=dest)
     g.add_node("merge_train", make_merge_train(services))
     node, dest = make_ci_wait(services)
     g.add_node("ci_wait", node, destinations=dest)

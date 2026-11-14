@@ -139,6 +139,10 @@ class FeatureEngine:
             from .pilot import InMemoryEffortStore
 
             services.effort = InMemoryEffortStore()
+        if getattr(services, "provision_queue", None) is None:
+            from .provision_queue import InMemoryProvisionQueue
+
+            services.provision_queue = InMemoryProvisionQueue()
         if getattr(services, "lessons", None) is None:
             from .lessons import InMemoryLessonStore
 
