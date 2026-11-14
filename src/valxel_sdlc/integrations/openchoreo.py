@@ -320,6 +320,15 @@ class StubOpenChoreo:
                  "state": self.resource_results.get((name, env), "ready"), "outputs": list(outputs.get((name, env), []))}
                 for env, b in latest.items()]
 
+    def release_image(self, *, component, project=None, namespace=None, release: str = "") -> dict:
+        """Stub releases run a made-up image pinned by digest (tests set `images[(component, release)]`)."""
+        import hashlib
+
+        name = release or f"{component.rsplit('/', 1)[-1]}-r1"
+        image = getattr(self, "images", {}).get((component, name))
+        return {"release": name, "image": image or f"ghcr.io/example/{component.rsplit('/', 1)[-1]}@sha256:"
+                + hashlib.sha256(f"{component}@{name}".encode()).hexdigest()}
+
     def deployment(self, *, component, env, project=None, namespace=None) -> dict:
         with self._lock:
             current = self.deployments.get(component)
@@ -498,12 +507,13 @@ class OpenChoreoMcp:
             raise McpError(f"openchoreo: {self.name(component)} has no release to deploy")
         return str(name)
 
-    def release_image(self, *, component, project=None, namespace=None) -> dict:
-        """The component's latest release and the image it runs, pinned by digest: what a lite
-        VM deploys after go-live (lite.builds.OpenChoreoBuilds). {"release", "image"}."""
+    def release_image(self, *, component, project=None, namespace=None, release: str = "") -> dict:
+        """A release of the component (its latest unless named) and the image it runs, pinned by
+        digest: what a lite VM deploys (lite.builds.OpenChoreoBuilds, lite.golive). {"release", "image"}."""
         scope = self._scope(component, project, namespace)
-        comp = self._call(("get_component",), scope) or {}
-        release = str(_get(comp, "status.latestRelease.name", "latestRelease.name", "latest_release") or "")
+        if not release:
+            comp = self._call(("get_component",), scope) or {}
+            release = str(_get(comp, "status.latestRelease.name", "latestRelease.name", "latest_release") or "")
         if not release:
             raise McpError(f"openchoreo: {self.name(component)} has no release yet")
         res = self._call(("get_component_release", "get_release"), {**scope, _RELEASE: release})

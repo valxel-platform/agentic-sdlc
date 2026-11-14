@@ -210,6 +210,19 @@ class ComposeRuntime:
         out = {k: v for k, v in s.items() if k not in ("workload", "image", "openchoreo_release")}
         return {**out, **({"release": release} if release else {})}
 
+    def import_release(self, *, component, image, workload, source="") -> str:
+        """A release built elsewhere (the one a hosted product runs in staging, at go-live): it
+        becomes the component's newest release here, so dev deploys it next."""
+        def fn(data):
+            rel = data["releases"].setdefault(component, [])
+            if rel and rel[-1]["image"] == image and rel[-1].get("workload") == (workload or {}):
+                return rel[-1]["name"]
+            name = f"{short(component)}-r{len(rel) + 1}"
+            rel.append({"name": name, "image": image, "workload": workload or {}, "ref": "", "run_id": "",
+                        "created": _now(), **({"openchoreo_release": source} if source else {})})
+            return name
+        return self._change(fn)
+
     # ------------------------------------------------------------------ the deployment pipeline
 
     def environment(self, component: str) -> str | None:

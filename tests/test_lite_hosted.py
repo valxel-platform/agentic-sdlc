@@ -128,6 +128,8 @@ def test_g6_waits_for_go_live_then_asks_as_usual(tmp_path, gov_root):
 
     path = gov_root / "acme-farm" / "farm-governance" / "product.yaml"
     path.write_text(path.read_text().replace("  phase: hosted", "  phase: live"))
+    assert eng.waits.check(w) is None  # live without VMs isn't a valid manifest: keep waiting
+    path.write_text(path.read_text().replace("  phase: live", "  phase: live\n  vms: {non_production: 'ssh://valxel@np'}"))
     assert eng.waits.check(w)["status"] == "success"
     eng._execute(fid, eng._ready_wait(fid))
     assert any(p.get("gate") == "g6" for p in eng.pending(fid))  # a person approves production as usual

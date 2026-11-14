@@ -58,6 +58,16 @@ def endpoints(workload: dict) -> list[dict]:
     return [e for e in (workload.get("endpoints") or []) if isinstance(e, dict) and e.get("port")]
 
 
+def secret_refs(workload: dict) -> list[tuple[str, str]]:
+    """The (secret name, key) pairs the workload's settings read."""
+    out = []
+    for item in (workload.get("configurations") or {}).get("env") or []:
+        ref = ((item.get("valueFrom") or {}).get("secretKeyRef") or {}) if isinstance(item, dict) else {}
+        if ref:
+            out.append((str(ref.get("name") or ""), str(ref.get("key") or "")))
+    return out
+
+
 def address(workload: dict, component: str, endpoint: str) -> str:
     """How another component reaches `endpoint` of this one, inside the environment."""
     for e in endpoints(workload):
