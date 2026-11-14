@@ -268,6 +268,16 @@ def build_services(
     svc.knowledge = default_knowledge(svc)
     svc.flags = default_flags(settings, svc)
     svc.provisioner = default_provisioner(settings, github, openchoreo)
+    # Lite mode (valxel_sdlc.lite): live lite products deploy through their VM runtime, everything
+    # else through OpenChoreo. On for instances that make lite products, or when asked.
+    import os as _os
+
+    from .environments import default_mode
+
+    if default_mode() == "lite" or _os.environ.get("VALXEL_LITE_ROUTING", "").lower() in ("1", "true", "on"):
+        from .lite.wiring import RuntimeRouter
+
+        svc.openchoreo = RuntimeRouter(openchoreo, svc)
     svc.available_roles = frozenset(available)
     svc.telemetry = default_telemetry(settings)
     from .attachments import AttachmentStore

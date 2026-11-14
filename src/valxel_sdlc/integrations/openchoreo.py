@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import itertools
 import threading
+from datetime import UTC
 from typing import Any, Protocol
 
 from .mcp_client import McpError, McpTools, fit_args, pick_tool
@@ -87,11 +88,6 @@ class OpenChoreo(Protocol):
     def resource_bindings_of(self, *, name: str, project: str,
                              namespace: str | None = None) -> list[dict]: ...
     # [{"env", "release", "state", "binding", "size", "outputs": [{"name", "value"} | {"name", "secret": {"name", "key"}}]}]
-
-
-# Who may roll production back: a person, or the tool under the platform's remediation policy
-# (ops/remediation.py: only a recent release, and the release restored was already approved).
-ROLLBACK_ACTORS = ("human", "policy")
 
 
 # Who may roll production back: a person, or the tool under the platform's remediation policy
@@ -227,12 +223,12 @@ class StubOpenChoreo:
     def create_environment(self, *, name, like, project=None, namespace=None, labels=None) -> dict:
         if self.refuse_environments:
             raise McpError("openchoreo: no tool create_environment")
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         with self._lock:
             env = self.environments.setdefault(name, {"name": name, "like": like, "project": project,
                                                       "namespace": namespace, "labels": dict(labels or {}),
-                                                      "created": datetime.now(timezone.utc).isoformat()})
+                                                      "created": datetime.now(UTC).isoformat()})
             return dict(env)
 
     def delete_environment(self, *, name, project=None, namespace=None) -> None:
@@ -324,6 +320,15 @@ class StubOpenChoreo:
                  "state": self.resource_results.get((name, env), "ready"), "outputs": list(outputs.get((name, env), []))}
                 for env, b in latest.items()]
 
+    def release_image(self, *, component, project=None, namespace=None, release: str = "") -> dict:
+        """Stub releases run a made-up image pinned by digest (tests set `images[(component, release)]`)."""
+        import hashlib
+
+        name = release or f"{component.rsplit('/', 1)[-1]}-r1"
+        image = getattr(self, "images", {}).get((component, name))
+        return {"release": name, "image": image or f"ghcr.io/example/{component.rsplit('/', 1)[-1]}@sha256:"
+                + hashlib.sha256(f"{component}@{name}".encode()).hexdigest()}
+
     def deployment(self, *, component, env, project=None, namespace=None) -> dict:
         with self._lock:
             current = self.deployments.get(component)
@@ -369,6 +374,18 @@ def _list(res: Any) -> list[dict]:
         if _get(res, "name", "metadata.name"):
             return [res]
     return []
+
+
+def _digest_in(obj: Any) -> str:
+    """The first container image pinned by digest (repo@sha256:...) anywhere in a resource."""
+    if isinstance(obj, str):
+        return obj if "@sha256:" in obj and " " not in obj else ""
+    items = obj.values() if isinstance(obj, dict) else obj if isinstance(obj, list) else ()
+    for v in items:
+        found = _digest_in(v)
+        if found:
+            return found
+    return ""
 
 
 def _condition(obj: dict, ctype: str) -> str | None:
@@ -489,6 +506,21 @@ class OpenChoreoMcp:
         if not name:
             raise McpError(f"openchoreo: {self.name(component)} has no release to deploy")
         return str(name)
+
+    def release_image(self, *, component, project=None, namespace=None, release: str = "") -> dict:
+        """A release of the component (its latest unless named) and the image it runs, pinned by
+        digest: what a lite VM deploys (lite.builds.OpenChoreoBuilds, lite.golive). {"release", "image"}."""
+        scope = self._scope(component, project, namespace)
+        if not release:
+            comp = self._call(("get_component",), scope) or {}
+            release = str(_get(comp, "status.latestRelease.name", "latestRelease.name", "latest_release") or "")
+        if not release:
+            raise McpError(f"openchoreo: {self.name(component)} has no release yet")
+        res = self._call(("get_component_release", "get_release"), {**scope, _RELEASE: release})
+        image = _digest_in(res)
+        if not image:
+            raise McpError(f"openchoreo: release {release} names no image pinned by digest")
+        return {"release": release, "image": image}
 
     def promote(self, *, component, env, actor, actor_type, project=None, namespace=None,
                 pipeline=PIPELINE) -> dict:

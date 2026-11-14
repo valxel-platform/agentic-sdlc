@@ -184,6 +184,14 @@ class WaitChecker:
         if wait in ("release_ready", "release_train", "incident_recovery", "analysis_report", "flag_step"):  # resolved from the engine's own threads
             fn = getattr(self.services, "release_waits", None)
             return fn(packet) if callable(fn) else None
+        if wait == "go_live":  # a hosted lite product's G6: over once product.yaml says it is live
+            from .environments import hosted
+
+            try:
+                runtime = self.services.snapshot(packet["product_id"]).product.runtime
+            except Exception:
+                return None  # governance unreadable for now: keep waiting
+            return None if hosted(runtime) else {"status": "success", "wait": wait, "at": now()}
         results = []
         for t in packet.get("targets", []):
             try:

@@ -371,6 +371,14 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     en.add_argument("--product", required=True)
     en.add_argument("--approver", required=True, help="Who approved the product gate (production is created for them)")
     en.add_argument("--mode", default="stub", choices=["live", "stub"])
+    gl = sub.add_parser("go-live", help="Move a hosted lite product to the customer's VM (dev, staging and production), "
+                                        "or retire its hosted environments once it is live")
+    gl.add_argument("--product", required=True)
+    gl.add_argument("--by", default=os.environ.get("USER", ""), help="Who decided to go to production (a person)")
+    gl.add_argument("--vm", help="The non-production VM's Docker host, e.g. ssh://valxel@10.0.1.5")
+    gl.add_argument("--prod-vm", default="", help="Production's own VM, if it has one")
+    gl.add_argument("--retire", action="store_true", help="Remove the hosted dev and staging (after the PR merged)")
+    gl.add_argument("--mode", default="stub", choices=["live", "stub"])
     ca = sub.add_parser("capacity", help="Propose a production stage step, or review production against the "
                                          "capacity plan, as a pull request to runtime/capacity.yaml")
     ca.add_argument("--product", required=True)
@@ -401,10 +409,30 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
         from .environments import environments
         from .services import build_services
 
-        out = environments(build_services(load_settings(mode=args.mode)), product_id=args.product,
-                           approver=args.approver)
+        services = build_services(load_settings(mode=args.mode))
+        try:  # a lite product is hosted on the shared plane until it goes live
+            mode = (services.snapshot(args.product).product.runtime or {}).get("mode") or "full"
+        except Exception:
+            mode = "full"
+        out = environments(services, product_id=args.product, approver=args.approver, mode=mode)
         print(out.get("why") or f"Created for {out['approved_by']}: " + ", ".join(f"{k} {v}" for k, v in out["created"].items()))
         return 0 if not out.get("waiting") else 2
+    if args.cmd == "go-live":
+        from .config import load_settings
+        from .lite.golive import go_live, retire_hosted
+        from .services import build_services
+
+        services = build_services(load_settings(mode=args.mode))
+        if args.retire:
+            print("Removed " + ", ".join(retire_hosted(services, product_id=args.product)["removed"]))
+            return 0
+        if not args.vm:
+            p.error("go-live needs --vm")
+        out = go_live(services, product_id=args.product, approver=args.by,
+                      vms={"non_production": args.vm, **({"production": args.prod_vm} if args.prod_vm else {})})
+        for st in out["steps"]:
+            print(f"{'ok ' if st['ok'] else 'FAILED'} {st['step']}: {st.get('error') or st.get('url') or ''}".rstrip(": "))
+        return 0 if out["ok"] else 1
     if args.cmd == "capacity":
         return _capacity(args)
     if args.cmd == "design-record":

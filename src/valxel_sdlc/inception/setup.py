@@ -54,7 +54,7 @@ def product_yaml(vision: Vision, brief: str) -> str:
         "product_id": pid, "name": vision.name, "constitution": "constitution.md", "context": "context.md",
         "depends_on": [],
         "runtime": {"openchoreo_project": pid.lower(), "pipeline": ["dev", "staging", "production"],
-                    **environments.runtime_entry(pid, tier)},
+                    **environments.runtime_entry(pid, tier, environments.default_mode(), _today())},
         # A first-year envelope spread over its features: the per-feature ceiling starts at a tenth of it.
         "budget_usd": max(50, round(i["budget_usd"] / 10)),
         "repos": [],
@@ -264,7 +264,7 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
         steps.extend(environments.setup(services, product_id=i["product_id"], tier=tier, approver=approved_by,
                                         template=template, zones=zones, thread_id=thread_id,
                                         awake=(plat.get("capacity") or capacity.DEFAULTS).get("awake")
-                                        or environments.AWAKE))
+                                        or environments.AWAKE, mode=environments.default_mode()))
         teams = sorted({f"{i['org']}/{t}" for t in (*TEAMS.values(), "qa")})
         steps.append({"step": "teams", "ok": True, "skipped": True, "teams": teams,
                       "why": "The approver teams product.yaml names; an org admin creates any that are missing"})
