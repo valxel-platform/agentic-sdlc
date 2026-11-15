@@ -397,3 +397,12 @@ def test_semgrep_runs_with_metrics_off_and_gitleaks_says_what_it_found():
     for name in ("security.yml", "governance-secrets.yml"):
         assert "--verbose" in rs.standard_file(name)
 
+
+def test_the_managed_workflows_are_prettier_clean():
+    """Repos with `prettier --check .` (template-web, template-acceptance) check these files too:
+    one space before an inline comment, as Prettier writes YAML."""
+    import re
+
+    for name in ("security.yml", "governance-secrets.yml"):
+        assert not [ln for ln in rs.standard_file(name).splitlines() if re.search(r"\S {2,}#", ln)], name
+
