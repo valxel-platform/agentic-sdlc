@@ -78,6 +78,12 @@ defaults:
   # Files every repo carries; the reconciler reports any that are missing. CODEOWNERS may be in
   # .github/, the root or docs/ (wherever GitHub reads it).
   files: [.github/CODEOWNERS, .github/dependabot.yml, SECURITY.md]
+  # Workflow files the platform owns: each repo's copy must match the platform's (agentic-sdlc's
+  # src/valxel_sdlc/standard_files/). `valxel repos check` reports one that differs or is missing;
+  # `valxel repos apply` opens a pull request with the platform's copy. Governance repos get only
+  # the secrets scan (governance-secrets.yml).
+  managed_files:
+    .github/workflows/security.yml: security.yml
 
 # Repos that belong to no lane but follow the same standards (`valxel repos check`). Lane repos
 # come from each governance manifest, and each product's governance repo from registry.yaml.

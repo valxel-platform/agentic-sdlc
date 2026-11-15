@@ -296,6 +296,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..provision_queue import PostgresProvisionQueue
 
         services.provision_queue = PostgresProvisionQueue(pool)
+        from ..upkeep.register import PostgresFindingRegister
+
+        services.findings = PostgresFindingRegister(pool)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080")
         from ..cluster import PostgresCluster
@@ -733,7 +736,19 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             run = gate.start(pr["head"]["sha"], (pr.get("base") or {}).get("sha", ""),
                              requested_by=(pr.get("user") or {}).get("login", ""))
             return {"event": "pull_request", "eval_run": run["id"]}
-        record_review_effort(eng(), request.headers.get("x-github-event", ""), event)
+        kind = request.headers.get("x-github-event", "")
+        from ..upkeep.alerts import EVENTS as ALERT_EVENTS
+
+        if kind in ALERT_EVENTS:  # a security alert on a default branch (valxel_sdlc.upkeep)
+            rec = await run_in_threadpool(eng().upkeep.receive, kind, event)
+            return {"event": kind, "finding": (rec or {}).get("id"), "status": (rec or {}).get("status")}
+        if any(b and b.startswith("dependabot/") for b in branches) and kind in ("pull_request", "check_suite", "status"):
+            repo = (event.get("repository") or {}).get("full_name", "")
+            pid = eng().upkeep.repos().get(repo)
+            if pid:  # Dependabot's update may be green now: merge it if the policy allows
+                merged = await run_in_threadpool(eng().upkeep.dependabot, pid, repo)
+                return {"event": kind, "merged": merged}
+        record_review_effort(eng(), kind, event)
         waiting = set(eng().waiting_on_external())
         poked = [fid for fid in sorted(features & waiting if features else waiting) if eng().poke(fid)]
         return {"event": request.headers.get("x-github-event", ""), "resumed": poked}
@@ -850,6 +865,43 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         return out
 
     # --- roadmap: initiatives and releases ---
+    # --- scan upkeep: security findings on products' default branches ---
+    @api.get("/findings")
+    def findings(product_id: str, status: str | None = None, user: User = Depends(current_user)) -> list[dict]:
+        """The product's findings register: every alert on its default branches, with its outcome,
+        deadline and fix (valxel_sdlc.upkeep)."""
+        member_of(user, product_id)
+        statuses = tuple(x for x in (status or "").split(",") if x) or None
+        keep = ("id", "repo", "kind", "tool", "rule", "severity", "title", "url", "state", "status", "outcome", "why",
+                "first_seen", "deadline", "release_by", "fix_feature", "release_id", "incident_id", "accepted", "attempts")
+        return [{k: r.get(k) for k in keep} for r in eng().services.findings.list(product_id, statuses)]
+
+    @api.get("/findings/{finding_id:path}/history")
+    def finding_history(finding_id: str, user: User = Depends(current_user)) -> dict:
+        rec = eng().services.findings.get(finding_id)
+        if rec is None:
+            raise HTTPException(404, f"Unknown finding {finding_id}")
+        member_of(user, rec["product_id"])
+        return rec
+
+    @api.post("/findings/{finding_id:path}/accept")
+    def accept_finding(finding_id: str, body: dict, user: User = Depends(current_user)) -> dict:
+        """A security approver accepts a finding's risk until a date: the same rule as a waiver in a
+        feature (a reason, at most quality.yaml's waivers.max_days). It comes back when it expires."""
+        rec = eng().services.findings.get(finding_id)
+        if rec is None:
+            raise HTTPException(404, f"Unknown finding {finding_id}")
+        pid = rec["product_id"]
+        member_of(user, pid)
+        lane = eng().services.snapshot(pid).product
+        if not can_decide(user, {"approvers": list(lane.approvers.get("security") or lane.approvers.get("g5") or [])}):
+            raise HTTPException(403, "Only the product's security approvers can accept a finding's risk")
+        try:
+            return eng().upkeep.accept(finding_id, approver=user.login, reason=str(body.get("reason") or ""),
+                                       days=int(body.get("days") or 0))
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     def member_of(user: User, product_id: str) -> None:
         if product_id not in lanes_for(user):
             if product_id not in eng().services.settings.registry:

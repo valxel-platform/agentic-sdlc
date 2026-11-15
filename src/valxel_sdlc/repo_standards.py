@@ -41,15 +41,16 @@ class Target:
 
 @dataclass
 class Drift:
-    area: str  # settings | security | ruleset | tags | teams | topics | properties | files | visibility | repo
+    area: str  # settings | security | ruleset | tags | teams | topics | properties | files | workflows | visibility | repo
     item: str
     want: object
     have: object
-    fix: str = "apply"  # apply | manual | unavailable
+    fix: str = "apply"  # apply | manual | unavailable | pending (a pull request will fix it)
     needs: str = ""  # for unavailable: the GitHub plan or product it needs
 
     def line(self) -> str:
-        how = {"manual": " (fix by hand)", "unavailable": f" (needs {self.needs or 'a paid GitHub feature'})"}.get(self.fix, "")
+        how = {"manual": " (fix by hand)", "unavailable": f" (needs {self.needs or 'a paid GitHub feature'})",
+               "pending": " (pull request open)"}.get(self.fix, "")
         return f"{self.area}.{self.item}: want {self.want!r}, have {self.have!r}{how}"
 
 
@@ -128,6 +129,7 @@ def _governance_plan(std, repo: str, pid: str, data_class: str, approvers: dict)
     p["tag_ruleset"] = {}
     p["files"] = [f for f in p["files"] if f != ".github/dependabot.yml"]
     p["codeowners"] = None  # owned by the lane's people, not generated
+    p["managed_files"] = {".github/workflows/secrets.yml": "governance-secrets.yml"}  # no code: only secrets
     return p
 
 
@@ -256,6 +258,25 @@ def compare(t: Target, state: dict | None) -> list[Drift]:
     return out
 
 
+def standard_file(name: str) -> str:
+    """The platform's copy of a managed file (src/valxel_sdlc/standard_files/)."""
+    from importlib.resources import files
+
+    return (files("valxel_sdlc") / "standard_files" / name).read_text()
+
+
+def managed_drift(gh, t: Target) -> list[Drift]:
+    """Managed workflow files whose copy differs from the platform's, or that are missing. A
+    template is checked too: new repos start from it."""
+    out = []
+    for path, name in sorted((t.plan.get("managed_files") or {}).items()):
+        want = standard_file(name)
+        have = gh.get_file(repo=t.repo, path=path, ref="")
+        if have != want:
+            out.append(Drift("workflows", path, "the platform's copy", "missing" if have is None else "differs"))
+    return out
+
+
 # -- applying ----------------------------------------------------------------------------
 
 
@@ -273,6 +294,11 @@ def reconcile(gh, t: Target, *, apply: bool) -> Report:
         rep.drift = compare(t, None)
         return rep
     rep.drift = compare(t, state)
+    if not state.get("archived"):
+        try:
+            rep.drift += managed_drift(gh, t)
+        except GitHubError as exc:
+            rep.errors.append(f"managed files: {exc}")
     if not apply:
         return rep
     p, areas = t.plan, {d.area for d in rep.drift if d.fix == "apply"}
@@ -308,10 +334,32 @@ def reconcile(gh, t: Target, *, apply: bool) -> Report:
         org = t.repo.split("/", 1)[0]
         do("properties", lambda: (gh.ensure_org_properties(org=org, names=sorted(p["properties"])),
                                   gh.set_properties(repo=t.repo, properties=p["properties"])))
+    workflows = [d for d in rep.drift if d.area == "workflows"]
+    pr_url = ""
+    if workflows:
+        def open_pr():
+            nonlocal pr_url
+            branch = "valxel/managed-files"
+            names = t.plan.get("managed_files") or {}
+            for d in workflows:
+                gh.put_file(repo=t.repo, branch=branch, path=d.item, content=standard_file(names[d.item]),
+                            message=f"Bring {d.item} back to the platform's copy")
+            pr = gh.open_pr(repo=t.repo, branch=branch, title="Update the platform's managed workflows",
+                            body="The Valxel SDLC manages these files (config/repos.yaml `managed_files`); this "
+                                 "brings them back to the platform's copy:\n\n"
+                                 + "\n".join(f"- `{d.item}` ({d.have})" for d in workflows)
+                                 + "\n\nChange them in agentic-sdlc, not here: the next check would undo it.",
+                            files=[d.item for d in workflows], labels=["valxel"])
+            pr_url = pr.get("url", "")
+
+        do("managed files", open_pr)
     if rep.applied:  # what's left after the changes
         try:
             after = gh.repo_state(repo=t.repo)
             rep.drift = compare(t, after) if after is not None else rep.drift
+            # The workflow files change when the pull request merges; until then they still differ.
+            rep.drift += [Drift(d.area, d.item, d.want, f"{d.have}; pull request {pr_url}".rstrip("; "), "pending")
+                          for d in workflows] if pr_url else workflows
         except GitHubError as exc:
             rep.errors.append(str(exc))
     return rep

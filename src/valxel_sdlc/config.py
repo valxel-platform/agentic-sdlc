@@ -60,6 +60,8 @@ class ProductConfig:
     repo_standards: dict = field(default_factory=dict)
     # Name prefix for new repos (e.g. 'cln-'). Required while a product has no repos yet.
     repo_prefix: str = ""
+    # What happens to security findings on the default branch after merge (valxel_sdlc.upkeep.effective)
+    upkeep: dict = field(default_factory=dict)
 
 
 def _secret(name: str) -> str:

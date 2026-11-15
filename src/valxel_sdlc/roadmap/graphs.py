@@ -342,7 +342,9 @@ def build_release_graph(services, checkpointer=None):
                          "release_id": state["release_id"], "model": state["model"], "feature_id": state["release_id"],
                          "features": state["features"], "since": now()})
         dropped = list(res.get("dropped") or [])
-        members = [f for f in state["features"] if f not in dropped]
+        # Security fixes that joined while it gathered (valxel_sdlc.upkeep) are released with it.
+        members = [f for f in state["features"] if f not in dropped] + [
+            f for f in res.get("joined") or [] if f not in state["features"]]
         if not members:
             return {"status": "cancelled", "dropped": dropped,
                     "events": [event("wait", "cancelled", "every feature in the release was stopped")]}

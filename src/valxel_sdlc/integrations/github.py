@@ -31,7 +31,10 @@ DELIVERY_PERMISSIONS = {"contents": "write", "pull_requests": "write", "statuses
 PROVISIONING_PERMISSIONS = {"administration": "write", "contents": "write", "pull_requests": "write",
                             "security_events": "write", "secret_scanning_alerts": "write",
                             "vulnerability_alerts": "write", "repository_custom_properties": "write",
-                            "organization_custom_properties": "admin", "members": "read", "metadata": "read"}
+                            "organization_custom_properties": "admin", "members": "read", "metadata": "read",
+                            # `valxel repos apply` opens pull requests that bring the managed
+                            # workflows (.github/workflows/security.yml) back to the platform's copy.
+                            "workflows": "write"}
 
 
 class GitHubError(RuntimeError):
@@ -120,6 +123,9 @@ class GitHub(Protocol):
     def code_scanning_alerts(self, *, repo: str, pr: int | None = None, ref: str | None = None) -> list | None: ...
     def dependency_diff(self, *, repo: str, base: str, head: str) -> list | None: ...
     def secret_alerts(self, *, repo: str) -> list | None: ...
+    def dependabot_alerts(self, *, repo: str) -> list | None: ...  # open alerts on the default branch
+    # Open pull requests: {number, title, body, author, branch, head_sha} (Dependabot's, for upkeep).
+    def open_pull_requests(self, *, repo: str) -> list[dict]: ...
     # Provisioning new repositories (see valxel_sdlc.provisioning); each call is idempotent.
     def get_file(self, *, repo: str, path: str, ref: str) -> str | None: ...  # ref '' = default branch
     def get_bytes(self, *, repo: str, path: str, ref: str) -> bytes | None: ...  # a binary file (a screenshot)
@@ -146,6 +152,7 @@ class StubGitHub:
         self.code_alerts: dict[str, list] = {}  # repo -> code-scanning alerts
         self.dep_diffs: dict[str, list] = {}  # repo -> dependency-review diff
         self.secrets: dict[str, list] = {}  # repo -> secret-scanning alerts
+        self.dependabot: dict[str, list] = {}  # repo -> Dependabot alerts
         self.repos: dict[str, dict] = {}  # provisioned repos and the settings applied to them
         self.fail_steps: set[str] = set()  # tests: provisioning calls that should fail
         self.ci_fail_once: set[str] = set()  # tests: repos whose first PR commit fails CI
@@ -235,6 +242,15 @@ class StubGitHub:
 
     def secret_alerts(self, *, repo):
         return list(self.secrets.get(repo, []))
+
+    def dependabot_alerts(self, *, repo):
+        return list(self.dependabot.get(repo, []))
+
+    def open_pull_requests(self, *, repo):
+        with self._lock:
+            return [{"number": p["number"], "title": p["title"], "body": p["body"], "author": p.get("author", "valxel[bot]"),
+                     "branch": p["branch"], "head_sha": p["head_sha"]}
+                    for p in self.prs.values() if p["repo"] == repo and p["state"] == "open"]
 
     def workflow_runs(self, *, repo, branch=None, head_sha=None, event=None) -> list[dict]:
         key = (repo, branch or head_sha or event or "")
@@ -525,6 +541,15 @@ class GitHubRest:
 
     def secret_alerts(self, *, repo):
         return self._maybe(repo, "/secret-scanning/alerts?state=open&per_page=100")
+
+    def dependabot_alerts(self, *, repo):
+        return self._maybe(repo, "/dependabot/alerts?state=open&per_page=100")
+
+    def open_pull_requests(self, *, repo):
+        rows = self._call("GET", repo, "/pulls?state=open&per_page=100") or []
+        return [{"number": p["number"], "title": p.get("title", ""), "body": p.get("body") or "",
+                 "author": (p.get("user") or {}).get("login", ""), "branch": (p.get("head") or {}).get("ref", ""),
+                 "head_sha": (p.get("head") or {}).get("sha", "")} for p in rows]
 
     # -- provisioning
     def _abs(self, method: str, org: str, path: str, body: dict | None = None, *, ok404: bool = False):

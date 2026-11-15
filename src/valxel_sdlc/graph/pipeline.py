@@ -175,6 +175,18 @@ def make_intake(services):
     return intake
 
 
+def hotfix_approvers(state: FeatureState, lane, gate: str) -> list[str]:
+    """An incident's hotfix: on-call decides G5 and G6. A security fix from the upkeep policy: the
+    lane's security approvers decide G5 (G5's own if it names none); G6 stays the release approvers'."""
+    if state.get("track") == "hotfix" and gate in ("g5", "g6"):
+        if (state.get("hotfix") or {}).get("source") == "finding":
+            if gate == "g5":
+                return list(lane.approvers.get("security") or lane.approvers.get("g5", []))
+            return list(lane.approvers.get(gate, []))
+        return list(lane.approvers.get("oncall") or lane.approvers.get(gate, []))
+    return list(lane.approvers.get(gate, []))
+
+
 def make_hotfix_brief(services):
     """An incident's hotfix skips discovery to architecture: on-call already decided it is needed.
     It starts at planning from a short spec and design written from the incident, so planning,
@@ -185,6 +197,8 @@ def make_hotfix_brief(services):
         snap = services.feature_snapshot(state)
         repo = h.get("repo", "")
         role = next((r.role for lane in snap.lanes().values() for r in lane.repos if r.name == repo), "provider")
+        if h.get("source") == "finding":
+            return finding_brief(state, h, snap, repo, role)
         inc = h.get("incident_id", "the incident")
         prd = "\n".join([
             f"# Hotfix spec: {state['title']}", "", "## Goals", f"- Stop the failure behind {inc}", "",
@@ -208,6 +222,37 @@ def make_hotfix_brief(services):
             "phase_status": {p: "skipped" for p in ("discovery", "spec", "design", "architecture")},
             "lanes_touched": touched_lanes(snap, [repo]),
             "events": [event("hotfix", "expedited", f"Hotfix for {inc}, approved by on-call {by}", approver=by)],
+        }
+
+    def finding_brief(state: FeatureState, h: dict, snap, repo: str, role: str) -> dict:
+        """A security fix the upkeep policy decided (valxel_sdlc.upkeep): governance's policy is the
+        approval to start, so it starts at planning like an incident's hotfix."""
+        ids = list(h.get("findings") or [])
+        acs = [f"- AC-{i}: Given {fid}, when the fix merges, then GitHub closes the alert on the default branch"
+               for i, fid in enumerate(ids, 1)]
+        acs.append(f"- AC-{len(ids) + 1}: Given the existing tests, when the fix is built, then they still pass "
+                   "and no check is weakened")
+        prd = "\n".join([
+            f"# Security fix spec: {state['title']}", "", "## Goals", f"- Close {len(ids)} security finding(s) in {repo}", "",
+            "## Non-goals", "- New behaviour; changes beyond what closes the findings", "", "## Acceptance criteria",
+            *acs, "", "## Constitution articles", "- VX-5", "", "## Change", h.get("change", ""), ""])
+        hld = "\n".join([
+            f"# Security fix design: {state['title']}", "", "## Builds on", "- None: a fix within the existing design",
+            "", "## ADRs", f"- ADR-{state['feature_id']}-1: Fix in {repo}; no design change", "",
+            "## Affected repos", f"- {repo} ({role})", "", "## Contracts", f"- {repo}: unchanged", ""])
+        arts = {}
+        for kind, phase, content in (("PRD", "spec", prd), ("HLD", "architecture", hld)):
+            arts[kind] = services.artifacts.save(feature_id=state["feature_id"], kind=kind, phase=phase,
+                                                 content=content, parents=[], constitution_version=snap.version)
+        held = (f"; held for the next release, or its own G6 on {h['release_by']}" if h.get("hold") and h.get("release_by")
+                else "; released as soon as G6 approves")
+        return {
+            "artifacts": arts,
+            "approvals": {g: True for g in ("g1", "g2", "g3", "g4")},
+            "phase_status": {p: "skipped" for p in ("discovery", "spec", "design", "architecture")},
+            "lanes_touched": touched_lanes(snap, [repo]),
+            "events": [event("hotfix", "expedited", f"Security fix for {len(ids)} finding(s), by the upkeep policy "
+                             f"({h.get('outcome', 'hotfix')}: {h.get('why', '')}){held}", approver=h.get("approved_by", ""))],
         }
 
     return hotfix_brief
@@ -286,7 +331,19 @@ def make_gate(gate: str, services):
         # release gate decides, then promotes like any approved G6 (a cancelled train falls back to G6).
         preset = None
         if gate == "g6":
-            rel = services.release_for(state["feature_id"]) if callable(getattr(services, "release_for", None)) else None
+            h = state.get("hotfix") or {}
+            if h.get("source") == "finding" and h.get("hold"):
+                # A scheduled security fix waits for the next release inside its deadline, or goes to
+                # its own G6 on its release-by date (valxel_sdlc.upkeep). The answer decides `rel`,
+                # so a resumed node takes the same path.
+                win = interrupt({"type": "external", "wait": "fix_window", "feature_id": state["feature_id"],
+                                 "product_id": state["product_id"], "release_by": h.get("release_by", ""),
+                                 "since": now(), "label": (f"Waiting for the next release before {h.get('release_by')}, "
+                                                           "or that date" if h.get("release_by") else
+                                                           "Waiting for the next release")})
+                rel = win.get("release") if win.get("status") == "joined" else None
+            else:
+                rel = services.release_for(state["feature_id"]) if callable(getattr(services, "release_for", None)) else None
             # A launch-group member without a flag can't go to production dark: it waits like a train.
             if rel and (rel["model"] == "train" or (rel["model"] == "launch" and not state.get("flag"))):
                 res = interrupt({"type": "external", "wait": "release_train", "release_id": rel["id"],
@@ -333,9 +390,7 @@ def make_gate(gate: str, services):
                 # Every gate sees what the feature has cost to build so far, by category (finops).
                 "build_cost": _build_cost(services, state),
                 # On-call decides an incident's hotfix at G5 and G6.
-                "approvers": (list(lane.approvers.get("oncall") or lane.approvers.get(gate, []))
-                              if state.get("track") == "hotfix" and gate in ("g5", "g6")
-                              else lane.approvers.get(gate, [])),
+                "approvers": hotfix_approvers(state, lane, gate),
                 "track": state.get("track", "standard"),
                 "profile": state.get("profile", "feature"),
                 # Express: no G2, so G4 approves the spec together with the design.

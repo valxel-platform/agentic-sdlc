@@ -14,6 +14,7 @@ sources:
   github-dependency-review: valxel_sdlc.quality.sources:GitHubDependencyReview  # vulnerable dependencies a PR adds
   new-dependencies: valxel_sdlc.dependencies:NewDependencies                    # packages a PR adds: real, not brand new, licensed
   github-secret-scanning: valxel_sdlc.quality.sources:GitHubSecretScanning      # open secret alerts in the repo
+  sonarqube: valxel_sdlc.quality.sonar:SonarQube                                # quality gate and issues (SonarQube Cloud or Server)
   openchoreo-workflow: valxel_sdlc.quality.sources:OpenChoreoWorkflowTasks      # steps inside the OpenChoreo build
   acceptance-runs: valxel_sdlc.quality.sources:AcceptanceRuns                   # the product acceptance repo's run per feature
   screen-scans: valxel_sdlc.screens:ScreenScans                                 # axe and screenshots of the built screens
@@ -115,7 +116,7 @@ suites:
     kind: security
     stage: pr
     source: github-code-scanning
-    match: { tools: ["CodeQL"] }    # add Semgrep, SonarQube, ... as they upload SARIF
+    match: { tools: ["CodeQL", "Semgrep*"] }  # Semgrep runs in each repo's security.yml (repos.yaml managed_files)
     required: true
     block_on: high
   dependencies:
@@ -136,6 +137,15 @@ suites:
     source: github-secret-scanning
     required: true
     block_on: low               # any exposed secret blocks
+  # gitleaks over the whole history (security.yml): our own secret formats, which push protection
+  # and secret scanning don't know. Required once every repo carries the managed security.yml.
+  secrets-history:
+    kind: security
+    stage: pr
+    source: github-checks
+    match: { checks: ["gitleaks*"] }
+    required: false
+    block_on: low               # a red job is a finding at this severity
   iac:
     kind: security
     stage: pr
@@ -160,6 +170,25 @@ suites:
     match: { tasks: ["sbom*", "sign*", "attest*"] }
     required: true
     block_on: high
+  # --- code quality
+  # Lint, where the template has a lint job (template-web's `lint`, for one).
+  lint:
+    kind: test
+    stage: pr
+    source: github-checks
+    match: { checks: ["lint*"] }
+    required: false             # required where a product or a role says so
+  # SonarQube's quality gate on new code (complexity, duplication, maintainability, coverage of new
+  # code). Its issues go to the coder agent like security findings. The scan runs in each repo's
+  # security.yml once the org has SonarQube Cloud (vars.SONAR_ORGANIZATION); until then it's missing,
+  # which blocks nothing while required is false. Turn it on per product in product.yaml.
+  code-quality:
+    kind: quality
+    stage: pr
+    source: sonarqube
+    match: { host: "https://sonarcloud.io", project_key: "{owner}_{name}" }
+    required: false
+    block_on: high              # a failed gate always blocks; issues block from here up
   dast:
     kind: security
     stage: staging
@@ -185,3 +214,25 @@ floors:
 # Accepting a blocking finding needs a security approver, a reason and an expiry.
 waivers:
   max_days: 90
+
+# Scan upkeep (valxel_sdlc.upkeep): findings on a product's default branch after merge, from GitHub's
+# code scanning, Dependabot and secret scanning alerts. Each gets an outcome: a hotfix now, a fix built
+# now and released with the next release inside its deadline (else on its own just before it), or the
+# backlog (no deadline). Products tighten in product.yaml `upkeep:`, never loosen. A person accepting a
+# finding's risk moves its deadline, within waivers.max_days.
+upkeep:
+  fix_within_days: { critical: 7, high: 30, medium: 90, low: 180 }   # first seen -> in production
+  hotfix:
+    severity: critical                       # at or above: a hotfix now
+    exploit_likely: { epss: 0.1, severity: high }   # EPSS 10%+ on a high: a hotfix now
+    secrets: true                            # an exposed secret: an incident (rotate, then remove)
+  release_lead_days: 2                       # a held fix goes to its own G6 this long before its deadline
+  max_open_fixes: 5                          # fix features per product at once
+  dependabot_grace_hours: 24                 # a dependency finding waits this long for Dependabot's own PR
+  dependabot: { auto_merge: [patch, minor] } # version updates that merge on green checks
+  floors:
+    phi:
+      fix_within_days: { critical: 3, high: 14, medium: 60, low: 120 }
+    payments:
+      fix_within_days: { critical: 3, high: 14, medium: 60, low: 120 }
+      hotfix: { severity: high }

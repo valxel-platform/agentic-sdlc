@@ -167,6 +167,7 @@ def plan(product, proposal: dict, standards: dict) -> dict:
         "default_branch": d.get("default_branch", "main"), "merge": dict(d.get("merge") or {}),
         "features": dict(d.get("features") or {}), "is_template": None,
         "tag_ruleset": dict(d.get("tag_ruleset") or {}), "files": list(d.get("files") or []),
+        "managed_files": dict(d.get("managed_files") or {}),
         "security": dict(d.get("security") or {}), "ruleset": {**(d.get("ruleset") or {}),
                                                               "required_checks": list(role.get("required_checks") or [])},
         "teams": teams, "codeowners": "\n".join(codeowners) + "\n",

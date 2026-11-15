@@ -903,6 +903,13 @@ valxel repos apply                    # change what differs (safe to repeat)
 valxel repos check --repo acme-clinic/cln-governance --json
 ```
 
+**Managed workflows.** Every repo carries the platform's `.github/workflows/security.yml`
+(Semgrep, gitleaks and SonarQube), and governance repos `.github/workflows/secrets.yml` (gitleaks
+only). The copies live in `src/valxel_sdlc/standard_files/`; a repo whose copy differs, or a
+template that lacks it, gets a pull request from `apply`. SonarQube runs once the org sets the
+Actions variable `SONAR_ORGANIZATION` and secret `SONAR_TOKEN`; a repo that needs a build first
+(Java) adds `.valxel/sonar-prepare.sh`, which writes extra scanner arguments to `.valxel/sonar.args`.
+
 Managed repos are each lane's repos (from its governance manifest), each lane's governance repo
 (from `registry.yaml`) and the platform's own repos (`platform_repos` in `config/repos.yaml`:
 the tool, `sdlc-governance` and the templates). Governance repos get reviews and code owners
@@ -912,6 +919,7 @@ but no required checks; templates are marked as templates and require their role
 | --- | --- |
 | A repo whose visibility differs from the standard (public) | Visibility changes are a person's decision |
 | Missing CODEOWNERS, `dependabot.yml`, `SECURITY.md` | Files arrive through pull requests, like any change |
+| A managed workflow that differs (`managed_files` in `config/repos.yaml`) | `apply` opens a pull request with the platform's copy; it's fixed when that merges |
 | Secret scanning and CodeQL on a private repo without GitHub Advanced Security | They're paid features; the report says which repos need them. Until then CodeQL is not a required check and there's no code-scanning merge rule, so pull requests aren't blocked by a check that never runs |
 
 The `repo-standards` workflow runs the check daily and fails when a repo drifts; run it by hand
@@ -1060,10 +1068,13 @@ SAMM and NIST SSDF practices:
 | --- | --- | --- | --- | --- |
 | Pull request | Unit tests | Your test runner, reporting counts and coverage | Check runs `unit*`, `test` | Required, line coverage 90% for every data class (VX-11) |
 | Pull request | Contract tests | Pact | Check runs `contract*`, `pact*` | Optional; required where a lane says so |
-| Pull request | Code scanning (SAST) | CodeQL, or Semgrep (SARIF) | GitHub code scanning | Required, blocks high and above |
+| Pull request | Code scanning (SAST) | CodeQL, plus Semgrep from the managed `security.yml` (SARIF) | GitHub code scanning | Required, blocks high and above |
 | Pull request | Dependency review (SCA) | GitHub dependency review, Dependabot | Dependency diff of the PR | Required, blocks high (general may relax to critical) |
 | Pull request | Secret scanning | GitHub secret scanning with push protection | Secret-scanning alerts | Required, any exposed secret blocks |
 | Pull request | Infrastructure as code | Trivy or Checkov (SARIF) | GitHub code scanning | Optional, blocks high |
+| Pull request | Secrets in the history | gitleaks, from the managed `security.yml` (our own secret formats too) | Check runs `gitleaks*` | Optional until every repo carries it; any finding blocks |
+| Pull request | Lint | The template's lint job | Check runs `lint*` | Optional; required where a product says so |
+| Pull request | Code quality | SonarQube Cloud's quality gate on new code, from `security.yml` | SonarQube's API (`quality/sonar.py`) | Optional; a failed gate blocks once a product requires it, and its issues go to the coder |
 | Build | Image scan | Trivy step in the OpenChoreo build workflow | OpenChoreo build steps | Required for PHI and payments |
 | Dev | Integration tests | The change set, all repos together | Check runs `integration*` on the merge commit | Required |
 | Staging | End-to-end tests | Playwright | Check runs `e2e*`, `playwright*` | Required |
@@ -1117,6 +1128,42 @@ quality:
 
 In stub delivery mode every suite passes with sample numbers; tests inject results through
 `services.quality.sources["stub"].results`.
+
+### After merge: findings on the default branch (scan upkeep)
+
+The suites above judge each change. Things also turn up on `main` later: a CVE disclosed against a
+package already merged, a new CodeQL rule that flags old code, a secret that slipped past push
+protection. `valxel_sdlc.upkeep` handles those, by the `upkeep:` policy in `config/quality.yaml`.
+
+1. **Intake.** GitHub's `code_scanning_alert`, `dependabot_alert` and `secret_scanning_alert`
+   webhooks, plus a nightly sweep of every managed repo's open alerts (a missed webhook is caught
+   within a day), go to the **findings register** (`GET /api/findings?product_id=`).
+2. **Triage, by policy:**
+
+   | Finding | Outcome |
+   | --- | --- |
+   | Critical; or high with an EPSS of 10% or more | **Hotfix:** a fix starts now and goes to G6 as soon as it's ready |
+   | A deadline, otherwise (high 30 days, medium 90, low 180 from first seen) | **Scheduled:** the fix is built now, then waits for the next release whose target date is inside its deadline; with none, or if that release runs late, it goes to its own G6 two days before the deadline |
+   | No deadline (info) | **Backlog:** recorded; fixed when a feature touches it |
+   | An exposed secret | **Incident:** on-call is paged for an active or public one; rotate first, then remove it from the code |
+
+   PHI and payments products have shorter deadlines (high 14 days), and payments hotfix from high.
+   Products may tighten in `product.yaml` (`upkeep:`), never loosen.
+3. **Fixes** are features on the hotfix track: the policy, which governance owns, approved the
+   start, so they begin at planning with a spec and design written from the findings. One fix per
+   repo collects its findings; at most `max_open_fixes` run per product. Tests, scans and the merge
+   train still apply. G5 goes to the security approvers; G6 to the release approvers, as usual.
+   A dependency finding first waits a day for Dependabot's own pull request.
+4. **Deadlines.** A finding past its deadline, or one two fixes didn't close, opens an incident with
+   no component (nothing is rolled back) that resolves when the finding closes. A security approver
+   can accept the risk until a date instead (`POST /api/findings/<id>/accept` with a reason and
+   up to 90 days); it comes back when that expires. A risk accepted at a feature's security review
+   holds on `main` too.
+5. **Dependabot's version updates** (not security updates) merge by themselves when they're patch
+   or minor and every check is green: the tool posts `valxel/gates` and merges. Majors go to people.
+   They reach production with the next release.
+
+`valxel upkeep sweep|tick|list` runs the same by hand.
 
 ## Security model (VX-17)
 

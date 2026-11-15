@@ -94,15 +94,22 @@ class QualityConfig:
     suites: dict[str, dict]
     floors: dict[str, dict[str, dict]]
     waiver_max_days: int = 90
+    upkeep: dict = field(default_factory=dict)  # findings on main after merge (valxel_sdlc.upkeep)
 
 
 def load_quality(path: Path) -> QualityConfig:
     if not path.exists():
         return QualityConfig(sources={}, suites={}, floors={})
     raw = yaml.safe_load(path.read_text()) or {}
+    from ..upkeep import UpkeepPolicyError, load as load_upkeep
+
+    try:
+        upkeep = load_upkeep(raw.get("upkeep"))
+    except UpkeepPolicyError as exc:
+        raise QualityConfigError(f"{path}: {exc}") from exc
     return QualityConfig(sources=dict(raw.get("sources") or {}), suites=dict(raw.get("suites") or {}),
                          floors={k: dict(v or {}) for k, v in (raw.get("floors") or {}).items()},
-                         waiver_max_days=int((raw.get("waivers") or {}).get("max_days", 90)))
+                         waiver_max_days=int((raw.get("waivers") or {}).get("max_days", 90)), upkeep=upkeep)
 
 
 _KEYS = {"kind", "stage", "source", "match", "required", "block_on", "min_coverage", "min_repos", "budget_s",
@@ -168,8 +175,8 @@ def effective_policy(cfg: QualityConfig, data_class: str, overrides: dict | None
     for name, spec in policy.items():
         if spec.get("stage") not in STAGES:
             problems.append(f"quality.{name}.stage must be one of {list(STAGES)}")
-        if spec.get("kind") not in ("test", "security"):
-            problems.append(f"quality.{name}.kind must be test or security")
+        if spec.get("kind") not in ("test", "security", "quality"):
+            problems.append(f"quality.{name}.kind must be test, security or quality")
         if spec.get("source") not in cfg.sources and spec.get("source") != "stub":
             problems.append(f"quality.{name}.source {spec.get('source')!r} is not registered in config/quality.yaml")
         if spec.get("block_on") is not None and str(spec["block_on"]).lower() not in SEVERITIES:

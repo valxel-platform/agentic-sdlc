@@ -318,6 +318,11 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
                                              "the Provisioning GitHub App, after checking each against governance")
     pv.add_argument("--once", action="store_true", help="Run what's queued now, then stop")
     pv.add_argument("--interval", type=float, default=5.0, help="Seconds between looks at the queue")
+    up = sub.add_parser("upkeep", help="Security findings on products' default branches: sweep GitHub's alerts, "
+                                       "run triage and deadlines now, or list the register")
+    up.add_argument("action", choices=["sweep", "tick", "list"])
+    up.add_argument("--product", default=None, help="Only this product")
+    up.add_argument("--json", action="store_true", help="Print as JSON")
     r = sub.add_parser("repos", help="Check or apply the repo standards (config/repos.yaml) on every managed repo")
     r.add_argument("action", choices=["check", "apply"])
     r.add_argument("--repo", action="append", default=[], metavar="ORG/REPO", help="Only these repos")
@@ -422,6 +427,8 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
         return 0 if not out.get("waiting") else 2
     if args.cmd == "provisioner":
         return _provisioner(args)
+    if args.cmd == "upkeep":
+        return _upkeep(args)
     if args.cmd == "go-live":
         from .config import load_settings
         from .lite.golive import go_live, retire_hosted
@@ -506,6 +513,34 @@ def _capacity(args) -> int:
         print(f"{f['repo']}: {f['kind']}{' to ' + f['to'] if f.get('to') else ''}: {f['why']}")
     if not found:
         print("Production fits its stage: nothing to propose")
+    return 0
+
+
+def _upkeep(args) -> int:
+    """Scan upkeep by hand: what the watcher does nightly (sweep) and every 15 minutes (tick)."""
+    import json as _json
+
+    from .api.app import create_engine_from_env
+
+    engine, _ = create_engine_from_env()
+    up = engine.upkeep
+    if args.action == "sweep":
+        out = up.sweep(args.product)
+        print(_json.dumps(out) if args.json else f"{out['repos']} repos, {out['alerts']} open alerts, "
+                                                  f"{out['closed']} closed since the last look")
+        return 0
+    if args.action == "tick":
+        out = up.tick()
+        print(_json.dumps(out) if args.json else "\n".join(f"{k}: {', '.join(v) or 'none'}" for k, v in out.items()))
+        return 0
+    rows = up.register.list(args.product)
+    if args.json:
+        print(_json.dumps(rows, indent=2))
+        return 0
+    for r in rows:
+        print(f"{r['status']:<10} {r['severity']:<8} {r.get('deadline') or '-':<10} {r['id']}  {r['title']}"
+              + (f"  [{r['fix_feature']}]" if r.get("fix_feature") else ""))
+    print(f"{len(rows)} findings")
     return 0
 
 

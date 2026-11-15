@@ -208,6 +208,12 @@ class FeatureEngine:
         self._inventory_day = ""
         self._outcomes_day = ""
         self._envs_swept = 0.0
+        # Scan upkeep: security findings on products' default branches (valxel_sdlc.upkeep).
+        from .upkeep.service import Upkeep
+
+        self.upkeep = Upkeep(self)
+        self._upkeep_ticked = 0.0
+        self._upkeep_swept_day = ""
         if getattr(services, "agents", None) is None:
             from .integrations.openchoreo_agents import from_env as agents_from_env
 
@@ -374,6 +380,18 @@ class FeatureEngine:
                     self._envs_swept = time.time()
                     try:
                         self.sweep_change_set_envs()
+                    except Exception:
+                        pass
+                if today != self._upkeep_swept_day:  # every repo's alerts once a day, for missed webhooks
+                    self._upkeep_swept_day = today
+                    try:
+                        self.upkeep.sweep()
+                    except Exception:
+                        pass
+                if time.time() - self._upkeep_ticked > 900:  # deadlines, fixes, Dependabot updates
+                    self._upkeep_ticked = time.time()
+                    try:
+                        self.upkeep.tick()
                     except Exception:
                         pass
                 if time.time() - self._cost_checked > 3600:  # cost data moves daily; hourly is plenty
@@ -868,6 +886,12 @@ class FeatureEngine:
             s = self._state(row["feature_id"])
             if feature_id in (s.get("features") or []) and not (active and s.get("status") == "cancelled"):
                 found = {"id": row["feature_id"], "model": s.get("model", "launch"), "status": s.get("status", "")}
+        if found is None:  # a security fix that joined a release after it was planned (valxel_sdlc.upkeep)
+            rid = self.services.findings.release_of(feature_id) if getattr(self.services, "findings", None) else None
+            if rid:
+                s = self._state(rid)
+                if not (active and s.get("status") == "cancelled"):
+                    found = {"id": rid, "model": s.get("model", "launch"), "status": s.get("status", "")}
         return found
 
     def create_release(self, *, product_id: str, title: str, model: str, features: list[str], target_date: str = "",
@@ -1548,17 +1572,34 @@ class FeatureEngine:
             return recovery(self.services.signals.for_incident(packet["feature_id"]), packet["since"],
                             int(packet.get("minutes") or 240), quiet_minutes=int(packet.get("quiet") or 0),
                             errors=(lambda: self.error_lines(pid, comp)) if comp else None)
+        if packet["wait"] == "fix_window":  # a held security fix before G6 (valxel_sdlc.upkeep)
+            return self.upkeep.fix_window(packet)
         if packet["wait"] == "release_train":  # a feature waiting for its train's approval
             s = self._state(packet["release_id"])
+            if packet["feature_id"] not in (s.get("features") or []) and s.get("status") not in ("", "planned"):
+                # A security fix that joined but wasn't ready when the release closed its list: it
+                # wasn't approved with it, so it goes to its own G6.
+                self.services.findings.unjoin(packet["feature_id"])
+                return {"status": "failure", "reason": f"it wasn't ready when {packet['release_id']} closed its list"}
             if s.get("status") in ("approved", "shipped"):
                 return {"status": "success", "approver": s.get("approved_by", ""), "release_id": packet["release_id"]}
             if s.get("status") == "cancelled":
                 return {"status": "failure", "reason": f"{packet['release_id']} was cancelled"}
+            # A security fix riding along leaves a release that's late for its deadline: its own G6.
+            late = self.upkeep.past_release_by(packet["feature_id"])
+            if late:
+                return {"status": "failure", "reason": late}
             return None
         # release_ready: every member is ready (launch: in production, flag off; train: waiting at
         # its train after staging) or was stopped.
         ready, dropped, lanes, flags, evidence = [], [], set(), {}, []
-        for fid in packet["features"]:
+        # Security fixes that joined after the release was planned ride along when they're ready;
+        # one that isn't yet doesn't hold the release up (valxel_sdlc.upkeep).
+        joined = [f for f in (self.services.findings.joined(packet["release_id"]) if packet.get("release_id") else [])
+                  if f not in packet["features"]]
+        riding = [f for f in joined if any(p.get("wait") == "release_train" and p.get("release_id") == packet["release_id"]
+                                          for p in self.pending(f))]
+        for fid in [*packet["features"], *riding]:
             s = self._state(fid)
             if s.get("status") == "aborted":
                 dropped.append(fid)
@@ -1582,7 +1623,7 @@ class FeatureEngine:
                             + (f"G5 by {g5}" if (g5 := ', '.join(g['approver'] for g in s.get('gate_decisions', []) if g['gate'] == 'g5'))
                                else f"no G5 needed (risk tier {s.get('risk_tier') or 'low'})"))
         return {"status": "success", "dropped": dropped, "lanes": sorted(lanes), "flags": flags,
-                "evidence": "\n".join(evidence)}
+                "evidence": "\n".join(evidence), "joined": [f for f in riding if f in ready]}
 
     def similar(self, product_id: str, title: str, description: str = "", exclude: str = "") -> list[dict]:
         from .duplicates import find_similar
@@ -1885,7 +1926,7 @@ RAIL = [("discovery", "phase"), ("g1", "gate"), ("spec", "phase"), ("g2", "gate"
 
 
 WAIT_STATION = {"ci": "build", "build": "build", "dev": "build", "staging": "release", "production": "operate",
-                "rollout": "operate", "flag_step": "operate", "release_train": "g6"}
+                "rollout": "operate", "flag_step": "operate", "release_train": "g6", "fix_window": "g6"}
 EXPEDITED = ("discovery", "g1", "spec", "g2", "design", "g3", "architecture", "g4")
 
 

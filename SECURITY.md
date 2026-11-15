@@ -86,3 +86,13 @@ Strict mode (`VALXEL_STRICT=1`) refuses to start with a published example value,
 shorter than 32 characters or with too few distinct characters, webhook secrets shorter than 20,
 or a default database password. In GitHub sign-in mode the server refuses a weak session secret
 even without strict mode.
+
+## Findings after merge
+
+Security alerts on a product's default branch (code scanning, Dependabot, secret scanning) go to a
+findings register and are fixed by policy, with deadlines by severity (`upkeep:` in
+`config/quality.yaml`; README, "After merge"). An exposed secret opens an incident: rotate it
+first (the repos are public, so treat it as known), then remove it from the code. The webhook needs
+the Delivery App subscribed to the `code_scanning_alert`, `dependabot_alert` and
+`secret_scanning_alert` events, with read access to those alerts.
+
