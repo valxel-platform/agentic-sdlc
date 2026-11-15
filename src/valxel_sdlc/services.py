@@ -95,6 +95,9 @@ class Services:
     attachments: object = None  # valxel_sdlc.attachments.AttachmentStore: files attached at intake
     evals: object = None  # valxel_sdlc.evals store: eval cases from finished document phases, labelled at the gates
     canary: object = None  # AgentStack: a candidate config a share of new features runs with (VALXEL_CANARY_*)
+    # valxel_sdlc.workspaces.Workspaces: members, roles, approver groups and gate mappings (in memory
+    # until the API wires Postgres)
+    workspaces: object = None
 
     def _stack(self, variant: str = ""):
         return self.canary if variant == "canary" and self.canary is not None else self
@@ -135,7 +138,11 @@ class Services:
     def snapshot(self, product_id: str, pins: dict | None = None) -> GovernanceSnapshot:
         """The product's governance, read from its own org. Pass the feature's pins inside a
         feature thread; omit them to resolve the current commit (intake and admin views)."""
-        return self.governance.snapshot(product_id, pins)
+        snap = self.governance.snapshot(product_id, pins)
+        if self.workspaces is None:
+            return snap
+        # The approver groups an admin mapped to its gates: the version the feature pinned, or the latest.
+        return self.workspaces.merge(snap, (pins or {}).get("groups"))
 
     def feature_snapshot(self, state: dict) -> GovernanceSnapshot:
         """The feature's pinned governance, plus repos provisioned for it. Until the governance PR
@@ -265,6 +272,9 @@ def build_services(
         trackers=trackers if trackers is not None else default_trackers(settings),
     )
     svc.quality = default_quality(svc)
+    from .workspaces import InMemoryWorkspaceStore, Workspaces
+
+    svc.workspaces = Workspaces(InMemoryWorkspaceStore(), settings.registry)
     svc.knowledge = default_knowledge(svc)
     svc.flags = default_flags(settings, svc)
     svc.provisioner = default_provisioner(settings, github, openchoreo)

@@ -40,9 +40,16 @@ class User:
     avatar_url: str = ""
     orgs: list[str] = field(default_factory=list)
     teams: list[str] = field(default_factory=list)  # "org/team-slug"
+    email: str = ""  # verified, when the sign-in provides one
+    # Read from the workspaces on every request, never trusted from the cookie (valxel_sdlc.workspaces):
+    groups: list[str] = field(default_factory=list)  # "<workspace>/<group>"
+    roles: dict[str, str] = field(default_factory=dict)  # workspace -> role
+    products: dict[str, list[str]] = field(default_factory=dict)  # workspace -> its products they may see ([] = all)
 
     def matches(self, approver: str) -> bool:
         a = approver.strip().lstrip("@").lower()
+        if a.startswith("group:"):  # a workspace's approver group
+            return a[len("group:"):] in {g.lower() for g in self.groups}
         if "/" in a:
             return a in {t.lower() for t in self.teams}
         return a == self.login.lower()
@@ -94,15 +101,18 @@ class SessionSigner:
         return payload
 
 
+IDENTITY = ("login", "name", "avatar_url", "orgs", "teams", "email")  # what the session cookie carries
+
+
 def session_payload(user: User) -> dict:
-    return {**asdict(user), "exp": int(time.time()) + SESSION_TTL}
+    d = asdict(user)
+    return {**{k: d[k] for k in IDENTITY}, "exp": int(time.time()) + SESSION_TTL}
 
 
 def user_from_payload(payload: dict | None) -> User | None:
     if not payload:
         return None
-    payload = {k: v for k, v in payload.items() if k != "exp"}
-    return User(**payload)
+    return User(**{k: v for k, v in payload.items() if k in IDENTITY})
 
 
 @dataclass

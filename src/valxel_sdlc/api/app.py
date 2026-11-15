@@ -219,6 +219,39 @@ class DevLoginIn(BaseModel):
     login: str = Field(min_length=1, max_length=39)
     teams: list[str] = Field(default_factory=list)
     orgs: list[str] = Field(default_factory=list)
+    email: str = Field(default="", max_length=254)
+
+
+class WorkspaceIn(BaseModel):
+    id: str = Field(min_length=3, max_length=40, pattern=r"^[a-z0-9][a-z0-9-]+$")
+    name: str = Field(min_length=1, max_length=80)
+    plan: str = Field(default="lite", pattern=r"^(self-hosted|lite|full)$")
+
+
+class MemberIn(BaseModel):
+    name: str = Field(default="", max_length=80)
+    email: str = Field(default="", max_length=254)
+    github_login: str = Field(default="", max_length=39)
+    role: str = "member"
+    products: list[str] = Field(default_factory=list)
+
+
+class MemberUpdate(BaseModel):
+    role: str | None = None
+    products: list[str] | None = None
+    status: str | None = None
+
+
+class GroupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+class GroupMembers(BaseModel):
+    members: list[str]
+
+
+class GatesIn(BaseModel):
+    gates: dict[str, list[str]]
 
 
 class MessageIn(BaseModel):
@@ -299,6 +332,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..upkeep.register import PostgresFindingRegister
 
         services.findings = PostgresFindingRegister(pool)
+        from ..workspaces import PostgresWorkspaceStore, Workspaces
+
+        services.workspaces = Workspaces(PostgresWorkspaceStore(pool), services.settings.registry)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080")
         from ..cluster import PostgresCluster
@@ -346,10 +382,23 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     def eng() -> FeatureEngine:
         return state["engine"]
 
+    def with_memberships(user: User) -> User:
+        """The person's workspaces, roles and groups, read now (valxel_sdlc.workspaces): a member
+        removed or suspended loses them on their next request, whatever their cookie says."""
+        ws = eng().services.workspaces
+        if ws is None:
+            return user
+        mine = ws.memberships(user.login, user.email)
+        user.roles = {m["workspace"]: m["role"] for m in mine}
+        user.products = {m["workspace"]: list(m.get("products") or []) for m in mine}
+        user.groups = ws.groups_of({m["id"] for m in mine}, set(user.roles))
+        return user
+
     def current_user(request: Request) -> User:
         user = user_from_payload(signer.loads(request.cookies.get(SESSION_COOKIE)))
         if user is None:
             raise HTTPException(401, "Sign in to continue")
+        user = with_memberships(user)
         if (request.method not in ("GET", "HEAD") and "application/json" not in request.headers.get("content-type", "")
                 and request.headers.get("x-valxel-client") != "web"):
             # With SameSite=Lax cookies this blocks cross-site form posts. A request that isn't JSON (a
@@ -358,10 +407,31 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         return user
 
     def lanes_for(user: User) -> list[str]:
+        """Products the person may see: their GitHub org's (as before), and their workspaces' (all, or
+        the products their profile lists)."""
         reg = eng().services.settings.registry
-        if auth.mode == "dev" and not user.orgs:
+        if auth.mode == "dev" and not user.orgs and not user.roles:
             return list(reg)
-        return [pid for pid, e in reg.items() if user.member_of(e.governance.org)]
+        return [pid for pid, e in reg.items() if user.member_of(e.governance.org)
+                or (e.workspace in user.roles and (not user.products.get(e.workspace)
+                                                   or pid in user.products[e.workspace]))]
+
+    def role_in(user: User, workspace: str) -> str:
+        return user.roles.get(workspace, "")
+
+    def may_start(user: User, product_id: str) -> None:
+        """Viewers see a product but don't start work on it."""
+        ws = eng().services.settings.registry[product_id].workspace
+        if role_in(user, ws) == "viewer":
+            raise HTTPException(403, "Viewers can't start features; ask an admin for the member role")
+
+    def admin_of(user: User, workspace: str) -> str:
+        from ..workspaces import rank
+
+        role = role_in(user, workspace)
+        if rank(role) < rank("admin"):
+            raise HTTPException(403, f"Only {workspace}'s admins can do that")
+        return role
 
     def item_approvers(fid: str, item: dict) -> list[str]:
         """Approvers for an inbox item: the gate's own list, or for an escalation the approvers of
@@ -437,7 +507,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if auth.mode != "dev":
             raise HTTPException(404, "Dev sign-in is disabled")
         orgs = sorted(set(body.orgs) | {t.split("/", 1)[0] for t in body.teams})
-        user = User(login=body.login, name=body.login, orgs=orgs, teams=list(body.teams))
+        user = User(login=body.login, name=body.login, orgs=orgs, teams=list(body.teams), email=body.email.lower())
         resp = JSONResponse(asdict(user))
         _set_session(resp, user)
         return resp
@@ -822,6 +892,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             if body.product_id not in eng().services.settings.registry:
                 raise HTTPException(404, f"Unknown product {body.product_id}")
             raise HTTPException(403, f"You aren't a member of {body.product_id}'s organization")
+        may_start(user, body.product_id)
         try:
             fid = eng().create(product_id=body.product_id, title=body.title, description=body.description,
                                created_by=user.login, simulate_faults=body.simulate_faults,
@@ -901,6 +972,109 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                                        days=int(body.get("days") or 0))
         except (ValueError, KeyError) as exc:
             raise HTTPException(400, str(exc)) from exc
+
+    # --- workspaces: members, roles, approver groups, gate mappings (valxel_sdlc.workspaces) ---
+    def wsx():
+        ws = eng().services.workspaces
+        if ws is None:
+            raise HTTPException(404, "Workspaces are off")
+        return ws
+
+    def ws_call(fn, *args, **kwargs):
+        from ..workspaces import WorkspaceError
+
+        try:
+            return fn(*args, **kwargs)
+        except WorkspaceError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+
+    @api.get("/workspaces")
+    def my_workspaces(user: User = Depends(current_user)) -> list[dict]:
+        return [{**(wsx().get(w) or {"id": w, "name": w}), "role": r} for w, r in sorted(user.roles.items())]
+
+    @api.post("/workspaces", status_code=201)
+    def create_workspace(body: WorkspaceIn, user: User = Depends(current_user)) -> dict:
+        """A new workspace, with the signed-in person as its owner, in every approver group."""
+        return ws_call(wsx().create, body.id, name=body.name, actor=user.login, plan=body.plan,
+                       owner={"name": user.name or user.login, "email": user.email, "github_login": user.login})
+
+    @api.get("/workspaces/{workspace}")
+    def workspace_view(workspace: str, user: User = Depends(current_user)) -> dict:
+        """Members see the workspace; admins also see invitations and the gate mappings to edit."""
+        if workspace not in user.roles:
+            raise HTTPException(404, f"No workspace {workspace}")
+        w = wsx()
+        return {**(w.get(workspace) or {"id": workspace}), "role": user.roles[workspace],
+                "members": w.members(workspace), "groups": w.groups(workspace),
+                "products": [{"id": p, "gates": (w.mapping(p) or {}).get("gates", {}),
+                              "version": (w.mapping(p) or {}).get("version", 0)} for p in w.products(workspace)]}
+
+    @api.post("/workspaces/{workspace}/members", status_code=201)
+    def invite_member(workspace: str, body: MemberIn, user: User = Depends(current_user)) -> dict:
+        """A profile for someone, invited by email. The link is returned for the admin to share until
+        invitation emails are sent (sign-in design, A3)."""
+        admin_of(user, workspace)
+        m, token = ws_call(wsx().invite, workspace, body.model_dump(), role=body.role, actor=user.login,
+                           products=body.products)
+        return {**m, "invite_url": f"{auth.public_url}/join/{workspace}/{token}"}
+
+    @api.post("/workspaces/{workspace}/members/{member_id}/resend")
+    def resend_invite(workspace: str, member_id: str, user: User = Depends(current_user)) -> dict:
+        admin_of(user, workspace)
+        token = ws_call(wsx().resend, workspace, member_id, actor=user.login)
+        return {"invite_url": f"{auth.public_url}/join/{workspace}/{token}"}
+
+    @api.post("/workspaces/{workspace}/join/{token}")
+    def join_workspace(workspace: str, token: str, user: User = Depends(current_user)) -> dict:
+        return ws_call(wsx().accept, workspace, token, login=user.login, email=user.email)
+
+    @api.patch("/workspaces/{workspace}/members/{member_id}")
+    def update_member(workspace: str, member_id: str, body: MemberUpdate, user: User = Depends(current_user)) -> dict:
+        role = admin_of(user, workspace)
+        return ws_call(wsx().update_member, workspace, member_id, actor=user.login, actor_role=role, role=body.role,
+                       products=body.products, status=body.status)
+
+    @api.delete("/workspaces/{workspace}/members/{member_id}", status_code=204)
+    def remove_member(workspace: str, member_id: str, user: User = Depends(current_user)):
+        from fastapi.responses import Response
+
+        role = admin_of(user, workspace)
+        ws_call(wsx().remove_member, workspace, member_id, actor=user.login, actor_role=role)
+        return Response(status_code=204)
+
+    @api.post("/workspaces/{workspace}/groups", status_code=201)
+    def create_group(workspace: str, body: GroupIn, user: User = Depends(current_user)) -> dict:
+        admin_of(user, workspace)
+        return ws_call(wsx().create_group, workspace, body.name, actor=user.login)
+
+    @api.put("/workspaces/{workspace}/groups/{group}")
+    def set_group(workspace: str, group: str, body: GroupMembers, user: User = Depends(current_user)) -> dict:
+        admin_of(user, workspace)
+        return ws_call(wsx().set_group, workspace, group, members=body.members, actor=user.login)
+
+    @api.delete("/workspaces/{workspace}/groups/{group}", status_code=204)
+    def delete_group(workspace: str, group: str, user: User = Depends(current_user)):
+        from fastapi.responses import Response
+
+        admin_of(user, workspace)
+        ws_call(wsx().delete_group, workspace, group, actor=user.login)
+        return Response(status_code=204)
+
+    @api.put("/workspaces/{workspace}/products/{product_id}/gates")
+    def set_gates(workspace: str, product_id: str, body: GatesIn, user: User = Depends(current_user)) -> dict:
+        """Which groups approve each of the product's gates. A new version: features already under way
+        keep the one they started with."""
+        admin_of(user, workspace)
+        if eng().services.settings.registry.get(product_id) is None or wsx().workspace_of(product_id) != workspace:
+            raise HTTPException(404, f"{product_id} isn't in {workspace}")
+        return ws_call(wsx().set_mapping, product_id, body.gates, actor=user.login)
+
+    @api.get("/workspaces/{workspace}/audit")
+    def workspace_audit(workspace: str, limit: int = 200, user: User = Depends(current_user)) -> list[dict]:
+        admin_of(user, workspace)
+        return wsx().store.audit_log(workspace, max(1, min(limit, 1000)))
 
     def member_of(user: User, product_id: str) -> None:
         if product_id not in lanes_for(user):

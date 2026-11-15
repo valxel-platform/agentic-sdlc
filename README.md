@@ -103,6 +103,44 @@ HttpOnly session cookie and discards the GitHub token.
 
 The API records the signed-in login as the approver; a request body cannot override it.
 
+#### Workspaces, members and approver groups
+
+A workspace is one customer: the `workspace` each product has in `config/registry.yaml`. People
+who aren't in a product's GitHub teams join through it (`src/valxel_sdlc/workspaces.py`):
+
+| Role | Can |
+|---|---|
+| owner | everything an admin can, and make or change owners. A workspace always keeps one. |
+| admin | invite people, set their role and products, suspend or remove them, edit groups and gate mappings, read the audit log |
+| approver | decide gates their groups are mapped to, and start features |
+| member | start features and follow them |
+| viewer | see the workspace's products, nothing more |
+
+- **Invitations.** An admin adds a profile (name, email or GitHub login, role, and optionally the
+  products it covers) and gets a one-time link to share. Only the invited person can accept it:
+  they sign in as that login or email. Until invitation emails ship, the admin sends the link.
+- **Approver groups.** Each workspace starts with Product, Design, Architecture, Security, Release
+  and On-call; the owner is in all of them. An admin maps groups to each product's gates
+  (`PUT /api/workspaces/{ws}/products/{id}/gates`). Mapped groups *add to* `product.yaml`'s
+  approvers as `group:<workspace>/<group>`; the teams there still decide.
+- **A feature keeps its mapping.** Each mapping change is a new version, and a feature pins the
+  version it started on, like its other inputs. Changing approvers mid-flight doesn't move a gate
+  to different people.
+- **Checked on every request.** Roles and groups are read from the database on each request, not
+  from the cookie, so suspending or removing someone takes effect at once.
+- **Audited.** Every change to members, groups and mappings is in `GET /api/workspaces/{ws}/audit`.
+
+An existing deployment's workspaces have no owner yet. Give each one from the command line:
+
+```bash
+DATABASE_URL=... valxel workspaces owner wrkspc-shared --github asha
+DATABASE_URL=... valxel workspaces list
+```
+
+Anyone signed in can create a new workspace (`POST /api/workspaces`) and becomes its owner.
+Self-hosted deployments that use only GitHub teams work exactly as before: with no members,
+nothing changes.
+
 Run as many replicas as you like behind one load balancer, all on the same Postgres
 (`src/valxel_sdlc/cluster.py`). Nothing routes a person back to the same replica:
 
