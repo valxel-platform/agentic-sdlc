@@ -388,3 +388,12 @@ def test_the_managed_workflows_pin_actions_by_commit():
         uses = re.findall(r"uses:\s*(\S+)", text)
         assert uses and all(re.search(r"@[0-9a-f]{40}$", u) for u in uses), uses
 
+
+def test_semgrep_runs_with_metrics_off_and_gitleaks_says_what_it_found():
+    text = rs.standard_file("security.yml")
+    [cmd] = [ln for ln in text.splitlines() if ln.strip().startswith("semgrep scan")]
+    assert "--metrics off" in cmd and "--config auto" not in cmd  # auto needs metrics on
+    assert "safe.directory" in text  # the semgrep container runs as another user
+    for name in ("security.yml", "governance-secrets.yml"):
+        assert "--verbose" in rs.standard_file(name)
+

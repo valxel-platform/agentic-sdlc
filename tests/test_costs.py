@@ -188,7 +188,7 @@ def test_budget_webhooks(engine, monkeypatch):
             return b"ok"
 
     monkeypatch.setattr("urllib.request.urlopen", lambda url, timeout=0: visited.append(url) or Resp())
-    token = "2336412f37fb687f5d51e6e2425c464de" * 2
+    token = "2336412f37fb687f5d51e6e2425c464de" * 2  # a fake SNS token  gitleaks:allow
     confirm = {"Type": "SubscriptionConfirmation", "TopicArn": TOPIC, "Token": token,
                "SubscribeURL": "https://evil.example/?Action=ConfirmSubscription"}  # never visited
     assert client.post("/api/signals/aws-budgets", json=confirm, headers=basic).status_code == 202
