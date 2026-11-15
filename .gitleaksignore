@@ -1,5 +1,0 @@
-# Test fixtures that only look like secrets (gitleaks fingerprints: commit:file:rule:line).
-# New ones get a `gitleaks:allow` comment on the line instead.
-4794a7132e02eb105d5f992a5e789e23a0cb7c39:tests/test_costs.py:generic-api-key:191
-dd8b60fcfc2f807b01aaf5889bdb25e9402555b2:tests/test_costs.py:generic-api-key:191
-08d22d85cafc42898bf547450cc6f14a04150ffe:tests/test_costs.py:generic-api-key:191
