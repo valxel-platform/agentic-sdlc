@@ -43,6 +43,13 @@ class ModelResponse:
     output_tokens: int
     web_searches: int = 0  # searches the provider ran (billed per search)
     request_id: str = field(default_factory=lambda: f"req_{uuid.uuid4().hex[:16]}")
+    # How full the context got: the largest prompt (input, cache writes and reads) of any one model
+    # call in the session; for a single call, the prompt itself. 0: take the call's total input.
+    context_tokens: int = 0
+    # The agent session's id (Claude Code's session, Codex's thread), "" for a single call.
+    session_id: str = ""
+    # The model's context window, when the vendor reported it with the response (0: from config).
+    context_window: int = 0
 
 
 class ProviderUnavailable(RuntimeError):

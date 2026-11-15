@@ -1375,6 +1375,18 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except KeyError as exc:
             raise HTTPException(404, str(exc)) from exc
 
+    @api.get("/usage/context")
+    def usage_context(product_id: str, weeks: int = 4, user: User = Depends(current_user)) -> list[dict]:
+        """How full agents' context gets and where it goes, by week, role and model (valxel_sdlc.context)."""
+        from datetime import UTC, datetime, timedelta
+
+        from ..context import report
+
+        member_of(user, product_id)
+        weeks = max(1, min(int(weeks), 26))
+        since = (datetime.now(UTC) - timedelta(weeks=weeks)).isoformat()
+        return report(eng().services.ledger.records(product_id=product_id, since=since), weeks=weeks)
+
     @api.get("/features/{feature_id}/usage")
     def usage(feature_id: str, user: User = Depends(current_user)) -> list[dict]:
         return [asdict(r) for r in eng().services.ledger.records(feature_id)]

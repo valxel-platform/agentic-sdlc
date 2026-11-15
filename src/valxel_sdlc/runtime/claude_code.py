@@ -137,9 +137,12 @@ class ClaudeCodeRuntime:
         from claude_agent_sdk import ResultMessage, query  # lazy import
 
         text, result, loaded = "", None, set()
+        peak, session_id = 0, ""  # the largest prompt of any one call, and the session (valxel_sdlc.context)
         started = time.monotonic()
         async for message in query(prompt=task.layers.tail, options=options):
             loaded |= skills_used(message)
+            peak = max(peak, prompt_tokens(getattr(message, "usage", None)) if not isinstance(message, ResultMessage) else 0)
+            session_id = getattr(message, "session_id", None) or session_id
             if getattr(message, "subtype", None) == "init":
                 data = getattr(message, "data", {}) or {}
                 for err in data.get("plugin_errors") or []:
@@ -157,6 +160,9 @@ class ClaudeCodeRuntime:
             cache_creation_input_tokens=int(usage.get("cache_creation_input_tokens", 0)),
             cache_read_input_tokens=int(usage.get("cache_read_input_tokens", 0)),
             output_tokens=int(usage.get("output_tokens", 0)),
+            context_tokens=peak,
+            session_id=str(session_id or ""),
+            context_window=reported_window(result, model),
         )
         extra = plugins.extra(loaded, task.skills)
         if extra:
@@ -173,6 +179,24 @@ class ClaudeCodeRuntime:
             request_ids=[resp.request_id],
             extra_skills=extra,
         )
+
+
+def prompt_tokens(usage) -> int:
+    """The prompt one model call sent (input, cache writes and cache reads), from a message's usage."""
+    if not isinstance(usage, dict):
+        return 0
+    return sum(int(usage.get(k) or 0) for k in ("input_tokens", "cache_creation_input_tokens",
+                                                  "cache_read_input_tokens"))
+
+
+def reported_window(result, model: str) -> int:
+    """The context window Claude Code reported for the model with its result, 0 when it didn't."""
+    usage = getattr(result, "model_usage", None) or {}
+    name = model.split("/", 1)[-1]
+    for key, u in usage.items() if isinstance(usage, dict) else ():
+        if isinstance(u, dict) and (key == name or key.startswith(name)):
+            return int(u.get("contextWindow") or u.get("context_window") or 0)
+    return 0
 
 
 def skills_used(message) -> set[str]:

@@ -125,6 +125,25 @@ def _verify_changes(log=None) -> int:
     return 1
 
 
+def _usage_context(args, engine=None) -> int:
+    """valxel usage context: the ledger's context measurements (valxel_sdlc.context)."""
+    from datetime import UTC, datetime, timedelta
+
+    from .context import report, table
+
+    if engine is None:
+        if not os.environ.get("DATABASE_URL"):
+            print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
+            return 2
+        from .api.app import create_engine_from_env
+
+        engine, _ = create_engine_from_env()
+    since = (datetime.now(UTC) - timedelta(weeks=args.weeks)).isoformat()
+    rows = report(engine.services.ledger.records(product_id=args.product, since=since), weeks=args.weeks)
+    print(json.dumps(rows, indent=2) if args.json else table(rows))
+    return 0
+
+
 def _pilot_report(args, engine=None) -> int:
     from .pilot import markdown, report
 
@@ -337,6 +356,11 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     g.add_argument("product")
     c = sub.add_parser("changes", help="Check the production change log's hash chain (DATABASE_URL)")
     c.add_argument("action", choices=["verify"])
+    us = sub.add_parser("usage", help="How full agents' context gets and where it goes, by week and role (DATABASE_URL)")
+    us.add_argument("action", choices=["context"])
+    us.add_argument("--product", default=None, help="Only this product")
+    us.add_argument("--weeks", type=int, default=4, help="How many weeks back (default 4)")
+    us.add_argument("--json", action="store_true")
     pr = sub.add_parser("pilot-report", help="The pilot's numbers for a product, as Markdown (DATABASE_URL)")
     pr.add_argument("product")
     pr.add_argument("--all", action="store_true", help="Every feature, not only those created as pilot features")
@@ -461,6 +485,8 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
         return _eval(args)
     if args.cmd == "pilot-report":
         return _pilot_report(args)
+    if args.cmd == "usage":
+        return _usage_context(args)
     if args.cmd == "changes":
         return _verify_changes()
     if args.cmd == "glitchtip-token":

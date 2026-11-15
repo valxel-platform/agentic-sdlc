@@ -41,15 +41,31 @@ class UsageRecord:
     attempt: str = ""
     # Installed skills the session loaded by itself, beyond its phase's ("plugin:skill,...").
     extra_skills: str = ""
+    # Context (valxel_sdlc.context): the agent session it belongs to and how it started
+    # (single: one gateway call; fresh: a new session; resumed; handoff: a fresh session started
+    # from a handoff document), the model's window, how full the context got (the largest prompt
+    # of any one call in the session) and the estimated tokens of each prompt layer.
+    session_id: str = ""
+    session_mode: str = "single"
+    context_window: int = 0
+    context_tokens: int = 0
+    layer_tokens: dict = field(default_factory=dict)
 
     @property
     def total_input(self) -> int:
         return self.input_tokens + self.cache_creation_input_tokens + self.cache_read_input_tokens
 
+    @property
+    def context_fill(self) -> float | None:
+        """How full the context got, as a share of the window; None when the window isn't known."""
+        return round(self.context_tokens / self.context_window, 4) if self.context_window else None
+
 
 class Ledger(Protocol):
     def record(self, rec: UsageRecord) -> None: ...
-    def records(self, feature_id: str | None = None) -> list[UsageRecord]: ...
+    # since: an ISO timestamp; only records at or after it.
+    def records(self, feature_id: str | None = None, *, product_id: str | None = None,
+                since: str | None = None) -> list[UsageRecord]: ...
 
 
 class InMemoryLedger:
@@ -61,9 +77,11 @@ class InMemoryLedger:
         with self._lock:
             self._rows.append(rec)
 
-    def records(self, feature_id: str | None = None) -> list[UsageRecord]:
+    def records(self, feature_id: str | None = None, *, product_id: str | None = None,
+                since: str | None = None) -> list[UsageRecord]:
         with self._lock:
-            return [r for r in self._rows if feature_id is None or r.feature_id == feature_id]
+            return [r for r in self._rows if (feature_id is None or r.feature_id == feature_id)
+                    and (product_id is None or r.product_id == product_id) and (since is None or r.ts >= since)]
 
 
 class PostgresLedger:
@@ -85,6 +103,11 @@ class PostgresLedger:
     ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS task_id TEXT NOT NULL DEFAULT '';
     ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS attempt TEXT NOT NULL DEFAULT '';
     ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS extra_skills TEXT NOT NULL DEFAULT '';
+    ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS session_id TEXT NOT NULL DEFAULT '';
+    ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS session_mode TEXT NOT NULL DEFAULT 'single';
+    ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS context_window INT NOT NULL DEFAULT 0;
+    ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS context_tokens INT NOT NULL DEFAULT 0;
+    ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS layer_tokens JSONB NOT NULL DEFAULT '{}'::jsonb;
     CREATE INDEX IF NOT EXISTS valxel_usage_feature ON valxel_usage (feature_id);
     CREATE INDEX IF NOT EXISTS valxel_usage_product_ts ON valxel_usage (product_id, ts);
     """
@@ -98,15 +121,22 @@ class PostgresLedger:
     def record(self, rec: UsageRecord) -> None:
         d = asdict(rec)
         d["prefix_hashes"] = json.dumps(d["prefix_hashes"])
+        d["layer_tokens"] = json.dumps(d["layer_tokens"])
         cols = ", ".join(d)
         vals = ", ".join(f"%({k})s" for k in d)
         with self.pool.connection() as conn:
             conn.execute(f"INSERT INTO valxel_usage ({cols}) VALUES ({vals})", d)
 
-    def records(self, feature_id: str | None = None) -> list[UsageRecord]:
-        sql = "SELECT * FROM valxel_usage" + (" WHERE feature_id = %s" if feature_id else "") + " ORDER BY id"
+    def records(self, feature_id: str | None = None, *, product_id: str | None = None,
+                since: str | None = None) -> list[UsageRecord]:
+        where, args = [], []
+        for col, op, val in (("feature_id", "=", feature_id), ("product_id", "=", product_id), ("ts", ">=", since)):
+            if val is not None:
+                where.append(f"{col} {op} %s")
+                args.append(val)
+        sql = "SELECT * FROM valxel_usage" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id"
         with self.pool.connection() as conn:
-            rows = conn.execute(sql, (feature_id,) if feature_id else ()).fetchall()
+            rows = conn.execute(sql, args).fetchall()
         out = []
         for r in rows:
             r = dict(r)
@@ -116,6 +146,8 @@ class PostgresLedger:
             r["duration_s"] = float(r.get("duration_s") or 0.0)
             if isinstance(r["prefix_hashes"], str):
                 r["prefix_hashes"] = json.loads(r["prefix_hashes"])
+            if isinstance(r.get("layer_tokens"), str):
+                r["layer_tokens"] = json.loads(r["layer_tokens"])
             out.append(UsageRecord(**r))
         return out
 

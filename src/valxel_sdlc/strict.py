@@ -154,6 +154,14 @@ def known_gaps(services) -> list[str]:
         out.append("VALXEL_CONFIG_REPO is not set: changes to models and settings aren't evaluated against past "
                    "work before they merge")
     s = services.settings
+    from .models import available_roles, optional_roles
+
+    optional, on = optional_roles(s), (available_roles(s) if s.mode == "live" else set())
+    unknown = sorted({r.model for n, r in s.roles.items()  # fallbacks count only when they can run
+                      if (n not in optional or n in on) and not s.context_window(r.model)})
+    if unknown:
+        out.append("models.yaml has no context window for " + ", ".join(unknown) + ": how full their sessions' "
+                   "context gets can't be measured (valxel usage context shows it as unknown)")
     pinned = getattr(getattr(s, "plugins", None), "ref", "")
     if pinned and s.mode == "live":
         from .plugins import installed_ref
