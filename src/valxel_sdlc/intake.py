@@ -230,6 +230,7 @@ class IntakeSession:
     attachments: list = field(default_factory=list)  # valxel_sdlc.attachments: names and checks, never contents
     starter: bool = False  # may start a new product (registry inception.starters)
     kind: str = ""  # what was submitted: feature | initiative | inception
+    workspace: str = ""  # a new product's workspace, when an admin of a self-serve workspace started this
 
     @property
     def duplicate(self) -> bool:
@@ -263,8 +264,8 @@ class IntakeStore:
         self._s: dict[str, IntakeSession] = {}
         self._lock = threading.Lock()
 
-    def create(self, owner: str, lanes: list[str], starter: bool = False) -> IntakeSession:
-        s = IntakeSession(id=uuid.uuid4().hex[:12], owner=owner, lanes=lanes, starter=starter)
+    def create(self, owner: str, lanes: list[str], starter: bool = False, workspace: str = "") -> IntakeSession:
+        s = IntakeSession(id=uuid.uuid4().hex[:12], owner=owner, lanes=lanes, starter=starter, workspace=workspace)
         with self._lock:
             self._s[s.id] = s
         return s
@@ -293,8 +294,8 @@ class PostgresIntakeStore:
             conn.execute("create table if not exists valxel_intake (id text primary key, owner text not null,"
                          " data jsonb not null, created_at timestamptz not null default now())")
 
-    def create(self, owner: str, lanes: list[str], starter: bool = False) -> IntakeSession:
-        s = IntakeSession(id=uuid.uuid4().hex[:12], owner=owner, lanes=lanes, starter=starter)
+    def create(self, owner: str, lanes: list[str], starter: bool = False, workspace: str = "") -> IntakeSession:
+        s = IntakeSession(id=uuid.uuid4().hex[:12], owner=owner, lanes=lanes, starter=starter, workspace=workspace)
         self.save(s)
         return s
 

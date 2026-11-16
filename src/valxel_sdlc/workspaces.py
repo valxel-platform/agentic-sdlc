@@ -194,6 +194,22 @@ class Workspaces:
                                actor=actor)
         return ws
 
+    def set_plan(self, workspace: str, plan: str, *, actor: str) -> dict:
+        """A hosted workspace moves between Lite and Full (valxel_sdlc.billing). Self-hosted isn't a
+        hosted workspace's plan: that's installing Valxel yourself."""
+        ws = self.get(workspace)
+        if not ws:
+            raise WorkspaceError(f"No workspace {workspace}")
+        if plan not in ("lite", "full"):
+            raise WorkspaceError("A hosted workspace's plan is lite or full")
+        if ws.get("plan") == "self-hosted":
+            raise WorkspaceError("This workspace runs on your own install; its plan doesn't change here")
+        if ws.get("plan") != plan:
+            ws = {**ws, "plan": plan}
+            self.store.put("workspace", workspace, "", ws)
+            self.store.audit(workspace, actor, "workspace.plan", {"plan": plan})
+        return ws
+
     def ensure(self, workspace: str, actor: str = "valxel") -> dict:
         """The workspace, created (no owner) the first time a product names it: existing deployments
         become workspaces with nothing else changed."""

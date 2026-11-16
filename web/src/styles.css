@@ -721,3 +721,19 @@ table.quality tfoot td { padding: 8px; font-weight: 600; }
 .built-pair figure { margin: 0; }
 .built-pair iframe, .built-pair img, .built-none { display: block; width: 100%; height: 260px; border: 1px solid var(--rule); border-radius: var(--r-m); background: #fff; object-fit: contain; object-position: top; }
 .built-none { display: flex; align-items: center; justify-content: center; background: var(--panel); }
+
+/* The sign-up wizard (pages/Start.tsx) */
+.wizard-steps { display: flex; gap: 18px; flex-wrap: wrap; list-style: none; padding: 0; margin: 0 0 16px; color: var(--ink-3); }
+.wizard-steps li { display: flex; align-items: center; gap: 6px; }
+.wizard-steps .n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid var(--rule); font-size: var(--fs-0); }
+.wizard-steps .current { color: var(--ink); font-weight: 600; }
+.wizard-steps .current .n { border-color: var(--lamp); background: var(--lamp-bg); color: var(--lamp-ink); }
+.wizard-steps .done .n { border-color: var(--clear); background: var(--clear-bg); color: var(--clear-ink); }
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.plan-card { display: flex; flex-direction: column; gap: 6px; padding: 14px; border: 1px solid var(--rule);
+  border-radius: var(--r-s); background: var(--raised); cursor: pointer; }
+.plan-card input { align-self: flex-start; }
+.plan-card.picked { border-color: var(--lamp); box-shadow: 0 0 0 1px var(--lamp); }
+.plan-card:focus-within { box-shadow: var(--focus); }
+.row-gap { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }

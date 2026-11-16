@@ -58,7 +58,11 @@ class InceptionState(TypedDict, total=False):
     cost_usd: Annotated[float, operator.add]
 
 
-def council(services) -> list[str]:
+def council(services, workspace: str = "") -> list[str]:
+    """Who approves an inception's gates: a self-serve workspace's own Product group for its product
+    (the founder is in it), otherwise the platform's product council."""
+    if workspace:
+        return [f"group:{workspace}/product"]
     return list((services.settings.inception or {}).get("council") or [])
 
 
@@ -97,7 +101,7 @@ def build_inception_graph(services, checkpointer=None):
         findings = [f for doc in extra.pop("docs") for f in (report.get(doc) or {}).get("findings", [])]
         packet = {"type": "gate", "gate": name, "kind": "inception", "phase": name, "feature_id": state["inception_id"],
                   "product_id": PRODUCT_ID, "title": state["title"], "preview": preview[:40000], "findings": findings,
-                  "approvers": council(services), "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
+                  "approvers": council(services, vision(state).workspace), "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
                   "budget_usd": float((services.settings.inception or {}).get("budget_usd") or 0), "allowed": list(DECISIONS),
                   **extra}
         return _decide(interrupt(packet))

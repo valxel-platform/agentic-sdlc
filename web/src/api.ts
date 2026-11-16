@@ -368,6 +368,15 @@ export const ROLE_TEXT: Record<Role, string> = {
   viewer: "Sees the workspace's products",
 };
 export interface Workspace { id: string; name: string; plan?: string; role: Role }
+export interface Plan {
+  id: "self-hosted" | "lite" | "full"; name: string; for_whom: string; price: string; card_when: string;
+  sign_in: string; runs_on: string; monthly_usd: number | null; hosted: boolean;
+}
+export interface Plans { plans: Plan[]; trial_days: number; install_guide: string }
+export interface Billing {
+  plan: Plan; provider: string; card_on_file: boolean; trial_ends: string; trial_days_left: number | null;
+  card_needed: boolean; note: string;
+}
 export interface Member {
   id: string; name: string; email: string; github_login: string; role: Role; products: string[];
   status: "invited" | "active" | "suspended"; invited_by?: string; created?: string; updated?: string;
@@ -738,7 +747,7 @@ export const api = {
     request<DecisionBriefData>("GET", `/features/${encodeURIComponent(featureId)}/decisions/${interruptId}/brief`),
   decide: (featureId: string, interruptId: string, body: Record<string, unknown>) =>
     request<{ accepted: boolean }>("POST", `/features/${encodeURIComponent(featureId)}/decisions/${interruptId}`, body),
-  intakeStart: () => request<IntakeSession>("POST", "/intake", {}),
+  intakeStart: (workspace = "") => request<IntakeSession>("POST", "/intake", workspace ? { workspace } : {}),
   intakeList: () => request<IntakeSession[]>("GET", "/intake"),
   intake: (id: string) => request<IntakeSession>("GET", `/intake/${id}`),
   intakeSay: (id: string, text: string) => request<IntakeSession>("POST", `/intake/${id}/messages`, { text }),
@@ -759,6 +768,9 @@ export const api = {
   trace: (id: string) => request<Trace>("GET", `/features/${encodeURIComponent(id)}/trace`),
   traceCsvUrl: (id: string) => `/api/features/${encodeURIComponent(id)}/trace.csv`,
   workspaces: () => request<Workspace[]>("GET", "/workspaces"),
+  plans: () => request<Plans>("GET", "/plans"),
+  billing: (ws: string) => request<Billing>("GET", `/workspaces/${encodeURIComponent(ws)}/billing`),
+  setPlan: (ws: string, plan: "lite" | "full") => request<Workspace>("PUT", `/workspaces/${encodeURIComponent(ws)}/plan`, { plan }),
   createWorkspace: (body: { id: string; name: string; plan: string }) => request<Workspace>("POST", "/workspaces", body),
   workspace: (ws: string) => request<WorkspaceView>("GET", `/workspaces/${encodeURIComponent(ws)}`),
   invite: (ws: string, body: { name: string; email: string; github_login: string; role: Role; products: string[] }) =>

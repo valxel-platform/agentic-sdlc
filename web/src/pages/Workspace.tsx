@@ -56,7 +56,7 @@ export function WorkspacesPage() {
                      id: form.id || e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") })} />
           </label>
           <label className="field">Id <span className="small muted">lowercase letters, digits and dashes; can't change later</span>
-            <input value={form.id} required pattern="[a-z0-9][a-z0-9-]{2,39}" className="mono"
+            <input value={form.id} required pattern="[a-z0-9][a-z0-9\-]{2,39}" className="mono"
                    onChange={(e) => setForm({ ...form, id: e.target.value })} />
           </label>
           <label className="field">Plan

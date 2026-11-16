@@ -148,6 +148,7 @@ class InceptionIn(BaseModel):
     constraints: list[str] = Field(default_factory=list)
     budget_usd: float = Field(0.0, ge=0)
     product_id: str = Field("", pattern=r"^$|^[A-Z]{2,6}$", description="An existing product to describe, or a proposed id")
+    workspace: str = Field("", max_length=40, description="A new product in this workspace, decided by its Product group")
     research: str = Field("quick", pattern="^(quick|thorough|own)$",
                           description="quick or thorough web research, or 'own': your research is in the vision")
 
@@ -237,6 +238,14 @@ class WorkspaceIn(BaseModel):
     id: str = Field(min_length=3, max_length=40, pattern=r"^[a-z0-9][a-z0-9-]+$")
     name: str = Field(min_length=1, max_length=80)
     plan: str = Field(default="lite", pattern=r"^(self-hosted|lite|full)$")
+
+
+class PlanIn(BaseModel):
+    plan: str = Field(pattern=r"^(lite|full)$")
+
+
+class IntakeStartIn(BaseModel):
+    workspace: str = Field("", max_length=40, description="Start a new product in this workspace (its admins only)")
 
 
 class MemberIn(BaseModel):
@@ -448,6 +457,13 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         ws = eng().services.settings.registry[product_id].workspace
         if role_in(user, ws) == "viewer":
             raise HTTPException(403, "Viewers can't start features; ask an admin for the member role")
+
+    def founder_of(user: User, workspace: str) -> None:
+        """An admin of a self-serve workspace may start its products: their Product group approves
+        the product gate, not the platform's council."""
+        admin_of(user, workspace)
+        if not (wsx().get(workspace) or {}).get("self_serve"):
+            raise HTTPException(403, f"{workspace}'s products are started by the product council")
 
     def admin_of(user: User, workspace: str) -> str:
         from ..workspaces import rank
@@ -1100,6 +1116,35 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                               "github_login": user.login if user.idp == "github" else ""},
                        self_serve=body.plan != "self-hosted")
 
+    @api.get("/plans")
+    def list_plans(user: User = Depends(current_user)) -> dict:
+        """The plans table for sign-up, and where the self-hosted install guide is (valxel_sdlc.billing)."""
+        from dataclasses import asdict
+
+        from ..billing import INSTALL_GUIDE, TRIAL_DAYS, plans
+
+        return {"plans": [asdict(p) for p in plans()], "trial_days": TRIAL_DAYS,
+                "install_guide": os.environ.get("VALXEL_INSTALL_GUIDE_URL") or INSTALL_GUIDE}
+
+    @api.get("/workspaces/{workspace}/billing")
+    def workspace_billing(workspace: str, user: User = Depends(current_user)) -> dict:
+        from ..billing import NoBilling, status
+
+        if workspace not in user.roles:
+            raise HTTPException(404, f"No workspace {workspace}")
+        c = getattr(eng().services, "connections", None)
+        provider = (c.billing if c is not None else None) or NoBilling()
+        live = bool(c is not None and c.of(workspace, "aws"))
+        return status(wsx().get(workspace) or {"id": workspace}, provider, live=live)
+
+    @api.put("/workspaces/{workspace}/plan")
+    def change_plan(workspace: str, body: PlanIn, user: User = Depends(current_user)) -> dict:
+        """Owners move a hosted workspace between Lite and Full."""
+        if role_in(user, workspace) != "owner":
+            raise HTTPException(403, f"Only {workspace}'s owners change its plan")
+        admin_of(user, workspace)  # and from a strong sign-in
+        return ws_call(wsx().set_plan, workspace, body.plan, actor=user.login)
+
     @api.get("/workspaces/{workspace}")
     def workspace_view(workspace: str, user: User = Depends(current_user)) -> dict:
         """Members see the workspace; admins also see invitations and the gate mappings to edit."""
@@ -1188,7 +1233,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         return conns().page(workspace)
 
     @api.get("/workspaces/{workspace}/connections/{tool}/install")
-    def install_tool(workspace: str, tool: str, user: User = Depends(current_user)) -> RedirectResponse:
+    def install_tool(workspace: str, tool: str, back: str = "", user: User = Depends(current_user)) -> RedirectResponse:
         """To the vendor's consent screen: GitHub's install page for one of Valxel's Apps, or the
         OAuth consent of Jira, Lucid, Sentry or PagerDuty."""
         from ..connections import GITHUB_APPS, OAUTH_TOOLS, ConnectionError_
@@ -1207,7 +1252,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(404, f"{tool} can't be connected from here yet")
         c = conns()
         try:
-            url = c.github.install_url(tool, c.github_state(signer, workspace=workspace, tool=tool, actor=user.login)) \
+            url = c.github.install_url(tool, c.github_state(signer, workspace=workspace, tool=tool, actor=user.login,
+                                                            back=local_path(back) if back else "")) \
                 if c.github else None
         except ConnectionError_ as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -1226,6 +1272,10 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
         st = signer.loads(state) or {}
         back = f"/workspaces/{q(str(st.get('ws') or ''))}?tab=connections" if st.get("ws") else "/workspaces?tab=connections"
+        if st.get("back"):  # the sign-up wizard, say
+            back = local_path(str(st["back"]))
+            back += "&" if "?" in back else "?"
+            back += f"tool={q(str(st.get('tool') or ''))}"
         if setup_action == "request":  # an org member asked; an org owner must approve the install
             return RedirectResponse(back + "&note=" + q("Waiting for an owner of the GitHub org to approve the install"),
                                     status_code=302)
@@ -1684,7 +1734,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
         settings = eng().services.settings
         starters = list((settings.inception or {}).get("starters") or [])
-        if not can_decide(user, {"approvers": starters}):
+        if body.workspace:
+            founder_of(user, body.workspace)
+        elif not can_decide(user, {"approvers": starters}):
             raise HTTPException(403, f"Only {', '.join(starters) or 'the inception starters'} can start a product inception")
         existing = bool(body.product_id) and body.product_id in settings.registry
         if existing:
@@ -1696,7 +1748,7 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             org = body.org
         v = Vision(name=body.name, org=org, vision=body.vision, goals=body.goals, users=body.users,
                    constraints=body.constraints, budget_usd=body.budget_usd, product_id=body.product_id,
-                   existing=existing, research_depth=body.research)
+                   existing=existing, research_depth=body.research, workspace="" if existing else body.workspace)
         return {"feature_id": eng().create_inception(v, created_by=user.login, background=True)}
 
     @api.get("/inceptions")
@@ -1968,12 +2020,16 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(404, str(exc)) from exc
 
     @api.post("/intake", status_code=201)
-    def intake_start(user: User = Depends(current_user)) -> dict:
+    def intake_start(body: IntakeStartIn | None = None, user: User = Depends(current_user)) -> dict:
         lanes = lanes_for(user)
-        if not lanes:
+        ws = (body.workspace if body else "") or ""
+        if ws:  # a self-serve workspace's admin starts its (first) product
+            founder_of(user, ws)
+        elif not lanes:
             raise HTTPException(403, "You aren't a member of any product organization")
         starters = list((eng().services.settings.inception or {}).get("starters") or [])
-        s = stores["intakes"].create(user.login, lanes, starter=can_decide(user, {"approvers": starters}))
+        s = stores["intakes"].create(user.login, lanes, starter=bool(ws) or can_decide(user, {"approvers": starters}),
+                                     workspace=ws)
         greeting = ("What do you want to do? Describe it in your own words: a change to a product, a goal you want "
                     "to move, or a new product. I'll work out the size with you.")
         s.messages.append({"role": "agent", "text": greeting, "at": s.created_at})
@@ -2104,12 +2160,14 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                 from ..inception import Vision
 
                 starters = list((eng().services.settings.inception or {}).get("starters") or [])
-                if not can_decide(user, {"approvers": starters}):
+                if s.workspace:
+                    founder_of(user, s.workspace)
+                elif not can_decide(user, {"approvers": starters}):
                     raise HTTPException(403, f"Only {', '.join(starters) or 'the inception starters'} can start a product")
                 v = Vision(name=d.name or d.title, org=d.org, vision=d.problem,
                            goals=[measure] if measure else [],
                            users=[] if d.users == AGENT_PROPOSES else [d.users], budget_usd=d.budget_usd,
-                           attachments_text="", research_depth=d.research or "quick")
+                           attachments_text="", research_depth=d.research or "quick", workspace=s.workspace)
                 s.feature_id = eng().create_inception(v, created_by=user.login, background=True)
                 s.kind, what = "inception", "a new product: research first, then the brief for the product council"
         except GovernanceError as exc:

@@ -250,6 +250,7 @@ class Connections:
                  oauth=None) -> None:
         self.workspaces, self.github, self.aws, self.notify, self.clock = workspaces, github, aws, notify, clock
         self.oauth = oauth  # valxel_sdlc.oauth_connections.OAuthTools: Jira, Lucid, Sentry, PagerDuty
+        self.billing = None  # valxel_sdlc.billing.BillingProvider: going live may wait for a card
         # tool -> check(record): "" when it works, otherwise what's wrong in plain words
         self.health_checks = dict(health or {})
 
@@ -309,13 +310,13 @@ class Connections:
         return {"removed": rec, "revoke": TOOL[tool].revoke}
 
     # ------------------------------------------------------------------ GitHub
-    def github_state(self, signer, *, workspace: str, tool: str, actor: str) -> str:
+    def github_state(self, signer, *, workspace: str, tool: str, actor: str, back: str = "") -> str:
         """The signed state an install carries through GitHub and back: which workspace, which
-        App, who started it, for 30 minutes."""
+        App, who started it, where to return (a local page, e.g. the sign-up wizard), for 30 minutes."""
         if tool not in GITHUB_APPS:
             raise ConnectionError_(f"{tool} isn't a GitHub App")
         return signer.dumps({"ws": workspace, "tool": tool, "by": actor, "n": secrets.token_urlsafe(8),
-                             "exp": int(self.clock()) + 1800})
+                             "exp": int(self.clock()) + 1800, **({"back": back} if back else {})})
 
     def github_installed(self, signer, *, state: str, code: str, installation_id: str, actor: str) -> dict:
         """GitHub's redirect after an install: check it, then record the installation."""
@@ -393,6 +394,12 @@ class Connections:
     def aws_launch(self, workspace: str, *, mode: str, region: str, actor: str) -> str:
         if self.aws is None:
             raise ConnectionError_("AWS connections aren't set up on this Valxel")
+        if self.billing is not None:
+            from .billing import blocks_go_live
+
+            why = blocks_go_live(self.workspaces.get(workspace) or {"id": workspace}, self.billing)
+            if why:
+                raise ConnectionError_(why)
         if mode not in ("lite", "full"):
             raise ConnectionError_("Choose lite or full mode")
         url = self.aws.launch_url(workspace, external_id=self.external_id(workspace, actor), mode=mode, region=region)

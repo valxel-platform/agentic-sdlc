@@ -20,6 +20,7 @@ import { PilotPage } from "./pages/Pilot";
 import { LessonsPage } from "./pages/Lessons";
 import { InceptionPage, ProductsPage } from "./pages/Products";
 import { JoinPage, WorkspacePage, WorkspacesPage } from "./pages/Workspace";
+import { StartPage } from "./pages/Start";
 
 function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; onChanged: () => void }) {
   const live = useLiveStatus();
@@ -59,7 +60,10 @@ function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; on
       </header>
       <main>
         <Routes>
-          <Route path="/" element={<Navigate to="/inbox" replace />} />
+          {/* Someone with no workspace and no product yet starts with the sign-up wizard. */}
+          <Route path="/" element={<Navigate to={newcomer(me) ? "/start" : "/inbox"} replace />} />
+          <Route path="/start" element={<StartPage me={me} onChanged={onChanged} />} />
+          <Route path="/start/:ws" element={<StartPage me={me} onChanged={onChanged} />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/board" element={<Board me={me} />} />
           <Route path="/features/:id" element={<FeaturePage canSync={(pid) => me.lanes.some((l) => l.id === pid)} />} />
@@ -86,6 +90,10 @@ function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; on
       </main>
     </div>
   );
+}
+
+function newcomer(me: Me): boolean {
+  return Object.keys(me.roles ?? {}).length === 0 && me.lanes.length === 0;
 }
 
 function App() {

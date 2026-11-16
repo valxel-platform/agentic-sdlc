@@ -159,10 +159,12 @@ def governance_files(vision: Vision, brief: str, architecture: str, roadmap: str
     return files
 
 
-def registry_line(brief: str) -> str:
+def registry_line(brief: str, workspace: str = "") -> str:
+    """The product's registry entry: in the workspace that started it (sign-up), or a workspace of its own."""
     i = ids(brief)
+    ws = workspace or f"wrkspc-{i['product_id'].lower()}"
     return (f"  {i['product_id']}: {{ kind: product, org: {i['org']}, repo: {i['prefix']}governance, ref: main, "
-            f"data_class: {i['data_class']}, workspace: wrkspc-{i['product_id'].lower()} }}")
+            f"data_class: {i['data_class']}, workspace: {ws} }}")
 
 
 def add_to_registry(text: str, line: str) -> str:
@@ -233,7 +235,7 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
 
     if not vision.existing:
         config_repo = config_repo if config_repo is not None else os.environ.get("VALXEL_CONFIG_REPO", "")
-        line = registry_line(brief)
+        line = registry_line(brief, vision.workspace)
 
         def registry_pr() -> dict:
             if not config_repo:

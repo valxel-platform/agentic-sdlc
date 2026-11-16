@@ -515,5 +515,8 @@ def make_connections(svc):
         conns.health_checks["aws"] = aws_health(conns)
     for tool in clients:
         conns.health_checks[tool] = oauth.health(tool)
+    from .billing import provider_for
+
+    conns.billing = provider_for()
     return conns
 

@@ -52,6 +52,7 @@ class Vision:
     existing: bool = False                              # describe an existing product
     attachments_text: str = ""
     research_depth: str = "quick"                       # quick | thorough | own (valxel_sdlc.research)
+    workspace: str = ""                                 # a self-serve workspace's own product: its Product group decides
 
     @staticmethod
     def from_markdown(text: str, *, org: str = "", product_id: str = "", existing: bool = False) -> "Vision":
