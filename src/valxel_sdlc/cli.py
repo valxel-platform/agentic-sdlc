@@ -149,7 +149,7 @@ def _workspaces(args, engine=None) -> int:
     return 0
     
     
-    def _usage_context(args, engine=None) -> int:
+def _usage_context(args, engine=None) -> int:
     """valxel usage context: the ledger's context measurements (valxel_sdlc.context)."""
     from datetime import UTC, datetime, timedelta
 
