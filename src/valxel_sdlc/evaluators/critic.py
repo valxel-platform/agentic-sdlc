@@ -106,7 +106,7 @@ def critique(services, *, phase: str, rubric_skills: tuple[str, ...], content: s
         variant = ctx.get("config_variant", "")
         layers = build_layers(role="critic", skills=rubric_skills, constitution=snap.constitution, product=product,
                               product_context=snap.product_context, parent_texts=ctx.get("parent_texts", {}), tail=tail,
-                              skills_dir=skills_dir_of(services, variant))
+                              skills_dir=skills_dir_of(services, variant), caps=services.settings.context_caps)
         runtime = services.runtime_for(role, variant) if variant else services.runtime_for(role)
         res = runtime.run(AgentTask(
             role=role, phase=phase, tags=tags, layers=layers, skills=tuple(rubric_skills), stub_text=stub_verdict(content, phase, items), max_tokens=1024,

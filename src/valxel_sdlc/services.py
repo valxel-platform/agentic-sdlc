@@ -205,6 +205,10 @@ def agent_stack(settings: Settings, ledger: Ledger):
     runtimes: dict[str, AgentRuntime] = {"generic": generic}
     if settings.mode == "live":
         check_skills(settings.skills_dir or None)
+        from .context import fit_problems
+
+        if problems := fit_problems(settings, available):
+            raise RuntimeError("Context caps don't fit: " + "; ".join(problems))
         runtimes["claude_code"] = ClaudeCodeRuntime(gateway)
         runtimes["codex"] = CodexRuntime(gateway)
     else:

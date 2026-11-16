@@ -127,9 +127,11 @@ sequenceDiagram
 ## Tasks
 ```json
 {"tasks": [{"id": "TASK-1", "repo": "<org>/<repo from the HLD's Affected repos>", "role": "<role>",
-            "acs": ["AC-1"], "files": ["<path>"], "screens": ["S1"]}]}
+            "acs": ["AC-1"], "adrs": ["ADR-<feature id>-1"], "files": ["<path>"], "screens": ["S1"]}]}
 ```
 (every task lists the criteria it implements; a task that implements none directly says why in "why";
+ "adrs" lists the HLD's decisions the task carries out: its coder and reviewer see only those, its
+ criteria and its repo's lines of the HLD;
  a web or mobile task (consumer, mobile) lists the UX spec's screens it builds under "screens", and
  together they build every screen)
 ## Traceability

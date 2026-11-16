@@ -18,7 +18,7 @@ from langgraph.types import Send
 
 from ..agents import PHASE_SPECS
 from ..agents import templates
-from ..agents.context import build_layers, skills_dir_of
+from ..agents.context import build_layers, skills_dir_of, task_texts
 from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
 from .. import diary, performance
 from .. import evals, lessons, telemetry
@@ -245,7 +245,10 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
         role=role, skills=skills, constitution=snap.constitution, product=product,
         parent_texts=ctx.get("parent_texts", {}), tail=tail, product_context=snap.product_context,
         design_knowledge=ctx.get("knowledge_text", ""), skills_dir=skills_dir_of(services, variant),
+        caps=services.settings.context_caps,
     )
+    for layer, note in (layers.meta.get("trimmed") or {}).items():
+        log.info("%s %s/%s: %s cut to its cap: %s", ctx["feature_id"], phase, role, layer, note)
     left = budget_usd if budget_usd is not None else ctx.get("budget_remaining_usd")
     candidates = services.roles_for(role, product.data_class, variant) if variant else services.roles_for(role, product.data_class)
     for i, who in enumerate(candidates):
@@ -275,6 +278,27 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
         res.role = who
         return res
     raise RuntimeError(f"No runtime for role {role} can do phase {phase}")
+
+
+def for_task(ctx: dict, task: dict, where: str = "") -> dict:
+    """The build context with the feature's documents cut down to what this task needs (L5,
+    agents.context.task_texts)."""
+    return {**ctx, "parent_texts": task_texts(ctx.get("parent_texts") or {}, task, where)}
+
+
+def feature_folder(box, parent_texts: dict) -> str:
+    """The feature's full documents in the session's home folder, outside the repo checkout, so a
+    coder can read what its prompt left out. Returns how the prompt names the folder."""
+    home = getattr(box, "home", "")
+    if not home or not parent_texts:
+        return ""
+    from pathlib import Path
+
+    folder = Path(home) / "feature"
+    folder.mkdir(parents=True, exist_ok=True)
+    for kind, text in parent_texts.items():
+        (folder / f"{kind}.md").write_text(text, encoding="utf-8")
+    return "~/feature/"
 
 
 def product_data_class(services, ctx: dict) -> str:
@@ -720,8 +744,9 @@ def build_build_subgraph(services):
 
     def _code_in(task, ctx, mine, fail, payload, box):
         live = services.settings.mode == "live"
+        where = feature_folder(box, ctx.get("parent_texts") or {})
         return call_agent(
-            services, role="coder", phase="build", ctx=ctx, skills=spec.skills, box=box.spec,
+            services, role="coder", phase="build", ctx=for_task(ctx, task, where), skills=spec.skills, box=box.spec,
             tail=(f"Implement {task['id']} in {task['repo']} on branch {ctx.get('branch') or 'feature/' + ctx['feature_id']}. "
                   + ("Your working directory is its checkout on that branch: commit there and push the branch "
                      "(git push origin HEAD). You can't push anywhere else, and your shell reaches only the "
@@ -795,7 +820,7 @@ def build_build_subgraph(services):
             # What the change weakens (a skipped test, a lowered threshold), read from the branch itself.
             weakened = weakening.findings(services.github, repo=r["repo"], branch=r["branch"], files=r["files"])
             res = call_agent(
-                services, role="reviewer", phase="build", ctx=ctx, skills=spec.critic_skills,
+                services, role="reviewer", phase="build", ctx=for_task(ctx, r), skills=spec.critic_skills,
                 tail=(review_tail := f"Review {pr['url']} against the plan and constitution."
                       + (f" Check that what users see changes only when feature flag {ctx['flag']} is on, and that"
                          " the code reads it with default false." if ctx.get("flag") and r.get("role") in FLAGGED_ROLES else "")
@@ -850,7 +875,7 @@ def build_build_subgraph(services):
             second = services.second_opinion("reviewer", product_data_class(services, ctx), reviewed_by=res.role)
             if second.role:
                 # Another model reads the same PR with the same instructions and reply format.
-                sres = call_agent(services, role=second.role, phase="build", ctx=ctx, skills=spec.critic_skills,
+                sres = call_agent(services, role=second.role, phase="build", ctx=for_task(ctx, r), skills=spec.critic_skills,
                                   tail=review_tail, max_tokens=1024, schema=structured.schema(structured.ReviewReply),
                                   stub_text=json.dumps({"approve": True, "blocking": [], "notes": [], "score": 0.9}))
                 reviews[tid] = merge_second_opinion(
@@ -861,7 +886,7 @@ def build_build_subgraph(services):
                 reviews[tid]["second_opinion"] = {"skipped": second.skipped}
             if ctx.get("pilot") and "reviewer_shadow" in services.settings.roles:
                 # Pilot: a cheaper reviewer reads the same PR; only its agreement is kept.
-                sres = call_agent(services, role="reviewer_shadow", phase="build", ctx=ctx, skills=spec.critic_skills,
+                sres = call_agent(services, role="reviewer_shadow", phase="build", ctx=for_task(ctx, r), skills=spec.critic_skills,
                                   tail=review_tail, max_tokens=1024, schema=structured.schema(structured.ReviewReply),
                                   stub_text=json.dumps({"approve": True, "blocking": [], "notes": [], "score": 0.85}))
                 sreply, _ = structured.parse(sres.text, structured.ReviewReply)

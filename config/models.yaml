@@ -60,6 +60,19 @@ context_windows:
   anthropic/claude-sonnet-5-5: 1000000
   anthropic/claude-haiku-5-5: 1000000
 
+# Token caps per prompt layer (gateway/prompt.py's L1 to L6). A layer over its cap is cut at a
+# heading, keeping what comes first, with a note in the prompt naming what was left out; the full
+# documents a coder or reviewer works from are in its session's home folder (~/feature/). L1 (tools)
+# is what the role's tools need; L6 (the task) is the rest of the window. reserve: the room a
+# role's model must have after the capped layers, or the tool refuses to start in live mode.
+# Starting values from the context design; tune them from `valxel usage context`.
+context_caps:
+  L2: 15000     # the role's persona and skills
+  L3: 8000      # platform, product and dependency constitutions
+  L4: 10000     # product context: glossary, architecture summary, conventions
+  L5: 25000     # what this task needs from the feature (PLAN, HLD, UX, filtered to the task)
+  reserve: 64000
+
 # USD per million tokens (input, output, cached input) for models the tool has no built-in price
 # for. A role whose model has no price can't run in live mode, so budgets hold whichever vendor
 # does the work. Fill in OpenAI's current prices to turn on coder_codex and reviewer_second.

@@ -1601,6 +1601,23 @@ These numbers set the caps on prompt layers and the rule for resuming sessions (
 agent context and session management"). A model with no window in config shows as unknown, and
 strict mode warns about it. Codex reports usage per turn, so its fill is an upper bound.
 
+**Caps per prompt layer.** `context_caps` in `config/models.yaml` caps the role's skills (L2,
+15k tokens), the constitutions (L3, 8k), the product context (L4, 10k) and the feature context (L5,
+25k). A layer over its cap is cut at a heading, keeping what comes first, and ends with a note
+naming what was left out: nothing is cut silently, and the cut is the same every time, so the
+prompt still caches. The size check counts 3.5 characters a token, so it errs toward cutting early.
+In live mode the tool won't start if a role's model can't hold the capped layers plus `reserve`
+(64k tokens for the task and the reply).
+
+**Each build task gets its own feature context.** The planner tags each task with the criteria
+(`acs`), decisions (`adrs`), files and screens it covers. A coder or reviewer then sees:
+- **from the plan:** only that task's entry (the others named in one line);
+- **from the HLD:** its ADRs and its repo's lines, plus lines that name no repo (threats, NFRs),
+  and the Data section only for providers and event workers;
+- **from the UX spec:** only its screens, and nothing when it builds none.
+Each cut document says what it left out. A coder's session also gets the full documents in
+`~/feature/`, outside the repo checkout, to read when the prompt isn't enough.
+
 ## Cost: what features and products cost
 
 One cost ledger holds every dollar a product spends, once, in [FinOps FOCUS](https://focus.finops.org/)
