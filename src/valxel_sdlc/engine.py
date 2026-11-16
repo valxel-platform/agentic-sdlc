@@ -349,6 +349,16 @@ class FeatureEngine:
                 continue
         return out
 
+    def expire_transcripts(self) -> int:
+        """Delete agent session transcripts older than a day (valxel_sdlc.sessions): resuming needs
+        them only that long; the handoffs and session records stay."""
+        from .sessions import TranscriptStore
+
+        gone = TranscriptStore(self.services.settings.artifact_dir).expire()
+        if gone:
+            log.info("Deleted %d session transcripts older than a day", gone)
+        return gone
+
     def start_watcher(self, interval_s: float = 30.0) -> None:
         """Poll features that wait on CI or OpenChoreo. Every replica starts it; only the one that
         holds the watcher's lock polls (cluster.py)."""
@@ -400,7 +410,7 @@ class FeatureEngine:
                         self.cluster.prune(30)
                     except Exception:
                         pass
-                    for job in (self.collect_costs, self.review_costs):
+                    for job in (self.collect_costs, self.review_costs, self.expire_transcripts):
                         try:
                             job()
                         except Exception:

@@ -98,6 +98,9 @@ class FeatureState(TypedDict, total=False):
     rerun_repos: Annotated[list[str], last]  # repos whose CI failed: the build retry redoes only their tasks
 
     artifacts: Annotated[dict[str, ArtifactRef], merge_dict]  # kind -> latest ref
+    # task id -> its latest agent session: id, role, model, runtime, when, how full, its handoff
+    # (valxel_sdlc.sessions); the next attempt resumes it or starts from the handoff.
+    sessions: Annotated[dict[str, dict], merge_dict]
     diaries: Annotated[dict[str, list[dict]], merge_dict]  # phase -> the agents' notes for the gate (valxel_sdlc.diary)
     trace_links: Annotated[list[list[str]], operator.add]  # [parent_id, child_id]
     phase_status: Annotated[dict[str, str], merge_dict]  # passed | escalated | resolved

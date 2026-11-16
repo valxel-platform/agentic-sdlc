@@ -19,6 +19,8 @@ _FENCED = re.compile(r"```(?:json|valxel-result)?\s*\n(.*?)\n```", re.S)
 _OBJECT = re.compile(r"\{.*\}", re.S)
 
 
+from ..sessions import Handoff  # noqa: E402 - the coder's reply carries one
+
 class ChecklistItem(BaseModel):
     id: str
     met: bool
@@ -59,6 +61,8 @@ class CoderReply(BaseModel):
     # For the reviewer and the people at G5: each 'Assumed: ...', 'Changed: ...', 'Traded off: ...' or
     # 'Open: ...' (valxel_sdlc.diary); empty when there is nothing the diff doesn't show.
     notes: list[str] = Field(default_factory=list)
+    # For whoever works on this task next, when it isn't this session resumed (valxel_sdlc.sessions).
+    handoff: Handoff = Field(default_factory=Handoff)
 
 
 M = TypeVar("M", bound=BaseModel)

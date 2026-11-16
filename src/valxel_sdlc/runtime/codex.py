@@ -278,13 +278,15 @@ class CodexRuntime:
         extra = plugins.extra(plugins.skills_in_paths(events, PLUGIN_NAMES), task.skills)
         rec = self.gateway.record_external(task.tags, runtime=self.name, model=role.model, layers=task.layers,
                                            response=resp, duration_s=time.monotonic() - started,
-                                           extra_skills=extra)
+                                           extra_skills=extra, session_mode=task.session_mode)
         cap = session_cap(task, role)
         if rec.cost_usd > cap:
             log.warning("%s/%s: the codex session cost $%.2f, over its $%.2f cap", task.phase, task.role,
                         rec.cost_usd, cap)
+        # Codex sessions aren't resumed (valxel_sdlc.sessions): the next one starts from a handoff.
         return AgentResult(text=text, tokens=rec.total_tokens, cost_usd=rec.cost_usd, request_ids=[resp.request_id],
-                           extra_skills=extra)
+                           extra_skills=extra, session_id=resp.session_id, context_fill=rec.record.context_fill,
+                           model=role.model, runtime=self.name)
 
     def on_demand(self, role: str) -> bool:
         """Whether the session gets the template's plugins: the role may load skills by itself, and

@@ -1619,6 +1619,22 @@ In live mode the tool won't start if a role's model can't hold the capped layers
 Each cut document says what it left out. A coder's session also gets the full documents in
 `~/feature/`, outside the repo checkout, to read when the prompt isn't enough.
 
+**Resume a session, or hand off** (`src/valxel_sdlc/sessions.py`).
+- **When it resumes.** A coder whose own tests failed, or whose review asked for changes, resumes
+  its Claude Code session by id, keeping everything it already read. It gets only what to fix now.
+  That needs the same task, role, model and runtime; less than 24 hours since; the session under
+  70% of its window; and its transcript still kept.
+- **Otherwise it starts fresh,** from the handoff document the last session left: done, open,
+  decisions and why, the files that matter, and what not to try again. A fallback to another model
+  always starts fresh, and so do Codex sessions (for now). If a resume fails, for example because
+  Claude Code can't find the transcript, the session starts fresh from the handoff instead of
+  failing.
+- **Transcripts** are kept gzipped beside the feature's artifacts (`<artifact dir>/<feature>/sessions/`),
+  never in the customer's repos, and the watcher deletes them after 24 hours. Handoffs (artifact kind
+  `HANDOFF-<task>`) and each task's session record (in the feature's state) stay.
+- **The ledger** records how each session started (fresh, resumed or handoff), so `valxel usage
+  context` can compare resumed sessions with fresh ones before the rule widens beyond the coder.
+
 ## Cost: what features and products cost
 
 One cost ledger holds every dollar a product spends, once, in [FinOps FOCUS](https://focus.finops.org/)
