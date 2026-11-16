@@ -280,3 +280,66 @@ def test_the_openchoreo_adapter_creates_binds_and_promotes_resources():
     st["bindings"][("field-state", "staging")]["status"]["conditions"] = [
         {"type": "Ready", "status": "False", "reason": "ApplyFailed", "message": "AccessDenied"}]
     assert oc.resource_status(env="staging", **scope) == {"state": "failed", "message": "AccessDenied"}
+
+
+# --- Kafka topics from data contracts (VX-16) -----------------------------------------------------
+
+CONTRACT = """```yaml
+apiVersion: v3.2.0
+kind: DataContract
+id: farm.readings
+name: Field readings
+version: 1.0.0
+schema:
+  - name: readings
+    physicalType: topic
+    physicalName: farm.readings.v1
+    logicalType: object
+    properties:
+      - { name: reading_id, logicalType: string, required: true, primaryKey: true, classification: none }
+customProperties:
+  - { property: owner, value: o/farm-api }
+  - { property: events, value: [valxel.reading.recorded.v1] }
+  - { property: compacted, value: true }
+  - { property: retention, value: 2y }
+  - property: consumers
+    value:
+      o/farm-worker: [reading_id]
+```"""
+
+
+def contract_hld(resources_body: str = "") -> str:
+    return (f"# HLD\n\n## ADRs\n- ADR-1: x\n\n" + (f"## Resources\n{resources_body}\n\n" if resources_body else "")
+            + f"## Datasets\n{CONTRACT}\n\n## Endpoints\n- o/farm-api: project\n")
+
+
+def test_kafka_topics_come_from_contracts_never_from_the_resources_section():
+    assert not CATALOG["types"]["kafka-topic"].get("internal") and CATALOG["types"]["kafka-topic"]["from_contracts"]
+    assert "kafka-topic" not in resources.catalog_guide(CATALOG, "general")
+    found = resources.check(hld("- readings: kafka-topic; topic=farm.readings.v1\n  writes: farm-api"), REPOS, ctx())
+    assert any("comes from the data contracts under '## Datasets'" in f for f in found)
+    [e] = resources.contract_entries(contract_hld(), CATALOG)
+    assert e["name"] == "farm-readings-v1" and e["type"] == "kafka-topic"
+    assert e["access"] == {"farm-api": {"write"}, "farm-worker": {"read"}}
+    assert e["params"] == {"topic": "farm.readings.v1", "compacted": True, "dead_letter": True, "retention_days": 730}
+    assert resources.contract_entries(contract_hld(), {"types": {}}) == []
+
+
+def test_the_plan_gives_each_component_only_its_contracts_access_and_its_own_kafka_identity():
+    plan = resources.plan(contract_hld(), CATALOG, lambda c: ("farm", None), product_id="FARM",
+                          feature_id="FARM-1", data_class="general")
+    by_name = {r["name"]: r for r in plan}
+    topic = by_name["farm-readings-v1"]
+    assert topic["stateful"] and topic["owner"] == "farm-api"
+    assert [(c["component"], c["access"]) for c in topic["parameters"]["consumers"]] == [
+        ("farm-api", ["write"]), ("farm-worker", ["read"])]
+    reader = next(c for c in topic["parameters"]["consumers"] if c["component"] == "farm-worker")
+    assert "kafka-cluster:ReadData" in reader["actions"] and "kafka-cluster:WriteData" not in reader["actions"]
+    assert {r["type"] for r in plan if r["owner"] == "farm-worker"} == {"workload-identity", "kafka-user"}
+    assert by_name["farm-worker-kafka"]["parameters"]["component"] == "farm-worker"
+    snippet = resources.workload_snippet(contract_hld(), CATALOG, "farm-worker")
+    assert "- ref: farm-readings-v1" in snippet and "topic: FARM_READINGS_V1_TOPIC" in snippet
+    assert "- ref: farm-worker-kafka" in snippet and "secret: KAFKA_SECRET" in snippet
+    text = resources.instruction({"hld_text": contract_hld(), "aws_catalog": CATALOG}, {"repo": "o/farm-worker"})
+    assert "farm.readings.v1 (read)" in text and "starting with 'farm-worker'" in text and "AWS_MSK_IAM" in text
+    assert "DynamoDB" not in text  # only Kafka here: no AWS SDK guidance

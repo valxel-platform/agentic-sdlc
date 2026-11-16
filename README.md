@@ -575,6 +575,12 @@ extensions (owner, events, compacted, retention, tenant, consumers) in its `cust
   the same module (`.github/scripts/datasets.py`) on every change, comparing with `main`.
 - The schema components validate against is generated from the contract (`json_schema`), and
   refuses any property the contract doesn't have, so nothing unclassified is published.
+- **Topics and access.** Each contract becomes a `kafka-topic` Resource (the catalog's
+  `from_contracts` type, which an architect can't list under Resources). Its owner gets write
+  access, its consumers get read, and each component it names gets a `kafka-user`. On MSK the
+  access is an IAM policy on the component's workload identity. On Strimzi it is a SCRAM user with
+  ACLs (valxel-platform/platform-resources). A topic or group the contracts don't give a
+  component is refused by Kafka itself. Consumer groups start with the component's name.
 
 
 responses); after a deploy to dev the agent's post-deploy job runs the same evals against the

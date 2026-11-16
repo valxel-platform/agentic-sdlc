@@ -196,6 +196,50 @@ types:
   # Not chosen in designs: the pipeline creates one per component that reads or writes an AWS
   # resource. An IAM role trusted only by the component's service account through EKS Pod
   # Identity; each resource's Composition attaches a policy with just its declared actions.
+  kafka-topic:
+    # Never picked by hand: the SDLC tool writes one per approved data contract (the HLD's
+    # Datasets, ODCS v3), with the contract's owner writing and its consumers reading. Topics,
+    # their access and their dead-letter topic exist only because a contract says so.
+    from_contracts: true
+    service: "Apache Kafka topic: Amazon MSK in production, Strimzi elsewhere (provider-kafka)"
+    use_for: "The product's domain events (VX-16): one topic per data contract, keyed by record id."
+    not_for: "Anything without an approved data contract; work queues with per-message retries (sqs-queue); device ingest (kinesis-stream)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    parameters:
+      topic: { type: string, required: true }
+      partitions: { type: integer, default: 6, min: 1, max: 96 }
+      retention_days: { type: integer, default: 7, min: 1, max: 3650 }
+      compacted: { type: boolean, default: false }
+      dead_letter: { type: boolean, default: true }
+    access:
+      read: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:DescribeGroup, kafka-cluster:AlterGroup]
+      write: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently]
+    outputs: { topic: TOPIC, bootstrap: BOOTSTRAP, auth: AUTH }
+    sizes:
+      small: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+      medium: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+      large: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+    built_in: [replication factor 3 and min.insync.replicas 2, a dead-letter topic its readers may write, IAM (MSK) or a SCRAM user per component (Strimzi) with access to this topic only, consumer groups named after the component only]
+    cloudwatch_namespace: AWS/Kafka
+    alarms:
+      consumers-behind: { metric: EstimatedMaxTimeLag, statistic: Maximum, period_s: 300, periods: 3, above: 300, severity: sev2, says: "A consumer group is over five minutes behind on this topic; what it keeps (a store, an index, a report) is stale." }
+    emulator: "Kafka in Testcontainers (the templates' KafkaContainer)"
+
+  kafka-user:
+    internal: true
+    service: "One component's Kafka identity: IAM through its workload identity (MSK), a SCRAM user (Strimzi)"
+    use_for: "Signing a component in to the environment's Kafka; what it may do is only what each kafka-topic grants."
+    data_classes: [general, payments, phi]
+    stateful: false
+    parameters:
+      component: { type: string, required: true }
+    access: {}
+    outputs: { username: KAFKA_USERNAME, secret: KAFKA_SECRET }
+    sizes:
+      small: { monthly_usd: 0 }
+    built_in: [a password only in the component's own namespace (Strimzi), no keys at all (MSK)]
+
   workload-identity:
     internal: true
     service: "IAM role with EKS Pod Identity"

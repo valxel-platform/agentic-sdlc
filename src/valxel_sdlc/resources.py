@@ -21,6 +21,10 @@ ClusterResourceType backed by a Crossplane Composition (valxel-platform/platform
    (`dependencies.resources`, outputs bound to environment variables) and reaches it behind a port
    with the emulator in tests.
 
+   Kafka topics are never listed here: the catalog's `from_contracts` type (kafka-topic) is
+   written from the HLD's data contracts (datasets.py), one per topic, the contract's owner
+   writing and its consumers reading, with a kafka-user per component they name.
+
 3. Environments (pipeline). OpenChoreo creates a Resource per entry, plus a workload identity per
    component that uses one: an IAM role through EKS Pod Identity whose policy holds only the
    actions its declared access needs. Each stage binds the Resource's release to the environment
@@ -42,6 +46,8 @@ ACCESS_VERBS = {"reads": "read", "writes": "write", "deletes": "delete", "publis
 # Roles that run in the platform and may hold an AWS identity.
 AWS_ROLES = ("provider", "event-worker", "agent", "mcp-server", "knowledge", "bff")
 IDENTITY_TYPE = "workload-identity"
+KAFKA_USER_TYPE = "kafka-user"
+RETENTION_DAYS = {"d": 1, "m": 30, "y": 365}
 # Parameters whose change replaces the resource (and its data).
 REPLACING = {"dynamodb-table": ("partition_key", "sort_key"), "sqs-queue": ("fifo",), "sns-topic": ("fifo",),
              "postgres-crossplane": ("database",)}
@@ -185,9 +191,13 @@ def check(hld: str, repos: list[dict], ctx: dict) -> list[str]:
             out.append(f"Resource {name} is declared twice")
         seen.add(name)
         t = types.get(kind)
+        if t is not None and t.get("from_contracts"):
+            out.append(f"{name}: {kind} isn't listed under Resources; it comes from the data contracts under "
+                       "'## Datasets', one per topic (VX-16)")
+            continue
         if t is None or t.get("internal"):
             out.append(f"{name}: {kind} isn't in the platform catalog; use one of "
-                       f"{sorted(k for k, v in types.items() if not v.get('internal'))}, or ask the platform team "
+                       f"{sorted(k for k, v in types.items() if _pickable(v))}, or ask the platform team "
                        "to add a type (VX-19)")
             continue
         if ctx.get("data_class") and ctx["data_class"] not in t["data_classes"]:
@@ -290,12 +300,53 @@ def summary(hld: str, catalog: dict, pipeline: list[str], aws: dict | None) -> d
             "note": "Planning figures from the platform catalog, not quotes."}
 
 
+def _pickable(t: dict) -> bool:
+    """A type an architect may list under Resources (not internal, not written from contracts)."""
+    return not t.get("internal") and not t.get("from_contracts")
+
+
+def _retention_days(value) -> int:
+    m = re.fullmatch(r"(\d+)([dmy])", str(value or ""))
+    return min(int(m.group(1)) * RETENTION_DAYS[m.group(2)], 3650) if m else 7
+
+
+def contract_entries(hld: str, catalog: dict) -> list[dict]:
+    """Resources entries for the HLD's data contracts: one kafka-topic per topic, the owner writing
+    and each consumer reading, in parse_resources' shape."""
+    from .datasets import consumers, extensions, parse_hld, topic
+
+    kind = next((k for k, t in (catalog.get("types") or {}).items() if t.get("from_contracts")), "")
+    if not kind:
+        return []
+    out = []
+    for c in parse_hld(hld)[0]:
+        name = re.sub(r"[^a-z0-9]+", "-", topic(c).lower()).strip("-")[:40]
+        owner = str(extensions(c).get("owner") or "").split("/", 1)[-1]
+        if not name or not owner:
+            continue
+        access: dict[str, set] = {owner: {"write"}}
+        for repo in consumers(c):
+            access.setdefault(repo.split("/", 1)[-1], set()).add("read")
+        ext = extensions(c)
+        params = {"topic": topic(c), "compacted": bool(ext.get("compacted")), "dead_letter": True,
+                  "retention_days": _retention_days(ext.get("retention"))}
+        out.append({"name": name, "type": kind, "line": f"contract {c.get('id')}", "params": params,
+                    "sizes": {}, "access": access})
+    return out
+
+
+def _entries(hld: str, catalog: dict) -> list[dict]:
+    return parse_resources(hld) + contract_entries(hld, catalog)
+
+
 def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: str, data_class: str) -> list[dict]:
-    """The OpenChoreo Resources to create: one per entry, plus a workload identity per component
-    that needs IAM access. `owner_target(component)` -> (project, namespace) of the component."""
+    """The OpenChoreo Resources to create: one per entry (and per data contract's topic), plus a
+    workload identity per component that needs IAM access and a Kafka identity per component a
+    contract names. `owner_target(component)` -> (project, namespace) of the component."""
     out: list[dict] = []
     identities: dict[str, dict] = {}
-    for e in parse_resources(hld):
+    kafka_users: set[str] = set()
+    for e in _entries(hld, catalog):
         t = (catalog.get("types") or {}).get(e["type"])
         if t is None or not e["access"]:
             continue
@@ -306,6 +357,8 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
             consumers.append({"component": comp, "access": sorted(access), "actions": acts})
             if acts:
                 identities.setdefault(comp, {"component": comp})
+        if t.get("from_contracts"):
+            kafka_users |= set(e["access"])
         owner = next((c for c, a in sorted(e["access"].items()) if "write" in a), sorted(e["access"])[0])
         project, namespace = owner_target(owner)
         params = {p: (str(v).split("+") if ((t.get("parameters") or {}).get(p) or {}).get("type") == "list" else v)
@@ -325,6 +378,14 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
                        "parameters": {"component": comp, "tags": {"valxel:product": product_id,
                                                                   "valxel:data-class": data_class}},
                     "sizes": {}, "outputs": {}})
+    user_type = (catalog.get("types") or {}).get(KAFKA_USER_TYPE)
+    for comp in sorted(kafka_users) if user_type else []:
+        project, namespace = owner_target(comp)
+        ids.append({"name": f"{comp}-kafka", "type": KAFKA_USER_TYPE, "project": project, "namespace": namespace,
+                    "owner": comp, "stateful": False,
+                    "parameters": {"component": comp, "tags": {"valxel:product": product_id,
+                                                               "valxel:data-class": data_class}},
+                    "sizes": {}, "outputs": dict(user_type.get("outputs") or {})})
     return ids + out
 
 
@@ -335,12 +396,18 @@ def env_name(resource: str, output: str) -> str:
 def workload_snippet(hld: str, catalog: dict, component: str) -> str:
     """What the component's workload.yaml gets under dependencies.resources."""
     lines = []
-    for e in parse_resources(hld):
+    kafka = False
+    for e in _entries(hld, catalog):
         t = (catalog.get("types") or {}).get(e["type"])
         if t is None or component not in e["access"]:
             continue
+        kafka = kafka or bool(t.get("from_contracts"))
         lines += [f"    - ref: {e['name']}", "      envBindings:"]
         lines += [f"        {out}: {env_name(e['name'], out)}" for out in (t.get("outputs") or {})]
+    user = (catalog.get("types") or {}).get(KAFKA_USER_TYPE)
+    if kafka and user:
+        lines += [f"    - ref: {component}-kafka", "      envBindings:"]
+        lines += [f"        {out}: KAFKA_{out.upper()}" for out in (user.get("outputs") or {})]
     return ("dependencies:\n  resources:\n" + "\n".join(lines)) if lines else ""
 
 
@@ -351,7 +418,17 @@ def instruction(ctx: dict, task: dict) -> str:
     snippet = workload_snippet(hld, catalog, comp) if hld and catalog else ""
     if not snippet:
         return ""
-    used = [e for e in parse_resources(hld) if comp in e["access"]]
+    every = [e for e in _entries(hld, catalog) if comp in e["access"]]
+    kafka = [e for e in every if ((catalog.get("types") or {}).get(e["type"]) or {}).get("from_contracts")]
+    used = [e for e in every if e not in kafka]
+    topics = (" Its Kafka topics come from the data contracts: " + ", ".join(
+        f"{e['params']['topic']} ({'/'.join(sorted(e['access'][comp]))})" for e in kafka)
+        + ". Read the topic and bootstrap servers from their environment variables and sign in as KAFKA_AUTH"
+          " says: iam (MSK) with the pod's identity through SASL AWS_MSK_IAM, scram (elsewhere) with SCRAM-SHA-512"
+          " and the credentials in the Secret KAFKA_SECRET names. Name every consumer group starting with "
+          f"'{comp}': Kafka refuses any other group, and any topic the contracts don't give it.") if kafka else ""
+    if not used:
+        return f" This component uses Kafka topics (VX-16). Add to workload.yaml:\n{snippet}\n" + topics.strip()
     names = ", ".join(f"{e['name']} ({e['type']}, {'/'.join(sorted(e['access'][comp]))})" for e in used)
     emulators = sorted({catalog["types"][e["type"]].get("emulator", "") for e in used if e["type"] in catalog["types"]})
     return (f" This component uses {names} (VX-19). Add to workload.yaml:\n{snippet}\n"
@@ -360,12 +437,12 @@ def instruction(ctx: dict, task: dict) -> str:
             + ", ".join(e for e in emulators if e) + ". Use only the access listed. Trace every AWS call with"
             " OpenTelemetry's AWS SDK instrumentation on the client (Java: opentelemetry-aws-sdk-2.2's"
             " AwsSdkTelemetry interceptor, as the event worker template's StoreConfig does; Python:"
-            " opentelemetry-instrumentation-botocore), so the calls show in OpenChoreo's traces.")
+            " opentelemetry-instrumentation-botocore), so the calls show in OpenChoreo's traces." + topics)
 
 
 def catalog_guide(catalog: dict, data_class: str) -> str:
     """The architect's view of the catalog."""
-    types = {k: v for k, v in (catalog.get("types") or {}).items() if not v.get("internal")}
+    types = {k: v for k, v in (catalog.get("types") or {}).items() if _pickable(v)}
     if not types:
         return ""
     lines = ["AWS services the platform offers (VX-19). Use one only when the platform defaults "
