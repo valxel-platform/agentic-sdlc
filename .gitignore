@@ -7,3 +7,10 @@ __pycache__/
 .env
 dist/
 build/
+
+# Test coverage data and reports
+.coverage
+.coverage.*
+coverage.xml
+coverage-*.data
+new-code.json
