@@ -12,6 +12,7 @@ and when a GitHub webhook says something changed.
   production (same)
   (store apps, role mobile: repo, sha, kind=store; done when the repo posts "release / <stage>")
   rollout    repo, sha, fraction, not_before, context: the repo posted <context> (valxel_sdlc.store)
+  connection workspace, orgs, repos               the workspace's GitHub App reaches them (connections.py)
 """
 
 from __future__ import annotations
@@ -190,6 +191,12 @@ class WaitChecker:
             done = getattr(prov, "done", None)
             return {"status": "success", "wait": wait, "at": now()} if callable(done) and done(
                 packet.get("request_ids") or []) else None
+        if wait == "connection":  # a self-serve workspace's GitHub connection (valxel_sdlc.connections)
+            conns = getattr(self.services, "connections", None)
+            if conns is None:
+                return None
+            missing = conns.github_missing(packet["workspace"], packet.get("orgs") or [], packet.get("repos") or [])
+            return None if missing else {"status": "success", "wait": wait, "at": now()}
         if wait == "go_live":  # a hosted lite product's G6: over once product.yaml says it is live
             from .environments import hosted
 

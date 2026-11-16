@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Send
+from langgraph.types import Send, interrupt
 
 from ..agents import PHASE_SPECS
 from ..agents import templates
@@ -966,11 +966,21 @@ def pr_body(result: dict) -> str:
     return result["summary"] + (f"\n\n{notes}" if notes else "")
 
 
+# Phases that read or change the product's repos: they wait for its GitHub connection.
+CONNECTED_PHASES = ("architecture", "build")
+
+
 def make_phase_node(phase: str, services):
     sub = build_build_subgraph(services) if phase == "build" else build_phase_subgraph(phase, services)
     spec = PHASE_SPECS[phase]
 
     def node(state: FeatureState, config: RunnableConfig) -> dict:
+        if phase in CONNECTED_PHASES:  # a self-serve workspace's repos must be connected first
+            from ..connections import connection_wait
+
+            packet = connection_wait(services, state)
+            if packet:
+                interrupt({**packet, "phase": phase, "since": datetime.now(timezone.utc).isoformat()})
         product = services.feature_snapshot(state).product
         spent = float(state.get("cost_usd", 0.0))
         budget = float(state.get("token_budget_usd") or product.budget_usd)

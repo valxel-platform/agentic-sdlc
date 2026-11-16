@@ -379,6 +379,15 @@ export interface WorkspaceView extends Workspace {
 }
 export interface AuditEntry { at: string; actor: string; action: string; target?: string; detail?: Record<string, unknown> }
 export interface Invited extends Member { invite_url: string; emailed: boolean }
+export interface Connection {
+  tool: string; account: string; status: "connected" | "needs_attention"; connected_by: string; connected_at: number;
+  last_ok: number; last_error: string;
+  reach: { account_type?: string; selection?: "all" | "selected"; repos?: string[]; installation_id?: number };
+}
+export interface ToolRow {
+  tool: string; name: string; asked_when: string; grants: string; revoke: string; available: boolean;
+  status: "connected" | "needs_attention" | "not_connected"; connections: Connection[];
+}
 
 export interface IncidentAction {
   id: string; type: "flag_off" | "rollback" | "hotfix" | "intent_change" | "monitor"; text: string;
@@ -767,6 +776,9 @@ export const api = {
     request<void>("DELETE", `/workspaces/${encodeURIComponent(ws)}/groups/${encodeURIComponent(slug)}`),
   setGates: (ws: string, productId: string, gates: Record<string, string[]>) =>
     request<{ version: number }>("PUT", `/workspaces/${encodeURIComponent(ws)}/products/${encodeURIComponent(productId)}/gates`, { gates }),
+  connections: (ws: string) => request<ToolRow[]>("GET", `/workspaces/${encodeURIComponent(ws)}/connections`),
+  disconnect: (ws: string, tool: string, account: string) =>
+    request<{ revoke: string }>("DELETE", `/workspaces/${encodeURIComponent(ws)}/connections/${encodeURIComponent(tool)}/${encodeURIComponent(account)}`),
   workspaceAudit: (ws: string) => request<AuditEntry[]>("GET", `/workspaces/${encodeURIComponent(ws)}/audit`),
   lessons: (productId: string) => request<LessonsOverview>("GET", `/products/${encodeURIComponent(productId)}/lessons`),
   pilotReport: (productId: string) => request<PilotReport>("GET", `/reports/pilot?product_id=${encodeURIComponent(productId)}`),

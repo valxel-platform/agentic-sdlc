@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import secrets
 import time
@@ -64,6 +65,8 @@ WEB_DIST = Path(
     or Path(os.environ.get("VALXEL_ROOT") or Path(__file__).resolve().parents[3]) / "web" / "dist"
 )
 
+
+log = logging.getLogger(__name__)
 
 def record_review_effort(engine, kind: str, event: dict) -> None:
     """A person's review or review comment on one of the tool's pull requests counts as their
@@ -342,6 +345,9 @@ def create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..workspaces import PostgresWorkspaceStore, Workspaces
 
         services.workspaces = Workspaces(PostgresWorkspaceStore(pool), services.settings.registry)
+        from ..services import make_connections
+
+        services.connections = make_connections(services)
         work = WorkSync(services, PostgresLinkStore(pool),
                         os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080")
         from ..cluster import PostgresCluster
@@ -1084,7 +1090,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     def create_workspace(body: WorkspaceIn, user: User = Depends(current_user)) -> dict:
         """A new workspace, with the signed-in person as its owner, in every approver group."""
         return ws_call(wsx().create, body.id, name=body.name, actor=user.login, plan=body.plan,
-                       owner={"name": user.name or user.login, "email": user.email, "github_login": user.login})
+                       owner={"name": user.name or user.login, "email": user.email,
+                              "github_login": user.login if user.idp == "github" else ""},
+                       self_serve=body.plan != "self-hosted")
 
     @api.get("/workspaces/{workspace}")
     def workspace_view(workspace: str, user: User = Depends(current_user)) -> dict:
@@ -1158,6 +1166,77 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if eng().services.settings.registry.get(product_id) is None or wsx().workspace_of(product_id) != workspace:
             raise HTTPException(404, f"{product_id} isn't in {workspace}")
         return ws_call(wsx().set_mapping, product_id, body.gates, actor=user.login)
+
+    # --- connections: each workspace's tools (valxel_sdlc.connections) ---
+    def conns():
+        c = getattr(eng().services, "connections", None)
+        if c is None:
+            raise HTTPException(404, "Connections are off")
+        return c
+
+    @api.get("/workspaces/{workspace}/connections")
+    def workspace_connections(workspace: str, user: User = Depends(current_user)) -> list[dict]:
+        """Every tool, connected or not. Members see it; admins connect and disconnect."""
+        if workspace not in user.roles:
+            raise HTTPException(404, f"No workspace {workspace}")
+        return conns().page(workspace)
+
+    @api.get("/workspaces/{workspace}/connections/{tool}/install")
+    def install_tool(workspace: str, tool: str, user: User = Depends(current_user)) -> RedirectResponse:
+        """To the vendor's consent screen: GitHub's install page for one of Valxel's Apps."""
+        from ..connections import GITHUB_APPS, ConnectionError_
+
+        admin_of(user, workspace)
+        if tool not in GITHUB_APPS:
+            raise HTTPException(404, f"{tool} can't be connected from here yet")
+        c = conns()
+        try:
+            url = c.github.install_url(tool, c.github_state(signer, workspace=workspace, tool=tool, actor=user.login)) \
+                if c.github else None
+        except ConnectionError_ as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if url is None:
+            raise HTTPException(409, "GitHub installs aren't set up on this Valxel")
+        return RedirectResponse(url, status_code=302)
+
+    @api.get("/connections/github/callback")
+    def github_installed(request: Request, state: str = "", code: str = "", installation_id: str = "",
+                         setup_action: str = "", user: User = Depends(current_user)) -> RedirectResponse:
+        """Where GitHub sends the person after an install: check it's theirs, record it, and go back
+        to the connections page saying what happened."""
+        from urllib.parse import quote as q
+
+        from ..connections import ConnectionError_
+
+        st = signer.loads(state) or {}
+        back = f"/workspaces/{q(str(st.get('ws') or ''))}?tab=connections" if st.get("ws") else "/workspaces?tab=connections"
+        if setup_action == "request":  # an org member asked; an org owner must approve the install
+            return RedirectResponse(back + "&note=" + q("Waiting for an owner of the GitHub org to approve the install"),
+                                    status_code=302)
+        try:
+            if st.get("ws"):
+                admin_of(user, st["ws"])
+            rec = conns().github_installed(signer, state=state, code=code, installation_id=installation_id,
+                                           actor=user.login)
+        except ConnectionError_ as exc:
+            return RedirectResponse(back + "&error=" + q(str(exc)), status_code=302)
+        for fid in eng().waiting_on_external():  # features waiting for this connection go on now
+            try:
+                if any(p.get("wait") == "connection" and p.get("workspace") == rec["workspace"]
+                       for p in eng().pending(fid)):
+                    eng().poke(fid)
+            except Exception:
+                log.exception("Couldn't wake %s after the GitHub install", fid)
+        return RedirectResponse(back + "&connected=" + q(rec["account"]), status_code=302)
+
+    @api.delete("/workspaces/{workspace}/connections/{tool}/{account}")
+    def disconnect_tool(workspace: str, tool: str, account: str, user: User = Depends(current_user)) -> dict:
+        """Forget the connection here. The vendor's side (the App, the stack) is the customer's to remove."""
+        admin_of(user, workspace)
+        try:
+            return conns().disconnect(workspace, tool, account, actor=user.login)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
 
     @api.get("/workspaces/{workspace}/audit")
     def workspace_audit(workspace: str, limit: int = 200, user: User = Depends(current_user)) -> list[dict]:

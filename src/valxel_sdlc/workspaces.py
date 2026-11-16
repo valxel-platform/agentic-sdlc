@@ -173,12 +173,16 @@ class Workspaces:
     def get(self, workspace: str) -> dict | None:
         return self.store.get("workspace", workspace, "")
 
-    def create(self, workspace: str, *, name: str, actor: str, owner: dict | None = None, plan: str = "lite") -> dict:
+    def create(self, workspace: str, *, name: str, actor: str, owner: dict | None = None, plan: str = "lite",
+               self_serve: bool = False) -> dict:
         """A workspace with the default approver groups; `owner` ({name, email, github_login}) becomes
         its owner and joins every group, so a solo founder approves every gate."""
         if self.get(workspace):
             raise WorkspaceError(f"Workspace {workspace} already exists")
-        ws = {"id": workspace, "name": name.strip() or workspace, "plan": plan, "created": now(), "created_by": actor}
+        # self_serve: made by sign-up, so its tools connect from its connections page and a feature waits
+        # for them (valxel_sdlc.connections); a deployment's own workspaces were connected by hand.
+        ws = {"id": workspace, "name": name.strip() or workspace, "plan": plan, "created": now(), "created_by": actor,
+              **({"self_serve": True} if self_serve else {})}
         self.store.put("workspace", workspace, "", ws)
         for g in DEFAULT_GROUPS:
             self.store.put("group", workspace, slug(g), {"workspace": workspace, "slug": slug(g), "name": g, "members": []})

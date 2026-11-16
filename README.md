@@ -169,6 +169,40 @@ who aren't in a product's GitHub teams join through it (`src/valxel_sdlc/workspa
   from the cookie, so suspending or removing someone takes effect at once.
 - **Audited.** Every change to members, groups and mappings is in `GET /api/workspaces/{ws}/audit`.
 
+#### Connections
+
+A workspace's **Connections** tab lists every tool, connected or not: GitHub, GitHub repo creation,
+AWS, Jira, Lucid, Sentry and PagerDuty (`src/valxel_sdlc/connections.py`). Each row shows what
+Valxel can reach, who connected it and when it last worked. Only admins connect and disconnect,
+and every change is in the audit log. GitHub connects today; the others follow.
+
+**GitHub** connects by installing Valxel's two GitHub Apps from that tab, one after the other:
+Delivery (code, pull requests, checks, alerts) and Provisioning (creating repos, used only by the
+provisioning worker). An install can be on an org or on a person's own account, and a workspace
+can have several. Valxel stores no GitHub secret for it: a connection is the installation's
+record. To turn installs on, in each App's settings on GitHub:
+
+1. Set the **Callback URL** to `<VALXEL_PUBLIC_URL>/api/connections/github/callback`, and tick
+   **Request user authorization (OAuth) during installation** and **Redirect on update**.
+2. Give Valxel the App's slug and OAuth client: `VALXEL_GITHUB_APP_SLUG`, `VALXEL_GITHUB_APP_CLIENT_ID`
+   and `VALXEL_GITHUB_APP_CLIENT_SECRET`, and the same with `VALXEL_GITHUB_PROVISIONER_APP_` for
+   Provisioning.
+
+How it behaves:
+- **Each install is checked as the installer's own.** GitHub returns a code with the install, and
+  Valxel exchanges it for that person's short-lived token. The installation must be one GitHub
+  says they can see, and of the right App, or it isn't recorded. Without this, anyone could attach
+  another customer's installation id to their own workspace. The token is used for those two reads
+  and dropped.
+- **Health.** Every hour, the Delivery App reads its installation. An uninstalled or suspended App
+  turns the row to *Needs attention* and emails the workspace's admins once, with a Reconnect
+  button on the page.
+- **Features wait.** A self-serve workspace's feature (any made from the Workspaces page, except
+  self-hosted ones) waits before architecture and build until GitHub reaches its product's org and
+  repos ("Waiting for: connect GitHub (farm-field-api isn't in the GitHub App's repos)"). It carries
+  on by itself once connected. Workspaces set up by hand, with the Apps installed in their orgs,
+  never wait.
+
 An existing deployment's workspaces have no owner yet. Give each one from the command line:
 
 ```bash

@@ -349,6 +349,11 @@ class FeatureEngine:
                 continue
         return out
 
+    def check_connections(self) -> int:
+        """Each workspace's connections, one cheap read each (valxel_sdlc.connections)."""
+        conns = getattr(self.services, "connections", None)
+        return conns.check_all() if conns is not None else 0
+
     def start_watcher(self, interval_s: float = 30.0) -> None:
         """Poll features that wait on CI or OpenChoreo. Every replica starts it; only the one that
         holds the watcher's lock polls (cluster.py)."""
@@ -400,7 +405,7 @@ class FeatureEngine:
                         self.cluster.prune(30)
                     except Exception:
                         pass
-                    for job in (self.collect_costs, self.review_costs):
+                    for job in (self.collect_costs, self.review_costs, self.check_connections):
                         try:
                             job()
                         except Exception:
@@ -1977,7 +1982,7 @@ def rail(s: dict, pending: list[dict], *, running: bool) -> list[dict]:
         stations.append({"key": key, "kind": kind, "state": st})
     for p in pending:  # CI or OpenChoreo: work in progress, not a person's turn
         if p["type"] == "external":
-            st = next((x for x in stations if x["key"] == WAIT_STATION.get(p.get("wait"), "build")), None)
+            st = next((x for x in stations if x["key"] == (p.get("phase") or WAIT_STATION.get(p.get("wait"), "build"))), None)
             if st:
                 st["state"] = "current"
     if running and not any(x["state"] in ("waiting", "current") for x in stations):

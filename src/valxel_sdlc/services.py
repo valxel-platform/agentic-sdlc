@@ -98,6 +98,7 @@ class Services:
     # valxel_sdlc.workspaces.Workspaces: members, roles, approver groups and gate mappings (in memory
     # until the API wires Postgres)
     workspaces: object = None
+    connections: object = None  # valxel_sdlc.connections: each workspace's tools
 
     def _stack(self, variant: str = ""):
         return self.canary if variant == "canary" and self.canary is not None else self
@@ -304,6 +305,7 @@ def build_services(
     from .notify import Notifier
 
     svc.notifier = Notifier(settings.artifact_dir)
+    svc.connections = make_connections(svc)
     svc.canary = default_canary(settings, ledger)
     from .evals import InMemoryEvalStore
 
@@ -484,3 +486,20 @@ def default_delivery(settings: Settings) -> tuple[GitHub, OpenChoreo]:
     return (GitHubRest(tokens, api=settings.github_api),
             OpenChoreoMcp(server, default_namespace=oc.setting("namespace") or "default",
                           console_url=oc.setting("console_url")))
+
+
+def make_connections(svc):
+    """The workspaces' connections: GitHub installs (when the Apps' slugs and OAuth clients are set),
+    the Delivery App's health check (when it can sign), and admins' emails through the notifier."""
+    from .connections import Connections, GitHubAppSettings, GitHubInstalls, delivery_health
+    from .signing import github_app_configured, github_app_tokens
+
+    apps = {app: GitHubAppSettings.from_env(app) for app in ("delivery", "provisioner")}
+    github = GitHubInstalls(apps, api=svc.settings.github_api) if any(apps.values()) else None
+    health = {}
+    if svc.settings.mode == "live" and github_app_configured():
+        health["github"] = delivery_health(github_app_tokens(api=svc.settings.github_api))
+    n = svc.notifier
+    notify = (lambda to, subject, text: n._send_email(to, subject, text)) if n is not None and n.email_ready() else None
+    return Connections(svc.workspaces, github=github, notify=notify, health=health)
+

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
-  api, ROLE_TEXT, ROLES, type AuditEntry, type Group, type Invited, type Me, type Member, type Role, type Workspace,
-  type WorkspaceView,
+  api, ROLE_TEXT, ROLES, type AuditEntry, type Group, type Invited, type Me, type Member, type Role, type ToolRow,
+  type Workspace, type WorkspaceView,
 } from "../api";
 import { GATES } from "../vocab";
 
@@ -71,14 +71,15 @@ export function WorkspacesPage() {
   );
 }
 
-type Tab = "people" | "groups" | "gates" | "audit";
+type Tab = "people" | "groups" | "gates" | "connections" | "audit";
 
 /** One workspace: its people and roles, approver groups, who approves each product's gates, and
  * (for admins) the audit log. Everything here is checked again by the server. */
 export function WorkspacePage({ me, onChanged }: { me: Me; onChanged: () => void }) {
   const { id = "" } = useParams();
   const [w, setW] = useState<WorkspaceView | null>(null);
-  const [tab, setTab] = useState<Tab>("people");
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<Tab>((params.get("tab") as Tab) || "people");
   const [err, setErr] = useState("");
   const load = useCallback(() => {
     api.workspace(id).then((v) => { setW(v); setErr(""); }).catch((e) => setErr(e.message));
@@ -91,6 +92,7 @@ export function WorkspacePage({ me, onChanged }: { me: Me; onChanged: () => void
 
   if (!w) return err ? <p className="error-note" role="alert">{err}</p> : null;
   const tabs: [Tab, string][] = [["people", "People"], ["groups", "Approver groups"], ["gates", "Gate approvers"],
+    ["connections", "Connections"],
     ...(admin ? [["audit", "Audit log"] as [Tab, string]] : [])];
   return (
     <>
@@ -115,6 +117,7 @@ export function WorkspacePage({ me, onChanged }: { me: Me; onChanged: () => void
         {tab === "people" && <People w={w} me={me} admin={admin} run={run} />}
         {tab === "groups" && <Groups w={w} admin={admin} run={run} />}
         {tab === "gates" && <Gates w={w} admin={admin} run={run} />}
+        {tab === "connections" && <Connections ws={w.id} admin={admin} />}
         {tab === "audit" && admin && <Audit ws={w.id} />}
       </div>
     </>
@@ -310,11 +313,72 @@ function ProductGates({ w, product, admin, run }: {
   );
 }
 
+const STATUS: Record<ToolRow["status"], [string, string]> = {
+  connected: ["Connected", "go"], needs_attention: ["Needs attention", "stop"], not_connected: ["Not connected", "plain"],
+};
+const when = (t?: number) => (t ? new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ") : "");
+
+/** Every tool, connected or not: what Valxel can reach, and the one way to fix what's broken. */
+function Connections({ ws, admin }: { ws: string; admin: boolean }) {
+  const [rows, setRows] = useState<ToolRow[] | null>(null);
+  const [params] = useSearchParams();
+  const [err, setErr] = useState(params.get("error") ?? "");
+  const [note, setNote] = useState(params.get("connected") ? `Connected ${params.get("connected")}.` : params.get("note") ?? "");
+  const load = useCallback(() => { api.connections(ws).then(setRows).catch((e) => setErr(e.message)); }, [ws]);
+  useEffect(load, [load]);
+  const install = (tool: string) => { window.location.href = `/api/workspaces/${encodeURIComponent(ws)}/connections/${tool}/install`; };
+  async function disconnect(tool: string, account: string, name: string) {
+    if (!window.confirm(`Disconnect ${name} for ${account}? Features that need it will wait until it's connected again.`)) return;
+    try {
+      const r = await api.disconnect(ws, tool, account);
+      setNote(`Disconnected. To remove Valxel's access on ${name}'s side too: ${r.revoke}.`);
+      load();
+    } catch (e) { setErr((e as Error).message); }
+  }
+  if (!rows) return err ? <p className="error-note" role="alert">{err}</p> : null;
+  return (
+    <>
+      {err && <p className="error-note" role="alert">{err}</p>}
+      {note && <p className="note" aria-live="polite">{note}</p>}
+      {rows.map((t) => {
+        const [label, chip] = STATUS[t.status];
+        return (
+          <section key={t.tool} className="panel" aria-labelledby={`h-c-${t.tool}`}>
+            <div className="panel-head">
+              <h2 id={`h-c-${t.tool}`} className="section-title">{t.name} <span className={`chip ${chip}`}>{label}</span></h2>
+              {admin && t.available && (
+                <button className={t.status === "connected" ? "btn secondary" : "btn"} onClick={() => install(t.tool)}>
+                  {t.status === "not_connected" ? "Connect" : t.status === "needs_attention" ? "Reconnect" : "Add an account"}
+                </button>
+              )}
+            </div>
+            <p className="small muted pad">{t.grants}. Asked for at: {t.asked_when}.
+              {!t.available && " Connecting it from here is coming soon."}</p>
+            {t.connections.map((c) => (
+              <div key={c.account} className="pad">
+                <strong>{c.account}</strong>{c.reach.account_type ? <span className="small muted"> ({c.reach.account_type})</span> : null}
+                {" · "}<span className="small">
+                  {c.reach.selection === "all" ? "all repositories" : c.reach.repos ? `${c.reach.repos.length} repositories: ${c.reach.repos.join(", ")}` : ""}
+                </span>
+                <div className="small muted">Connected by {c.connected_by} on {when(c.connected_at)}; last worked {when(c.last_ok)}.</div>
+                {c.status === "needs_attention" && <p className="error-note">{c.last_error.charAt(0).toUpperCase() + c.last_error.slice(1)}.{admin && t.available ? " Reconnect to fix it." : ""}</p>}
+                {admin && <button className="small-btn" onClick={() => disconnect(t.tool, c.account, t.name)}>Disconnect</button>}
+              </div>
+            ))}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
 const ACTIONS: Record<string, string> = {
   "workspace.create": "created the workspace", "member.add": "added someone", "member.accept": "accepted an invitation",
   "member.update": "changed someone's profile", "member.remove": "removed someone", "member.reinvite": "sent a new invitation link",
   "group.create": "added a group", "group.members": "changed a group's members", "group.delete": "deleted a group",
-  "gates.set": "changed gate approvers",
+  "gates.set": "changed gate approvers", "connection.add": "connected a tool", "connection.reconnect": "reconnected a tool",
+  "connection.remove": "disconnected a tool", "connection.failed": "found a connection broken",
+  "connection.recovered": "found a connection working again",
 };
 
 function Audit({ ws }: { ws: string }) {

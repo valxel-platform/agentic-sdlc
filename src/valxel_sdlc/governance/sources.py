@@ -212,13 +212,22 @@ class GitHubAppTokenProvider:
             raise GovernanceError(f"GitHub App {method} {path} failed with {exc.code}"
                                   + (f": {detail}" if detail else "")) from exc
 
+    def installation(self, account: str, app_jwt: str) -> dict:
+        """The App's installation on an org, or on a person's own account (a solo founder's repos)."""
+        try:
+            return self._call("GET", f"/orgs/{quote(account)}/installation", app_jwt)
+        except GovernanceError as exc:
+            if "404" not in str(exc):
+                raise
+            return self._call("GET", f"/users/{quote(account)}/installation", app_jwt)
+
     def scoped(self, org: str, repositories: list[str], permissions: dict[str, str]) -> str:
         """A fresh token for named repositories only, with only these permissions (never cached):
         what an agent session gets, so it can't reach beyond its own repository and work."""
         if not repositories:
             raise GovernanceError("A scoped token names its repositories")
         app_jwt = self._jwt()
-        inst = self._call("GET", f"/orgs/{quote(org)}/installation", app_jwt)
+        inst = self.installation(org, app_jwt)
         tok = self._call("POST", f"/app/installations/{inst['id']}/access_tokens", app_jwt,
                          {"repositories": list(repositories), "permissions": dict(permissions)})
         granted = tok.get("permissions") or {}
@@ -234,7 +243,7 @@ class GitHubAppTokenProvider:
                 return cached[0]
         app_jwt = self._jwt()
         try:
-            inst = self._call("GET", f"/orgs/{quote(org)}/installation", app_jwt)
+            inst = self.installation(org, app_jwt)
         except GovernanceError as exc:
             if "404" in str(exc):
                 raise GovernanceError(f"The GitHub App isn't installed in {org}: install it there "
