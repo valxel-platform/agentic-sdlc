@@ -456,6 +456,11 @@ def test_a_passing_or_unanalysed_sonarqube_gate():
 def test_the_platform_policy_registers_semgrep_sonarqube_and_gitleaks(settings):
     q = settings.quality
     assert "Semgrep*" in q.suites["sast"]["match"]["tools"]
-    assert q.suites["code-quality"]["source"] == "sonarqube" and q.sources["sonarqube"].endswith(":SonarQube")
+    # Coverage of new code is built in (diff-cover, no vendor); SonarQube is optional.
+    cq = q.suites["code-quality"]
+    assert cq["source"] == "github-checks" and cq["match"]["checks"] == ["code-quality*"]
+    assert cq["required"] and cq["min_coverage"] == 80
+    assert q.suites["sonarqube"]["source"] == "sonarqube" and not q.suites["sonarqube"]["required"]
+    assert q.sources["sonarqube"].endswith(":SonarQube")
     assert q.suites["secrets-history"]["match"]["checks"] == ["gitleaks*"]
     assert q.upkeep["fix_within_days"]["critical"] == 7 and q.upkeep["floors"]["phi"]["fix_within_days"]["high"] == 14

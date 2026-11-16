@@ -92,8 +92,9 @@ def test_governance_rejects_a_looser_quality_block(tmp_path, gov_root):
 def test_gate_outcomes_and_waivers():
     policy = effective_policy(CFG, "general", {})
     ok_unit = SuiteResult(suite="unit", kind="test", stage="pr", state="passed", repo="o/a", coverage=92)
+    new_code = SuiteResult(suite="code-quality", kind="test", stage="pr", state="passed", repo="o/a", coverage=88)
     clean = [ok_unit] + [SuiteResult(suite=s, kind="security", stage="pr", state="passed", repo="o/a")
-                         for s in ("sast", "dependencies", "new-dependencies", "secrets")]
+                         for s in ("sast", "dependencies", "new-dependencies", "secrets")] + [new_code]
     assert evaluate("pr", policy, clean, [])["status"] == "passed"
 
     low_cov = [SuiteResult(suite="unit", kind="test", stage="pr", state="passed", repo="o/a", coverage=61)] + clean[1:]

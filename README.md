@@ -903,12 +903,25 @@ valxel repos apply                    # change what differs (safe to repeat)
 valxel repos check --repo acme-clinic/cln-governance --json
 ```
 
-**Managed workflows.** Every repo carries the platform's `.github/workflows/security.yml`
-(Semgrep, gitleaks and SonarQube), and governance repos `.github/workflows/secrets.yml` (gitleaks
-only). The copies live in `src/valxel_sdlc/standard_files/`; a repo whose copy differs, or a
-template that lacks it, gets a pull request from `apply`. SonarQube runs once the org sets the
-Actions variable `SONAR_ORGANIZATION` and secret `SONAR_TOKEN`; a repo that needs a build first
-(Java) adds `.valxel/sonar-prepare.sh`, which writes extra scanner arguments to `.valxel/sonar.args`.
+**Managed files.** Every repo carries the platform's `.github/workflows/security.yml` (Semgrep,
+gitleaks and, optionally, SonarQube) and `.github/scripts/report.py` (how CI posts test results
+and coverage of new code), and governance repos `.github/workflows/secrets.yml` (gitleaks only).
+The copies live in `src/valxel_sdlc/standard_files/`; a repo whose copy differs, or a template
+that lacks it, gets a pull request from `apply`.
+
+**Coverage of new code** needs no vendor. After the tests, each template's unit job runs
+[diff-cover](https://github.com/Bachmann1234/diff_cover) on the coverage report it already writes
+(JaCoCo, Cobertura or LCOV) against the pull request's base, and `report.py --new-code` posts the
+`code-quality / new code` status: the share of changed lines a test runs, and the lines none does.
+The `code-quality` suite requires 80% (products may raise it). The step is `continue-on-error`: the
+status is the gate, and the unit check stays about the tests.
+
+**SonarQube is optional**, for a customer who already uses it: it runs once the org sets the
+Actions variable `SONAR_ORGANIZATION` and secret `SONAR_TOKEN`, and the `sonarqube` suite reads it
+when a product requires it. A repo that needs a build first (Java) adds `.valxel/sonar-prepare.sh`,
+which writes extra scanner arguments to `.valxel/sonar.args`. (SonarQube Cloud's *automatic*
+analysis gets no coverage report, so its gate fails on "0% coverage on new code": turn automatic
+analysis off and let the workflow scan, or don't install it.)
 
 Managed repos are each lane's repos (from its governance manifest), each lane's governance repo
 (from `registry.yaml`) and the platform's own repos (`platform_repos` in `config/repos.yaml`:
@@ -1074,7 +1087,8 @@ SAMM and NIST SSDF practices:
 | Pull request | Infrastructure as code | Trivy or Checkov (SARIF) | GitHub code scanning | Optional, blocks high |
 | Pull request | Secrets in the history | gitleaks, from the managed `security.yml` (our own secret formats too) | Check runs `gitleaks*` | Optional until every repo carries it; any finding blocks |
 | Pull request | Lint | The template's lint job | Check runs `lint*` | Optional; required where a product says so |
-| Pull request | Code quality | SonarQube Cloud's quality gate on new code, from `security.yml` | SonarQube's API (`quality/sonar.py`) | Optional; a failed gate blocks once a product requires it, and its issues go to the coder |
+| Pull request | Coverage of new code | diff-cover on the unit job's coverage report, posted by the managed `report.py` | Status `code-quality / new code` | Required, 80% of the changed lines; the status names the untested ones for the coder |
+| Pull request | SonarQube | SonarQube's quality gate on new code, from `security.yml` | SonarQube's API (`quality/sonar.py`) | Optional; a failed gate blocks once a product requires it, and its issues go to the coder |
 | Build | Image scan | Trivy step in the OpenChoreo build workflow | OpenChoreo build steps | Required for PHI and payments |
 | Dev | Integration tests | The change set, all repos together | Check runs `integration*` on the merge commit | Required |
 | Staging | End-to-end tests | Playwright | Check runs `e2e*`, `playwright*` | Required |

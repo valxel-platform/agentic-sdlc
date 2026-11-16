@@ -7,6 +7,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write # the code-quality / new code status
     services:
       postgres:
         image: postgres:16-alpine
@@ -19,6 +22,8 @@ jobs:
           --health-cmd "pg_isready -U valxel -d valxel" --health-interval 3s --health-timeout 3s --health-retries 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the base branch, for coverage of new code
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
@@ -35,9 +40,21 @@ jobs:
           git init -q "$RUNNER_TEMP/kwp" && cd "$RUNNER_TEMP/kwp"
           git fetch -q --depth 1 https://github.com/anthropics/knowledge-work-plugins "$ref" && git checkout -q FETCH_HEAD
           echo "KNOWLEDGE_WORK_PLUGINS=$RUNNER_TEMP/kwp" >> "$GITHUB_ENV"
-      - run: pytest
+      - run: pytest --cov=src --cov-report=xml:coverage.xml
         env:
           VALXEL_TEST_DATABASE_URL: postgresql://valxel:valxel@localhost:5432/valxel
+      # The lines this pull request changes that no test runs (diff-cover), posted as the
+      # code-quality / new code status the quality gate reads. The status is the gate, not this job.
+      - name: Coverage on new code
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPORT_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          pipx run diff-cover==11.0.2 coverage.xml --compare-branch="origin/${{ github.base_ref }}" \
+            --format json:new-code.json
+          python3 .github/scripts/report.py --context "code-quality / new code" --new-code new-code.json
       - run: valxel demo --product CLN --fault spec=1 --revise
 
   image:

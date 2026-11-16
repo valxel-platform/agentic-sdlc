@@ -178,11 +178,23 @@ suites:
     source: github-checks
     match: { checks: ["lint*"] }
     required: false             # required where a product or a role says so
-  # SonarQube's quality gate on new code (complexity, duplication, maintainability, coverage of new
-  # code). Its issues go to the coder agent like security findings. The scan runs in each repo's
-  # security.yml once the org has SonarQube Cloud (vars.SONAR_ORGANIZATION); until then it's missing,
-  # which blocks nothing while required is false. Turn it on per product in product.yaml.
+  # Coverage of new code: the lines a pull request changes, measured by diff-cover from the same
+  # coverage report the unit job already writes, and posted by the managed report.py as the
+  # `code-quality / new code` status (every template's unit job; no vendor, account or token). The
+  # status names the lines no test runs, so the coder agent knows what to test. Lint is above.
   code-quality:
+    kind: test
+    stage: pr
+    source: github-checks
+    match: { checks: ["code-quality*"] }
+    required: true
+    min_coverage: 80            # of the changed lines; products may raise it
+  # SonarQube, optional: its quality gate on new code (complexity, duplication, maintainability) and
+  # its issues, which go to the coder agent like security findings. For a customer who already
+  # uses it: the scan runs in each repo's security.yml once the org sets vars.SONAR_ORGANIZATION
+  # and the SONAR_TOKEN secret, and the tool reads it with VALXEL_SONAR_TOKEN. Missing blocks
+  # nothing while required is false; a product turns it on in product.yaml.
+  sonarqube:
     kind: quality
     stage: pr
     source: sonarqube

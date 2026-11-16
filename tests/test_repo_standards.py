@@ -34,7 +34,8 @@ def existing(gh: StubGitHub, repo: str, *, ghas: bool = True, files: bool = True
     platform's managed workflows, unless `workflows` is False: they have tests of their own)."""
     if workflows:
         for path, name in {".github/workflows/security.yml": "security.yml",
-                           ".github/workflows/secrets.yml": "governance-secrets.yml"}.items():
+                           ".github/workflows/secrets.yml": "governance-secrets.yml",
+                           ".github/scripts/report.py": "report.py"}.items():
             gh.files[(repo, "main", path)] = rs.standard_file(name)
     gh.repos[repo] = {"state": {"visibility": "public", "allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True,
                                 "delete_branch_on_merge": False, "default_branch": "main", "has_wiki": True,
@@ -363,6 +364,7 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     gh.files[(lane, "main", ".github/workflows/security.yml")] = "name: security\njobs: {}\n"  # someone trimmed it
     rep = rs.reconcile(gh, target(svc, lane), apply=False)
     assert [(d.area, d.item, d.have, d.fix) for d in rep.drift if d.area == "workflows"] == [
+        ("workflows", ".github/scripts/report.py", "missing", "apply"),
         ("workflows", ".github/workflows/security.yml", "differs", "apply")]
     # A governance repo has no code: only the secrets scan is managed there.
     grep = rs.reconcile(gh, target(svc, gov), apply=False)
@@ -370,13 +372,15 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
 
     after = rs.reconcile(gh, target(svc, lane), apply=True)
     assert "managed files" in after.applied and after.ok
-    [pending] = [d for d in after.drift if d.area == "workflows"]
-    assert pending.fix == "pending" and "pull request" in pending.have
+    pending = [d for d in after.drift if d.area == "workflows"]
+    assert len(pending) == 2 and all(d.fix == "pending" and "pull request" in d.have for d in pending)
     pr = next(p for p in gh.prs.values() if p["repo"] == lane and p["branch"] == "valxel/managed-files")
     assert gh.files[(lane, "valxel/managed-files", ".github/workflows/security.yml")] == rs.standard_file("security.yml")
+    assert gh.files[(lane, "valxel/managed-files", ".github/scripts/report.py")] == rs.standard_file("report.py")
     assert "agentic-sdlc" in pr["body"]
     # Once it merges, the repo is on standard again.
     gh.files[(lane, "main", ".github/workflows/security.yml")] = rs.standard_file("security.yml")
+    gh.files[(lane, "main", ".github/scripts/report.py")] = rs.standard_file("report.py")
     assert not [d for d in rs.reconcile(gh, target(svc, lane), apply=False).drift if d.area == "workflows"]
 
 
@@ -406,3 +410,62 @@ def test_the_managed_workflows_are_prettier_clean():
     for name in ("security.yml", "governance-secrets.yml"):
         assert not [ln for ln in rs.standard_file(name).splitlines() if re.search(r"\S {2,}#", ln)], name
 
+
+
+def _report_module():
+    import importlib.util
+    from importlib.resources import files
+
+    path = files("valxel_sdlc") / "standard_files" / "report.py"
+    spec = importlib.util.spec_from_file_location("valxel_report", str(path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_report_py_is_managed_and_the_tools_own_copy_matches():
+    from pathlib import Path
+
+    std = rs.load_standards(Path("config/repos.yaml")) if hasattr(rs, "load_standards") else None
+    managed = (std or {}).get("managed_files") if isinstance(std, dict) else None
+    import yaml
+
+    managed = managed or yaml.safe_load(Path("config/repos.yaml").read_text())["defaults"]["managed_files"]
+    assert managed[".github/scripts/report.py"] == "report.py"
+    assert Path(".github/scripts/report.py").read_text() == rs.standard_file("report.py")
+
+
+def test_new_code_coverage_names_the_untested_lines(tmp_path):
+    import json
+
+    report = _report_module()
+    p = tmp_path / "new.json"
+    p.write_text(json.dumps({"total_num_lines": 40, "total_num_violations": 10, "src_stats": {
+        "src/app/orders.py": {"violation_lines": [12, 13, 14, 20]},
+        "src/app/api.py": {"violation_lines": []},
+        "src/main/java/acme/Pay.java": {"violation_lines": [3, 5, 6, 7, 8, 9]}}}))
+    state, text, detail = report.new_code(str(p), 80)
+    assert state == "failure" and text.startswith("Coverage on new code: 75.0% (at least 80%).")
+    assert "10 of 40 changed lines untested: orders.py 12-14, 20; Pay.java 3, 5-9" in text
+    assert "`src/app/orders.py`: lines 12-14, 20" in detail and "api.py" not in detail
+    assert report.new_code(str(p), 75)[0] == "success"
+    # What the quality gate reads from the status
+    from valxel_sdlc.quality.sources import _summary
+
+    assert _summary(text[:140])["coverage"] == 75.0
+    empty = tmp_path / "none.json"
+    empty.write_text(json.dumps({"total_num_lines": 0, "total_num_violations": 0, "src_stats": {}}))
+    assert report.new_code(str(empty), 80)[0] == "success"  # docs or config only
+    assert report.new_code(str(tmp_path / "missing.json"), 80)[0] == "failure"
+
+
+def test_a_low_new_code_coverage_status_fails_the_code_quality_suite(settings):
+    from valxel_sdlc.quality import SuiteResult, evaluate
+
+    spec = settings.quality.suites["code-quality"]
+    low = SuiteResult(suite="code-quality", kind="test", stage="pr", state="failed", repo="acme/web", coverage=62.0,
+                      message="code-quality / new code")
+    out = evaluate("pr", {"code-quality": spec}, [low], [])
+    assert out["status"] == "failed" and any("62.0% is below 80%" in r for r in out["test_failures"])
+    missing = evaluate("pr", {"code-quality": spec}, [], [])
+    assert missing["status"] == "failed"  # required: a repo that doesn't report it can't merge
