@@ -40,13 +40,18 @@ jobs:
           echo "python=$python" >> "$GITHUB_OUTPUT"; echo "web=$web" >> "$GITHUB_OUTPUT"
           echo "Python tests: $python; web build: $web"
 
-  test:
+  # The Python tests in three parallel shares (tests/conftest.py --shard), each on every CPU its
+  # runner has; `test` below joins their coverage and is the required check.
+  test-shard:
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      statuses: write # the code-quality / new code status
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     services:
       postgres:
         image: postgres:16-alpine
@@ -58,6 +63,44 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U valxel -d valxel" --health-interval 3s --health-timeout 3s --health-retries 20
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - name: Fetch the plugins the image pins
+        run: |
+          ref=$(python -c "import yaml; print(yaml.safe_load(open('config/plugins.yaml'))['knowledge_work_plugins']['ref'])")
+          git init -q "$RUNNER_TEMP/kwp" && cd "$RUNNER_TEMP/kwp"
+          git fetch -q --depth 1 https://github.com/anthropics/knowledge-work-plugins "$ref" && git checkout -q FETCH_HEAD
+          echo "KNOWLEDGE_WORK_PLUGINS=$RUNNER_TEMP/kwp" >> "$GITHUB_ENV"
+      # Each worker gets its own database (tests/conftest.py).
+      - run: pytest -n auto --shard ${{ matrix.shard }}/3 --cov=src --cov-report=
+        env:
+          VALXEL_TEST_DATABASE_URL: postgresql://valxel:valxel@localhost:5432/valxel
+      - run: mv .coverage coverage-${{ matrix.shard }}.data
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-${{ matrix.shard }}
+          path: coverage-${{ matrix.shard }}.data
+          retention-days: 1
+      - if: matrix.shard == 1
+        run: valxel demo --product CLN --fault spec=1 --revise
+
+  test:
+    needs: [changes, test-shard]
+    # Runs whenever the shares ran, so a failed share fails this check; skipped with them otherwise.
+    if: always() && needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write # the code-quality / new code status
+    steps:
+      - name: Every share passed
+        env:
+          SHARDS: ${{ needs.test-shard.result }}
+        run: |
+          test "$SHARDS" = success || { echo "A share of the tests failed ($SHARDS)"; exit 1; }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # the base branch, for coverage of new code
@@ -71,16 +114,15 @@ jobs:
           uv export --frozen --format requirements-txt --extra live --extra github --extra integrations \
             --no-emit-project --no-dev -q -o /tmp/requirements.lock
           diff <(grep -v '^#' requirements.lock) <(grep -v '^#' /tmp/requirements.lock)
-      - name: Fetch the plugins the image pins
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+      - name: Coverage of the whole suite
         run: |
-          ref=$(python -c "import yaml; print(yaml.safe_load(open('config/plugins.yaml'))['knowledge_work_plugins']['ref'])")
-          git init -q "$RUNNER_TEMP/kwp" && cd "$RUNNER_TEMP/kwp"
-          git fetch -q --depth 1 https://github.com/anthropics/knowledge-work-plugins "$ref" && git checkout -q FETCH_HEAD
-          echo "KNOWLEDGE_WORK_PLUGINS=$RUNNER_TEMP/kwp" >> "$GITHUB_ENV"
-      # On every CPU the runner has (pytest-xdist); each worker gets its own database (tests/conftest.py).
-      - run: pytest -n auto --cov=src --cov-report=xml:coverage.xml
-        env:
-          VALXEL_TEST_DATABASE_URL: postgresql://valxel:valxel@localhost:5432/valxel
+          coverage combine coverage-*.data
+          coverage xml -o coverage.xml
+          coverage report --format=total | sed 's/^/Total coverage: /;s/$/%/'
       # The lines this pull request changes that no test runs (diff-cover), posted as the
       # code-quality / new code status the quality gate reads. The status is the gate, not this job.
       - name: Coverage on new code
@@ -94,7 +136,6 @@ jobs:
           pipx run diff-cover==11.0.2 coverage.xml --compare-branch="origin/$BASE_REF" \
             --format json:new-code.json
           python3 .github/scripts/report.py --context "code-quality / new code" --new-code new-code.json
-      - run: valxel demo --product CLN --fault spec=1 --revise
 
   image:
     runs-on: ubuntu-latest
