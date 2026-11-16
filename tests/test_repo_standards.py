@@ -483,6 +483,8 @@ def test_report_py_reads_junit_jacoco_and_cobertura_and_refuses_xml_entities(tmp
                    '<report name="t"><package name="a"><counter type="LINE" missed="50" covered="50"/></package>'
                    '<counter type="LINE" missed="1" covered="3"/></report>')
     assert report.jacoco(str(jac)) == 75.0  # the report-level counter, not a package's
+    (tmp_path / "nolines.xml").write_text('<report name="t"><counter type="BRANCH" missed="1" covered="1"/></report>')
+    assert report.jacoco(str(tmp_path / "nolines.xml")) is None
     cob = tmp_path / "coverage.xml"
     cob.write_text('<?xml version="1.0"?><coverage line-rate="0.835" branch-rate="0"><packages/></coverage>')
     assert round(report.cobertura(str(cob)), 1) == 83.5
@@ -502,3 +504,75 @@ def test_report_py_posts_only_over_https(tmp_path, monkeypatch):
                                      "--repo", "o/r", "--sha", "abc"])
     with pytest.raises(SystemExit, match="must be an https URL"):
         report.main()
+
+
+class _FakeHTTPS:
+    calls: list = []
+    status = 201
+
+    def __init__(self, host, port, timeout):
+        self.host, self.port = host, port
+
+    def request(self, method, path, body, headers):
+        _FakeHTTPS.calls.append({"host": self.host, "port": self.port, "method": method, "path": path,
+                                 "body": __import__("json").loads(body), "auth": headers["Authorization"]})
+
+    def getresponse(self):
+        return type("R", (), {"status": _FakeHTTPS.status, "read": lambda self: b"{}"})()
+
+
+def _run_report(monkeypatch, tmp_path, *argv, api="https://api.github.com"):
+    report = _report_module()
+    monkeypatch.setattr(report.http.client, "HTTPSConnection", _FakeHTTPS)
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setenv("GITHUB_API_URL", api)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "summary.md"))
+    monkeypatch.setattr("sys.argv", ["report.py", "--repo", "o/r", "--sha", "abc", *argv])
+    _FakeHTTPS.calls = []
+    return report.main()
+
+
+def test_report_py_posts_test_results_and_new_code_as_statuses(tmp_path, monkeypatch):
+    import json
+
+    (tmp_path / "junit.xml").write_text('<testsuite tests="10" failures="0" errors="0" skipped="1"/>')
+    (tmp_path / "summary.json").write_text(json.dumps({"total": {"lines": {"pct": 91.25}}}))
+    code = _run_report(monkeypatch, tmp_path, "--context", "unit / report", "--junit", str(tmp_path / "junit.xml"),
+                       "--istanbul", str(tmp_path / "summary.json"))
+    [call] = _FakeHTTPS.calls
+    assert code == 0 and call["path"] == "/repos/o/r/statuses/abc" and call["auth"] == "Bearer tok"
+    assert call["host"] == "api.github.com" and call["port"] == 443
+    assert call["body"]["state"] == "success" and call["body"]["description"] == "9 passed, 0 failed, 1 skipped. Coverage: 91.2%"
+
+    # A GitHub Enterprise Server API (a path and a port), and an eval run with a pass rate.
+    (tmp_path / "evals.xml").write_text('<testsuite tests="20" failures="1" errors="0" skipped="0"/>')
+    code = _run_report(monkeypatch, tmp_path, "--context", "evals / report", "--junit", str(tmp_path / "evals.xml"),
+                       "--min-pass-rate", "0.9", api="https://ghe.example:8443/api/v3/")
+    [call] = _FakeHTTPS.calls
+    assert code == 0 and call["port"] == 8443 and call["path"] == "/api/v3/repos/o/r/statuses/abc"
+    assert "Pass rate: 95.0% (at least 90%)." in call["body"]["description"]
+
+    (tmp_path / "new.json").write_text(json.dumps({"total_num_lines": 10, "total_num_violations": 5,
+                                                   "src_stats": {"src/a.py": {"violation_lines": [1, 2, 3, 7, 9]}}}))
+    code = _run_report(monkeypatch, tmp_path, "--context", "code-quality / new code", "--new-code", str(tmp_path / "new.json"))
+    [call] = _FakeHTTPS.calls
+    assert code == 1 and call["body"]["state"] == "failure" and "a.py 1-3, 7, 9" in call["body"]["description"]
+    assert "- `src/a.py`: lines 1-3, 7, 9" in (tmp_path / "summary.md").read_text()
+
+    _FakeHTTPS.status = 403
+    try:
+        with pytest.raises(SystemExit, match="HTTP 403"):
+            _run_report(monkeypatch, tmp_path, "--context", "c", "--new-code", str(tmp_path / "new.json"))
+    finally:
+        _FakeHTTPS.status = 201
+
+
+def test_report_py_without_a_token_only_prints(tmp_path, monkeypatch, capsys):
+    report = _report_module()
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "s.md"))
+    monkeypatch.setattr("sys.argv", ["report.py", "--context", "unit / report", "--junit", str(tmp_path / "none*.xml")])
+    assert report.main() == 1  # no tests ran
+    assert "0 passed, 0 failed, 0 skipped." in capsys.readouterr().out
+    for read in (report.jacoco, report.cobertura, report.istanbul):
+        assert read(str(tmp_path / "missing.xml")) is None and read("") is None
