@@ -1,6 +1,6 @@
 """Sign-in and authorization.
 
-GitHub sign-in (OAuth web flow, scope read:org) records who a person is and which orgs and teams
+GitHub sign-in (OAuth web flow, scopes read:org and user:email) records who a person is and which orgs and teams
 they belong to. The session is an HMAC-signed cookie holding only that identity; the GitHub token
 is used once at sign-in and never stored.
 
@@ -25,7 +25,12 @@ from urllib.request import Request, build_opener
 
 SESSION_COOKIE = "valxel_session"
 STATE_COOKIE = "valxel_oauth_state"
+NEXT_COOKIE = "valxel_next"  # the page to return to after sign-in
 SESSION_TTL = 12 * 3600
+# A workspace's admins and approvers sign in again after 4 hours (the sign-in design, A4): their
+# session can approve a release or change who else can.
+PRIVILEGED_TTL = 4 * 3600
+OIDC_COOKIE = "valxel_oidc"  # state, nonce and PKCE verifier between the redirect and the callback
 
 # Who may act on an escalation: the approvers of the gate that phase leads to.
 ESCALATION_GATE = {"discovery": "g1", "spec": "g2", "design": "g3", "architecture": "g4", "plan": "g4",
@@ -41,6 +46,12 @@ class User:
     orgs: list[str] = field(default_factory=list)
     teams: list[str] = field(default_factory=list)  # "org/team-slug"
     email: str = ""  # verified, when the sign-in provides one
+    idp: str = "github"  # how they signed in: github, cognito or dev
+    # Two factors at sign-in: GitHub (which requires two-factor sign-in of everyone who contributes
+    # code) and dev sign-in count; through Cognito, only a passkey (web/identity.py). A workspace's
+    # admins and group approvers need it to act (api/app.py).
+    strong: bool = True
+    signed_in_at: int = 0  # epoch seconds
     # Read from the workspaces on every request, never trusted from the cookie (valxel_sdlc.workspaces):
     groups: list[str] = field(default_factory=list)  # "<workspace>/<group>"
     roles: dict[str, str] = field(default_factory=dict)  # workspace -> role
@@ -59,7 +70,22 @@ class User:
 
 
 def can_decide(user: User, item: dict) -> bool:
-    return any(user.matches(a) for a in item.get("approvers") or [])
+    """A GitHub team or login decides as before. A workspace group decides only from a two-factor
+    sign-in (a passkey through Cognito): its members may have joined with nothing but an email."""
+    approvers = item.get("approvers") or []
+    if any(user.matches(a) for a in approvers if not a.strip().lower().startswith("group:")):
+        return True
+    return user.strong and any(user.matches(a) for a in approvers)
+
+
+def needs_passkey(user: User, approvers: list[str]) -> bool:
+    """They'd decide through a workspace group if they had signed in with a passkey."""
+    return not user.strong and not can_decide(user, {"approvers": approvers}) and any(
+        user.matches(a) for a in approvers)
+
+
+PASSKEY_NEEDED = ("Approving through a workspace group needs a passkey sign-in. Choose 'Use a passkey' "
+                  "(add one first from your workspace page), then try again.")
 
 
 class SessionSigner:
@@ -101,12 +127,13 @@ class SessionSigner:
         return payload
 
 
-IDENTITY = ("login", "name", "avatar_url", "orgs", "teams", "email")  # what the session cookie carries
+IDENTITY = ("login", "name", "avatar_url", "orgs", "teams", "email", "idp", "strong", "signed_in_at")  # the cookie's
 
 
 def session_payload(user: User) -> dict:
     d = asdict(user)
-    return {**{k: d[k] for k in IDENTITY}, "exp": int(time.time()) + SESSION_TTL}
+    now = int(time.time())
+    return {**{k: d[k] for k in IDENTITY}, "signed_in_at": d["signed_in_at"] or now, "exp": now + SESSION_TTL}
 
 
 def user_from_payload(payload: dict | None) -> User | None:
@@ -117,12 +144,26 @@ def user_from_payload(payload: dict | None) -> User | None:
 
 @dataclass
 class AuthConfig:
-    mode: str  # github | dev
+    mode: str  # github | cognito | dev (any identity; never in production)
     secret: str
-    client_id: str = ""
+    client_id: str = ""  # GitHub OAuth
     client_secret: str = ""
     public_url: str = "http://localhost:8080"
     from_store: bool = False  # the key ring is re-read from VALXEL_SECRETS_DIR or the environment
+    # Google, email and passkeys through a Cognito user pool (web/identity.py, deploy/cognito.yaml)
+    cognito_domain: str = ""
+    cognito_client_id: str = ""
+    cognito_client_secret: str = ""
+    cognito_issuer: str = ""
+    cognito_google: bool = True
+
+    @property
+    def github_enabled(self) -> bool:
+        return bool(self.client_id and self.client_secret)
+
+    @property
+    def cognito_enabled(self) -> bool:
+        return bool(self.cognito_domain and self.cognito_client_id and self.cognito_client_secret and self.cognito_issuer)
 
     @classmethod
     def from_env(cls) -> "AuthConfig":
@@ -141,11 +182,20 @@ class AuthConfig:
         cfg = cls(mode=mode, secret=secret, from_store=from_store,
                   client_id=os.environ.get("VALXEL_GITHUB_OAUTH_CLIENT_ID", ""),
                   client_secret=current("VALXEL_GITHUB_OAUTH_CLIENT_SECRET"),
-                  public_url=(os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080").rstrip("/"))
-        if mode == "github" and not (cfg.client_id and cfg.client_secret):
+                  public_url=(os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080").rstrip("/"),
+                  cognito_domain=os.environ.get("VALXEL_COGNITO_DOMAIN", ""),
+                  cognito_client_id=os.environ.get("VALXEL_COGNITO_CLIENT_ID", ""),
+                  cognito_client_secret=current("VALXEL_COGNITO_CLIENT_SECRET"),
+                  cognito_issuer=os.environ.get("VALXEL_COGNITO_ISSUER", ""),
+                  cognito_google=(os.environ.get("VALXEL_COGNITO_GOOGLE") or "true").lower() != "false")
+        if mode not in ("github", "cognito", "dev"):
+            raise RuntimeError(f"VALXEL_AUTH must be github, cognito or dev, not {mode!r}")
+        # GitHub mode needs GitHub's OAuth app and may add Cognito; Cognito mode the reverse.
+        if mode == "github" and not cfg.github_enabled:
             raise RuntimeError("GitHub sign-in needs VALXEL_GITHUB_OAUTH_CLIENT_ID and VALXEL_GITHUB_OAUTH_CLIENT_SECRET")
-        if mode not in ("github", "dev"):
-            raise RuntimeError(f"VALXEL_AUTH must be github or dev, not {mode!r}")
+        if mode == "cognito" and not cfg.cognito_enabled:
+            raise RuntimeError("Cognito sign-in needs VALXEL_COGNITO_DOMAIN, VALXEL_COGNITO_CLIENT_ID, "
+                               "VALXEL_COGNITO_CLIENT_SECRET and VALXEL_COGNITO_ISSUER")
         return cfg
 
     def ring(self) -> Callable[[], list[str]]:
@@ -164,6 +214,20 @@ class AuthConfig:
     def redirect_uri(self) -> str:
         return f"{self.public_url}/api/auth/callback"
 
+    @property
+    def oidc_redirect_uri(self) -> str:
+        return f"{self.public_url}/api/auth/oidc/callback"
+
+    def cognito(self, opener=None):
+        """The Cognito identity provider, or None when it isn't configured."""
+        if not self.cognito_enabled:
+            return None
+        from .identity import CognitoProvider
+
+        return CognitoProvider(domain=self.cognito_domain, client_id=self.cognito_client_id,
+                               client_secret=self.cognito_client_secret, issuer=self.cognito_issuer,
+                               redirect_uri=self.oidc_redirect_uri, google=self.cognito_google, opener=opener)
+
 
 class GitHubOAuth:
     """The OAuth web flow plus the three reads that establish identity."""
@@ -175,7 +239,7 @@ class GitHubOAuth:
 
     def authorize_url(self, state: str) -> str:
         q = urlencode({"client_id": self.cfg.client_id, "redirect_uri": self.cfg.redirect_uri,
-                       "scope": "read:org", "state": state, "allow_signup": "false"})
+                       "scope": "read:org user:email", "state": state, "allow_signup": "false"})
         return f"{self.web}/login/oauth/authorize?{q}"
 
     def _json(self, req: Request) -> dict | list:
@@ -200,8 +264,12 @@ class GitHubOAuth:
         me = get("/user")
         orgs = [o["login"] for o in get("/user/orgs?per_page=100")]
         teams = [f"{t['organization']['login']}/{t['slug']}" for t in get("/user/teams?per_page=100")]
+        try:  # the primary address, and only if GitHub verified it: an invitation can be accepted by email
+            email = next((e["email"] for e in get("/user/emails") if e.get("primary") and e.get("verified")), "")
+        except Exception:  # an app installed before user:email was asked for
+            email = ""
         return User(login=me["login"], name=me.get("name") or "", avatar_url=me.get("avatar_url") or "",
-                    orgs=orgs, teams=teams)
+                    orgs=orgs, teams=teams, email=(email or "").lower())
 
 
 def new_state() -> str:

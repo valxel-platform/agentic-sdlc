@@ -22,6 +22,43 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4) if text else 0
 
 
+def cap_tokens(text: str) -> int:
+    """A cautious size for checking a layer against its cap: 3.5 characters per token, since code
+    and markup run denser than prose's 4. Over-counting trims a little early; under-counting would
+    send a prompt over its cap."""
+    return -(-len(text) * 2 // 7) if text else 0
+
+
+_HEADING = re.compile(r"(?m)^(?=#{1,3} )")
+
+
+def fit(text: str, cap: int, label: str) -> tuple[str, str]:
+    """The text cut to `cap` tokens at heading boundaries, keeping what comes first, and a note
+    naming what was left out ("" when it fits). The note goes into the prompt, so an agent knows
+    something is missing and where to find it; nothing is cut silently. Deterministic, so the same
+    input caches the same way."""
+    if not cap or cap_tokens(text) <= cap:
+        return text, ""
+    chunks = [c for c in _HEADING.split(text) if c]
+    budget = cap - 60  # room for the note
+    kept, left = [], []
+    for c in chunks:
+        if not left and cap_tokens("".join(kept) + c) <= budget:
+            kept.append(c)
+        else:
+            left.append(c)
+    partial = not kept
+    if partial:  # one section larger than the whole cap: keep its start
+        kept, left = [chunks[0][: budget * 7 // 2].rsplit("\n", 1)[0] + "\n"], [chunks[0], *chunks[1:]]
+    names = [c.splitlines()[0].lstrip("#").strip() for c in left if c.lstrip().startswith("#")]
+    if partial and names and chunks[0].lstrip().startswith("#"):
+        names[0] = f"the rest of {names[0]}"
+    shown = ", ".join(names[:12]) + (f" and {len(names) - 12} more" if len(names) > 12 else "")
+    note = (f"[{label} was cut to fit its {cap}-token cap. Left out: "
+            + (shown or "the rest of the text") + ".]")
+    return "".join(kept).rstrip() + "\n\n" + note + "\n", note
+
+
 @dataclass(frozen=True)
 class PromptLayers:
     tools: str  # L1: tool definitions, serialized deterministically

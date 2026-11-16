@@ -1,0 +1,183 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Valxel SDLC sign-in: a Cognito user pool for Google, email one-time codes and passkeys, with
+  managed login (the sign-in design, A4). GitHub sign-in doesn't use it. The tool reads the outputs
+  as VALXEL_COGNITO_DOMAIN, VALXEL_COGNITO_CLIENT_ID, VALXEL_COGNITO_ISSUER and, from the secret
+  this stack creates, VALXEL_COGNITO_CLIENT_SECRET.
+
+Parameters:
+  PublicUrl:
+    Type: String
+    Description: The tool's public URL, without a trailing slash (VALXEL_PUBLIC_URL), e.g. https://sdlc.valxel.dev
+    AllowedPattern: "^https://[a-z0-9.-]+(:[0-9]+)?$"
+  DomainPrefix:
+    Type: String
+    Description: >-
+      The managed login domain's prefix: <prefix>.auth.<region>.amazoncognito.com. Use a custom
+      domain later by replacing the UserPoolDomain.
+    AllowedPattern: "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+  PasskeyDomain:
+    Type: String
+    Description: >-
+      The passkeys' relying party: the managed login domain above
+      (<prefix>.auth.<region>.amazoncognito.com) or your custom domain. Passkeys only work there.
+  GoogleClientId:
+    Type: String
+    Default: ""
+    Description: A Google OAuth client's id (Google Cloud console, web application). Empty leaves Google off.
+  GoogleClientSecretName:
+    Type: String
+    Default: ""
+    Description: The Secrets Manager secret holding that client's secret (a plain string).
+  SesIdentityArn:
+    Type: String
+    Default: ""
+    Description: >-
+      A verified SES identity to send sign-in codes from (recommended: Cognito's own sender allows
+      only 50 emails a day). Empty uses Cognito's sender.
+  FromAddress:
+    Type: String
+    Default: ""
+    Description: The From address for sign-in codes, an address of the SES identity, e.g. Valxel <no-reply@valxel.dev>
+
+Conditions:
+  WithGoogle: !Not [!Equals [!Ref GoogleClientId, ""]]
+  WithSes: !Not [!Equals [!Ref SesIdentityArn, ""]]
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: valxel-sdlc
+      # Essentials: passwordless sign-in, passkeys and managed login.
+      UserPoolTier: ESSENTIALS
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+        - Name: name
+          AttributeDataType: String
+          Required: false
+          Mutable: true
+      Policies:
+        SignInPolicy:
+          # A code by email or a passkey: no passwords to leak or reuse. A passkey with user
+          # verification is two factors, which admins and group approvers need to act.
+          AllowedFirstAuthFactors: [EMAIL_OTP, WEB_AUTHN]
+        PasswordPolicy:
+          MinimumLength: 14
+          RequireLowercase: false
+          RequireNumbers: false
+          RequireSymbols: false
+          RequireUppercase: false
+          TemporaryPasswordValidityDays: 1
+      WebAuthnRelyingPartyID: !Ref PasskeyDomain
+      WebAuthnUserVerification: required
+      # Cognito can't require MFA in a pool with passwordless sign-in; the tool asks for a passkey
+      # where it matters instead (the ID token's amr and acr claims).
+      MfaConfiguration: "OFF"
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      EmailConfiguration: !If
+        - WithSes
+        - EmailSendingAccount: DEVELOPER
+          SourceArn: !Ref SesIdentityArn
+          From: !Ref FromAddress
+        - EmailSendingAccount: COGNITO_DEFAULT
+      DeletionProtection: ACTIVE
+      UserPoolTags:
+        valxel:component: sign-in
+
+  Google:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: WithGoogle
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: !Sub "{{resolve:secretsmanager:${GoogleClientSecretName}}}"
+        authorize_scopes: openid email profile
+      AttributeMapping:
+        email: email
+        email_verified: email_verified
+        name: name
+        picture: picture
+
+  Domain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain: !Ref DomainPrefix
+      ManagedLoginVersion: 2
+
+  Client:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: valxel-sdlc-web
+      GenerateSecret: true
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      CallbackURLs:
+        - !Sub "${PublicUrl}/api/auth/oidc/callback"
+      LogoutURLs:
+        - !Sub "${PublicUrl}/"
+      SupportedIdentityProviders: !If
+        - WithGoogle
+        - [COGNITO, Google]
+        - [COGNITO]
+      ExplicitAuthFlows: [ALLOW_USER_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      # The tool keeps its own session (12 hours, 4 for admins and approvers): Cognito's tokens are
+      # read once, at sign-in.
+      IdTokenValidity: 1
+      AccessTokenValidity: 1
+      RefreshTokenValidity: 1
+      TokenValidityUnits:
+        IdToken: hours
+        AccessToken: hours
+        RefreshToken: days
+    DependsOn: [Domain]
+
+  Branding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientId: !Ref Client
+      UseCognitoProvidedValues: true
+
+  ClientSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: valxel/sdlc/VALXEL_COGNITO_CLIENT_SECRET
+      Description: The Cognito app client's secret, read by the tool as VALXEL_COGNITO_CLIENT_SECRET.
+      SecretString: !GetAtt Client.ClientSecret
+
+Outputs:
+  CognitoDomain:
+    Description: VALXEL_COGNITO_DOMAIN
+    Value: !Sub "${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com"
+  CognitoClientId:
+    Description: VALXEL_COGNITO_CLIENT_ID
+    Value: !Ref Client
+  CognitoIssuer:
+    Description: VALXEL_COGNITO_ISSUER
+    Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+  ClientSecretArn:
+    Description: Where VALXEL_COGNITO_CLIENT_SECRET is kept
+    Value: !Ref ClientSecret

@@ -93,8 +93,36 @@ GitHub sign-in uses an OAuth app owned by `valxel-platform`:
 3. Each product org approves the OAuth app (org settings, Third-party access) so team membership
    is visible.
 
-The app requests `read:org` only to read the user's orgs and teams. It keeps them in a signed,
-HttpOnly session cookie and discards the GitHub token.
+The app requests `read:org` to read the user's orgs and teams, and `user:email` for their primary
+email if GitHub has verified it. It keeps them in a signed, HttpOnly session cookie and discards
+the GitHub token.
+
+**Google, email and passkeys** come through an Amazon Cognito user pool (`src/valxel_sdlc/web/identity.py`).
+GitHub stays on its own OAuth app, since GitHub isn't a standard OpenID provider.
+
+1. Deploy `deploy/cognito.yaml`. It creates the user pool and managed login on the Essentials plan
+   (email codes, passkeys, and Google when you give it a Google OAuth client), the app client, and
+   its secret in Secrets Manager. Give it an SES identity: Cognito's own sender allows 50 emails a day.
+2. Set its outputs as `VALXEL_COGNITO_DOMAIN`, `VALXEL_COGNITO_CLIENT_ID` and `VALXEL_COGNITO_ISSUER`,
+   and the secret as `VALXEL_COGNITO_CLIENT_SECRET`. Set `VALXEL_COGNITO_GOOGLE=false` without Google.
+3. Choose `VALXEL_AUTH=github` (GitHub, plus Cognito when it's set) or `VALXEL_AUTH=cognito` (Cognito
+   only, plus GitHub when its OAuth app is set).
+
+How it works:
+- **Flow and checks.** Sign-in is OIDC's code flow with PKCE, a state and a nonce. The ID token's
+  signature is checked against the pool's published keys, along with its issuer, audience, expiry
+  and use.
+- **Who someone is.** Only a verified email signs anyone in, and that email is who they are. An
+  invitation, a group or an approval finds them by it, so someone who signs in with Google one day
+  and GitHub (same verified email) the next is the same member.
+- **Passkeys for admins and group approvers.** A passkey (`amr` swk or hwk, `acr` level 3) counts as
+  two factors; an email code or Google doesn't. So a workspace's admins, and anyone approving
+  through a workspace group, act only from a passkey session; GitHub sign-in counts too, since
+  GitHub requires two-factor sign-in of code contributors. They add a passkey from their workspace
+  page (Cognito's `/passkeys/add`), and the decision page offers "Sign in with your passkey". A
+  GitHub team in `product.yaml` approves as before.
+- **Session lengths.** Sessions last 12 hours. Anyone who is an approver, admin or owner in a
+  workspace signs in again after 4 hours.
 
 - **Submitting an intent** requires membership of the product's GitHub org.
 - **Deciding a gate** requires matching one of the gate's approvers in that product's
@@ -118,8 +146,18 @@ who aren't in a product's GitHub teams join through it (`src/valxel_sdlc/workspa
 | viewer | see the workspace's products, nothing more |
 
 - **Invitations.** An admin adds a profile (name, email or GitHub login, role, and optionally the
-  products it covers) and gets a one-time link to share. Only the invited person can accept it:
-  they sign in as that login or email. Until invitation emails ship, the admin sends the link.
+  products it covers) on the workspace's People page. The person gets an email with a one-time
+  link when email is set up (`VALXEL_SMTP_HOST` and friends; Amazon SES works through its SMTP
+  endpoint, `email-smtp.<region>.amazonaws.com`). Otherwise the page shows the link for the admin
+  to share. Only the invited person can accept it: they sign in as that GitHub login, or with that
+  email, which GitHub sign-in reads only when GitHub has verified it. Sign-in returns them to the
+  link.
+- **Pages.** Workspace (beside your name) has four tabs:
+  - **People:** roles, products, suspend, remove, a new link.
+  - **Approver groups:** who is in each group.
+  - **Gate approvers:** a grid of gates by groups per product, saved as a new version.
+  - **Audit log:** shown to admins.
+  Every action is checked again by the server.
 - **Approver groups.** Each workspace starts with Product, Design, Architecture, Security, Release
   and On-call; the owner is in all of them. An admin maps groups to each product's gates
   (`PUT /api/workspaces/{ws}/products/{id}/gates`). Mapped groups *add to* `product.yaml`'s
@@ -1563,6 +1601,23 @@ percentile and largest fill, sessions over 70%, the layers that take the most, c
 These numbers set the caps on prompt layers and the rule for resuming sessions (the design, "Valxel:
 agent context and session management"). A model with no window in config shows as unknown, and
 strict mode warns about it. Codex reports usage per turn, so its fill is an upper bound.
+
+**Caps per prompt layer.** `context_caps` in `config/models.yaml` caps the role's skills (L2,
+15k tokens), the constitutions (L3, 8k), the product context (L4, 10k) and the feature context (L5,
+25k). A layer over its cap is cut at a heading, keeping what comes first, and ends with a note
+naming what was left out: nothing is cut silently, and the cut is the same every time, so the
+prompt still caches. The size check counts 3.5 characters a token, so it errs toward cutting early.
+In live mode the tool won't start if a role's model can't hold the capped layers plus `reserve`
+(64k tokens for the task and the reply).
+
+**Each build task gets its own feature context.** The planner tags each task with the criteria
+(`acs`), decisions (`adrs`), files and screens it covers. A coder or reviewer then sees:
+- **from the plan:** only that task's entry (the others named in one line);
+- **from the HLD:** its ADRs and its repo's lines, plus lines that name no repo (threats, NFRs),
+  and the Data section only for providers and event workers;
+- **from the UX spec:** only its screens, and nothing when it builds none.
+Each cut document says what it left out. A coder's session also gets the full documents in
+`~/feature/`, outside the repo checkout, to read when the prompt isn't enough.
 
 ## Cost: what features and products cost
 

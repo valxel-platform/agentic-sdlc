@@ -102,6 +102,30 @@ class Notifier:
             self._save()
             return p
 
+    def email_ready(self) -> bool:
+        """Whether email goes anywhere: an injected sender, or SMTP configured (Amazon SES's SMTP
+        endpoint works: VALXEL_SMTP_HOST=email-smtp.<region>.amazonaws.com)."""
+        return self._send_email is not _smtp or bool(os.environ.get("VALXEL_SMTP_HOST"))
+
+    def invite(self, to: str, *, workspace: str, by: str, role: str, url: str) -> bool:
+        """An invitation to a workspace: who asked, the role, and the one-time link. True when it
+        was sent; the admin shares the link themselves otherwise."""
+        if not to or not self.email_ready():
+            return False
+        text = (f"{by} invited you to the {workspace} workspace in Valxel, as {role}.\n\n"
+                f"Accept the invitation (the link works once, for you alone):\n{url}\n\n"
+                "If you weren't expecting this, ignore this email.")
+        try:
+            self._send_email(to, f"Join {workspace} in Valxel", text)
+        except Exception:
+            log.exception("Invitation email to %s failed", to)
+            return False
+        with self._lock:  # who was invited, never the link
+            self.outbox = (self.outbox + [{"at": datetime.now(timezone.utc).isoformat(), "kind": "invite",
+                                           "ref": workspace, "subject": f"Join {workspace} in Valxel",
+                                           "to": [], "emailed": [to]}])[-OUTBOX:]
+        return True
+
     def link(self, thread_id: str) -> str:
         kind = (thread_id.split("-") + ["", ""])[1]
         path = {"INI": "initiatives", "REL": "releases", "PRD": "products", "REV": "reviews",

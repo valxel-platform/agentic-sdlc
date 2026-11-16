@@ -224,6 +224,9 @@ class FakeGitHub:
             return FakeResp(json.dumps([{"login": "acme-clinic"}]).encode())
         if "/user/teams" in url:
             return FakeResp(json.dumps([{"slug": "architects", "organization": {"login": "acme-clinic"}}]).encode())
+        if url.endswith("/user/emails"):
+            return FakeResp(json.dumps([{"email": "old@x.example", "primary": False, "verified": True},
+                                        {"email": "Maria@Clinic.example", "primary": True, "verified": True}]).encode())
         raise AssertionError(url)
 
 
@@ -236,7 +239,7 @@ def test_github_sign_in_flow(engine):
         assert client.post("/api/auth/dev-login", json={"login": "x"}).status_code == 404
         r = client.get("/api/auth/login", follow_redirects=False)
         q = parse_qs(urlparse(r.headers["location"]).query)
-        assert q["scope"] == ["read:org"] and q["redirect_uri"] == ["https://sdlc.valxel.dev/api/auth/callback"]
+        assert q["scope"] == ["read:org user:email"] and q["redirect_uri"] == ["https://sdlc.valxel.dev/api/auth/callback"]
 
         bad = client.get("/api/auth/callback?code=the-code&state=forged", follow_redirects=False)
         assert bad.status_code == 400  # state must match the cookie set at login
@@ -245,8 +248,34 @@ def test_github_sign_in_flow(engine):
         assert r.status_code == 302 and "secure" in r.headers["set-cookie"].lower()
         me = client.get("/api/me").json()
         assert me["login"] == "maria" and me["teams"] == ["acme-clinic/architects"]
+        assert me["email"] == "maria@clinic.example"  # the primary, verified address
         assert [lane["id"] for lane in me["lanes"]] == ["CLN"]
         assert "gho_abc" not in r.headers["set-cookie"]  # the GitHub token is never stored
+
+
+def test_github_sign_in_returns_to_the_page_it_started_on_and_nowhere_else(engine):
+    cfg = AuthConfig(mode="github", secret=SECRET, client_id="cid", client_secret="cs",
+                     public_url="https://sdlc.valxel.dev")
+    app = create_app(engine, auth=cfg, oauth=GitHubOAuth(cfg, opener=FakeGitHub()), web_dist=None)
+    with TestClient(app, base_url="https://sdlc.valxel.dev") as client:
+        for asked, lands in (("/join/wrkspc-shared/tok123", "/join/wrkspc-shared/tok123"),
+                             ("https://evil.example/x", "/"), ("//evil.example/x", "/"), ("/\\evil.example", "/"),
+                             ("/api/auth/logout", "/")):
+            r = client.get("/api/auth/login", params={"next": asked}, follow_redirects=False)
+            state = parse_qs(urlparse(r.headers["location"]).query)["state"][0]
+            r = client.get(f"/api/auth/callback?code=the-code&state={state}", follow_redirects=False)
+            assert r.headers["location"] == lands, asked
+
+
+def test_unverified_github_email_is_not_used():
+    class Unverified(FakeGitHub):
+        def open(self, req, timeout=None):
+            if req.full_url.endswith("/user/emails"):
+                return FakeResp(json.dumps([{"email": "m@x.example", "primary": True, "verified": False}]).encode())
+            return super().open(req, timeout)
+
+    cfg = AuthConfig(mode="github", secret=SECRET, client_id="cid", client_secret="cs", public_url="https://x.dev")
+    assert GitHubOAuth(cfg, opener=Unverified()).identity("gho_abc").email == ""
 
 
 def test_tampered_session_cookies_are_rejected(client):

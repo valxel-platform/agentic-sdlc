@@ -106,6 +106,7 @@ export interface PendingItem {
   title?: string;
   approvers: string[];
   can_decide: boolean;
+  needs_passkey?: boolean; // they'd decide through a workspace group after a passkey sign-in
   allowed?: string[];
   artifact?: { id: string; kind: string } | null;
   preview?: string;
@@ -349,7 +350,35 @@ export interface WorkTracking { provider: string; project: string; items: WorkIt
 export interface Me {
   login: string; name: string; avatar_url: string; orgs: string[]; teams: string[];
   lanes: { id: string; name: string }[];
+  email?: string;
+  idp?: "github" | "cognito" | "dev";
+  strong?: boolean; // two factors at sign-in (a passkey through Cognito)
+  roles?: Record<string, Role>;        // workspace -> role, read on every request
+  groups?: string[];                   // "<workspace>/<group>"
+  products?: Record<string, string[]>; // workspace -> products the profile covers ([] for all)
 }
+
+export type Role = "owner" | "admin" | "approver" | "member" | "viewer";
+export const ROLES: Role[] = ["owner", "admin", "approver", "member", "viewer"];
+export const ROLE_TEXT: Record<Role, string> = {
+  owner: "Everything an admin can, and makes or changes owners",
+  admin: "Invites people, sets roles, groups and gate approvers",
+  approver: "Decides the gates their groups approve, and starts features",
+  member: "Starts features and follows them",
+  viewer: "Sees the workspace's products",
+};
+export interface Workspace { id: string; name: string; plan?: string; role: Role }
+export interface Member {
+  id: string; name: string; email: string; github_login: string; role: Role; products: string[];
+  status: "invited" | "active" | "suspended"; invited_by?: string; created?: string; updated?: string;
+}
+export interface Group { slug: string; name: string; members: string[] }
+export interface WorkspaceView extends Workspace {
+  members: Member[]; groups: Group[];
+  products: { id: string; gates: Record<string, string[]>; version: number }[];
+}
+export interface AuditEntry { at: string; actor: string; action: string; target?: string; detail?: Record<string, unknown> }
+export interface Invited extends Member { invite_url: string; emailed: boolean }
 
 export interface IncidentAction {
   id: string; type: "flag_off" | "rollback" | "hotfix" | "intent_change" | "monitor"; text: string;
@@ -642,8 +671,9 @@ export const api = {
   featureCost: (id: string) => request<FeatureCost>("GET", `/features/${encodeURIComponent(id)}/cost`),
   productCost: (productId: string, month?: string) =>
     request<ProductCost>("GET", `/costs/${encodeURIComponent(productId)}${month ? `?month=${month}` : ""}`),
-  authConfig: () => request<{ mode: "github" | "dev"; teams?: string[] }>("GET", "/auth/config"),
-  devLogin: (login: string, teams: string[], orgs: string[]) => request<Me>("POST", "/auth/dev-login", { login, teams, orgs }),
+  authConfig: () => request<{ mode: "github" | "cognito" | "dev"; teams?: string[]; providers?: { id: string; label: string }[] }>("GET", "/auth/config"),
+  devLogin: (login: string, teams: string[], orgs: string[], email = "") =>
+    request<Me>("POST", "/auth/dev-login", { login, teams, orgs, email }),
   logout: () => request<{ ok: boolean }>("POST", "/auth/logout", {}),
   me: () => request<Me>("GET", "/me"),
   features: () => request<FeatureSummary[]>("GET", "/features"),
@@ -717,6 +747,27 @@ export const api = {
     request<IntakeSession>("POST", `/intake/${id}/submit`, { pilot, profile }),
   trace: (id: string) => request<Trace>("GET", `/features/${encodeURIComponent(id)}/trace`),
   traceCsvUrl: (id: string) => `/api/features/${encodeURIComponent(id)}/trace.csv`,
+  workspaces: () => request<Workspace[]>("GET", "/workspaces"),
+  createWorkspace: (body: { id: string; name: string; plan: string }) => request<Workspace>("POST", "/workspaces", body),
+  workspace: (ws: string) => request<WorkspaceView>("GET", `/workspaces/${encodeURIComponent(ws)}`),
+  invite: (ws: string, body: { name: string; email: string; github_login: string; role: Role; products: string[] }) =>
+    request<Invited>("POST", `/workspaces/${encodeURIComponent(ws)}/members`, body),
+  resendInvite: (ws: string, id: string) =>
+    request<{ invite_url: string; emailed: boolean }>("POST", `/workspaces/${encodeURIComponent(ws)}/members/${encodeURIComponent(id)}/resend`, {}),
+  updateMember: (ws: string, id: string, body: { role?: Role; products?: string[]; status?: string }) =>
+    request<Member>("PATCH", `/workspaces/${encodeURIComponent(ws)}/members/${encodeURIComponent(id)}`, body),
+  removeMember: (ws: string, id: string) =>
+    request<void>("DELETE", `/workspaces/${encodeURIComponent(ws)}/members/${encodeURIComponent(id)}`),
+  join: (ws: string, token: string) =>
+    request<Member>("POST", `/workspaces/${encodeURIComponent(ws)}/join/${encodeURIComponent(token)}`, {}),
+  createGroup: (ws: string, name: string) => request<Group>("POST", `/workspaces/${encodeURIComponent(ws)}/groups`, { name }),
+  setGroup: (ws: string, slug: string, members: string[]) =>
+    request<Group>("PUT", `/workspaces/${encodeURIComponent(ws)}/groups/${encodeURIComponent(slug)}`, { members }),
+  deleteGroup: (ws: string, slug: string) =>
+    request<void>("DELETE", `/workspaces/${encodeURIComponent(ws)}/groups/${encodeURIComponent(slug)}`),
+  setGates: (ws: string, productId: string, gates: Record<string, string[]>) =>
+    request<{ version: number }>("PUT", `/workspaces/${encodeURIComponent(ws)}/products/${encodeURIComponent(productId)}/gates`, { gates }),
+  workspaceAudit: (ws: string) => request<AuditEntry[]>("GET", `/workspaces/${encodeURIComponent(ws)}/audit`),
   lessons: (productId: string) => request<LessonsOverview>("GET", `/products/${encodeURIComponent(productId)}/lessons`),
   pilotReport: (productId: string) => request<PilotReport>("GET", `/reports/pilot?product_id=${encodeURIComponent(productId)}`),
 };

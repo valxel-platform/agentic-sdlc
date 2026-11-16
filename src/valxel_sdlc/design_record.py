@@ -225,7 +225,7 @@ def draft_for_existing(services, product_id: str) -> dict:
         tail = workspace.describe(co).split(". Under Agent notes")[0] + ".\n\n" + tail
     layers = build_layers(role="designer", skills=("design:design-system",), constitution=snap.constitution,
                           product=snap.product, parent_texts={}, tail=tail, product_context=snap.product_context,
-                          skills_dir=skills_dir_of(services))
+                          skills_dir=skills_dir_of(services), caps=services.settings.context_caps)
     tags = CallTags(product_id=product_id, feature_id=f"{product_id}-design-record", phase="design", role="designer",
                     data_class=snap.product.data_class, workspace=snap.product.workspace, prompt_version="design-record@1")
     try:
