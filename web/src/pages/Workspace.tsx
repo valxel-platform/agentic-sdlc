@@ -98,6 +98,14 @@ export function WorkspacePage({ me, onChanged }: { me: Me; onChanged: () => void
         <h1>{w.name}</h1>
         <p className="muted">You're {/^[aeiou]/.test(w.role) ? "an" : "a"} {w.role} here: {ROLE_TEXT[w.role].toLowerCase()}.
           {me.login && <> Signed in as <span className="mono">{me.login}</span>.</>}</p>
+        {me.idp === "cognito" && (
+          <p className="small">
+            {me.strong ? "You signed in with a passkey." : admin || w.role === "approver"
+              ? <>To change this workspace or approve through a group, <a href="/api/auth/login?provider=passkey&next=/workspaces">sign in with a passkey</a>.</>
+              : null}{" "}
+            <a href="/api/auth/passkey">Add a passkey</a>
+          </p>
+        )}
       </div></div>
       {err && <p className="error-note" role="alert">{err}</p>}
       <div className="tabs" role="tablist">

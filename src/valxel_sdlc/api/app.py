@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
+import time
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -42,12 +44,16 @@ from ..web.auth import (
     SESSION_COOKIE,
     SESSION_TTL,
     NEXT_COOKIE,
+    OIDC_COOKIE,
+    PASSKEY_NEEDED,
+    PRIVILEGED_TTL,
     STATE_COOKIE,
     AuthConfig,
     GitHubOAuth,
     SessionSigner,
     User,
     can_decide,
+    needs_passkey,
     new_state,
     session_payload,
     user_from_payload,
@@ -400,6 +406,11 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if user is None:
             raise HTTPException(401, "Sign in to continue")
         user = with_memberships(user)
+        from ..workspaces import rank
+
+        if (any(rank(r) >= rank("approver") for r in user.roles.values())
+                and time.time() - (user.signed_in_at or 0) > PRIVILEGED_TTL):
+            raise HTTPException(401, "Approvers and admins sign in again every 4 hours")
         if (request.method not in ("GET", "HEAD") and "application/json" not in request.headers.get("content-type", "")
                 and request.headers.get("x-valxel-client") != "web"):
             # With SameSite=Lax cookies this blocks cross-site form posts. A request that isn't JSON (a
@@ -432,6 +443,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         role = role_in(user, workspace)
         if rank(role) < rank("admin"):
             raise HTTPException(403, f"Only {workspace}'s admins can do that")
+        if not user.strong:
+            raise HTTPException(403, "Changing a workspace needs a passkey sign-in. Choose 'Use a passkey' "
+                                     "(add one first from your workspace page), then try again.")
         return role
 
     def item_approvers(fid: str, item: dict) -> list[str]:
@@ -456,12 +470,18 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         if item["type"] == "external":  # CI or OpenChoreo, not a person
             return {**item, "approvers": [], "can_decide": False}
         approvers = item_approvers(fid, item)
-        return {**item, "approvers": approvers, "can_decide": can_decide(user, {"approvers": approvers})}
+        return {**item, "approvers": approvers, "can_decide": can_decide(user, {"approvers": approvers}),
+                "needs_passkey": needs_passkey(user, approvers)}
 
     # --- auth ---
+    cognito = auth.cognito()
+
     @api.get("/auth/config")
     def auth_config() -> dict:
-        out: dict = {"mode": auth.mode}
+        """How to sign in: the buttons the sign-in page shows."""
+        providers = ([{"id": "github", "label": "Sign in with GitHub"}] if auth.github_enabled and auth.mode != "dev" else [])
+        providers += cognito.options() if cognito and auth.mode != "dev" else []
+        out: dict = {"mode": auth.mode, "providers": providers}
         if auth.mode == "dev":  # offer the approver identities from governance as quick picks
             teams: set[str] = set()
             for pid in eng().services.settings.registry:
@@ -483,8 +503,11 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         return path[:300] if ok else "/"
 
     @api.get("/auth/login")
-    def login(next: str = "/") -> RedirectResponse:  # noqa: A002 - the query parameter's name
-        if auth.mode != "github":
+    def login(next: str = "/", provider: str = "github", step_up: bool = False,  # noqa: A002 - query names
+              hint: str = "") -> RedirectResponse:
+        if provider in ("google", "email", "passkey"):
+            return oidc_login(provider, local_path(next), step_up or provider == "passkey", hint)
+        if auth.mode == "dev" or not auth.github_enabled:
             raise HTTPException(404, "GitHub sign-in is not enabled")
         st = new_state()
         resp = RedirectResponse(oauth.authorize_url(st), status_code=302)
@@ -511,12 +534,60 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         _set_session(resp, user)
         return resp
 
+    def oidc_login(option: str, next_path: str, step_up: bool, hint: str) -> RedirectResponse:
+        if cognito is None or auth.mode == "dev":
+            raise HTTPException(404, "Google and email sign-in aren't enabled")
+        from ..web.identity import pkce
+
+        st, nonce = new_state(), new_state()
+        verifier, _ = pkce()
+        resp = RedirectResponse(cognito.authorize_url(option="email" if option == "passkey" else option, state=st,
+                                                      nonce=nonce, verifier=verifier, step_up=step_up,
+                                                      hint=hint[:254]), status_code=302)
+        # Signed, so the callback trusts its own values; short-lived, and only sent to /api/auth.
+        resp.set_cookie(OIDC_COOKIE, signer.dumps({"state": st, "nonce": nonce, "verifier": verifier,
+                                                   "next": next_path, "exp": int(time.time()) + 600}),
+                        max_age=600, httponly=True, samesite="lax", secure=auth.secure_cookies, path="/api/auth")
+        return resp
+
+    @api.get("/auth/oidc/callback")
+    def oidc_callback(request: Request, code: str = "", state: str = "", error: str = "") -> RedirectResponse:
+        from ..web.identity import SignInError
+
+        saved = signer.loads(request.cookies.get(OIDC_COOKIE))
+        if error or not code:
+            return RedirectResponse("/?signin=failed", status_code=302)
+        if cognito is None:
+            raise HTTPException(404, "Google and email sign-in aren't enabled")
+        if not saved or not state or not secrets.compare_digest(state, str(saved.get("state", ""))):
+            raise HTTPException(400, "Sign-in expired or was started elsewhere; try again")
+        try:
+            who = cognito.identity(code, verifier=saved["verifier"], nonce=saved["nonce"])
+        except SignInError as exc:
+            raise HTTPException(401, str(exc)) from exc
+        # The person is their verified email: invitations, groups and approvals find them by it,
+        # whichever way they signed in (GitHub's verified email links the same way).
+        user = User(login=who.email, name=who.name or who.email.split("@", 1)[0], avatar_url=who.picture,
+                    email=who.email, idp="cognito", strong=who.strong)
+        resp = RedirectResponse(local_path(saved.get("next") or "/"), status_code=302)
+        resp.delete_cookie(OIDC_COOKIE, path="/api/auth")
+        _set_session(resp, user)
+        return resp
+
+    @api.get("/auth/passkey")
+    def add_passkey(user: User = Depends(current_user)) -> RedirectResponse:
+        """Cognito's page for adding a passkey to the signed-in person's account."""
+        if cognito is None or user.idp != "cognito":
+            raise HTTPException(404, "Passkeys are for Google and email sign-in; GitHub has its own two-factor sign-in")
+        return RedirectResponse(cognito.passkey_url(), status_code=302)
+
     @api.post("/auth/dev-login")
     def dev_login(body: DevLoginIn) -> JSONResponse:
         if auth.mode != "dev":
             raise HTTPException(404, "Dev sign-in is disabled")
         orgs = sorted(set(body.orgs) | {t.split("/", 1)[0] for t in body.teams})
-        user = User(login=body.login, name=body.login, orgs=orgs, teams=list(body.teams), email=body.email.lower())
+        user = User(login=body.login, name=body.login, orgs=orgs, teams=list(body.teams), email=body.email.lower(),
+                    idp="dev")
         resp = JSONResponse(asdict(user))
         _set_session(resp, user)
         return resp
@@ -1640,7 +1711,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             raise HTTPException(404, str(exc)) from exc
         approvers = item_approvers(feature_id, {**item, "product_id": eng().view(feature_id)["product_id"]})
         if not can_decide(user, {"approvers": approvers}):
-            raise HTTPException(403, f"Only {', '.join(approvers) or 'the listed approvers'} can decide this")
+            raise HTTPException(403, PASSKEY_NEEDED if needs_passkey(user, approvers)
+                                else f"Only {', '.join(approvers) or 'the listed approvers'} can decide this")
         trace = item.get("traceability") or {}
         if body.override_reason and not trace.get("blocks"):
             raise HTTPException(422, "Nothing to override: the traceability matrix is complete")

@@ -634,7 +634,11 @@ export function DecisionPanel({ item, featureId, onDone }: { item: PendingItem; 
         </div>
       )}
 
-      {!item.can_decide ? (
+      {!item.can_decide && item.needs_passkey ? (
+        <p className="note">You approve this through your workspace group, which needs a passkey sign-in.{" "}
+          <a href={`/api/auth/login?provider=passkey&next=${encodeURIComponent(location.pathname)}`}>Sign in with your passkey</a>
+          {" "}(no passkey yet? <a href="/api/auth/passkey">add one</a> first).</p>
+      ) : !item.can_decide ? (
         <p className="note">Waiting on {item.approvers.join(", ") || "the listed approvers"}. You can follow along, but only they can decide.</p>
       ) : (
         <>

@@ -106,6 +106,7 @@ export interface PendingItem {
   title?: string;
   approvers: string[];
   can_decide: boolean;
+  needs_passkey?: boolean; // they'd decide through a workspace group after a passkey sign-in
   allowed?: string[];
   artifact?: { id: string; kind: string } | null;
   preview?: string;
@@ -350,6 +351,8 @@ export interface Me {
   login: string; name: string; avatar_url: string; orgs: string[]; teams: string[];
   lanes: { id: string; name: string }[];
   email?: string;
+  idp?: "github" | "cognito" | "dev";
+  strong?: boolean; // two factors at sign-in (a passkey through Cognito)
   roles?: Record<string, Role>;        // workspace -> role, read on every request
   groups?: string[];                   // "<workspace>/<group>"
   products?: Record<string, string[]>; // workspace -> products the profile covers ([] for all)
@@ -668,7 +671,7 @@ export const api = {
   featureCost: (id: string) => request<FeatureCost>("GET", `/features/${encodeURIComponent(id)}/cost`),
   productCost: (productId: string, month?: string) =>
     request<ProductCost>("GET", `/costs/${encodeURIComponent(productId)}${month ? `?month=${month}` : ""}`),
-  authConfig: () => request<{ mode: "github" | "dev"; teams?: string[] }>("GET", "/auth/config"),
+  authConfig: () => request<{ mode: "github" | "cognito" | "dev"; teams?: string[]; providers?: { id: string; label: string }[] }>("GET", "/auth/config"),
   devLogin: (login: string, teams: string[], orgs: string[], email = "") =>
     request<Me>("POST", "/auth/dev-login", { login, teams, orgs, email }),
   logout: () => request<{ ok: boolean }>("POST", "/auth/logout", {}),

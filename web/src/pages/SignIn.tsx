@@ -3,7 +3,8 @@ import { api } from "../api";
 import { Mark } from "../components/Mark";
 
 export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
-  const [cfg, setCfg] = useState<{ mode: string; teams?: string[] } | null>(null);
+  const [cfg, setCfg] = useState<{ mode: string; teams?: string[]; providers?: { id: string; label: string }[] } | null>(null);
+  const back = encodeURIComponent(location.pathname + location.search);
   const [login, setLogin] = useState("");
   const [email, setEmail] = useState("");
   const [teams, setTeams] = useState<string[]>([]);
@@ -31,11 +32,21 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
       <div className="card">
         <div>
           <h1>Sign in</h1>
-          <p className="muted" style={{ marginTop: 8 }}>Your GitHub teams and your workspace groups decide which gates you can approve.</p>
+          <p className="muted" style={{ marginTop: 8 }}>Your GitHub teams and your workspace groups decide which gates you can approve.
+            Admins and group approvers sign in with a passkey or GitHub to act.</p>
         </div>
         {err && <p className="error-note" role="alert">{err}</p>}
         {!cfg && !err && <p className="faint">Checking how to sign in…</p>}
-        {cfg?.mode === "github" && <a className="btn" href={`/api/auth/login?next=${encodeURIComponent(location.pathname + location.search)}`}>Sign in with GitHub</a>}
+        {cfg && cfg.mode !== "dev" && (
+          <div className="stack">
+            {(cfg.providers ?? []).map((p, i) => (
+              <a key={p.id} className={i === 0 ? "btn" : "btn secondary"} href={`/api/auth/login?provider=${p.id}&next=${back}`}>{p.label}</a>
+            ))}
+            {(cfg.providers ?? []).some((p) => p.id === "email") && (
+              <a className="linkish" href={`/api/auth/login?provider=passkey&next=${back}`}>Use a passkey</a>
+            )}
+          </div>
+        )}
         {cfg?.mode === "dev" && (
           <form onSubmit={dev} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p className="note">Development sign-in: choose any identity. Not for production.</p>

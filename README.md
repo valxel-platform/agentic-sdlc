@@ -92,8 +92,36 @@ GitHub sign-in uses an OAuth app owned by `valxel-platform`:
 3. Each product org approves the OAuth app (org settings, Third-party access) so team membership
    is visible.
 
-The app requests `read:org` only to read the user's orgs and teams. It keeps them in a signed,
-HttpOnly session cookie and discards the GitHub token.
+The app requests `read:org` to read the user's orgs and teams, and `user:email` for their primary
+email if GitHub has verified it. It keeps them in a signed, HttpOnly session cookie and discards
+the GitHub token.
+
+**Google, email and passkeys** come through an Amazon Cognito user pool (`src/valxel_sdlc/web/identity.py`).
+GitHub stays on its own OAuth app, since GitHub isn't a standard OpenID provider.
+
+1. Deploy `deploy/cognito.yaml`. It creates the user pool and managed login on the Essentials plan
+   (email codes, passkeys, and Google when you give it a Google OAuth client), the app client, and
+   its secret in Secrets Manager. Give it an SES identity: Cognito's own sender allows 50 emails a day.
+2. Set its outputs as `VALXEL_COGNITO_DOMAIN`, `VALXEL_COGNITO_CLIENT_ID` and `VALXEL_COGNITO_ISSUER`,
+   and the secret as `VALXEL_COGNITO_CLIENT_SECRET`. Set `VALXEL_COGNITO_GOOGLE=false` without Google.
+3. Choose `VALXEL_AUTH=github` (GitHub, plus Cognito when it's set) or `VALXEL_AUTH=cognito` (Cognito
+   only, plus GitHub when its OAuth app is set).
+
+How it works:
+- **Flow and checks.** Sign-in is OIDC's code flow with PKCE, a state and a nonce. The ID token's
+  signature is checked against the pool's published keys, along with its issuer, audience, expiry
+  and use.
+- **Who someone is.** Only a verified email signs anyone in, and that email is who they are. An
+  invitation, a group or an approval finds them by it, so someone who signs in with Google one day
+  and GitHub (same verified email) the next is the same member.
+- **Passkeys for admins and group approvers.** A passkey (`amr` swk or hwk, `acr` level 3) counts as
+  two factors; an email code or Google doesn't. So a workspace's admins, and anyone approving
+  through a workspace group, act only from a passkey session; GitHub sign-in counts too, since
+  GitHub requires two-factor sign-in of code contributors. They add a passkey from their workspace
+  page (Cognito's `/passkeys/add`), and the decision page offers "Sign in with your passkey". A
+  GitHub team in `product.yaml` approves as before.
+- **Session lengths.** Sessions last 12 hours. Anyone who is an approver, admin or owner in a
+  workspace signs in again after 4 hours.
 
 - **Submitting an intent** requires membership of the product's GitHub org.
 - **Deciding a gate** requires matching one of the gate's approvers in that product's
