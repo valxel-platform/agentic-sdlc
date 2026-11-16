@@ -146,6 +146,7 @@ def _workspaces(args, engine=None) -> int:
         print(str(exc), file=sys.stderr)
         return 1
     print(f"{m['name']} owns {args.workspace} and is in every approver group.")
+    return 0
     
     
     def _usage_context(args, engine=None) -> int:
