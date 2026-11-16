@@ -5,27 +5,28 @@
 @import "@fontsource/ibm-plex-mono/400.css";
 @import "@fontsource/ibm-plex-mono/500.css";
 
-/* Signal box. Every feature is a train on a line from intent to production; each gate is a signal
-   a person clears. The signal colors mean one thing each and are never decoration:
+/* Valxel. The frame is the logo's navy; the mark's cyan-to-blue appears only in the mark itself and
+   the page you're on. Every feature is still a train on a line from intent to production, each gate
+   a signal a person clears, and the signal colours mean one thing each, never decoration:
      red     stopped or failed        amber  waiting on a person
-     green   passed, line clear       blue   agents working (the section is occupied)
-   The panel paint is the pale green-grey of an interlocking frame; the ink is line green. */
+     green   passed, line clear       blue   agents working (the brand's blue: the agents are Valxel)
+   Neutrals are cool slate, so the status colours are the only warm or green things on the page. */
 :root {
-  --ground: #e8ece6;
-  --panel: #f6f8f4;
+  --ground: #eef2f7;
+  --panel: #f8fafc;
   --raised: #ffffff;
-  --ink: #13261f;
-  --ink-2: #43544c;
-  --ink-3: #5a6a62;
-  --rule: #c5cec1;
-  --rule-soft: #dbe2d7;
+  --ink: #0f1a2b;
+  --ink-2: #3e4c63;
+  --ink-3: #56647b;
+  --rule: #c9d2df;
+  --rule-soft: #dee4ed;
 
   --stop: #c2362b;   --stop-ink: #a4291f;   --stop-bg: #f7e2df;
   --wait: #d98a12;   --wait-ink: #8a5a06;   --wait-bg: #f7ebd3;
   --clear: #2e8b57;  --clear-ink: #1f6b41;  --clear-bg: #e1f0e6;
-  --lamp: #2c6fb7;   --lamp-ink: #1d5fa3;   --lamp-bg: #e2ecf7;
-  --unlit: #3a4a42;  /* a signal lamp that isn't lit */
-  --head: #13261f;   /* the ring of a signal head */
+  --lamp: #2563eb;   --lamp-ink: #1d4ed8;   --lamp-bg: #e3ebfc;
+  --unlit: #2a3447;  /* a signal lamp that isn't lit */
+  --head: #121621;   /* the ring of a signal head */
 
   /* The lane's data class, as the colour of its track band. */
   --band-general: #8a9a90;
@@ -33,11 +34,14 @@
   --band-payments: #1f7f86;
 
   --act: var(--lamp-ink);       /* links */
-  --act-hover: #154a80;
-  --bar: #13261f;               /* the top bar: the signal box frame */
-  --bar-ink: #d7e2db;
-  --bar-ink-2: #9db0a5;
-  --focus: 0 0 0 3px #8fb8e6;
+  --act-hover: #1e3a8a;
+  --bar: #121621;               /* the top bar: the signal box frame */
+  --bar-ink: #dce3ee;
+  --bar-ink-2: #9aa6ba;
+  --focus: 0 0 0 3px #8cc8f5;
+  /* the mark's gradient, for the one place it's used outside the mark */
+  --brand-cyan: #22d3ee; --brand-blue: #2563eb;
+  --brand: linear-gradient(90deg, var(--brand-cyan), var(--brand-blue));
 
   --font: "IBM Plex Sans", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
@@ -55,32 +59,32 @@
 /* The signal box at night. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --ground: #0e1814; --panel: #15221d; --raised: #1a2a24;
-    --ink: #e3ebe5; --ink-2: #b4c2b9; --ink-3: #8c9c93;
-    --rule: #2f4038; --rule-soft: #22312a;
+    --ground: #0e121c; --panel: #141a27; --raised: #1a2232;
+    --ink: #e4e9f2; --ink-2: #b3bdcd; --ink-3: #8c97aa;
+    --rule: #2a3446; --rule-soft: #1f2736;
     --stop: #e5574b;  --stop-ink: #f08a80;  --stop-bg: #2e1715;
     --wait: #f2a93b;  --wait-ink: #f2b54a;  --wait-bg: #2e2412;
     --clear: #4cb67a; --clear-ink: #6fcf97; --clear-bg: #15291e;
-    --lamp: #5c9ee3;  --lamp-ink: #7fb2ea;  --lamp-bg: #14233a;
-    --unlit: #24332c; --head: #5d7468;
-    --band-general: #7d8f84; --band-phi: #a47dcc; --band-payments: #3fa9b0;
-    --act-hover: #a6caf0; --bar: #08100d; --bar-ink: #d7e2db; --bar-ink-2: #8fa398;
-    --focus: 0 0 0 3px #3f6fa8;
+    --lamp: #4f8ff7;  --lamp-ink: #8ab4fa;  --lamp-bg: #14223f;
+    --unlit: #263043; --head: #5e6b82;
+    --band-general: #8390a5; --band-phi: #a47dcc; --band-payments: #3fa9b0;
+    --act-hover: #b9d2fc; --bar: #0b0f18; --bar-ink: #dce3ee; --bar-ink-2: #8f9bb0;
+    --focus: 0 0 0 3px #2f6fb8;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --ground: #0e1814; --panel: #15221d; --raised: #1a2a24;
-  --ink: #e3ebe5; --ink-2: #b4c2b9; --ink-3: #8c9c93;
-  --rule: #2f4038; --rule-soft: #22312a;
+  --ground: #0e121c; --panel: #141a27; --raised: #1a2232;
+  --ink: #e4e9f2; --ink-2: #b3bdcd; --ink-3: #8c97aa;
+  --rule: #2a3446; --rule-soft: #1f2736;
   --stop: #e5574b;  --stop-ink: #f08a80;  --stop-bg: #2e1715;
   --wait: #f2a93b;  --wait-ink: #f2b54a;  --wait-bg: #2e2412;
   --clear: #4cb67a; --clear-ink: #6fcf97; --clear-bg: #15291e;
-  --lamp: #5c9ee3;  --lamp-ink: #7fb2ea;  --lamp-bg: #14233a;
-  --unlit: #24332c; --head: #5d7468;
-  --band-general: #7d8f84; --band-phi: #a47dcc; --band-payments: #3fa9b0;
-  --act-hover: #a6caf0; --bar: #08100d; --bar-ink: #d7e2db; --bar-ink-2: #8fa398;
-  --focus: 0 0 0 3px #3f6fa8;
+  --lamp: #4f8ff7;  --lamp-ink: #8ab4fa;  --lamp-bg: #14223f;
+  --unlit: #263043; --head: #5e6b82;
+  --band-general: #8390a5; --band-phi: #a47dcc; --band-payments: #3fa9b0;
+  --act-hover: #b9d2fc; --bar: #0b0f18; --bar-ink: #dce3ee; --bar-ink-2: #8f9bb0;
+  --focus: 0 0 0 3px #2f6fb8;
   color-scheme: dark;
 }
 
@@ -112,8 +116,28 @@ a:hover { color: var(--act-hover); }
   position: sticky; top: 0; z-index: 10; background: var(--bar); color: var(--bar-ink);
   display: flex; align-items: center; gap: 28px; padding: 0 28px; min-height: 56px;
 }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: var(--fs-2); color: #fff; white-space: nowrap; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: var(--fs-2); color: #fff; white-space: nowrap; text-decoration: none; }
 .brand svg { flex: none; }
+/* the logo's lockup: mark, then VALXEL over "Agentic SDLC" */
+.lockup { display: inline-flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; }
+.lockup svg { flex: none; }
+.lockup-words { display: flex; flex-direction: column; gap: 3px; line-height: 1; }
+.lockup-words .wordmark { display: block; }
+.lockup-product { font-size: 11px; font-weight: 500; letter-spacing: 0.04em; color: var(--bar-ink-2); }
+a.lockup:hover { color: #fff; }
+a.lockup:focus-visible { border-radius: var(--r-s); }
+/* the account menu: who's signed in, workspaces, sign out */
+.account { position: relative; }
+.account > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; color: #fff; padding: 4px 6px; border-radius: var(--r-m); }
+.account > summary::-webkit-details-marker { display: none; }
+.account > summary:hover { background: #1c2333; }
+.account[open] > summary { background: #1c2333; }
+.account-menu { position: absolute; right: 0; top: calc(100% + 8px); min-width: 200px; background: var(--raised); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: var(--r-m); box-shadow: 0 8px 24px rgba(10, 16, 30, 0.18); padding: 6px; display: flex; flex-direction: column; z-index: 20; }
+.account-menu .who-line { padding: 6px 10px 8px; border-bottom: 1px solid var(--rule-soft); margin-bottom: 4px; font-size: var(--fs-0); color: var(--ink-2); }
+.account-menu a, .account-menu button { display: block; text-align: left; padding: 7px 10px; border-radius: var(--r-s); color: var(--ink);
+  text-decoration: none; background: none; border: 0; font: inherit; font-size: var(--fs-1); cursor: pointer; }
+.account-menu a:hover, .account-menu button:hover { background: var(--lamp-bg); }
 .nav { display: flex; align-items: stretch; gap: 2px; overflow-x: auto; scrollbar-width: none; align-self: stretch; }
 .nav::-webkit-scrollbar { display: none; }
 .nav a {
@@ -121,7 +145,7 @@ a:hover { color: var(--act-hover); }
   padding: 0 12px; font-weight: 500; border-bottom: 3px solid transparent; border-top: 3px solid transparent;
 }
 .nav a:hover { color: #fff; }
-.nav a.active { color: #fff; border-bottom-color: var(--wait); }
+.nav a.active { color: #fff; background: var(--brand) left bottom / 100% 3px no-repeat; }
 .nav a:focus-visible { box-shadow: inset var(--focus); border-radius: 0; }
 .count {
   min-width: 20px; padding: 0 6px; border-radius: 10px; background: var(--wait); color: #1d1404;
@@ -129,9 +153,9 @@ a:hover { color: var(--act-hover); }
 }
 .side-foot { margin-left: auto; display: flex; align-items: center; gap: 18px; font-size: var(--fs-0); white-space: nowrap; }
 .who { display: flex; align-items: center; gap: 8px; color: #fff; }
-.who img, .who .initial { width: 26px; height: 26px; border-radius: 50%; background: #2c3d35; display: grid; place-items: center; font-weight: 600; }
+.who img, .who .initial { width: 26px; height: 26px; border-radius: 50%; background: #253048; display: grid; place-items: center; font-weight: 600; }
 .live { display: flex; align-items: center; gap: 7px; color: var(--bar-ink-2); }
-.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--unlit); box-shadow: inset 0 0 0 1px #556b60; }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--unlit); box-shadow: inset 0 0 0 1px #4a566c; }
 .live.on i { background: #4cb67a; box-shadow: 0 0 6px #4cb67a; }
 .linkish { background: none; border: 0; padding: 0; color: var(--bar-ink-2); font: inherit; cursor: pointer; text-align: left; }
 .linkish:hover { color: #fff; }
@@ -146,7 +170,7 @@ main { padding: 32px 40px 72px; min-width: 0; width: 100%; max-width: 1480px; ma
   font: inherit; font-weight: 600; padding: 9px 16px; cursor: pointer; border: 1px solid transparent;
   background: var(--ink); color: var(--ground); text-decoration: none; white-space: nowrap;
 }
-.btn:hover { background: var(--ink-2); color: var(--ground); }
+.btn:hover { background: #24324a; color: #fff; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn.secondary { background: transparent; color: var(--ink); border-color: var(--rule); }
 .btn.secondary:hover { border-color: var(--ink-3); background: var(--panel); }
@@ -446,7 +470,8 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-weight: 500;
   min-height: 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 480px); align-items: stretch;
 }
 .signin-art { background: var(--bar); color: var(--bar-ink); padding: 48px; display: flex; flex-direction: column; justify-content: space-between; gap: 32px; overflow: hidden; }
-.signin-art .brand { font-size: var(--fs-3); }
+.signin-art { background: #121621; align-items: center; text-align: center; } /* the logo's navy */
+.signin-logo { width: min(300px, 64%); height: auto; margin-top: 12px; }
 .signin-art p { color: var(--bar-ink-2); max-width: 46ch; font-size: var(--fs-2); }
 .signin-art svg.line { width: 100%; height: auto; max-height: 280px; }
 .signin .card { padding: 48px 40px; display: flex; flex-direction: column; justify-content: center; gap: 20px; border: 0; border-radius: 0; background: var(--ground); }
@@ -462,7 +487,7 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-weight: 500;
   .intent-body { max-height: none; }
   .row { grid-template-columns: 1fr; gap: 10px; }
   .row-cost { text-align: left; }
-  .side-foot .live span, .side-foot .who span { display: none; }
+  .side-foot .live span, .side-foot .who > span:not(.initial) { display: none; }
 }
 @media (max-width: 760px) {
   .side { flex-wrap: wrap; gap: 0 16px; padding: 8px 16px 0; }
@@ -473,7 +498,9 @@ label.field { display: flex; flex-direction: column; gap: 6px; font-weight: 500;
   .rail.full .label { display: none; }
   .rail.full .station.waiting .label, .rail.full .station.current .label, .rail.full .station.stopped .label { display: block; overflow: visible; }
   .signin { grid-template-columns: 1fr; }
-  .signin-art { padding: 28px 20px; }
+  .signin-art { padding: 24px 20px; gap: 16px; }
+  .signin-logo { width: 150px; margin-top: 0; }
+  .signin-art svg.line { display: none; } /* the form first, on a phone */
   .signin .card { padding: 28px 20px; }
   .decision { padding: 18px 16px; }
   .actions { position: static; }
@@ -666,6 +693,8 @@ table.quality tfoot td { padding: 8px; font-weight: 600; }
 .path-steps li { border: 1px solid var(--rule-soft); border-radius: var(--r-m); padding: 8px 10px; background: var(--raised); display: flex; flex-direction: column; gap: 4px; }
 .path-steps li.done { background: var(--panel); color: var(--ink-3); }
 .path-steps li.now { border-color: var(--lamp); box-shadow: inset 3px 0 0 var(--lamp); }
+/* a gate waiting on people is amber, as everywhere else; blue is agents at work */
+.path-steps li.now.waiting { border-color: var(--wait); box-shadow: inset 3px 0 0 var(--wait); }
 .path-steps li.mine:not(.done) { border-color: var(--wait); }
 .path-steps li.waiting.mine { box-shadow: inset 3px 0 0 var(--wait); }
 .path-name { font-weight: 600; font-size: var(--fs-1); }

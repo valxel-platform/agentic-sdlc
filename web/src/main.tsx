@@ -1,11 +1,11 @@
-import { StrictMode, useCallback, useEffect, useState } from "react";
+import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, Navigate, NavLink, Route, Routes } from "react-router-dom";
 import "./styles.css";
 import { api, ApiError, type Me } from "./api";
 import { closeLive, useLive, useLiveStatus } from "./live";
 import { SignIn } from "./pages/SignIn";
-import { Mark } from "./components/Mark";
+import { Lockup } from "./components/Mark";
 import { Inbox } from "./pages/Inbox";
 import { Board } from "./pages/Board";
 import { FeaturePage } from "./pages/Feature";
@@ -32,7 +32,7 @@ function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; on
   return (
     <div className="shell">
       <header className="side">
-        <div className="brand"><Mark /> Valxel SDLC</div>
+        <Link to="/" className="brand" aria-label="Valxel Agentic SDLC: home"><Lockup /></Link>
         <nav className="nav" aria-label="Main">
           <NavLink to="/inbox">Decisions {mine > 0 && <span className="count" aria-label={`${mine} waiting on you`}>{mine}</span>}</NavLink>
           <NavLink to="/roadmap">Roadmap</NavLink>
@@ -50,12 +50,7 @@ function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; on
           <div className={`live ${live ? "on" : ""}`} title={live ? "Live updates on" : "Reconnecting…"}>
             <i aria-hidden="true" /><span>{live ? "Live" : "Reconnecting…"}</span>
           </div>
-          <div className="who">
-            {me.avatar_url ? <img src={me.avatar_url} alt="" /> : <span className="initial" aria-hidden="true">{me.login[0]?.toUpperCase()}</span>}
-            <span>{me.name || me.login}</span>
-          </div>
-          <NavLink className="linkish" to="/workspaces">{Object.keys(me.roles ?? {}).length === 1 ? "Workspace" : "Workspaces"}</NavLink>
-          <button className="linkish" onClick={onSignOut}>Sign out</button>
+          <Account me={me} onSignOut={onSignOut} />
         </div>
       </header>
       <main>
@@ -89,6 +84,36 @@ function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; on
         </Routes>
       </main>
     </div>
+  );
+}
+
+/** Who's signed in, with their workspaces and sign out, in one menu so the bar keeps room for pages. */
+function Account({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const close = () => { if (ref.current) ref.current.open = false; };
+  useEffect(() => {
+    const away = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    document.addEventListener("click", away);
+    document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("click", away); document.removeEventListener("keydown", esc); };
+  }, []);
+  const many = Object.keys(me.roles ?? {}).length !== 1;
+  return (
+    <details className="account" ref={ref}>
+      <summary aria-label={`Account: ${me.name || me.login}`}>
+        <span className="who">
+          {me.avatar_url ? <img src={me.avatar_url} alt="" /> : <span className="initial" aria-hidden="true">{me.login[0]?.toUpperCase()}</span>}
+          <span>{me.name || me.login}</span>
+        </span>
+      </summary>
+      <div className="account-menu">
+        <div className="who-line">Signed in as <strong>{me.login}</strong></div>
+        <Link to="/workspaces" onClick={close}>{many ? "Workspaces" : "Workspace"}</Link>
+        <Link to="/start" onClick={close}>Set up a new workspace</Link>
+        <button type="button" onClick={() => { close(); onSignOut(); }}>Sign out</button>
+      </div>
+    </details>
   );
 }
 

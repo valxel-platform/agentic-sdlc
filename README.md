@@ -1,6 +1,8 @@
-# Valxel SDLC
+<p align="center"><img src="docs/brand/valxel-agentic-sdlc.jpg" alt="Valxel Agentic SDLC" width="520"></p>
 
-Valxel SDLC is an agentic software development lifecycle built on LangGraph. Agents built from
+# Valxel Agentic SDLC
+
+Valxel Agentic SDLC is an agentic software development lifecycle built on LangGraph. Agents built from
 the Product, Design and Engineering plugin skills take a feature from idea to production. Humans
 decide at six gates, and an escalation path takes over a phase when agents are stuck.
 
@@ -54,6 +56,14 @@ the first PRD defective, so the evaluator loop fixes it, and `--revise` sends th
 at G3.
 
 ## Web interface
+
+**Look.** The interface wears the Valxel logo: the hexagon mark and VALXEL wordmark
+(`web/src/components/Mark.tsx`, drawn as SVG; `web/public/favicon.svg`), the logo's navy for the
+top bar, and its cyan-to-blue only in the mark and the page you're on. The sign-in page shows the
+logo itself (`web/src/brand/valxel-lockup.png`, cut from `docs/brand/valxel-agentic-sdlc.jpg`).
+Four colours carry status and nothing else: red stopped, amber waiting on a person, green passed,
+blue agents working. Neutrals are cool slate, and the dark theme follows the logo's navy. Every
+text colour meets WCAG AA (4.5:1) on the backgrounds it sits on, in both themes.
 
 Three screens, all updated live over server-sent events (`/api/events`):
 
