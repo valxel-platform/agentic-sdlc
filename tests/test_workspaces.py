@@ -195,3 +195,27 @@ def test_a_new_workspace_makes_its_creator_owner(client):
     assert v["role"] == "owner" and v["members"][0]["email"] == "f@new.example" and v["products"] == []
     assert client.post("/api/workspaces", json={"id": "acme-new", "name": "again"}).status_code == 400
     assert client.get("/api/workspaces/someone-elses").status_code == 404
+
+
+@pytest.mark.skipif(not __import__("os").environ.get("VALXEL_TEST_DATABASE_URL"),
+                    reason="set VALXEL_TEST_DATABASE_URL to run Postgres tests")
+def test_workspaces_persist_in_postgres(settings):
+    import os
+    import uuid
+
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from valxel_sdlc.workspaces import PostgresWorkspaceStore
+
+    name = f"wrkspc-{uuid.uuid4().hex[:8]}"
+    with ConnectionPool(os.environ["VALXEL_TEST_DATABASE_URL"],
+                        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        w = Workspaces(PostgresWorkspaceStore(pool), settings.registry)
+        w.bootstrap_owner(name, {"github_login": "asha"})
+        _, token = w.invite(name, {"email": "b@x.example"}, role="approver", actor="asha")
+        w.accept(name, token, login=f"b-{name}", email="b@x.example")
+        again = Workspaces(PostgresWorkspaceStore(pool), settings.registry)  # a restarted replica
+        assert len(again.groups(name)) == 6 and len(again.members(name)) == 2
+        assert [m["role"] for m in again.memberships(f"b-{name}")] == ["approver"]
+        assert again.store.audit_log(name)[0]["action"] == "member.accept"

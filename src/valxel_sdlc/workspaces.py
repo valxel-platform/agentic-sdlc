@@ -134,11 +134,11 @@ class PostgresWorkspaceStore:
                          (kind, workspace, key))
 
     def list(self, kind, workspace=None):
-        q, args = "SELECT data FROM valxel_workspace_rows WHERE kind = %s", [kind]
-        if workspace is not None:
-            q, args = q + " AND workspace = %s", [*args, workspace]
         with self.pool.connection() as conn:
-            return [r["data"] for r in conn.execute(q + " ORDER BY workspace, key", args).fetchall()]
+            return [r["data"] for r in conn.execute(
+                "SELECT data FROM valxel_workspace_rows WHERE kind = %(kind)s"
+                " AND (%(ws)s::text IS NULL OR workspace = %(ws)s) ORDER BY workspace, key",
+                {"kind": kind, "ws": workspace}).fetchall()]
 
     def audit(self, workspace, actor, action, detail):
         with self.pool.connection() as conn:
