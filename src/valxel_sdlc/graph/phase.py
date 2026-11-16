@@ -78,6 +78,20 @@ def design_knowledge(services, snap) -> tuple[dict, str]:
     return pack, render(pack, int(kn.cfg.settings.get("max_chars", 12000)))
 
 
+def released_datasets(services, product_id: str) -> list[dict]:
+    """The product's data contracts already released: its governance repo's datasets/*.yaml."""
+    from ..datasets import load
+
+    try:
+        gov = services.settings.entry(product_id).governance
+        src = services.governance.source
+        sha = src.resolve(gov.org, gov.repo, gov.ref)
+        paths = [p for p in src.list(gov.org, gov.repo, "datasets", sha) if p.endswith(".yaml")]
+        return [c for c in (load(src.read(gov.org, gov.repo, p, sha, optional=True) or "") for p in paths) if c]
+    except Exception:  # noqa: BLE001 - no governance repo, or no datasets yet: nothing released
+        return []
+
+
 def feature_ctx(services, state: FeatureState, phase: str) -> dict:
     """Read-only snapshot a phase needs; artifact bodies are loaded from the store."""
     spec = PHASE_SPECS[phase]
@@ -94,6 +108,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         **goal_ctx,
         "knowledge": knowledge,
         "knowledge_text": knowledge_text,
+        # The data contracts already released (governance datasets/): the design builds on them.
+        "datasets": released_datasets(services, state["product_id"]) if phase in KNOWLEDGE_PHASES else [],
         "feature_id": state["feature_id"],
         "product_id": state["product_id"],
         "product_name": product.name,

@@ -129,7 +129,11 @@ def _governance_plan(std, repo: str, pid: str, data_class: str, approvers: dict)
     p["tag_ruleset"] = {}
     p["files"] = [f for f in p["files"] if f != ".github/dependabot.yml"]
     p["codeowners"] = None  # owned by the lane's people, not generated
-    p["managed_files"] = {".github/workflows/secrets.yml": "governance-secrets.yml"}  # no code: only secrets
+    # No code: the secrets scan, and the check of the product's data contracts (datasets/).
+    p["managed_files"] = {".github/workflows/secrets.yml": "governance-secrets.yml",
+                          ".github/workflows/datasets.yml": "governance-datasets.yml",
+                          ".github/scripts/datasets.py": "datasets.py",
+                          ".github/scripts/odcs-json-schema-v3.2.0.json": "odcs-json-schema-v3.2.0.json"}
     return p
 
 
@@ -258,10 +262,19 @@ def compare(t: Target, state: dict | None) -> list[Drift]:
     return out
 
 
+def standard_file_path(name: str):
+    """Where the platform's copy of a managed file is, for reading it in place."""
+    from pathlib import Path
+
+    return Path(__file__).with_name("standard_files") / name
+
+
 def standard_file(name: str) -> str:
     """The platform's copy of a managed file (src/valxel_sdlc/standard_files/)."""
     from importlib.resources import files
 
+    if name == "datasets.py":  # the module itself: governance CI runs the same checks as the evaluator
+        return (files("valxel_sdlc") / "datasets.py").read_text()
     return (files("valxel_sdlc") / "standard_files" / name).read_text()
 
 

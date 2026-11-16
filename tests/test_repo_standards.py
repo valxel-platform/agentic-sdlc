@@ -35,6 +35,9 @@ def existing(gh: StubGitHub, repo: str, *, ghas: bool = True, files: bool = True
     if workflows:
         for path, name in {".github/workflows/security.yml": "security.yml",
                            ".github/workflows/secrets.yml": "governance-secrets.yml",
+                           ".github/workflows/datasets.yml": "governance-datasets.yml",
+                           ".github/scripts/datasets.py": "datasets.py",
+                           ".github/scripts/odcs-json-schema-v3.2.0.json": "odcs-json-schema-v3.2.0.json",
                            ".github/scripts/report.py": "report.py"}.items():
             gh.files[(repo, "main", path)] = rs.standard_file(name)
     gh.repos[repo] = {"state": {"visibility": "public", "allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True,
@@ -366,9 +369,13 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     assert [(d.area, d.item, d.have, d.fix) for d in rep.drift if d.area == "workflows"] == [
         ("workflows", ".github/scripts/report.py", "missing", "apply"),
         ("workflows", ".github/workflows/security.yml", "differs", "apply")]
-    # A governance repo has no code: only the secrets scan is managed there.
+    # A governance repo has no code: the secrets scan and the data-contract check are managed there.
     grep = rs.reconcile(gh, target(svc, gov), apply=False)
-    assert [(d.item, d.have) for d in grep.drift if d.area == "workflows"] == [(".github/workflows/secrets.yml", "missing")]
+    assert [(d.item, d.have) for d in grep.drift if d.area == "workflows"] == [
+        (".github/scripts/datasets.py", "missing"), (".github/scripts/odcs-json-schema-v3.2.0.json", "missing"),
+        (".github/workflows/datasets.yml", "missing"), (".github/workflows/secrets.yml", "missing")]
+    # Its datasets.py is the evaluator's own module, so CI and G4 check contracts the same way.
+    assert rs.standard_file("datasets.py") == (Path(rs.__file__).parent / "datasets.py").read_text()
 
     after = rs.reconcile(gh, target(svc, lane), apply=True)
     assert "managed files" in after.applied and after.ok
@@ -387,7 +394,7 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
 def test_the_managed_workflows_pin_actions_by_commit():
     import re
 
-    for name in ("security.yml", "governance-secrets.yml"):
+    for name in ("security.yml", "governance-secrets.yml", "governance-datasets.yml"):
         text = rs.standard_file(name)
         uses = re.findall(r"uses:\s*(\S+)", text)
         assert uses and all(re.search(r"@[0-9a-f]{40}$", u) for u in uses), uses
@@ -407,7 +414,7 @@ def test_the_managed_workflows_are_prettier_clean():
     one space before an inline comment, as Prettier writes YAML."""
     import re
 
-    for name in ("security.yml", "governance-secrets.yml"):
+    for name in ("security.yml", "governance-secrets.yml", "governance-datasets.yml"):
         assert not [ln for ln in rs.standard_file(name).splitlines() if re.search(r"\S {2,}#", ln)], name
 
 

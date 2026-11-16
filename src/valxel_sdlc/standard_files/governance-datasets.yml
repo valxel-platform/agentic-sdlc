@@ -1,0 +1,35 @@
+# Managed by the Valxel SDLC (config/repos.yaml managed_files): `valxel repos check` reports a copy
+# that differs, and `valxel repos apply` opens a pull request to bring it back. Change it in
+# agentic-sdlc (src/valxel_sdlc/standard_files/governance-datasets.yml), not here.
+#
+# The product's data contracts (datasets/*.yaml, ODCS v3 with Valxel's extensions): each is valid
+# against the standard's own JSON Schema (.github/scripts/odcs-json-schema-v3.2.0.json, Apache-2.0,
+# from bitol-io/open-data-contract-standard) and Valxel's profile, and on a pull request every
+# changed contract stays compatible with main: within an event version, only optional properties,
+# new enum values and stricter classes may be added.
+name: datasets
+
+on:
+  pull_request:
+    paths: ["datasets/**", ".github/scripts/datasets.py", ".github/workflows/datasets.yml"]
+  push:
+    branches: [main]
+    paths: ["datasets/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: pip install --quiet "pyyaml>=6" "jsonschema>=4.20"
+      - name: Check the data contracts
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: python3 .github/scripts/datasets.py check datasets ${BASE:+--base "$BASE"}

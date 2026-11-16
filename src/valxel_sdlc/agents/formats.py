@@ -101,6 +101,36 @@ sequenceDiagram
                                 records keyed by id, otherwise make it a scan of the service's database)
 ## Events                      (when records change through Kafka)
 - valxel.<record>.<event>.v<n>: published by <repo>, applied by <repo>
+## Datasets                    (with Events or a Knowledge events source: one ODCS v3 data contract per topic, each in
+                                its own ```yaml block. Released contracts are in the governance repo's datasets/; change
+                                one only compatibly (add optional properties, enum values or stricter classes, raise its
+                                version) or add a new event type, topic and contract. Every property has a classification:
+                                none, pii, financial, phi or secret; free text is always phi.)
+```yaml
+apiVersion: v3.2.0
+kind: DataContract
+id: <product>.<name>
+name: <what the records are>
+version: 1.0.0
+status: active
+schema:
+  - name: <name>
+    physicalType: topic
+    physicalName: <prefix>.<entity>.v1
+    logicalType: object
+    properties:
+      - { name: <id>, logicalType: string, required: true, primaryKey: true, classification: none }
+      - { name: <field>, logicalType: <string|integer|number|boolean|date|timestamp|object|array>, classification: <class> }
+customProperties:
+  - { property: owner, value: <org>/<repo that publishes it> }
+  - { property: events, value: [valxel.<record>.<event>.v1] }
+  - { property: compacted, value: <true when events carry whole records keyed by id> }
+  - { property: retention, value: <90d|7y...> }
+  - { property: tenant, value: <the property saying whose record it is> }
+  - property: consumers
+    value:
+      <org>/<repo>: [<the properties it reads>]
+```
 ## Instrumentation             (one line for every event in the PRD's Instrumentation section)
 - <event_name>: <org>/<repo>   (the affected repo that records it)
 ## Data                        (required when a provider or event worker changes; '- None: <why>' otherwise)

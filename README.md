@@ -558,7 +558,25 @@ Roles merge and deploy in dependency order: library, provider, event-worker, kno
   runs with the real embedding model and reranker. G6 shows the recall beside the last release's.
 - **Production.** A source more than an hour behind the product raises the `knowledge-lag` alert
   rule. It applies only to knowledge components (`roles:` in `platform/alert-rules.yaml`).
-The `evals` quality suite reads the agent's `evals / report` status on every PR (recorded model
+**Data contracts** (`src/valxel_sdlc/datasets.py`). Every event type is a dataset, written as an
+[ODCS v3](https://bitol-io.github.io/open-data-contract-standard/) data contract with Valxel's
+extensions (owner, events, compacted, retention, tenant, consumers) in its `customProperties`:
+- **Architecture (G4).** The architecture agent writes one contract per topic under the HLD's
+  `## Datasets` (a fenced yaml block each). Every property has a class: `none`, `pii`,
+  `financial`, `phi` or `secret`. The evaluator checks each one against the standard's JSON Schema
+  and Valxel's profile. It also checks that every `## Events` line and every knowledge events
+  source has a contract, that the publisher is the contract's owner, and that every repo that
+  applies or indexes the topic is a listed consumer. A contract already released must stay
+  compatible within its event version: only optional properties, new enum values and stricter
+  classes may be added, with a higher version. Anything else is a new event type, topic and
+  contract.
+- **Release.** Approved contracts go to the governance repo's `datasets/<id>.yaml` in the same
+  pull request as the feature's decisions. The governance repo's managed `datasets` workflow runs
+  the same module (`.github/scripts/datasets.py`) on every change, comparing with `main`.
+- The schema components validate against is generated from the contract (`json_schema`), and
+  refuses any property the contract doesn't have, so nothing unclassified is published.
+
+
 responses); after a deploy to dev the agent's post-deploy job runs the same evals against the
 real model and reports `integration / report`. Platform articles VX-12 to VX-14 make these
 rules: models only through the gateway, people approve changes, evals gate every PR.

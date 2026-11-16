@@ -231,6 +231,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     out += _data(text, repos, ctx)
     out += _threats(text, repos, ctx)
     out += _events(text, repos)
+    out += _datasets(text, repos + new, ctx)
     out += _emitters(text, repos, ctx)
     out += _acceptance(repos, ctx)
     out += _endpoints(text, repos, ctx)
@@ -386,6 +387,74 @@ def _events(text: str, repos: list[dict]) -> list[str]:
         return []
     return ["HLD has event workers but no Events section naming the events, each as "
             "'- valxel.<entity>.<what happened>.v1: <who publishes it, who applies it>' (VX-16)"]
+
+
+_PUBLISHED = re.compile(r"published by\s+([\w./-]+)", re.I)
+_APPLIED = re.compile(r"applied by\s+(.+)$", re.I)
+
+
+def _short(name: str) -> str:
+    return name.split("/", 1)[-1].strip().lower()
+
+
+def _datasets(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """Every event the design names has an ODCS data contract (under '## Datasets', or already in
+    the governance repo); each contract is valid, names its publisher and every repo that applies
+    or indexes it, and stays compatible with the version already released."""
+    from .. import datasets as ds
+    from ..agents.parse import parse_events
+    from ..repo_standards import standard_file_path
+    from ..retrieval import parse_knowledge
+
+    contracts, out = ds.parse_hld(text)
+    named = parse_events(text)
+    sources = [(k["repo"], s) for k in parse_knowledge(text) for s in k["sources"] if s["kind"] == "events"]
+    if not contracts and not named and not sources:
+        return out
+    released = {str(c.get("id")): c for c in ctx.get("datasets") or []}
+    schema = standard_file_path("odcs-json-schema-v3.2.0.json")
+    for c in contracts:
+        out += ds.problems(c, schema)
+        old = released.get(str(c.get("id")))
+        if old:
+            out += ds.breaking(old, c)
+    current = {**released, **{str(c.get("id")): c for c in contracts}}
+    by_event = {e: c for c in current.values() for e in ds.events(c)}
+    by_topic = {ds.topic(c): c for c in current.values()}
+    known = {_short(r["name"]) for r in [*repos, *(ctx.get("repos") or []), *(ctx.get("dependency_repos") or [])]}
+    for c in contracts:
+        owner = str(ds.extensions(c).get("owner") or "")
+        if owner and known and _short(owner) not in known:
+            out.append(f"{c.get('id')}: owner {owner} isn't an affected or registered repo")
+        for repo in ds.consumers(c):
+            if known and _short(repo) not in known:
+                out.append(f"{c.get('id')}: consumer {repo} isn't an affected or registered repo")
+    for e in named:
+        c = by_event.get(e["type"])
+        if c is None:
+            out.append(f"Event {e['type']} has no data contract: add an ODCS contract for its topic under "
+                       "'## Datasets' (one ```yaml block per topic), listing it under events")
+            continue
+        pub = _PUBLISHED.search(e["about"])
+        owner = _short(str(ds.extensions(c).get("owner") or ""))
+        if pub and owner and _short(pub.group(1)) != owner:
+            out.append(f"Event {e['type']} is published by {pub.group(1)}, but {c.get('id')}'s owner is "
+                       f"{ds.extensions(c).get('owner')}")
+        applied = _APPLIED.search(e["about"])
+        readers = {_short(r) for r in ds.consumers(c)}
+        for repo in [a for a in re.split(r",|\band\b", applied.group(1)) if a.strip()] if applied else []:
+            if _short(repo) not in readers:
+                out.append(f"{repo.strip()} applies {e['type']} but isn't listed under {c.get('id')}'s consumers")
+    for repo, s in sources:
+        c = by_topic.get(s["topic"])
+        if c is None:
+            out.append(f"{repo}: source {s['name']} reads {s['topic']}, which no data contract describes")
+            continue
+        if s["compacted"] and not ds.extensions(c).get("compacted"):
+            out.append(f"{repo}: source {s['name']} says {s['topic']} is compacted, but {c.get('id')} says it isn't")
+        if _short(repo) not in {_short(r) for r in ds.consumers(c)}:
+            out.append(f"{repo} indexes {s['topic']} but isn't listed under {c.get('id')}'s consumers")
+    return out
 
 
 def _emitters(text: str, repos: list[dict], ctx: dict) -> list[str]:

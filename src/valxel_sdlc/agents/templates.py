@@ -167,6 +167,40 @@ def _new_repo(ctx: dict) -> dict | None:
     return {"name": name, "role": "provider", "lane": ctx["product_id"]}
 
 
+def _stub_topic(ctx: dict) -> str:
+    record = _slug(ctx["title"]).split("-", 1)[0] or "record"
+    return f"{ctx['product_id'].lower()}.{record}.v1"
+
+
+def _stub_contract(ctx: dict, provider: str, repos: list[dict]) -> str:
+    """The stand-in architect's data contract for the record its events carry (ODCS v3)."""
+    import yaml
+
+    record = _slug(ctx["title"]).split("-", 1)[0] or "record"
+    readers = {r["name"]: [f"{record}_id", "tenant_id", "summary", "updated_at"]
+               for r in repos if r["role"] in ("event-worker", "knowledge")}
+    phi = ctx.get("data_class") == "phi"
+    contract = {
+        "apiVersion": "v3.2.0", "kind": "DataContract", "id": f"{ctx['product_id'].lower()}.{record}s",
+        "name": f"{record.title()} records", "version": "1.0.0", "status": "active",
+        "schema": [{"name": f"{record}s", "physicalType": "topic", "physicalName": _stub_topic(ctx),
+                    "logicalType": "object", "properties": [
+                        {"name": f"{record}_id", "logicalType": "string", "required": True, "primaryKey": True,
+                         "classification": "none"},
+                        {"name": "tenant_id", "logicalType": "string", "required": True, "classification": "none"},
+                        {"name": "summary", "logicalType": "string", "classification": "phi" if phi else "pii"},
+                        {"name": "updated_at", "logicalType": "timestamp", "required": True, "classification": "none"}]}],
+        "customProperties": [
+            {"property": "owner", "value": provider},
+            {"property": "events", "value": [f"valxel.{record}.changed.v1"]},
+            {"property": "compacted", "value": True},
+            {"property": "retention", "value": "7y" if phi else "1y"},
+            {"property": "tenant", "value": "tenant_id"},
+            {"property": "consumers", "value": readers}],
+    }
+    return yaml.safe_dump(contract, sort_keys=False).rstrip()
+
+
 def architecture(ctx: dict, defective: bool) -> str:
     deps = [r for r in ctx.get("dependency_repos", []) if _mentions(ctx, r["name"])]
     new = _new_repo(ctx)
@@ -225,7 +259,7 @@ def architecture(ctx: dict, defective: bool) -> str:
         via = "gateway (BAA)" if ctx.get("data_class") == "phi" else "gateway"
         record = _slug(ctx["title"]).split("-", 1)[0] or "record"
         lines += ["", "## Knowledge"] + [
-            f"- {r['name']}: model text-embedding-3-small via {via}; sources: {record}s (events valxel.{record}.changed.v1, compacted)"
+            f"- {r['name']}: model text-embedding-3-small via {via}; sources: {record}s (events {_stub_topic(ctx)}, compacted)"
             for r in knowledge]
     lines += _data_lines(ctx, repos) + _threat_lines(ctx, repos)
     lines += _resource_lines(ctx, repos, provider, lines)
@@ -234,6 +268,8 @@ def architecture(ctx: dict, defective: bool) -> str:
         workers = ", ".join(r["name"].split("/", 1)[-1] for r in repos if r["role"] == "event-worker")
         lines += ["", "## Events",
                   f"- valxel.{record}.changed.v1: published by {provider.split('/', 1)[-1]}, applied by {workers}"]
+    if any(r["role"] in ("event-worker", "knowledge") for r in repos):
+        lines += ["", "## Datasets", "```yaml", _stub_contract(ctx, provider, repos), "```"]
     from .parse import parse_instrumentation
 
     wanted = parse_instrumentation((ctx.get("parent_texts") or {}).get("PRD", ""))
