@@ -406,6 +406,8 @@ def make_gate(gate: str, services):
                 "quality": quality_summary(state) if gate in ("g5", "g6") else None,
                 # G6 sees whether the events that measure the feature's goal fired in staging.
                 "instrumentation": (state.get("instrumentation_check") or None) if gate == "g6" else None,
+                # Each data contract's events, reconciled in staging (reconcile.py).
+                "datasets": (state.get("datasets_check") or None) if gate == "g6" else None,
                 # G5 and G6 see which performance tests the change needed, and why.
                 "performance": (sorted((state.get("performance") or {}).values(), key=lambda d: d["repo"])
                                 if gate in ("g5", "g6") else None),
@@ -1772,6 +1774,21 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
 
                     evs.append(event("staging_wait", "instrumentation", describe(check),
                                      missing=list(check.get("missing") or [])))
+                # Did every event published reach every consumer, with none breaking its contract?
+                reset["datasets_check"] = recon = datasets_staging(services, state)
+                if recon.get("datasets"):
+                    from ..reconcile import describe as describe_datasets
+
+                    evs.append(event("staging_wait", "datasets", describe_datasets(recon),
+                                     problems=[p["message"] for p in recon.get("problems") or []]))
+                if recon.get("problems"):  # holds the release, like a failed suite (decision 3)
+                    held = {**res, "status": "failed", "reason": "the datasets don't reconcile in staging",
+                            "results": [*(res.get("results") or []),
+                                        *({"repo": p["repo"], "state": "failed", "message": p["message"]}
+                                          for p in recon["problems"])]}
+                    return fix_or_ask(services, state, stage, held, lambda: _people_said(
+                        state, stage, held, ok=ok, retry=retry, extra={"datasets_check": recon}),
+                        extra={"datasets_check": recon})
             return Command(goto=ok, update={"delivery": {stage: res}, **_quality_update(res), **reset, "events": evs})
         return fix_or_ask(services, state, stage, res, lambda: _people_said(
             state, stage, res, ok=ok, retry=retry, extra=_quality_update(res)))
@@ -1786,6 +1803,18 @@ def _goal_events(services, state: FeatureState) -> list[dict]:
         return instrumentation_events(services, state.get("artifacts") or {})
     except Exception:
         return []
+
+
+def datasets_staging(services, state: FeatureState) -> dict:
+    """The design's data contracts, reconciled in staging (valxel_sdlc.reconcile)."""
+    from ..datasets import parse_hld
+    from ..reconcile import staging_check
+
+    ref = (state.get("artifacts") or {}).get("HLD")
+    contracts = parse_hld(services.artifacts.load(ref))[0] if ref else []
+    rt = services.feature_snapshot(state).product.runtime or {}
+    env = env_for("staging", tuple(rt.get("pipeline") or PIPELINE)) or "staging"
+    return staging_check(services, state, contracts, env)
 
 
 def instrumentation_staging(services, state: FeatureState) -> dict:

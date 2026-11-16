@@ -34,6 +34,17 @@ rules:
     condition: { window: 5m, interval: 1m, operator: gt, threshold: 100 }
     says: "Exceptions on most requests: the component is failing. Check the latest release first."
 
+  # Producers refuse, and consumers park, an event that breaks its data contract (the templates
+  # log "breaks the data contract", naming the field and never its value). One is a bug: in
+  # production it opens an incident; in staging the reconciliation at G6 holds the release.
+  contract-broken:
+    description: "An event broke its data contract."
+    roles: [provider, event-worker, knowledge]
+    severity: warning
+    source: { type: log, query: "breaks the data contract" }
+    condition: { window: 5m, interval: 1m, operator: gt, threshold: 0 }
+    says: "A producer sent, or tried to send, data its approved contract does not allow. Find the field in the logs, fix the producer, then replay the dead-letter topic."
+
   # Knowledge components (template-knowledge) log knowledge.source_behind while a source's index is
   # more than an hour behind the product; other components never log it.
   knowledge-lag:

@@ -575,6 +575,12 @@ extensions (owner, events, compacted, retention, tenant, consumers) in its `cust
   the same module (`.github/scripts/datasets.py`) on every change, comparing with `main`.
 - The schema components validate against is generated from the contract (`json_schema`), and
   refuses any property the contract doesn't have, so nothing unclassified is published.
+- **Reconciliation.** Templates log `valxel.datasets {"<dataset>":{"<outcome>":n}}` once a minute
+  (counts only). After staging passes, `reconcile.py` sums these per component. Whatever a
+  contract's owner published must have reached every consumer, and nothing may have broken the
+  contract (refused or parked). Otherwise the release is held like a failed suite: the agents fix
+  the repos it names, and people decide when the tries run out. G6 shows the result. In production
+  the `contract-broken` alert rule watches for the same breaks.
 - **Topics and access.** Each contract becomes a `kafka-topic` Resource (the catalog's
   `from_contracts` type, which an architect can't list under Resources). Its owner gets write
   access, its consumers get read, and each component it names gets a `kafka-user`. On MSK the

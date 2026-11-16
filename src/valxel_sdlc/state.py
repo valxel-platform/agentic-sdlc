@@ -96,6 +96,7 @@ class FeatureState(TypedDict, total=False):
     fix_branch: Annotated[str, last]  # the branch the current fix goes on ('' before merge)
     performance: Annotated[dict, last]  # repo -> the performance test it needs (valxel_sdlc.performance)
     instrumentation_check: Annotated[dict, last]  # the feature's product events counted in staging (outcomes)
+    datasets_check: Annotated[dict, last]  # each data contract's events reconciled in staging (reconcile.py)
     rerun_repos: Annotated[list[str], last]  # repos whose CI failed: the build retry redoes only their tasks
 
     artifacts: Annotated[dict[str, ArtifactRef], merge_dict]  # kind -> latest ref

@@ -38,6 +38,11 @@ def test_the_platform_rules_become_traits_per_component():
     knowledge = traits_for(doc, "emr-knowledge", role="knowledge")
     assert [t["instanceName"] for t in knowledge][-2:] == ["emr-knowledge-knowledge-lag", "emr-knowledge-memory"]
     assert knowledge[-2]["parameters"]["source"] == {"type": "log", "query": "knowledge.source_behind"}
+    # Components that publish or read events get the rule for an event that breaks its data contract.
+    for role in ("provider", "event-worker", "knowledge"):
+        names = [t["instanceName"] for t in traits_for(doc, "c", role=role)]
+        assert "c-contract-broken" in names, role
+    assert "c-contract-broken" not in [t["instanceName"] for t in traits_for(doc, "c", role="consumer")]
 
 
 @pytest.mark.parametrize("bad", [
