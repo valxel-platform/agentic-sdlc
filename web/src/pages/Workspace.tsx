@@ -353,13 +353,17 @@ function Connections({ ws, admin }: { ws: string; admin: boolean }) {
               )}
             </div>
             <p className="small muted pad">{t.grants}. Asked for at: {t.asked_when}.
-              {!t.available && " Connecting it from here is coming soon."}</p>
+              {!t.available && " It isn't set up on this Valxel yet: whoever runs Valxel adds its OAuth client."}</p>
             {t.connections.map((c) => (
               <div key={c.account} className="pad">
                 <strong>{c.account}</strong>{c.reach.account_type ? <span className="small muted"> ({c.reach.account_type})</span> : null}
                 {" · "}<span className="small">
                   {c.reach.selection === "all" ? "all repositories" : c.reach.repos ? `${c.reach.repos.length} repositories: ${c.reach.repos.join(", ")}` : ""}
                   {c.reach.mode ? `${c.reach.mode} mode: a deploy role and a read-only role for agents` : ""}
+                  {c.reach.sites ? `Jira sites: ${c.reach.sites.map((x) => x.name).join(", ")}` : ""}
+                  {c.reach.org ? `Sentry organization ${c.reach.org}` : ""}
+                  {c.reach.subdomain ? `PagerDuty account ${c.reach.subdomain}` : ""}
+                  {c.reach.user && !c.reach.subdomain ? `as ${c.reach.user}` : ""}
                 </span>
                 <div className="small muted">Connected by {c.connected_by} on {when(c.connected_at)}; last worked {when(c.last_ok)}.</div>
                 {c.status === "needs_attention" && <p className="error-note">{c.last_error.charAt(0).toUpperCase() + c.last_error.slice(1)}.{admin && t.available ? " Reconnect to fix it." : ""}</p>}

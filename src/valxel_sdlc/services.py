@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from .artifacts import ArtifactStore
@@ -501,8 +502,18 @@ def make_connections(svc):
         health["github"] = delivery_health(github_app_tokens(api=svc.settings.github_api))
     n = svc.notifier
     notify = (lambda to, subject, text: n._send_email(to, subject, text)) if n is not None and n.email_ready() else None
-    conns = Connections(svc.workspaces, github=github, aws=AwsConnect.from_env(), notify=notify, health=health)
+    from .oauth_connections import OAuthTools, clients_from_env, vault_for
+
+    clients = clients_from_env()
+    oauth = None
+    if clients:
+        public = (os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080").rstrip("/")
+        oauth = OAuthTools(clients, redirect_uri=f"{public}/api/connections/oauth/callback", vault=vault_for())
+    conns = Connections(svc.workspaces, github=github, aws=AwsConnect.from_env(), notify=notify, health=health,
+                        oauth=oauth)
     if conns.aws is not None:
         conns.health_checks["aws"] = aws_health(conns)
+    for tool in clients:
+        conns.health_checks[tool] = oauth.health(tool)
     return conns
 

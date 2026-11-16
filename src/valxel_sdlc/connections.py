@@ -60,15 +60,18 @@ TOOLS: tuple[Tool, ...] = (
     Tool("aws", "AWS", "Go-live, in lite or full mode",
          "A role Valxel assumes with your workspace's external ID, scoped to the mode, and a read-only role for agents",
          "Delete the CloudFormation stack", available=True),
-    Tool("jira", "Jira", "Only if you pick Jira as the tracker", "Read and write issues in the projects you choose",
-         "Revoke in Atlassian, or Disconnect here"),
-    Tool("lucid", "Lucid", "Only if you want diagrams in Lucid", "Create and update diagrams in a Valxel folder",
-         "Revoke in Lucid, or Disconnect here"),
-    Tool("sentry", "Sentry", "First production release, if you use it", "Read errors", "Revoke in Sentry, or Disconnect here"),
-    Tool("pagerduty", "PagerDuty", "First production release, if you use it", "Open and resolve pages",
-         "Revoke in PagerDuty, or Disconnect here"),
+    Tool("jira", "Jira", "Only if you pick Jira as the tracker",
+         "Read and write issues on the Jira site you choose, as the person who connected it",
+         "Remove Valxel under Connected apps in your Atlassian account, or Disconnect here", available=True),
+    Tool("lucid", "Lucid", "Only if you want diagrams in Lucid", "Create and update diagrams, as the person who connected it",
+         "Revoke Valxel under App integrations in Lucid, or Disconnect here", available=True),
+    Tool("sentry", "Sentry", "First production release, if you use it", "Read errors in the organization you choose",
+         "Uninstall Valxel under Settings, Integrations in Sentry, or Disconnect here", available=True),
+    Tool("pagerduty", "PagerDuty", "First production release, if you use it", "Open and resolve incidents; read services",
+         "Revoke Valxel under Integrations, OAuth Apps in PagerDuty, or Disconnect here", available=True),
 )
 TOOL = {t.id: t for t in TOOLS}
+OAUTH_TOOLS = ("jira", "lucid", "sentry", "pagerduty")  # valxel_sdlc.oauth_connections
 # The Apps behind each GitHub tool (valxel_sdlc.signing names their settings).
 GITHUB_APPS = {"github": "delivery", "github-provisioning": "provisioner"}
 APP_ENV = {"delivery": "VALXEL_GITHUB_APP", "provisioner": "VALXEL_GITHUB_PROVISIONER_APP"}
@@ -243,8 +246,10 @@ class Connections:
     their changes in its audit log."""
 
     def __init__(self, workspaces, *, github: GitHubInstalls | None = None, aws: AwsConnect | None = None, notify=None,
-                 health: dict[str, Callable[[dict], str]] | None = None, clock: Callable[[], float] = time.time) -> None:
+                 health: dict[str, Callable[[dict], str]] | None = None, clock: Callable[[], float] = time.time,
+                 oauth=None) -> None:
         self.workspaces, self.github, self.aws, self.notify, self.clock = workspaces, github, aws, notify, clock
+        self.oauth = oauth  # valxel_sdlc.oauth_connections.OAuthTools: Jira, Lucid, Sentry, PagerDuty
         # tool -> check(record): "" when it works, otherwise what's wrong in plain words
         self.health_checks = dict(health or {})
 
@@ -274,6 +279,8 @@ class Connections:
     def _can_connect(self, tool: str) -> bool:
         if tool == "aws":
             return self.aws is not None
+        if self.oauth is not None and self.oauth.available(tool):
+            return True
         return tool in GITHUB_APPS and bool(self.github and self.github.apps.get(GITHUB_APPS[tool]))
 
     def record(self, workspace: str, tool: str, account: str, *, actor: str, reach: dict) -> dict:
@@ -293,6 +300,11 @@ class Connections:
         if not rec:
             raise KeyError(f"No {tool} connection for {account}")
         self.store.delete("connection", workspace, key)
+        if self.oauth is not None and tool in OAUTH_TOOLS:
+            try:
+                self.oauth.forget(workspace, tool, rec["account"])
+            except Exception:
+                log.exception("Couldn't delete the %s tokens for %s", tool, workspace)
         self.store.audit(workspace, actor, "connection.remove", {"tool": tool, "account": account})
         return {"removed": rec, "revoke": TOOL[tool].revoke}
 
@@ -341,6 +353,32 @@ class Connections:
                 out += [f"{r} isn't in the GitHub App's repos" for r in repos
                         if r.split("/", 1)[0].lower() == org.lower() and r.lower() not in given]
         return out
+
+    # ------------------------------------------------------------------ OAuth tools
+    def oauth_start(self, signer, *, workspace: str, tool: str, actor: str) -> tuple[str, str]:
+        """(the vendor's consent screen, the signed state for the cookie)."""
+        if self.oauth is None or not self.oauth.available(tool):
+            raise ConnectionError_(f"{TOOL[tool].name if tool in TOOL else tool} isn't set up on this Valxel")
+        from .oauth_connections import OAuthError
+
+        try:
+            return self.oauth.start(signer, workspace=workspace, tool=tool, actor=actor)
+        except OAuthError as exc:
+            raise ConnectionError_(str(exc)) from exc
+
+    def oauth_finished(self, signer, *, state: str, cookie_state: str, code: str, actor: str,
+                       installation: str = "", org: str = "") -> dict:
+        if self.oauth is None:
+            raise ConnectionError_("OAuth connections aren't set up on this Valxel")
+        from .oauth_connections import OAuthError
+
+        try:
+            got = self.oauth.finish(signer, state=state, cookie_state=cookie_state, code=code, actor=actor,
+                                    installation=installation, org=org)
+        except OAuthError as exc:
+            raise ConnectionError_(str(exc)) from exc
+        rec = self.record(got["workspace"], got["tool"], got["account"], actor=actor, reach=got["reach"])
+        return {**rec, "workspace": got["workspace"]}
 
     # ------------------------------------------------------------------ AWS
     def external_id(self, workspace: str, actor: str = "valxel") -> str:

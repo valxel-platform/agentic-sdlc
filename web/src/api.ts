@@ -383,7 +383,8 @@ export interface Connection {
   tool: string; account: string; status: "connected" | "needs_attention"; connected_by: string; connected_at: number;
   last_ok: number; last_error: string;
   reach: { account_type?: string; selection?: "all" | "selected"; repos?: string[]; installation_id?: number;
-           mode?: string; deploy_role?: string; agents_role?: string };
+           mode?: string; deploy_role?: string; agents_role?: string;
+           sites?: { id?: string; url?: string; name?: string }[]; org?: string; subdomain?: string; user?: string };
 }
 export interface ToolRow {
   tool: string; name: string; asked_when: string; grants: string; revoke: string; available: boolean;

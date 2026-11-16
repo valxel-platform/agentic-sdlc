@@ -174,7 +174,7 @@ who aren't in a product's GitHub teams join through it (`src/valxel_sdlc/workspa
 A workspace's **Connections** tab lists every tool, connected or not: GitHub, GitHub repo creation,
 AWS, Jira, Lucid, Sentry and PagerDuty (`src/valxel_sdlc/connections.py`). Each row shows what
 Valxel can reach, who connected it and when it last worked. Only admins connect and disconnect,
-and every change is in the audit log. GitHub connects today; the others follow.
+and every change is in the audit log.
 
 **GitHub** connects by installing Valxel's two GitHub Apps from that tab, one after the other:
 Delivery (code, pull requests, checks, alerts) and Provisioning (creating repos, used only by the
@@ -214,6 +214,31 @@ How it behaves:
   Valxel stores no AWS secret; sessions last 15 minutes. The hourly health check assumes the
   roles again, so a deleted stack shows within the hour. Host the template where the console can
   read it and set `VALXEL_AWS_STACK_TEMPLATE_URL`.
+- **Jira, Lucid, Sentry and PagerDuty** connect through the vendor's own consent screen
+  (`src/valxel_sdlc/oauth_connections.py`). Whoever runs Valxel registers one OAuth client with
+  each vendor, with the redirect URL `<VALXEL_PUBLIC_URL>/api/connections/oauth/callback`. For
+  Sentry, register a public integration whose redirect URL is
+  `<VALXEL_PUBLIC_URL>/api/connections/sentry/setup` instead. Then give Valxel each client's
+  settings:
+  - `VALXEL_JIRA_OAUTH_CLIENT_ID` and `VALXEL_JIRA_OAUTH_CLIENT_SECRET` (an Atlassian OAuth 2.0
+    integration with Jira's `read:jira-work`, `write:jira-work` and `read:jira-user` scopes);
+  - the same with `LUCID`, and with `PAGERDUTY` (a scoped OAuth app: incidents read and write,
+    services read, users read; it uses PKCE);
+  - `SENTRY`'s, plus `VALXEL_SENTRY_OAUTH_APP_SLUG`.
+
+  A tool whose client isn't set shows as not set up. When an admin connects one, Valxel asks the
+  vendor what the token reaches and records it (the Jira site, the Lucid user, the Sentry org, the
+  PagerDuty account). The tokens go to the secret store, never the database, at
+  `valxel/workspaces/<workspace>/<tool>/<account>`: AWS Secrets Manager, or files under
+  `VALXEL_SECRETS_DIR`. With `VALXEL_SECRET_STORE=env`, as on a laptop, they stay in memory until
+  Valxel restarts.
+
+  Valxel renews a token in the five minutes before it expires. Atlassian's refresh tokens work only
+  once, so a renewal holds a lock and reads the store again first, and if the vendor refuses a
+  refresh token another process has already spent, Valxel goes on with the newest one. The hourly
+  health check renews tokens when due and makes the same read as at connect time. A revoked
+  connection turns to *Needs attention*. Disconnecting deletes the tokens; the vendor's side is the
+  customer's to revoke.
 - **Features wait.** A self-serve workspace's feature (any made from the Workspaces page, except
   self-hosted ones) waits before architecture and build until GitHub reaches its product's org and
   repos ("Waiting for: connect GitHub (farm-field-api isn't in the GitHub App's repos)"). It carries

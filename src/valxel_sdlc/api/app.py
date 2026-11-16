@@ -67,6 +67,7 @@ WEB_DIST = Path(
 
 
 log = logging.getLogger(__name__)
+CONNECT_COOKIE = "valxel_connect"  # an OAuth tool connection's state, between Valxel and the vendor
 
 def record_review_effort(engine, kind: str, event: dict) -> None:
     """A person's review or review comment on one of the tool's pull requests counts as their
@@ -1188,10 +1189,20 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
 
     @api.get("/workspaces/{workspace}/connections/{tool}/install")
     def install_tool(workspace: str, tool: str, user: User = Depends(current_user)) -> RedirectResponse:
-        """To the vendor's consent screen: GitHub's install page for one of Valxel's Apps."""
-        from ..connections import GITHUB_APPS, ConnectionError_
+        """To the vendor's consent screen: GitHub's install page for one of Valxel's Apps, or the
+        OAuth consent of Jira, Lucid, Sentry or PagerDuty."""
+        from ..connections import GITHUB_APPS, OAUTH_TOOLS, ConnectionError_
 
         admin_of(user, workspace)
+        if tool in OAUTH_TOOLS:
+            try:
+                url, st = conns().oauth_start(signer, workspace=workspace, tool=tool, actor=user.login)
+            except ConnectionError_ as exc:
+                raise HTTPException(409, str(exc)) from exc
+            resp = RedirectResponse(url, status_code=302)
+            resp.set_cookie(CONNECT_COOKIE, st, max_age=1800, httponly=True, samesite="lax",
+                            secure=auth.secure_cookies, path="/api/connections")
+            return resp
         if tool not in GITHUB_APPS:
             raise HTTPException(404, f"{tool} can't be connected from here yet")
         c = conns()
@@ -1233,6 +1244,35 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             except Exception:
                 log.exception("Couldn't wake %s after the GitHub install", fid)
         return RedirectResponse(back + "&connected=" + q(rec["account"]), status_code=302)
+
+    @api.get("/connections/oauth/callback")
+    @api.get("/connections/sentry/setup")
+    def oauth_connected(request: Request, state: str = "", code: str = "", error: str = "", installationId: str = "",
+                        orgSlug: str = "", user: User = Depends(current_user)) -> RedirectResponse:
+        """Where Jira, Lucid and PagerDuty send the person after consent (and Sentry after its
+        install): exchange the code, record what it reaches, back to the connections page."""
+        from urllib.parse import quote as q
+
+        from ..connections import ConnectionError_
+
+        cookie = request.cookies.get(CONNECT_COOKIE, "")
+        st = signer.loads(cookie) or {}
+        back = f"/workspaces/{q(str(st.get('ws') or ''))}?tab=connections" if st.get("ws") else "/workspaces?tab=connections"
+
+        def done(resp: RedirectResponse) -> RedirectResponse:
+            resp.delete_cookie(CONNECT_COOKIE, path="/api/connections")
+            return resp
+
+        if error:
+            return done(RedirectResponse(back + "&error=" + q(f"The connection wasn't made: {error[:100]}"), status_code=302))
+        try:
+            if st.get("ws"):
+                admin_of(user, st["ws"])
+            rec = conns().oauth_finished(signer, state=state, cookie_state=cookie, code=code, actor=user.login,
+                                         installation=installationId, org=orgSlug)
+        except ConnectionError_ as exc:
+            return done(RedirectResponse(back + "&error=" + q(str(exc)), status_code=302))
+        return done(RedirectResponse(back + "&connected=" + q(rec["account"]), status_code=302))
 
     @api.get("/workspaces/{workspace}/connections/aws/launch")
     def aws_launch(workspace: str, mode: str = "", region: str = "us-east-1", user: User = Depends(current_user)) -> dict:

@@ -152,7 +152,8 @@ def test_only_admins_connect_and_disconnect(client, engine):
     r = client.delete(f"/api/workspaces/{WS}/connections/github/acme-farm", headers=web).json()
     assert "Uninstall the Valxel App in GitHub" in r["revoke"]
     assert client.get(f"/api/workspaces/{WS}/connections").json()[0]["status"] == "not_connected"
-    assert client.get(f"/api/workspaces/{WS}/connections/jira/install", follow_redirects=False).status_code == 404
+    r = client.get(f"/api/workspaces/{WS}/connections/jira/install", follow_redirects=False)
+    assert r.status_code == 409 and "isn't set up on this Valxel" in r.json()["detail"]  # no Jira OAuth client
 
 
 def test_what_a_product_still_lacks(engine, gh):
