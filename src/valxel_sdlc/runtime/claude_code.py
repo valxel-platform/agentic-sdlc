@@ -23,13 +23,14 @@ comes from the Usage and Cost API. Not exercised by the offline test suite.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
 import time
 from pathlib import Path
 
-from .. import plugins
+from .. import plugins, sessions
 from ..gateway import ModelGateway, ModelResponse, PolicyViolation, ProviderUnavailable, is_transient
 from ..sandbox import claude_sandbox, claude_settings, session_env
 from .base import AgentResult, AgentTask
@@ -126,14 +127,36 @@ class ClaudeCodeRuntime:
         import tempfile
 
         # Every session gets a home of its own: nothing from the container's home directory.
-        with tempfile.TemporaryDirectory(prefix="valxel-session-") as home:
-            Path(home, "tmp").mkdir()
-            options = ClaudeAgentOptions(**session_options(task, role, model, cwd=self.cwd,
-                                                           plugin_dirs=self.plugins_for(task.role),
-                                                           home=(task.sandbox or {}).get("home") or home))
-            return await self._query(task, model, options)
+        with tempfile.TemporaryDirectory(prefix="valxel-session-") as tmp_home:
+            Path(tmp_home, "tmp").mkdir()
+            home = (task.sandbox or {}).get("home") or tmp_home
+            kwargs = session_options(task, role, model, cwd=self.cwd, plugin_dirs=self.plugins_for(task.role), home=home)
+            store = sessions.TranscriptStore(self.gateway.settings.artifact_dir)
+            fid = task.tags.feature_id
+            if task.resume:
+                try:  # the kept transcript where Claude Code looks for this working directory's sessions
+                    store.restore(fid, task.resume, sessions.claude_project_dir(home, kwargs["cwd"] or os.getcwd())
+                                  / f"{task.resume}.jsonl")
+                    res = await self._query(task, model, ClaudeAgentOptions(**kwargs, resume=task.resume),
+                                            session_mode="resumed")
+                    res.resumed = True
+                except ProviderUnavailable:
+                    raise
+                except Exception as exc:  # gone, or Claude Code can't find it: start fresh, from the handoff
+                    log.warning("%s %s/%s: couldn't resume session %s (%s); starting fresh", fid, task.phase,
+                                task.role, task.resume, exc)
+                    fresh = dataclasses.replace(task, resume="", session_mode="handoff" if task.fresh_tail else "fresh",
+                                                layers=dataclasses.replace(task.layers, tail=task.fresh_tail or task.layers.tail))
+                    res = await self._query(fresh, model, ClaudeAgentOptions(**kwargs), session_mode=fresh.session_mode)
+            else:
+                res = await self._query(task, model, ClaudeAgentOptions(**kwargs), session_mode=task.session_mode)
+            if task.keep_transcript and res.session_id:
+                found = sessions.find_transcript(home, res.session_id)
+                if not (found and store.keep(fid, res.session_id, found)):
+                    log.info("%s %s/%s: no transcript to keep for session %s", fid, task.phase, task.role, res.session_id)
+            return res
 
-    async def _query(self, task: AgentTask, model: str, options) -> AgentResult:
+    async def _query(self, task: AgentTask, model: str, options, session_mode: str = "fresh") -> AgentResult:
         from claude_agent_sdk import ResultMessage, query  # lazy import
 
         text, result, loaded = "", None, set()
@@ -169,7 +192,7 @@ class ClaudeCodeRuntime:
             log.info("%s/%s loaded skills beyond its phase's: %s", task.phase, task.role, ", ".join(extra))
         rec = self.gateway.record_external(
             task.tags, runtime=self.name, model=model, layers=task.layers, response=resp,
-            duration_s=time.monotonic() - started, extra_skills=extra,
+            duration_s=time.monotonic() - started, extra_skills=extra, session_mode=session_mode,
         )
         sdk_cost = getattr(result, "total_cost_usd", None) if result else None
         return AgentResult(
@@ -178,6 +201,10 @@ class ClaudeCodeRuntime:
             cost_usd=float(sdk_cost) if sdk_cost is not None else rec.cost_usd,
             request_ids=[resp.request_id],
             extra_skills=extra,
+            session_id=resp.session_id,
+            context_fill=rec.record.context_fill,
+            model=model,
+            runtime=self.name,
         )
 
 

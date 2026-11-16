@@ -36,6 +36,12 @@ class AgentTask:
     # The session's own folder and home (valxel_sdlc.sandbox.Box.spec): a coder's checkout of its one
     # repository, cloned with a token for that repository only.
     sandbox: dict | None = None
+    # Resuming a session (valxel_sdlc.sessions): its id, the task to run instead when it can't be
+    # resumed after all, and whether to keep this session's transcript for a later resume.
+    resume: str = ""
+    fresh_tail: str = ""
+    keep_transcript: bool = False
+    session_mode: str = "fresh"  # fresh | resumed | handoff (started from an earlier session's handoff)
 
 
 @dataclass
@@ -47,6 +53,12 @@ class AgentResult:
     role: str = ""  # the role that did the work: the one asked for, or a fallback
     # Installed skills the session loaded by itself, beyond its phase's (valxel_sdlc.plugins).
     extra_skills: tuple[str, ...] = ()
+    # The session, for resuming it or handing off (valxel_sdlc.sessions).
+    session_id: str = ""
+    context_fill: float = 0.0  # how full its context got, 0 to 1 (0: unknown)
+    model: str = ""
+    runtime: str = ""
+    resumed: bool = False  # it continued an earlier session
 
 
 class AgentRuntime(Protocol):
