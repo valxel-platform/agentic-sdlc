@@ -53,6 +53,7 @@ DEFAULTS: dict = {
         "consumer": {"unit": "requests", "per_pod": 200, "cpu": 0.5, "memory_gib": 0.5, "pilot_cpu": 0.25, "pool": 0},
         "event-worker": {"unit": "events", "per_pod": 50, "cpu": 0.5, "memory_gib": 0.5, "pilot_cpu": 0.25, "pool": 5},
         "mcp-server": {"unit": "requests", "per_pod": 100, "cpu": 0.5, "memory_gib": 0.5, "pilot_cpu": 0.25, "pool": 5},
+        "reporting": {"unit": "events", "per_pod": 50, "cpu": 0.5, "memory_gib": 0.5, "pilot_cpu": 0.25, "pool": 5},
         "knowledge": {"unit": "requests", "per_pod": 50, "cpu": 0.5, "memory_gib": 1.0, "pilot_cpu": 0.25, "pool": 5},
         "agent": {"unit": "requests", "per_pod": 20, "cpu": 1.0, "memory_gib": 1.0, "pilot_cpu": 0.5, "pool": 5},
     },
@@ -512,7 +513,7 @@ def check_doc(arch: str, comps: list[dict], resources: list[dict]) -> list[str]:
         if len(fields.get("when down", "").split()) < 3:
             out.append(f"{d['from']} -> {d['to']}: say what people see when it's down")
     for n, c in names.items():
-        if c["role"] in ("bff", "consumer", "event-worker", "agent", "mcp-server", "knowledge") and n not in callers:
+        if c["role"] in ("bff", "consumer", "event-worker", "agent", "mcp-server", "knowledge", "reporting") and n not in callers:
             out.append(f"{n}: say under '## Failure' what happens when what it calls is slow or down")
     for r in resources:
         if r.get("type", "").startswith(("postgres", "dynamodb", "redis", "s3")) and r["name"] not in f["recovery"]:

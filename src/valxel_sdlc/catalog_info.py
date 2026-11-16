@@ -19,7 +19,7 @@ PATH = "catalog-info.yaml"
 CAPABILITIES = "valxel.io/capabilities"
 
 # Backstage component types by repo role (free strings in Backstage; these are its conventions).
-TYPES = {"provider": "service", "bff": "service", "event-worker": "service", "mcp-server": "service", "knowledge": "service",
+TYPES = {"provider": "service", "bff": "service", "event-worker": "service", "mcp-server": "service", "knowledge": "service", "reporting": "service",
          "agent": "service", "consumer": "website", "mobile": "mobile-app", "library": "library",
          "acceptance": "test-suite"}
 

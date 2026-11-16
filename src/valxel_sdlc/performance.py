@@ -50,7 +50,7 @@ DEFAULT_BUDGETS: dict[str, dict[str, float]] = {
 STAGING_ROLES = ("provider", "consumer")
 
 KIND_OF_ROLE = {"provider": "api", "bff": "api", "mcp-server": "api", "knowledge": "api", "consumer": "web", "mobile": "mobile",
-                "event-worker": "event-worker", "agent": "agent"}
+                "event-worker": "event-worker", "reporting": "event-worker", "agent": "agent"}
 
 DEFAULTS = {
     "smoke_regression_pct": 20,  # PR: how much worse than main the PR's image may be (shared runners are noisy)

@@ -633,6 +633,10 @@ SECURITY = {
     "knowledge": (" Every passage carries its record's tenant and allow list from knowledge.yaml, and every search"
                   " filters by the caller inside the query; row-level security (schema.sql) enforces the same."
                   " Never index a field the data class forbids, and keep excluded fields out (VX-17)."),
+    "reporting": (" reporting.yaml keeps only the fields the data contracts list for this repo; tokenize or"
+                  " generalize what a de-identified destination gets, never send a secret field, and set tenant on"
+                  " every table that has one; reporting-admin check must pass. Reports read through"
+                  " reporting_reader with row-level security; Kafka as this component's own identity (VX-17)."),
     "agent": (" Call MCP servers only through token exchange for the person behind the step (audience and"
               " scope per server); never a fixed token (VX-13, VX-17)."),
     "consumer": (" The app never holds a token: it calls the API on its own origin through the product's BFF"

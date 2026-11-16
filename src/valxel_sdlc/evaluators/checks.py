@@ -253,7 +253,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     return out
 
 
-RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge")
+RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge", "reporting")
 
 
 EXPOSED_ROLES = RUNTIME_ROLES + ("bff", "mobile")
@@ -445,6 +445,11 @@ def _datasets(text: str, repos: list[dict], ctx: dict) -> list[str]:
         for repo in [a for a in re.split(r",|\band\b", applied.group(1)) if a.strip()] if applied else []:
             if _short(repo) not in readers:
                 out.append(f"{repo.strip()} applies {e['type']} but isn't listed under {c.get('id')}'s consumers")
+    for r in repos:  # a reporting repo reads only what contracts list for it (the design's D5)
+        if r.get("role") == "reporting" and not any(_short(r["name"]) in {_short(x) for x in ds.consumers(c)}
+                                                    for c in current.values()):
+            out.append(f"{r['name']} is a reporting repo, but no data contract lists it under consumers: add it, "
+                       "with the fields its reports use, to each contract it reads")
     for repo, s in sources:
         c = by_topic.get(s["topic"])
         if c is None:

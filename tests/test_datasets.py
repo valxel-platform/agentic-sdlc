@@ -346,3 +346,12 @@ def test_coders_are_told_to_validate_what_they_publish_and_read():
     reader = ds.instruction([notes()], "valxel-emr/emr-knowledge")
     assert "may use only note_id, patient_id, kind, body, clinic_id" in reader and "never its value" in reader
     assert ds.instruction([notes()], "valxel-emr/emr-web") == ""
+
+
+def test_a_reporting_repo_reads_only_what_contracts_list_for_it():
+    repos = [*REPOS, {"name": "valxel-emr/emr-reporting", "role": "reporting"}]
+    found = _datasets(hld(), repos, {"repos": repos})
+    assert found == ["valxel-emr/emr-reporting is a reporting repo, but no data contract lists it under consumers: "
+                     "add it, with the fields its reports use, to each contract it reads"]
+    listed = NOTES.replace("      valxel-emr/emr-knowledge:", "      valxel-emr/emr-reporting: [note_id, kind]\n      valxel-emr/emr-knowledge:")
+    assert _datasets(hld(contract=listed), repos, {"repos": repos}) == []

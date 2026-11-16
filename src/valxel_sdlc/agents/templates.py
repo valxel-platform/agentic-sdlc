@@ -441,6 +441,7 @@ def plan(ctx: dict, defective: bool) -> str:
             "library": [f"contracts/{slug}.yaml"],
             "mcp-server": [f"src/mcp_server/tools/{slug}.py", f"tests/test_{slug}_tools.py"],
             "knowledge": ["knowledge.yaml", "evals/questions.yaml"],
+            "reporting": ["reporting.yaml"],
             "agent": [f"src/agent/prompts/{slug}.md", f"evals/cases/{slug}.jsonl"],
             "event-worker": [f"src/main/java/com/valxel/worker/{slug.replace('-', '')}/Handler.java",
                              f"src/main/resources/db/migration/V2__{slug.replace('-', '_')}.sql"],

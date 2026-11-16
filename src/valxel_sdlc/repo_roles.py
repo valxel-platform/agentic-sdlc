@@ -18,6 +18,6 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
 
 from __future__ import annotations
 
-ROLES = ("library", "provider", "event-worker", "knowledge", "mcp-server", "agent", "consumer", "bff", "mobile", "acceptance")
+ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "mcp-server", "agent", "consumer", "bff", "mobile", "acceptance")
 REPO_ORDER = {role: i for i, role in enumerate(ROLES)}
 ROLE_PATTERN = "|".join(ROLES)

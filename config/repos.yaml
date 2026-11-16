@@ -101,6 +101,7 @@ platform_repos:
   valxel-platform/template-agent: { kind: template, role: agent }
   valxel-platform/template-mcp-server: { kind: template, role: mcp-server }
   valxel-platform/template-knowledge: { kind: template, role: knowledge }
+  valxel-platform/template-reporting: { kind: template, role: reporting }
   valxel-platform/template-event-worker: { kind: template, role: event-worker }
   valxel-platform/template-acceptance: { kind: template, role: acceptance }
   valxel-platform/template-bff: { kind: template, role: bff }
@@ -139,6 +140,14 @@ roles:
     template: valxel-platform/template-knowledge
     required_checks: [unit, retrieval, CodeQL]  # retrieval: the golden set's evals on every PR
     openchoreo: { component_type: deployment/service, workflow: docker }
+  # Reporting over the product's data contracts (the design "Datasets, contracts and reporting"):
+  # reporting tables in the product's Postgres with row-level security by tenant, and filtered
+  # topics that Kafka Connect writes to the lake and exports. reporting.yaml says which fields, how
+  # (keep, tokenize, generalize) and where; people approve it at G4 with the contracts.
+  reporting:
+    template: valxel-platform/template-reporting
+    required_checks: [unit, CodeQL]  # unit runs reporting-admin check and the row-level security tests
+    openchoreo: { component_type: deployment/worker, workflow: docker }
   agent:
     template: valxel-platform/template-agent
     required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR
