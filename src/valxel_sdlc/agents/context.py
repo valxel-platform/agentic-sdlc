@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..config import ProductConfig
 from ..constitution import Constitution
-from ..gateway import PromptLayers, serialize_tools
+from ..gateway import PromptLayers, fit, serialize_tools
 from . import untrusted
 
 # Design knowledge (decisions, contracts, catalog) is put in the prompt by the pipeline rather than
@@ -127,15 +127,143 @@ def build_layers(
     product_context: str = "",
     design_knowledge: str = "",
     skills_dir: str = "",
+    caps: dict | None = None,
 ) -> PromptLayers:
+    """The six layers, each of L2 to L5 cut to its cap (config `context_caps`) with a note saying
+    what was left out; `meta["trimmed"]` lists the notes."""
+    caps = caps or {}
     tools = serialize_tools(_BASE_TOOLS + _ROLE_TOOLS.get(role, []))
     skill_text = "\n\n".join(load_skill(s, skills_dir or None) for s in sorted(skills))
     feature = "\n\n".join(f"<artifact kind=\"{k}\">\n{parent_texts[k]}\n</artifact>" for k in sorted(parent_texts))
+    trimmed = {}
+
+    def capped(layer: str, text: str, label: str) -> str:
+        out, note = fit(text, int(caps.get(layer) or 0), label)
+        if note:
+            trimmed[layer] = note
+        return out
+
     return PromptLayers(
         tools=tools,
-        skills=f"{persona(role)}\n\n{skill_text}",
-        constitution=constitution.text,
-        product_context=product_pack(product, product_context, design_knowledge),
-        feature_context=feature,
+        skills=capped("L2", f"{persona(role)}\n\n{skill_text}", "The role's skills"),
+        constitution=capped("L3", constitution.text, "The constitution"),
+        product_context=capped("L4", product_pack(product, product_context, design_knowledge), "The product context"),
+        feature_context=capped("L5", feature, "The feature context"),
         tail=tail,
+        meta={"trimmed": trimmed} if trimmed else {},
     )
+
+
+# --- L5 for one build task (the context design's C4) ------------------------------------------
+
+def _repo_names(task: dict) -> tuple[str, ...]:
+    repo = task.get("repo") or ""
+    return (repo, repo.split("/", 1)[-1]) if repo else ()
+
+
+def _mentions(line: str, words) -> bool:
+    return any(re.search(rf"(?<![\w-]){re.escape(w)}(?![\w-])", line) for w in words if w)
+
+
+# HLD sections whose lines are each about one repo or one requirement: only the task's lines stay.
+_PER_LINE = ("Affected repos", "Contracts", "Endpoints", "Events", "Instrumentation", "Audit", "Dependency lanes",
+             "New repos", "Coverage", "Threats")
+# Plan sections filtered to the task's id and criteria.
+_PLAN_LINES = ("Traceability", "Test cases", "Acceptance tests")
+# UX sections that list one line per screen.
+_UX_LINES = ("Screens", "States", "Coverage")
+
+
+def _filter_section(body: str, keep) -> tuple[str, int]:
+    """A section's lines: bullets kept when `keep(line)`, other lines (sub-headings, notes) kept."""
+    out, dropped = [], 0
+    for ln in body.splitlines():
+        if ln.startswith("- ") and not keep(ln):
+            dropped += 1
+            continue
+        out.append(ln)
+    return "\n".join(out), dropped
+
+
+def _by_section(text: str, rules: dict) -> tuple[str, list[str]]:
+    """Each '## ' section through its rule: None drops it, a predicate filters its bullets,
+    anything else keeps it whole. Returns the text and what was left out."""
+    from .parse import split_sections
+
+    head, sections = split_sections(text)
+    parts, left = [head.rstrip()] if head.strip() else [], []
+    for name, body in sections:
+        rule = rules.get(name, True)
+        if rule is None:
+            left.append(name)
+            continue
+        if callable(rule):
+            body, dropped = _filter_section(body, rule)
+            if dropped:
+                left.append(f"{dropped} {name} line{'s' if dropped > 1 else ''} about other tasks")
+        parts.append(body.rstrip())
+    return "\n\n".join(p for p in parts if p), left
+
+
+def task_texts(parent_texts: dict[str, str], task: dict, where: str = "") -> dict[str, str]:
+    """What one build task's coder or reviewer needs from the feature's PLAN, HLD and UX: its own
+    plan entry, criteria and test cases; the HLD's decisions with its repo's lines (and the ADRs
+    the planner tagged it with, or those naming its repo); the UX spec's screens it builds, or no UX
+    spec at all for a task without screens. What was left out is said at the end of each document,
+    with where the full one is (`where`, the session's folder; the agent's tools otherwise)."""
+    tid, acs = task.get("id", ""), list(task.get("acs") or [])
+    repos, screens = _repo_names(task), list(task.get("screens") or [])
+    words = (tid, *acs, *repos)
+    out = {}
+    for kind, text in parent_texts.items():
+        if kind == "PLAN":
+            filtered, left = _plan_for(text, task)
+        elif kind == "HLD":
+            adrs = set(task.get("adrs") or [])
+
+            def adr_line(ln, adrs=adrs):
+                ident = ln[2:].split(":", 1)[0].strip()
+                return ident in adrs if adrs else _mentions(ln, repos)
+            filtered, left = _by_section(text, {
+                # A line naming no repo (a threat, an NFR) is about every task.
+                **{n: (lambda ln: _mentions(ln, words) or "/" not in ln) for n in _PER_LINE},
+                "ADRs": adr_line,
+                "Data": True if task.get("role") in ("provider", "event-worker") else None,
+            })
+        elif kind == "UX":
+            if not screens:
+                out[kind] = (f"[The UX spec is left out: {tid} builds no screens. Read it from "
+                             f"{where or 'the feature'} if the change affects what people see.]")
+                continue
+            filtered, left = _by_section(text, {n: (lambda ln: _mentions(ln, screens)) for n in _UX_LINES})
+        else:
+            out[kind] = text
+            continue
+        out[kind] = filtered + (f"\n\n[For {tid}, left out: {'; '.join(left)}. The full {kind} is in "
+                                f"{where or 'the feature'}.]" if left else "")
+    return out
+
+
+def _plan_for(plan: str, task: dict) -> tuple[str, list[str]]:
+    """The plan with only this task in Tasks (the others named in a line) and its own lines."""
+    import json as _json
+
+    from .parse import _JSON_BLOCK
+
+    tid, acs = task.get("id", ""), list(task.get("acs") or [])
+    m = _JSON_BLOCK.search(plan)
+    others = []
+    if m:
+        try:
+            tasks = _json.loads(m.group(1)).get("tasks", [])
+        except _json.JSONDecodeError:
+            tasks = []
+        mine = [t for t in tasks if t.get("id") == tid]
+        others = [f"{t.get('id')} ({t.get('repo')})" for t in tasks if t.get("id") != tid]
+        if mine:
+            block = "```json\n" + _json.dumps({"tasks": mine}, indent=2) + "\n```"
+            if others:
+                block += "\nOther tasks in this feature: " + ", ".join(others) + "."
+            plan = plan[:m.start()] + block + plan[m.end():]
+    text, left = _by_section(plan, {n: (lambda ln: _mentions(ln, (tid, *acs))) for n in _PLAN_LINES})
+    return text, left

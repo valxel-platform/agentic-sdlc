@@ -1,6 +1,6 @@
 from .gateway import CallTags, GatewayResult, ModelGateway, PolicyViolation
 from .ledger import InMemoryLedger, PostgresLedger, UsageRecord, summarize
-from .prompt import PromptLayers, estimate_tokens, serialize_tools
+from .prompt import PromptLayers, cap_tokens, estimate_tokens, fit, serialize_tools
 from .providers import (
     AnthropicProvider,
     ModelRequest,
@@ -20,6 +20,8 @@ __all__ = [
     "ModelRequest",
     "ModelResponse",
     "OpenAICompatibleProvider",
+    "cap_tokens",
+    "fit",
     "PolicyViolation",
     "ProviderUnavailable",
     "PostgresLedger",

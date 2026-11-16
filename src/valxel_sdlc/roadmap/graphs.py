@@ -51,7 +51,7 @@ def run_agent(services, *, role: str, product_id: str, thread_id: str, phase: st
     snap = services.snapshot(product_id)
     layers = build_layers(role=role, skills=skills, constitution=snap.constitution, product=snap.product,
                           parent_texts={}, tail=tail, product_context=snap.product_context,
-                          skills_dir=skills_dir_of(services))
+                          skills_dir=skills_dir_of(services), caps=services.settings.context_caps)
     tags = CallTags(product_id=product_id, feature_id=thread_id, phase=phase, role=role,
                     data_class=snap.product.data_class, workspace=snap.product.workspace, prompt_version=f"{phase}@1")
     return services.runtime_for(role).run(AgentTask(role=role, phase=phase, tags=tags, layers=layers, skills=tuple(skills),
@@ -123,7 +123,7 @@ def initiative_research(services, state: dict):
     def layers_for(skills, tail):
         return build_layers(role=role, skills=tuple(skills), constitution=snap.constitution, product=snap.product,
                             parent_texts={}, tail=tail, product_context=snap.product_context,
-                            skills_dir=skills_dir_of(services))
+                            skills_dir=skills_dir_of(services), caps=services.settings.context_caps)
 
     tags = CallTags(product_id=pid, feature_id=state["initiative_id"], phase="research", role=role,
                     data_class=snap.product.data_class, workspace=snap.product.workspace, prompt_version="research@1")
