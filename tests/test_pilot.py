@@ -2,6 +2,7 @@
 shadow modes (automatic approval, a cheaper critic and reviewer) recorded beside real decisions."""
 
 import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -143,4 +144,9 @@ def test_intake_can_submit_a_pilot_feature(eng):
     assert s["ready"], s["missing"]
     r = client.post(f"/api/intake/{s['id']}/submit", json={"pilot": True})
     assert r.status_code == 201, r.text
-    assert eng._state(r.json()["feature_id"])["pilot"] is True
+    fid = r.json()["feature_id"]
+    for _ in range(200):  # intake starts the feature in the background: wait for its first checkpoint
+        if "pilot" in eng._state(fid):
+            break
+        time.sleep(0.05)
+    assert eng._state(fid)["pilot"] is True

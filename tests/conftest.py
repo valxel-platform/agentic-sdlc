@@ -1,9 +1,29 @@
+import os
+
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from valxel_sdlc.config import load_settings
 from valxel_sdlc.engine import FeatureEngine
 from valxel_sdlc.services import build_services
+
+
+def pytest_configure(config):
+    """With pytest -n (pytest-xdist), each worker gets a fresh database of its own, made beside
+    VALXEL_TEST_DATABASE_URL's: the Postgres tests expect to be alone in theirs. Runs before the test
+    modules are imported, so the ones that read the variable at import see the worker's."""
+    worker, url = os.environ.get("PYTEST_XDIST_WORKER"), os.environ.get("VALXEL_TEST_DATABASE_URL")
+    if not (worker and url):
+        return
+    import psycopg
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+
+    name = f"valxel_test_{worker}"
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    os.environ["VALXEL_TEST_DATABASE_URL"] = make_conninfo(url, dbname=name)
 
 
 @pytest.fixture

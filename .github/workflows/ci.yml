@@ -5,7 +5,44 @@ on:
   pull_request:
 
 jobs:
+  # What a pull request touches decides what it runs: only web/ skips the Python tests, no web/
+  # skips the web build. A skipped job counts as passed for required checks. Pushes to main run
+  # everything, and so does any change to the workflows.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      python: ${{ steps.paths.outputs.python }}
+      web: ${{ steps.paths.outputs.web }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: paths
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "python=true" >> "$GITHUB_OUTPUT"; echo "web=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          python=false; web=false
+          while IFS= read -r f; do
+            case "$f" in
+              "") ;;
+              .github/*) python=true; web=true ;;
+              web/*) web=true ;;
+              docs/*|*.md) ;;
+              *) python=true ;;
+            esac
+          done < <(git diff --name-only "origin/$BASE_REF...HEAD")
+          echo "python=$python" >> "$GITHUB_OUTPUT"; echo "web=$web" >> "$GITHUB_OUTPUT"
+          echo "Python tests: $python; web build: $web"
+
   test:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,7 +77,8 @@ jobs:
           git init -q "$RUNNER_TEMP/kwp" && cd "$RUNNER_TEMP/kwp"
           git fetch -q --depth 1 https://github.com/anthropics/knowledge-work-plugins "$ref" && git checkout -q FETCH_HEAD
           echo "KNOWLEDGE_WORK_PLUGINS=$RUNNER_TEMP/kwp" >> "$GITHUB_ENV"
-      - run: pytest --cov=src --cov-report=xml:coverage.xml
+      # On every CPU the runner has (pytest-xdist); each worker gets its own database (tests/conftest.py).
+      - run: pytest -n auto --cov=src --cov-report=xml:coverage.xml
         env:
           VALXEL_TEST_DATABASE_URL: postgresql://valxel:valxel@localhost:5432/valxel
       # The lines this pull request changes that no test runs (diff-cover), posted as the
@@ -100,6 +138,8 @@ jobs:
             | grep -E '^(product-management|engineering|design|valxel)@valxel-plugins .*installed, enabled' | wc -l | grep -qx 4
 
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:

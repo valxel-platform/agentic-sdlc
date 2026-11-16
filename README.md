@@ -36,7 +36,8 @@ teams to act as, for example `acme-clinic/product-owners`. Use GitHub sign-in fo
 
 ```bash
 pip install -e ".[dev]"
-pytest                                   # in memory; set VALXEL_TEST_DATABASE_URL for the Postgres test
+pytest -n auto                           # on every CPU; set VALXEL_TEST_DATABASE_URL for the Postgres tests
+                                         # (each worker makes its own database beside that one)
 valxel demo --product CLN --fault spec=1 --revise
 
 (cd web && npm ci && npm run build)      # build the web interface into web/dist
