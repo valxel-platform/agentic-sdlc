@@ -232,6 +232,9 @@ class Settings:
     data_classes: dict[str, list[str]]
     providers: dict[str, "ProviderConfig"] = field(default_factory=dict)
     prices: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    # Each model's context window in tokens (models.yaml `context_windows`, from the vendor's docs),
+    # by "provider/model" or the bare model name.
+    context_windows: dict[str, int] = field(default_factory=dict)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     quality: Any = None  # valxel_sdlc.quality.QualityConfig
     repos: Any = None  # valxel_sdlc.provisioning.RepoStandards
@@ -269,6 +272,12 @@ class Settings:
 
     def role(self, role: str) -> RoleConfig:
         return self.roles[role]
+
+    def context_window(self, model: str) -> int:
+        """The model's context window in tokens, 0 when config doesn't say."""
+        w, bare = self.context_windows, model.split("/", 1)[-1]
+        found = w.get(model) or w.get(bare) or next((v for k, v in w.items() if k.split("/", 1)[-1] == bare), 0)
+        return int(found or 0)
 
 
 def load_settings(
@@ -332,6 +341,7 @@ def load_settings(
         data_classes={n: list(s["allowed_providers"]) for n, s in models_raw["data_classes"].items()},
         providers={n: ProviderConfig(name=n, **(p or {})) for n, p in (models_raw.get("providers") or {}).items()},
         prices={m: tuple(float(x) for x in v) for m, v in (models_raw.get("prices") or {}).items()},
+        context_windows={m: int(v) for m, v in (models_raw.get("context_windows") or {}).items()},
         tools=load_tools(cfg_dir / "tools.yaml"),
         quality=_load_quality(cfg_dir / "quality.yaml"),
         knowledge=_load_knowledge(cfg_dir / "knowledge.yaml"),

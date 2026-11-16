@@ -125,6 +125,49 @@ def _verify_changes(log=None) -> int:
     return 1
 
 
+def _workspaces(args, engine=None) -> int:
+    """valxel workspaces owner <ws> --github LOGIN | list: bootstrapping, before anyone can sign in as admin."""
+    from .workspaces import WorkspaceError
+
+    ws = engine.services.workspaces
+    if args.action == "list":
+        names = sorted({e.workspace for e in engine.services.settings.registry.values()} | {
+            w["id"] for w in ws.store.list("workspace")})
+        for n in names:
+            owners = [m["github_login"] or m["email"] for m in ws.members(n) if m["role"] == "owner"]
+            print(f"{n:<28} products: {', '.join(ws.products(n)) or '-':<20} owners: {', '.join(owners) or 'none'}")
+        return 0
+    if not args.workspace or not (args.github or args.email):
+        print("Name the workspace and the owner's --github login or --email.", file=sys.stderr)
+        return 2
+    try:
+        m = ws.bootstrap_owner(args.workspace, {"name": args.name, "github_login": args.github, "email": args.email})
+    except WorkspaceError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    print(f"{m['name']} owns {args.workspace} and is in every approver group.")
+    return 0
+    
+    
+def _usage_context(args, engine=None) -> int:
+    """valxel usage context: the ledger's context measurements (valxel_sdlc.context)."""
+    from datetime import UTC, datetime, timedelta
+
+    from .context import report, table
+
+    if engine is None:
+        if not os.environ.get("DATABASE_URL"):
+            print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
+            return 2
+        from .api.app import create_engine_from_env
+
+        engine, _ = create_engine_from_env()
+    since = (datetime.now(UTC) - timedelta(weeks=args.weeks)).isoformat()
+    rows = report(engine.services.ledger.records(product_id=args.product, since=since), weeks=args.weeks)
+    print(json.dumps(rows, indent=2) if args.json else table(rows))
+    return 0
+
+
 def _pilot_report(args, engine=None) -> int:
     from .pilot import markdown, report
 
@@ -337,6 +380,18 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     g.add_argument("product")
     c = sub.add_parser("changes", help="Check the production change log's hash chain (DATABASE_URL)")
     c.add_argument("action", choices=["verify"])
+    wk = sub.add_parser("workspaces", help="Give a workspace its first owner (an existing deployment's), or list them "
+                                           "(DATABASE_URL)")
+    wk.add_argument("action", choices=["owner", "list"])
+    wk.add_argument("workspace", nargs="?", default="")
+    wk.add_argument("--github", default="", help="The owner's GitHub login")
+    wk.add_argument("--email", default="", help="The owner's email")
+    wk.add_argument("--name", default="")
+    us = sub.add_parser("usage", help="How full agents' context gets and where it goes, by week and role (DATABASE_URL)")
+    us.add_argument("action", choices=["context"])
+    us.add_argument("--product", default=None, help="Only this product")
+    us.add_argument("--weeks", type=int, default=4, help="How many weeks back (default 4)")
+    us.add_argument("--json", action="store_true")
     pr = sub.add_parser("pilot-report", help="The pilot's numbers for a product, as Markdown (DATABASE_URL)")
     pr.add_argument("product")
     pr.add_argument("--all", action="store_true", help="Every feature, not only those created as pilot features")
@@ -461,6 +516,10 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
         return _eval(args)
     if args.cmd == "pilot-report":
         return _pilot_report(args)
+    if args.cmd == "workspaces":
+        return _workspaces(args)
+    if args.cmd == "usage":
+        return _usage_context(args)
     if args.cmd == "changes":
         return _verify_changes()
     if args.cmd == "glitchtip-token":

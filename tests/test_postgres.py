@@ -266,6 +266,10 @@ def test_pilot_effort_and_the_ledgers_new_columns_persist():
                                   duration_s=4.5))
         [row] = ledger.records(fid)
         assert row.config_version == "abc123" and row.duration_s == 4.5
+        assert [r.feature_id for r in ledger.records(product_id="FARM", since="2026-11-09T09:00:00+00:00")
+                if r.feature_id == fid] == [fid]
+        assert ledger.records(fid, since="2026-11-09T11:00:00+00:00") == []
+        assert ledger.records(fid, product_id="SHOP") == []
         store = PostgresEffortStore(pool)
         store.add({"feature_id": fid, "product_id": "FARM", "kind": "asked", "ref": "i1"})
         store.add({"feature_id": fid, "product_id": "FARM", "kind": "asked", "ref": "i1"})  # first time only
