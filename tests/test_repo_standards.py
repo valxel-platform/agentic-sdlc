@@ -469,3 +469,36 @@ def test_a_low_new_code_coverage_status_fails_the_code_quality_suite(settings):
     assert out["status"] == "failed" and any("62.0% is below 80%" in r for r in out["test_failures"])
     missing = evaluate("pr", {"code-quality": spec}, [], [])
     assert missing["status"] == "failed"  # required: a repo that doesn't report it can't merge
+
+
+def test_report_py_reads_junit_jacoco_and_cobertura_and_refuses_xml_entities(tmp_path):
+    report = _report_module()
+    (tmp_path / "a.xml").write_text('<testsuites><testsuite tests="5" failures="1" errors="0" skipped="1"/>'
+                                    '<testsuite tests="3" failures="0" errors="1" skipped="0"/></testsuites>')
+    (tmp_path / "b.xml").write_text('<?xml version="1.0"?><testsuite tests="2" failures="0" skipped="0">'
+                                    '<testsuite tests="9"/></testsuite>')  # a root suite counts once
+    assert report.junit([str(tmp_path / "*.xml")]) == {"passed": 7, "failed": 2, "skipped": 1}
+    jac = tmp_path / "jacoco.xml"
+    jac.write_text('<?xml version="1.0"?><!DOCTYPE report PUBLIC "-//JACOCO//DTD Report 1.1//EN" "report.dtd">'
+                   '<report name="t"><package name="a"><counter type="LINE" missed="50" covered="50"/></package>'
+                   '<counter type="LINE" missed="1" covered="3"/></report>')
+    assert report.jacoco(str(jac)) == 75.0  # the report-level counter, not a package's
+    cob = tmp_path / "coverage.xml"
+    cob.write_text('<?xml version="1.0"?><coverage line-rate="0.835" branch-rate="0"><packages/></coverage>')
+    assert round(report.cobertura(str(cob)), 1) == 83.5
+    evil = tmp_path / "evil.xml"
+    evil.write_text('<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]><r>&x;</r>')
+    with pytest.raises(ValueError, match="entities aren't allowed"):
+        report.elements(str(evil))
+
+
+def test_report_py_posts_only_over_https(tmp_path, monkeypatch):
+    report = _report_module()
+    monkeypatch.setenv("GITHUB_TOKEN", "t")
+    monkeypatch.setenv("GITHUB_API_URL", "file:///etc")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(tmp_path / "s.md"))
+    (tmp_path / "n.json").write_text('{"total_num_lines": 0}')
+    monkeypatch.setattr("sys.argv", ["report.py", "--context", "c", "--new-code", str(tmp_path / "n.json"),
+                                     "--repo", "o/r", "--sha", "abc"])
+    with pytest.raises(SystemExit, match="must be an https URL"):
+        report.main()
