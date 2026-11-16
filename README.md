@@ -197,6 +197,23 @@ How it behaves:
 - **Health.** Every hour, the Delivery App reads its installation. An uninstalled or suspended App
   turns the row to *Needs attention* and emails the workspace's admins once, with a Reconnect
   button on the page.
+- **AWS** connects at go-live, with a CloudFormation stack the customer creates in their own account
+  (`deploy/customer-stack.yaml`). In the AWS row the admin picks the mode and region, and **Open AWS
+  to create the stack** opens the console's quick-create page with the stack's parameters filled in:
+  Valxel's account, the workspace, the mode and the workspace's external ID. After creating it,
+  they enter their account ID and Valxel assumes both roles to check them.
+
+  The stack makes one role per job, each trusting only Valxel's account (`VALXEL_AWS_ACCOUNT_ID`),
+  only with that external ID, and acting only on resources tagged `valxel:workspace`:
+  - **Deploy, lite mode:** the products' VMs, reached over SSH with one-minute EC2 Instance Connect
+    keys.
+  - **Deploy, full mode:** EKS clusters, passing only the roles the stack makes. Crossplane's own
+    Pod Identity role builds the catalog services.
+  - **Agents:** AWS's `ViewOnlyAccess` (metadata, never data), tags and costs.
+
+  Valxel stores no AWS secret; sessions last 15 minutes. The hourly health check assumes the
+  roles again, so a deleted stack shows within the hour. Host the template where the console can
+  read it and set `VALXEL_AWS_STACK_TEMPLATE_URL`.
 - **Features wait.** A self-serve workspace's feature (any made from the Workspaces page, except
   self-hosted ones) waits before architecture and build until GitHub reaches its product's org and
   repos ("Waiting for: connect GitHub (farm-field-api isn't in the GitHub App's repos)"). It carries

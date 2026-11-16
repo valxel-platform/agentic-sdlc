@@ -346,7 +346,7 @@ function Connections({ ws, admin }: { ws: string; admin: boolean }) {
           <section key={t.tool} className="panel" aria-labelledby={`h-c-${t.tool}`}>
             <div className="panel-head">
               <h2 id={`h-c-${t.tool}`} className="section-title">{t.name} <span className={`chip ${chip}`}>{label}</span></h2>
-              {admin && t.available && (
+              {admin && t.available && t.tool !== "aws" && (
                 <button className={t.status === "connected" ? "btn secondary" : "btn"} onClick={() => install(t.tool)}>
                   {t.status === "not_connected" ? "Connect" : t.status === "needs_attention" ? "Reconnect" : "Add an account"}
                 </button>
@@ -359,16 +359,71 @@ function Connections({ ws, admin }: { ws: string; admin: boolean }) {
                 <strong>{c.account}</strong>{c.reach.account_type ? <span className="small muted"> ({c.reach.account_type})</span> : null}
                 {" · "}<span className="small">
                   {c.reach.selection === "all" ? "all repositories" : c.reach.repos ? `${c.reach.repos.length} repositories: ${c.reach.repos.join(", ")}` : ""}
+                  {c.reach.mode ? `${c.reach.mode} mode: a deploy role and a read-only role for agents` : ""}
                 </span>
                 <div className="small muted">Connected by {c.connected_by} on {when(c.connected_at)}; last worked {when(c.last_ok)}.</div>
                 {c.status === "needs_attention" && <p className="error-note">{c.last_error.charAt(0).toUpperCase() + c.last_error.slice(1)}.{admin && t.available ? " Reconnect to fix it." : ""}</p>}
                 {admin && <button className="small-btn" onClick={() => disconnect(t.tool, c.account, t.name)}>Disconnect</button>}
               </div>
             ))}
+            {t.tool === "aws" && admin && t.available && <AwsConnectForm ws={ws} onDone={(m) => { setNote(m); setErr(""); load(); }} onError={setErr} />}
           </section>
         );
       })}
     </>
+  );
+}
+
+const REGIONS = ["us-east-1", "us-east-2", "us-west-2", "ap-south-1", "eu-west-1"];
+
+/** Connect AWS in two steps: create the stack in the customer's console, then let Valxel check its roles. */
+function AwsConnectForm({ ws, onDone, onError }: { ws: string; onDone: (msg: string) => void; onError: (msg: string) => void }) {
+  const [mode, setMode] = useState("lite");
+  const [region, setRegion] = useState("us-east-1");
+  const [account, setAccount] = useState("");
+  const [opened, setOpened] = useState(false);
+  const [busy, setBusy] = useState(false);
+  async function open() {
+    try {
+      const r = await api.awsLaunch(ws, mode, region);
+      window.open(r.url, "_blank", "noopener");
+      setOpened(true);
+    } catch (e) { onError((e as Error).message); }
+  }
+  async function check(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const c = await api.awsCheck(ws, account, mode);
+      onDone(`Connected AWS account ${c.account}.`);
+    } catch (ex) { onError((ex as Error).message); } finally { setBusy(false); }
+  }
+  return (
+    <div className="pad stack">
+      <ol className="plain-ol">
+        <li>
+          <div className="grid-2">
+            <label className="field">Mode
+              <select value={mode} onChange={(e) => setMode(e.target.value)}>
+                <option value="lite">Lite: products run on VMs</option><option value="full">Full: EKS clusters and managed services</option>
+              </select></label>
+            <label className="field">Region
+              <select value={region} onChange={(e) => setRegion(e.target.value)}>{REGIONS.map((r) => <option key={r}>{r}</option>)}</select></label>
+          </div>
+          <button className="btn" type="button" onClick={open}>Open AWS to create the stack</button>
+          <span className="small muted"> Signed in to your AWS account, tick the IAM acknowledgement and choose Create stack.</span>
+        </li>
+        <li>
+          <form onSubmit={check} className="submit-row">
+            <label className="field">Your AWS account ID
+              <input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="123456789012" className="mono"
+                     inputMode="numeric" required /></label>
+            <button className={opened ? "btn" : "btn secondary"} type="submit" disabled={busy || account.replace(/-/g, "").length !== 12}>
+              {busy ? "Checking…" : "Check the connection"}</button>
+          </form>
+        </li>
+      </ol>
+    </div>
   );
 }
 

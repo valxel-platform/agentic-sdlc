@@ -59,7 +59,7 @@ TOOLS: tuple[Tool, ...] = (
          "Uninstall it in GitHub; Valxel then lists the repos for you to create", available=True),
     Tool("aws", "AWS", "Go-live, in lite or full mode",
          "A role Valxel assumes with your workspace's external ID, scoped to the mode, and a read-only role for agents",
-         "Delete the CloudFormation stack"),
+         "Delete the CloudFormation stack", available=True),
     Tool("jira", "Jira", "Only if you pick Jira as the tracker", "Read and write issues in the projects you choose",
          "Revoke in Atlassian, or Disconnect here"),
     Tool("lucid", "Lucid", "Only if you want diagrams in Lucid", "Create and update diagrams in a Valxel folder",
@@ -167,13 +167,84 @@ class GitHubInstalls:
                 "suspended": bool(inst.get("suspended_at"))}
 
 
+class AwsConnect:
+    """AWS's side: the console's quick-create page for the customer stack (deploy/customer-stack.yaml,
+    hosted at `template_url`), and assuming its roles with the workspace's external ID. Valxel's
+    account is the only one the roles trust; a session lasts 15 minutes."""
+
+    def __init__(self, *, valxel_account: str, template_url: str, assume: Callable[..., dict] | None = None) -> None:
+        self.valxel_account, self.template_url = valxel_account, template_url
+        self._assume = assume or _sts_assume
+
+    @classmethod
+    def from_env(cls, env=None) -> AwsConnect | None:
+        env = env if env is not None else os.environ
+        acct, url = env.get("VALXEL_AWS_ACCOUNT_ID", ""), env.get("VALXEL_AWS_STACK_TEMPLATE_URL", "")
+        return cls(valxel_account=acct, template_url=url) if acct and url.startswith("https://") else None
+
+    @staticmethod
+    def roles(workspace: str, account: str) -> dict[str, str]:
+        base = f"arn:aws:iam::{account}:role/valxel/valxel-{workspace}"
+        return {"deploy": f"{base}-deploy", "agents": f"{base}-agents"}
+
+    def launch_url(self, workspace: str, *, external_id: str, mode: str, region: str) -> str:
+        q = urlencode({"templateURL": self.template_url, "stackName": f"valxel-{workspace}",
+                       "param_ValxelAccountId": self.valxel_account, "param_ExternalId": external_id,
+                       "param_WorkspaceId": workspace, "param_Mode": mode})
+        return f"https://console.aws.amazon.com/cloudformation/home?region={quote(region)}#/stacks/quickcreate?{q}"
+
+    def check(self, workspace: str, *, account: str, external_id: str) -> dict:
+        roles = self.roles(workspace, account)
+        for job, arn in roles.items():
+            try:
+                who = self._assume(arn, external_id=external_id, session=f"valxel-{workspace}-check")
+            except Exception as exc:
+                raise ConnectionError_(aws_reason(exc, job, account)) from exc
+            if str(who.get("Account")) != account:
+                raise ConnectionError_(f"The {job} role answered from account {who.get('Account')}, not {account}")
+        return {"account_id": account, "deploy_role": roles["deploy"], "agents_role": roles["agents"]}
+
+
+def aws_reason(exc: Exception, job: str, account: str) -> str:
+    text = str(exc)
+    if "AccessDenied" in text or "not authorized" in text:
+        return (f"Valxel can't assume the {job} role in {account}: the stack isn't there (still creating, failed or "
+                "deleted), or it was made for another workspace. Open the stack in CloudFormation to see why")
+    return f"Checking the {job} role in {account} failed: {text[:200]}"
+
+
+def _sts_assume(role_arn: str, *, external_id: str, session: str) -> dict:
+    """Assume the role for 15 minutes and say which account answered."""
+    import boto3  # the 'aws' extra
+
+    creds = boto3.client("sts").assume_role(RoleArn=role_arn, RoleSessionName=session[:64], ExternalId=external_id,
+                                            DurationSeconds=900)["Credentials"]
+    return boto3.client("sts", aws_access_key_id=creds["AccessKeyId"], aws_secret_access_key=creds["SecretAccessKey"],
+                        aws_session_token=creds["SessionToken"]).get_caller_identity()
+
+
+def aws_health(conns: Connections) -> Callable[[dict], str]:
+    """The stack's roles still assume: a deleted stack shows within the hour."""
+
+    def check(c: dict) -> str:
+        if conns.aws is None:
+            return ""
+        try:
+            conns.aws.check(c["workspace"], account=c["account"], external_id=conns.external_id(c["workspace"]))
+        except ConnectionError_ as exc:
+            return str(exc)
+        return ""
+
+    return check
+
+
 class Connections:
     """A workspace's connections, kept beside its members and groups (valxel_sdlc.workspaces), with
     their changes in its audit log."""
 
-    def __init__(self, workspaces, *, github: GitHubInstalls | None = None, notify=None,
+    def __init__(self, workspaces, *, github: GitHubInstalls | None = None, aws: AwsConnect | None = None, notify=None,
                  health: dict[str, Callable[[dict], str]] | None = None, clock: Callable[[], float] = time.time) -> None:
-        self.workspaces, self.github, self.notify, self.clock = workspaces, github, notify, clock
+        self.workspaces, self.github, self.aws, self.notify, self.clock = workspaces, github, aws, notify, clock
         # tool -> check(record): "" when it works, otherwise what's wrong in plain words
         self.health_checks = dict(health or {})
 
@@ -201,7 +272,9 @@ class Connections:
         return out
 
     def _can_connect(self, tool: str) -> bool:
-        return tool not in GITHUB_APPS or bool(self.github and self.github.apps.get(GITHUB_APPS[tool]))
+        if tool == "aws":
+            return self.aws is not None
+        return tool in GITHUB_APPS and bool(self.github and self.github.apps.get(GITHUB_APPS[tool]))
 
     def record(self, workspace: str, tool: str, account: str, *, actor: str, reach: dict) -> dict:
         key = f"{tool}:{account.lower()}"
@@ -268,6 +341,35 @@ class Connections:
                 out += [f"{r} isn't in the GitHub App's repos" for r in repos
                         if r.split("/", 1)[0].lower() == org.lower() and r.lower() not in given]
         return out
+
+    # ------------------------------------------------------------------ AWS
+    def external_id(self, workspace: str, actor: str = "valxel") -> str:
+        """The workspace's external ID: made once, unguessable, and sent with every role assumption, so
+        a request about one customer can't use another's roles (the confused deputy)."""
+        ws = self.workspaces.get(workspace) or self.workspaces.ensure(workspace, actor) or self.workspaces.get(workspace)
+        if not ws.get("aws_external_id"):
+            ws = {**ws, "aws_external_id": f"valxel-{workspace}-{secrets.token_urlsafe(24)}"}
+            self.store.put("workspace", workspace, "", ws)
+        return ws["aws_external_id"]
+
+    def aws_launch(self, workspace: str, *, mode: str, region: str, actor: str) -> str:
+        if self.aws is None:
+            raise ConnectionError_("AWS connections aren't set up on this Valxel")
+        if mode not in ("lite", "full"):
+            raise ConnectionError_("Choose lite or full mode")
+        url = self.aws.launch_url(workspace, external_id=self.external_id(workspace, actor), mode=mode, region=region)
+        self.store.audit(workspace, actor, "connection.aws_stack_opened", {"mode": mode, "region": region})
+        return url
+
+    def aws_check(self, workspace: str, *, account: str, mode: str, actor: str) -> dict:
+        """Assume the stack's roles with the workspace's external ID; record the account when both work."""
+        if self.aws is None:
+            raise ConnectionError_("AWS connections aren't set up on this Valxel")
+        account = account.strip().replace("-", "")
+        if not (account.isdigit() and len(account) == 12):
+            raise ConnectionError_("An AWS account ID is 12 digits")
+        reach = self.aws.check(workspace, account=account, external_id=self.external_id(workspace, actor))
+        return self.record(workspace, "aws", account, actor=actor, reach={**reach, "mode": mode})
 
     # ------------------------------------------------------------------ health
     def check(self, workspace: str) -> list[dict]:

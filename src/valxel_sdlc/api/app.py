@@ -260,6 +260,11 @@ class GroupMembers(BaseModel):
     members: list[str]
 
 
+class AwsCheckIn(BaseModel):
+    account: str = Field(min_length=12, max_length=14)
+    mode: str = Field(default="", pattern=r"^(|lite|full)$")
+
+
 class GatesIn(BaseModel):
     gates: dict[str, list[str]]
 
@@ -1228,6 +1233,30 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             except Exception:
                 log.exception("Couldn't wake %s after the GitHub install", fid)
         return RedirectResponse(back + "&connected=" + q(rec["account"]), status_code=302)
+
+    @api.get("/workspaces/{workspace}/connections/aws/launch")
+    def aws_launch(workspace: str, mode: str = "", region: str = "us-east-1", user: User = Depends(current_user)) -> dict:
+        """The AWS console's page that creates the stack, its parameters filled in for this workspace."""
+        from ..connections import ConnectionError_
+
+        admin_of(user, workspace)
+        mode = mode or (wsx().get(workspace) or {}).get("plan", "lite")
+        try:
+            return {"url": conns().aws_launch(workspace, mode=mode, region=region, actor=user.login), "mode": mode}
+        except ConnectionError_ as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/workspaces/{workspace}/connections/aws/check")
+    def aws_check(workspace: str, body: AwsCheckIn, user: User = Depends(current_user)) -> dict:
+        """After the stack is created: Valxel assumes its roles; the account is connected when both work."""
+        from ..connections import ConnectionError_
+
+        admin_of(user, workspace)
+        mode = body.mode or (wsx().get(workspace) or {}).get("plan", "lite")
+        try:
+            return conns().aws_check(workspace, account=body.account, mode=mode, actor=user.login)
+        except ConnectionError_ as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     @api.delete("/workspaces/{workspace}/connections/{tool}/{account}")
     def disconnect_tool(workspace: str, tool: str, account: str, user: User = Depends(current_user)) -> dict:

@@ -382,7 +382,8 @@ export interface Invited extends Member { invite_url: string; emailed: boolean }
 export interface Connection {
   tool: string; account: string; status: "connected" | "needs_attention"; connected_by: string; connected_at: number;
   last_ok: number; last_error: string;
-  reach: { account_type?: string; selection?: "all" | "selected"; repos?: string[]; installation_id?: number };
+  reach: { account_type?: string; selection?: "all" | "selected"; repos?: string[]; installation_id?: number;
+           mode?: string; deploy_role?: string; agents_role?: string };
 }
 export interface ToolRow {
   tool: string; name: string; asked_when: string; grants: string; revoke: string; available: boolean;
@@ -777,6 +778,10 @@ export const api = {
   setGates: (ws: string, productId: string, gates: Record<string, string[]>) =>
     request<{ version: number }>("PUT", `/workspaces/${encodeURIComponent(ws)}/products/${encodeURIComponent(productId)}/gates`, { gates }),
   connections: (ws: string) => request<ToolRow[]>("GET", `/workspaces/${encodeURIComponent(ws)}/connections`),
+  awsLaunch: (ws: string, mode: string, region: string) =>
+    request<{ url: string; mode: string }>("GET", `/workspaces/${encodeURIComponent(ws)}/connections/aws/launch?mode=${mode}&region=${encodeURIComponent(region)}`),
+  awsCheck: (ws: string, account: string, mode: string) =>
+    request<Connection>("POST", `/workspaces/${encodeURIComponent(ws)}/connections/aws/check`, { account, mode }),
   disconnect: (ws: string, tool: string, account: string) =>
     request<{ revoke: string }>("DELETE", `/workspaces/${encodeURIComponent(ws)}/connections/${encodeURIComponent(tool)}/${encodeURIComponent(account)}`),
   workspaceAudit: (ws: string) => request<AuditEntry[]>("GET", `/workspaces/${encodeURIComponent(ws)}/audit`),

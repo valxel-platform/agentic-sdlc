@@ -1,0 +1,271 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Connects your AWS account to Valxel (the sign-in design, A7). Creates roles Valxel assumes with
+  your workspace's external ID, one per job, each limited to resources tagged with your workspace:
+  a deploy role for the mode you chose (lite: your VMs; full: your EKS clusters, with Crossplane's
+  role for the catalog services they use) and a read-only role for agents. Delete this stack to
+  take Valxel's access away; nothing else in your account depends on it.
+
+Parameters:
+  ValxelAccountId:
+    Type: String
+    Description: Valxel's AWS account, the only one these roles trust
+    AllowedPattern: "^[0-9]{12}$"
+  ExternalId:
+    Type: String
+    Description: Your workspace's external ID, from Valxel's connections page; Valxel sends it with every request
+    AllowedPattern: "^[A-Za-z0-9+=,.@:/-]{16,128}$"
+    NoEcho: true
+  WorkspaceId:
+    Type: String
+    Description: Your Valxel workspace; the roles act only on resources tagged valxel:workspace with it
+    AllowedPattern: "^[a-z0-9][a-z0-9-]{2,39}$"
+  Mode:
+    Type: String
+    AllowedValues: [lite, full]
+    Description: "lite: your products run on VMs; full: on EKS clusters with managed services"
+
+Conditions:
+  Lite: !Equals [!Ref Mode, lite]
+  Full: !Equals [!Ref Mode, full]
+
+Resources:
+  # What agents read: resource metadata (never data in buckets, tables or queues), tags and costs.
+  AgentsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "valxel-${WorkspaceId}-agents"
+      Path: /valxel/
+      Description: Valxel's agents read resource metadata, tags and costs; no data, no changes
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Sub "arn:${AWS::Partition}:iam::${ValxelAccountId}:root" }
+            Action: sts:AssumeRole
+            Condition: { StringEquals: { "sts:ExternalId": !Ref ExternalId } }
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/job-function/ViewOnlyAccess"
+      Policies:
+        - PolicyName: tags-and-costs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [tag:GetResources, ce:GetCostAndUsage, ce:GetCostForecast]
+                Resource: "*"
+      Tags:
+        - { Key: "valxel:workspace", Value: !Ref WorkspaceId }
+
+  # Lite: the VMs the products run on, created and managed only with the workspace's tag, reached
+  # over SSH with a key EC2 Instance Connect accepts for 60 seconds (no key is stored anywhere).
+  DeployRoleLite:
+    Type: AWS::IAM::Role
+    Condition: Lite
+    Properties:
+      RoleName: !Sub "valxel-${WorkspaceId}-deploy"
+      Path: /valxel/
+      Description: Valxel creates and runs your products' VMs, only those tagged with your workspace
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Sub "arn:${AWS::Partition}:iam::${ValxelAccountId}:root" }
+            Action: sts:AssumeRole
+            Condition: { StringEquals: { "sts:ExternalId": !Ref ExternalId } }
+      Policies:
+        - PolicyName: lite-vms
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Look
+                Effect: Allow
+                Action: [ec2:Describe*]
+                Resource: "*"
+              - Sid: CreateTaggedVmsOnly
+                Effect: Allow
+                Action: [ec2:RunInstances, ec2:CreateSecurityGroup, ec2:CreateVolume]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*"
+                  - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:volume/*"
+                  - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:security-group/*"
+                  - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:network-interface/*"
+                Condition: { StringEquals: { "aws:RequestTag/valxel:workspace": !Ref WorkspaceId } }
+              - Sid: WhatANewVmUses
+                Effect: Allow
+                Action: [ec2:RunInstances, ec2:CreateSecurityGroup]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:ec2:*::image/*"
+                  - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:subnet/*"
+                  - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:vpc/*"
+                  - !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:security-group/*"
+              - Sid: TagOnlyWhenCreating
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource: "*"
+                Condition: { StringEquals: { "ec2:CreateAction": [RunInstances, CreateSecurityGroup, CreateVolume] } }
+              - Sid: RunTheWorkspacesVms
+                Effect: Allow
+                Action:
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                  - ec2:RebootInstances
+                  - ec2:TerminateInstances
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:AuthorizeSecurityGroupIngress
+                  - ec2:RevokeSecurityGroupIngress
+                  - ec2:AuthorizeSecurityGroupEgress
+                  - ec2:RevokeSecurityGroupEgress
+                  - ec2:AttachVolume
+                  - ec2:DetachVolume
+                  - ec2:DeleteSecurityGroup
+                Resource: "*"
+                Condition: { StringEquals: { "aws:ResourceTag/valxel:workspace": !Ref WorkspaceId } }
+              - Sid: SshAsValxelWithAOneMinuteKey
+                Effect: Allow
+                Action: ec2-instance-connect:SendSSHPublicKey
+                Resource: !Sub "arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    "aws:ResourceTag/valxel:workspace": !Ref WorkspaceId
+                    "ec2:osuser": valxel
+      Tags:
+        - { Key: "valxel:workspace", Value: !Ref WorkspaceId }
+
+  # Full: EKS clusters with the workspace's tag, and only the roles this stack makes for them.
+  DeployRoleFull:
+    Type: AWS::IAM::Role
+    Condition: Full
+    Properties:
+      RoleName: !Sub "valxel-${WorkspaceId}-deploy"
+      Path: /valxel/
+      Description: Valxel creates and runs your products' EKS clusters, only those tagged with your workspace
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !Sub "arn:${AWS::Partition}:iam::${ValxelAccountId}:root" }
+            Action: sts:AssumeRole
+            Condition: { StringEquals: { "sts:ExternalId": !Ref ExternalId } }
+      Policies:
+        - PolicyName: full-clusters
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Look
+                Effect: Allow
+                Action: [eks:Describe*, eks:List*, ec2:Describe*]
+                Resource: "*"
+              - Sid: CreateTaggedClustersOnly
+                Effect: Allow
+                Action: [eks:CreateCluster, eks:CreateNodegroup, eks:TagResource]
+                Resource: "*"
+                Condition: { StringEquals: { "aws:RequestTag/valxel:workspace": !Ref WorkspaceId } }
+              - Sid: RunTheWorkspacesClusters
+                Effect: Allow
+                Action:
+                  - eks:UpdateClusterConfig
+                  - eks:UpdateClusterVersion
+                  - eks:UpdateNodegroupConfig
+                  - eks:UpdateNodegroupVersion
+                  - eks:CreateAccessEntry
+                  - eks:AssociateAccessPolicy
+                  - eks:CreatePodIdentityAssociation
+                  - eks:CreateAddon
+                  - eks:UpdateAddon
+                  - eks:DeleteNodegroup
+                  - eks:DeleteCluster
+                Resource: "*"
+                Condition: { StringEquals: { "aws:ResourceTag/valxel:workspace": !Ref WorkspaceId } }
+              - Sid: PassOnlyThisStacksRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt ClusterRole.Arn
+                  - !GetAtt NodeRole.Arn
+                  - !GetAtt CrossplaneRole.Arn
+      Tags:
+        - { Key: "valxel:workspace", Value: !Ref WorkspaceId }
+
+  ClusterRole:
+    Type: AWS::IAM::Role
+    Condition: Full
+    Properties:
+      RoleName: !Sub "valxel-${WorkspaceId}-eks-cluster"
+      Path: /valxel/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - { Effect: Allow, Principal: { Service: eks.amazonaws.com }, Action: ["sts:AssumeRole", "sts:TagSession"] }
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy"
+      Tags:
+        - { Key: "valxel:workspace", Value: !Ref WorkspaceId }
+
+  NodeRole:
+    Type: AWS::IAM::Role
+    Condition: Full
+    Properties:
+      RoleName: !Sub "valxel-${WorkspaceId}-eks-node"
+      Path: /valxel/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - { Effect: Allow, Principal: { Service: ec2.amazonaws.com }, Action: sts:AssumeRole }
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKS_CNI_Policy"
+      Tags:
+        - { Key: "valxel:workspace", Value: !Ref WorkspaceId }
+
+  # Full: what Crossplane, inside the cluster, uses to build the catalog services products ask for
+  # (platform/aws-resources.yaml): only resources it tags with the workspace, through EKS Pod Identity.
+  CrossplaneRole:
+    Type: AWS::IAM::Role
+    Condition: Full
+    Properties:
+      RoleName: !Sub "valxel-${WorkspaceId}-crossplane"
+      Path: /valxel/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - { Effect: Allow, Principal: { Service: pods.eks.amazonaws.com }, Action: ["sts:AssumeRole", "sts:TagSession"] }
+      Policies:
+        - PolicyName: catalog-services
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: Look
+                Effect: Allow
+                Action: [rds:Describe*, elasticache:Describe*, sqs:GetQueueAttributes, sqs:ListQueues, sns:ListTopics,
+                         s3:ListAllMyBuckets, dynamodb:DescribeTable, dynamodb:ListTables, kinesis:DescribeStream*,
+                         kinesis:ListStreams, ec2:Describe*]
+                Resource: "*"
+              - Sid: CreateTaggedOnly
+                Effect: Allow
+                Action: [rds:CreateDBInstance, rds:CreateDBSubnetGroup, elasticache:CreateReplicationGroup,
+                         elasticache:CreateCacheSubnetGroup, sqs:CreateQueue, sns:CreateTopic, s3:CreateBucket,
+                         dynamodb:CreateTable, kinesis:CreateStream]
+                Resource: "*"
+                Condition: { StringEquals: { "aws:RequestTag/valxel:workspace": !Ref WorkspaceId } }
+              - Sid: ManageTaggedOnly
+                Effect: Allow
+                Action: [rds:Modify*, rds:Delete*, rds:AddTagsToResource, elasticache:Modify*, elasticache:Delete*,
+                         elasticache:AddTagsToResource, sqs:SetQueueAttributes, sqs:DeleteQueue, sqs:TagQueue,
+                         sns:SetTopicAttributes, sns:DeleteTopic, sns:TagResource, s3:PutBucket*, s3:PutEncryptionConfiguration,
+                         s3:PutLifecycleConfiguration, s3:DeleteBucket, dynamodb:UpdateTable, dynamodb:DeleteTable,
+                         dynamodb:TagResource, kinesis:AddTagsToStream, kinesis:DeleteStream, kinesis:UpdateShardCount]
+                Resource: "*"
+                Condition: { StringEquals: { "aws:ResourceTag/valxel:workspace": !Ref WorkspaceId } }
+      Tags:
+        - { Key: "valxel:workspace", Value: !Ref WorkspaceId }
+
+Outputs:
+  DeployRoleArn:
+    Value: !If [Lite, !GetAtt DeployRoleLite.Arn, !GetAtt DeployRoleFull.Arn]
+  AgentsRoleArn:
+    Value: !GetAtt AgentsRole.Arn

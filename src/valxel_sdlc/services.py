@@ -491,7 +491,7 @@ def default_delivery(settings: Settings) -> tuple[GitHub, OpenChoreo]:
 def make_connections(svc):
     """The workspaces' connections: GitHub installs (when the Apps' slugs and OAuth clients are set),
     the Delivery App's health check (when it can sign), and admins' emails through the notifier."""
-    from .connections import Connections, GitHubAppSettings, GitHubInstalls, delivery_health
+    from .connections import AwsConnect, Connections, GitHubAppSettings, GitHubInstalls, aws_health, delivery_health
     from .signing import github_app_configured, github_app_tokens
 
     apps = {app: GitHubAppSettings.from_env(app) for app in ("delivery", "provisioner")}
@@ -501,5 +501,8 @@ def make_connections(svc):
         health["github"] = delivery_health(github_app_tokens(api=svc.settings.github_api))
     n = svc.notifier
     notify = (lambda to, subject, text: n._send_email(to, subject, text)) if n is not None and n.email_ready() else None
-    return Connections(svc.workspaces, github=github, notify=notify, health=health)
+    conns = Connections(svc.workspaces, github=github, aws=AwsConnect.from_env(), notify=notify, health=health)
+    if conns.aws is not None:
+        conns.health_checks["aws"] = aws_health(conns)
+    return conns
 
