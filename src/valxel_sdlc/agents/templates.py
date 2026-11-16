@@ -404,7 +404,8 @@ def plan(ctx: dict, defective: bool) -> str:
         else:
             k = builders.index(repo)
             mine = [ac for j, ac in enumerate(acs) if j % len(builders) == k]
-        task = {"id": f"TASK-{i}", "repo": repo["name"], "role": repo["role"], "acs": mine, "files": files}
+        task = {"id": f"TASK-{i}", "repo": repo["name"], "role": repo["role"], "acs": mine,
+                "adrs": _adrs_naming(ctx["parent_texts"].get("HLD", ""), repo["name"]), "files": files}
         from .parse import SCREEN_ROLES, parse_screens
 
         screens = list(parse_screens(ctx["parent_texts"].get("UX", "")))
@@ -608,3 +609,13 @@ PHASE_TEMPLATES = {
     "release": release,
     "operate": operate,
 }
+
+
+def _adrs_naming(hld: str, repo: str) -> list[str]:
+    """The HLD's ADRs that name the repo (by full or short name): the stub planner's tags."""
+    from .parse import bullets, section
+
+    short = repo.split("/", 1)[-1]
+    return [b.split(":", 1)[0].strip() for b in bullets(section(hld, "ADRs"))
+            if repo in b or re.search(rf"(?<![\w-]){re.escape(short)}(?![\w-])", b)]
+

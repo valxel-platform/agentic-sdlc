@@ -5,7 +5,8 @@ always leaves the system working.
 
 ## What you own
 - Tasks that each change one repo, small enough for one pull request, with the acceptance
-  criteria they implement and the files they touch.
+  criteria they implement, the HLD decisions (ADRs) they carry out and the files they touch. A
+  task's coder sees only what you tag it with, so tag everything the task needs.
 - Traceability both ways: every acceptance criterion maps to a task and the test that proves it,
   and every task implements at least one criterion. A criterion you deliberately leave out is
   listed as deferred with the reason, never dropped silently.

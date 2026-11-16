@@ -98,3 +98,21 @@ def table(rows: list[dict]) -> str:
                      f"{pct(r['fill_p90']):>8} {pct(r['fill_max']):>8} {r['over_resume_fill']:>4} "
                      f"{r['cache_hit_rate']:>6.0%} {r['cost_usd']:>9.2f}  {layers}")
     return "\n".join(lines)
+
+
+CAPPED = ("L2", "L3", "L4", "L5")
+
+
+def fit_problems(settings, roles) -> list[str]:
+    """Roles whose model's window can't hold the capped layers plus the reserve (config
+    `context_caps`). A role whose window isn't in config is strict mode's to report."""
+    caps = settings.context_caps
+    need = sum(int(caps.get(k) or 0) for k in CAPPED) + int(caps.get("reserve") or 0)
+    out = []
+    for role in sorted(roles):
+        model = settings.role(role).model
+        window = settings.context_window(model)
+        if window and need > window:
+            out.append(f"{role}: {model}'s {window:,}-token window can't hold the layer caps and reserve "
+                       f"({need:,} tokens); lower context_caps or give the role a larger model")
+    return out
