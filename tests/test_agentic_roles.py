@@ -98,7 +98,7 @@ KNOWLEDGE_HLD = """## ADRs
 - acme-clinic/cln-intake-api (provider)
 - acme-clinic/cln-knowledge (knowledge)
 ## Knowledge
-- acme-clinic/cln-knowledge: model text-embedding-3-small via gateway (BAA); sources: notes (events emr.notes.v1), forms (files)
+- acme-clinic/cln-knowledge: model text-embedding-3-small via gateway (BAA); sources: notes (events emr.notes.v1, compacted), policies (scan clinic_documents), forms (files)
 """
 
 
@@ -118,15 +118,16 @@ def test_the_hld_says_which_model_and_sources_and_phi_embeds_under_the_baa():
     repos = parse_affected_repos(KNOWLEDGE_HLD)
     [k] = retrieval.parse_knowledge(KNOWLEDGE_HLD)
     assert k["model"] == "text-embedding-3-small" and k["via"] == "gateway (baa)"
-    assert k["sources"] == [{"name": "notes", "kind": "events", "detail": "emr.notes.v1"},
-                            {"name": "forms", "kind": "files", "detail": ""}]
+    assert [(x["name"], x["kind"], x["topic"], x["compacted"]) for x in k["sources"]] == [
+        ("notes", "events", "emr.notes.v1", True), ("policies", "scan", "", False), ("forms", "files", "", False)]
     assert retrieval.check(KNOWLEDGE_HLD, repos, {"data_class": "phi"}) == []
     plain = KNOWLEDGE_HLD.replace("via gateway (BAA)", "via gateway")
     assert "under the BAA" in retrieval.check(plain, repos, {"data_class": "phi"})[0]
     assert retrieval.check(plain, repos, {"data_class": "general"}) == []
     missing = KNOWLEDGE_HLD.split("## Knowledge")[0]
     assert "say under '## Knowledge'" in retrieval.check(missing, repos, {})[0]
-    odd = KNOWLEDGE_HLD.replace("via gateway (BAA)", "via openai").replace("notes (events emr.notes.v1), forms (files)", "?")
+    odd = KNOWLEDGE_HLD.replace("via gateway (BAA)", "via openai").replace(
+        "notes (events emr.notes.v1, compacted), policies (scan clinic_documents), forms (files)", "?")
     problems = retrieval.check(odd, repos, {})
     assert any("not 'openai'" in p for p in problems) and any("at least one source" in p for p in problems)
     assert retrieval.check(KNOWLEDGE_HLD, [r for r in repos if r["role"] != "knowledge"], {}) == []
@@ -138,7 +139,8 @@ def test_coder_agents_write_the_config_and_golden_set_from_the_decision():
     ctx = {"parent_texts": {"HLD": KNOWLEDGE_HLD}}
     said = retrieval.instruction(ctx, {"role": "knowledge", "repo": "acme-clinic/cln-knowledge"})
     assert "knowledge.yaml" in said and "evals/questions.yaml" in said and "approve both at G5" in said
-    assert "text-embedding-3-small via gateway (baa)" in said and "notes (events), forms (files)" in said
+    assert "text-embedding-3-small via gateway (baa)" in said and "notes (events), policies (scan), forms (files)" in said
+    assert "compacted: true" in said
     assert retrieval.instruction(ctx, {"role": "agent", "repo": "acme-clinic/cln-intake-agent"}) == ""
     bare = retrieval.instruction({"parent_texts": {}}, {"role": "knowledge", "repo": "acme-clinic/x"})
     assert "decided at G4" not in bare and "knowledge.yaml" in bare
@@ -175,3 +177,22 @@ def test_g6_shows_a_knowledge_repos_golden_set_beside_the_last_release():
     [row] = agent_evals(Services(), state)
     assert row["role"] == "knowledge" and row["stages"]["pr"]["rate"] == round(18 / 19, 4)
     assert row["previous_feature"] == "CLN-FEAT-4" and row["change"]["pr"] == round(round(18 / 19, 4) - round(17 / 19, 4), 4)
+
+
+def test_agents_decide_how_each_source_survives_a_rebuild_and_people_approve_it_at_g4():
+    from valxel_sdlc import retrieval
+
+    repos = parse_affected_repos(KNOWLEDGE_HLD)
+    # Ordinary retention would lose the older records on a rebuild: the design must decide.
+    plain = KNOWLEDGE_HLD.replace("emr.notes.v1, compacted", "emr.notes.v1")
+    [problem] = retrieval.check(plain, repos, {"data_class": "phi"})
+    assert "notes is rebuilt by replaying emr.notes.v1" in problem and "(scan <store>)" in problem
+    no_topic = KNOWLEDGE_HLD.replace("events emr.notes.v1, compacted", "events")
+    assert "name the topic notes is read from" in retrieval.check(no_topic, repos, {})[0]
+    assert retrieval.compacted_topics(KNOWLEDGE_HLD) == {"emr.notes.v1": "acme-clinic/cln-knowledge"}
+    # The provider that publishes it keeps the topic rebuildable.
+    ctx = {"parent_texts": {"HLD": KNOWLEDGE_HLD}}
+    said = retrieval.instruction(ctx, {"role": "provider", "repo": "acme-clinic/cln-intake-api"})
+    assert "emr.notes.v1 is read by a knowledge repo" in said and "cleanup.policy=compact" in said
+    assert "key every event on it by the record's id" in said and "carry the whole record" in said
+    assert retrieval.instruction({"parent_texts": {"HLD": plain}}, {"role": "provider", "repo": "x/y"}) == ""

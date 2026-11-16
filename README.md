@@ -542,6 +542,13 @@ Roles merge and deploy in dependency order: library, provider, event-worker, kno
   `- <org>/<repo>: model <model> via <gateway (BAA)|gateway|self-hosted>; sources: notes (events emr.notes.v1), ...`.
   People decide the model at G4. A PHI product embeds through the gateway under the BAA or with
   its self-hosted model, and the evaluator says so when the HLD doesn't.
+  The agent also decides, for each events source, how a rebuild gets every record. A rebuild
+  replays the topic from its start, and ordinary retention would silently drop older records. So
+  the source is either a compacted topic (`notes (events emr.notes.v1, compacted)`: whole records
+  keyed by id) or a scan of the service's database. The evaluator refuses an events source with
+  neither, and people approve the choice at G4. The provider that publishes a compacted source is
+  told to key events by record id, carry whole records, send deletions as `.deleted` events, and
+  declare the topic `cleanup.policy=compact`. The knowledge repo checks the topic at run time.
 - **Build (G5).** Coder agents write the repo's `knowledge.yaml` from that line and the product's
   data model: sources, text, tenant and access fields, and excluded fields. They also draft the
   golden set (`evals/questions.yaml`), which has recall questions, a leak case for every tenant and

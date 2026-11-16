@@ -225,7 +225,7 @@ def architecture(ctx: dict, defective: bool) -> str:
         via = "gateway (BAA)" if ctx.get("data_class") == "phi" else "gateway"
         record = _slug(ctx["title"]).split("-", 1)[0] or "record"
         lines += ["", "## Knowledge"] + [
-            f"- {r['name']}: model text-embedding-3-small via {via}; sources: {record}s (events valxel.{record}.changed.v1)"
+            f"- {r['name']}: model text-embedding-3-small via {via}; sources: {record}s (events valxel.{record}.changed.v1, compacted)"
             for r in knowledge]
     lines += _data_lines(ctx, repos) + _threat_lines(ctx, repos)
     lines += _resource_lines(ctx, repos, provider, lines)

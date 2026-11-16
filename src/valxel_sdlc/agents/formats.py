@@ -96,7 +96,9 @@ sequenceDiagram
 ## Endpoints
 - <org>/<repo>: <none|project|namespace|internal|external>; calls <repo>, <repo>
 ## Knowledge                   (only with a knowledge repo: what agents search, and the embedding model people decide at G4)
-- <org>/<repo>: model <embedding model> via <gateway (BAA)|gateway|self-hosted>; sources: <name> (<events <topic>|scan <store>|files>), ...
+- <org>/<repo>: model <embedding model> via <gateway (BAA)|gateway|self-hosted>; sources: <name> (<events <topic>, compacted|scan <store>|files>), ...
+                               (an events source is rebuilt by replaying its topic: 'compacted' when its events carry whole
+                                records keyed by id, otherwise make it a scan of the service's database)
 ## Events                      (when records change through Kafka)
 - valxel.<record>.<event>.v<n>: published by <repo>, applied by <repo>
 ## Instrumentation             (one line for every event in the PRD's Instrumentation section)
