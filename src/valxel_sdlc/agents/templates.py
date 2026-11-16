@@ -540,7 +540,13 @@ def code_result(ctx: dict, task: dict, passed: bool) -> str:
     return json.dumps({"summary": code_task(ctx, task, passed), "files": list(task["files"]),
                        "tests": {"command": "the repo's test command", "passed": passed,
                                  "failed": [] if passed else [f"test_{_slug(task['id'])}"]},
-                       "notes": [f"Assumed: {task['repo']}'s public API stays compatible for its other callers"]})
+                       "notes": [f"Assumed: {task['repo']}'s public API stays compatible for its other callers"],
+                       # What a coder leaves for the next attempt (valxel_sdlc.sessions): only when work is left.
+                       "handoff": {} if passed else {
+                           "done": [f"{task['id']}'s change in {', '.join(task['files'][:2]) or task['repo']}"],
+                           "open": [f"make test_{_slug(task['id'])} pass"],
+                           "files": list(task["files"][:3]),
+                           "avoid": ["skipping or loosening the failing test"]}})
 
 
 def release(ctx: dict, defective: bool) -> str:

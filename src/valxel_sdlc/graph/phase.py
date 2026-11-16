@@ -7,9 +7,11 @@ and only refs, scores and usage flow back to the feature thread.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import re
+import time
 from datetime import datetime, timezone
 
 from langchain_core.runnables import RunnableConfig
@@ -123,6 +125,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "config_variant": state.get("config_variant", ""),
         "simulate_faults": dict(state.get("simulate_faults") or {}),
         "tasks": list(state.get("tasks") or []),
+        "sessions": dict(state.get("sessions") or {}),
         "cases": list(state.get("cases") or []),
         "components": list((state.get("change_set") or {}).get("merge_order", [])),
         "deployments": sorted((state.get("deployments") or {}).values(), key=lambda d: d["repo"]),
@@ -229,7 +232,8 @@ NO_LESSON_ROLES = ("knowledge", "router", "intake")
 def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str, ...], tail: str,
                stub_text: str | None, max_tokens: int = 4096, schema: dict | None = None,
                budget_usd: float | None = None, cwd: str | None = None,
-               box: dict | None = None) -> AgentResult:
+               box: dict | None = None, task_id: str = "", prev_session: dict | None = None,
+               resume_tail: str = "", keep_transcript: bool = False) -> AgentResult:
     """One agent session. Its dollar cap is the role's, and never more than what's left of the
     feature's budget (ctx budget_remaining_usd, or `budget_usd` when the caller knows better).
 
@@ -262,14 +266,35 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
             product_id=ctx["product_id"], feature_id=ctx["feature_id"], phase=phase, role=who,
             data_class=product.data_class, workspace=product.workspace, prompt_version=f"{phase}@1",
         )
+        # Resume the task's last session, or start fresh: from its handoff when it left one
+        # (valxel_sdlc.sessions). A fallback to another model never resumes.
+        session_args, layers_for = {}, layers
+        if prev_session is not None or keep_transcript:
+            from .. import sessions
+
+            handoff = handoff_text(services, prev_session)
+            fresh = layers if not handoff else dataclasses.replace(layers, tail=layers.tail + sessions.picking_up(handoff))
+            decision = sessions.may_resume(
+                prev_session, task_id=task_id, role=who, model=services.settings.role(who).model, runtime=runtime.name,
+                transcripts=sessions.TranscriptStore(services.settings.artifact_dir), feature_id=ctx["feature_id"])
+            if prev_session:
+                log.info("%s %s %s: %s session %s: %s", ctx["feature_id"], task_id, who,
+                         "resuming" if decision.resume else "not resuming", prev_session.get("session_id"), decision.why)
+            if decision.resume and resume_tail:
+                layers_for = dataclasses.replace(layers, tail=resume_tail)
+                session_args = {"resume": prev_session["session_id"], "fresh_tail": fresh.tail, "session_mode": "resumed"}
+            else:
+                layers_for = fresh
+                session_args = {"session_mode": "handoff" if handoff else "fresh"}
+            session_args["keep_transcript"] = keep_transcript
         try:
-            res = runtime.run(AgentTask(role=who, phase=phase, tags=tags, layers=layers, skills=tuple(skills),
+            res = runtime.run(AgentTask(role=who, phase=phase, tags=tags, layers=layers_for, skills=tuple(skills),
                                         stub_text=stub_text, max_tokens=max_tokens, schema=schema,
                                         max_budget_usd=None if left is None else max(0.0, float(left)),
                                         # A box is a session's own writable checkout; a bare cwd is a
                                         # read-only one (valxel_sdlc.sandbox, valxel_sdlc.workspace).
                                         cwd=(box or {}).get("cwd") or cwd, read_only=bool(cwd) and not box,
-                                        sandbox=box))
+                                        sandbox=box, **session_args))
         except ProviderUnavailable as exc:
             if i == len(candidates) - 1:
                 raise
@@ -278,6 +303,39 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
         res.role = who
         return res
     raise RuntimeError(f"No runtime for role {role} can do phase {phase}")
+
+
+def sessions_instruction() -> str:
+    from ..sessions import HANDOFF_INSTRUCTION
+
+    return HANDOFF_INSTRUCTION
+
+
+def handoff_text(services, session: dict | None) -> str:
+    """The handoff an earlier session on the task left, or ""."""
+    ref = (session or {}).get("handoff")
+    if not ref:
+        return ""
+    try:
+        return services.artifacts.load(ref)
+    except OSError:
+        return ""
+
+
+def session_record(services, ctx: dict, task: dict, res, handoff) -> dict | None:
+    """What the next attempt on `task` needs to resume this session or pick up from it: the
+    session, and its handoff saved as an artifact (kind HANDOFF-<task>)."""
+    if not getattr(res, "session_id", "") and (handoff is None or handoff.empty()):
+        return None
+    ref = None
+    if handoff is not None and not handoff.empty():
+        ref = services.artifacts.save(
+            feature_id=ctx["feature_id"], kind=f"HANDOFF-{task['id']}", phase="build",
+            content=handoff.markdown(f"{ctx['feature_id']} {task['id']}"), parents=[],
+            constitution_version=ctx.get("constitution_version", ""))
+    return {"task": task["id"], "session_id": res.session_id, "role": res.role, "model": res.model,
+            "runtime": res.runtime, "at": time.time(), "fill": round(float(res.context_fill or 0), 4),
+            "resumed": bool(res.resumed), **({"handoff": dict(ref)} if ref else {})}
 
 
 def for_task(ctx: dict, task: dict, where: str = "") -> dict:
@@ -721,6 +779,9 @@ def build_build_subgraph(services):
             return "review"
         results = s.get("task_results") or {}
         return [Send("code_task", {"task": t, "ctx": s["ctx"], "attempt": s["attempt"],
+                                   # The task's last session: this run's attempt, or the feature's (a CI fix).
+                                   "session": (results.get(t["id"]) or {}).get("session")
+                                   or (s["ctx"].get("sessions") or {}).get(t["id"]),
                                    "fix": blocking_of(reviews.get(t["id"])) + [
                                        f"write the test for {c} under exactly the planned name"
                                        for c in missing_cases(results.get(t["id"]) or {})]}) for t in pending]
@@ -745,8 +806,16 @@ def build_build_subgraph(services):
     def _code_in(task, ctx, mine, fail, payload, box):
         live = services.settings.mode == "live"
         where = feature_folder(box, ctx.get("parent_texts") or {})
+        fixes = ((f" Fix this first: {ctx['feedback']}" if ctx.get("feedback") else "")
+                 + (" The review blocked your last attempt; fix each of these without weakening any check: "
+                    + "; ".join(payload["fix"]) + "." if payload.get("fix") else ""))
+        prev = payload.get("session")
         return call_agent(
             services, role="coder", phase="build", ctx=for_task(ctx, task, where), skills=spec.skills, box=box.spec,
+            task_id=task["id"], prev_session=prev, keep_transcript=True,
+            # Resumed, the session already has the task and everything it read: only what to fix now.
+            resume_tail=(f"Continue {task['id']} on the same branch, in a fresh checkout of it." + fixes
+                         + " Run the tests again and reply in the same JSON format, handoff included.") if prev and fixes else "",
             tail=(f"Implement {task['id']} in {task['repo']} on branch {ctx.get('branch') or 'feature/' + ctx['feature_id']}. "
                   + ("Your working directory is its checkout on that branch: commit there and push the branch "
                      "(git push origin HEAD). You can't push anywhere else, and your shell reaches only the "
@@ -762,7 +831,8 @@ def build_build_subgraph(services):
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
-                    " type the change uses. " + diary.CODER + "\n\n" + structured.instruction(structured.CoderReply)),
+                    " type the change uses. " + diary.CODER + " " + sessions_instruction()
+                  + "\n\n" + structured.instruction(structured.CoderReply)),
             stub_text=templates.code_result(ctx, task, passed=not fail),
             schema=structured.schema(structured.CoderReply),
         )
@@ -786,6 +856,9 @@ def build_build_subgraph(services):
                   "notes": diary.entries(list(reply.notes)) if reply else [],
                   "tests": reply.tests.model_dump() if reply else {"passed": False, "failed": [],
                                                                     "error": f"no structured result: {error}"}}
+        record = session_record(services, ctx, task, res, reply.handoff if reply else None)
+        if record:
+            result["session"] = record
         return {"task_results": {task["id"]: result}, "usage": {"tokens": res.tokens, "cost_usd": res.cost_usd}}
 
     def review(s: PhaseState) -> dict:
@@ -1070,6 +1143,7 @@ def make_phase_node(phase: str, services):
             reviews = out.get("reviews") or {}
             delta["case_evidence"] = {cid: {**c, "task": tid} for tid, r in (out.get("task_results") or {}).items()
                                       for cid, c in (r.get("cases") or {}).items()}
+            delta["sessions"] = {tid: r["session"] for tid, r in (out.get("task_results") or {}).items() if r.get("session")}
             delta["pull_requests"] = {
                 f"{rv['pr']['repo']}#{rv['pr']['number']}": {**rv["pr"], "task_id": tid, "role": rv["role"],
                                                              "review_score": rv["score"]}

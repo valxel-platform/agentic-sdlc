@@ -353,6 +353,15 @@ class FeatureEngine:
         """Each workspace's connections, one cheap read each (valxel_sdlc.connections)."""
         conns = getattr(self.services, "connections", None)
         return conns.check_all() if conns is not None else 0
+    def expire_transcripts(self) -> int:
+        """Delete agent session transcripts older than a day (valxel_sdlc.sessions): resuming needs
+        them only that long; the handoffs and session records stay."""
+        from .sessions import TranscriptStore
+
+        gone = TranscriptStore(self.services.settings.artifact_dir).expire()
+        if gone:
+            log.info("Deleted %d session transcripts older than a day", gone)
+        return gone
 
     def start_watcher(self, interval_s: float = 30.0) -> None:
         """Poll features that wait on CI or OpenChoreo. Every replica starts it; only the one that
@@ -405,7 +414,8 @@ class FeatureEngine:
                         self.cluster.prune(30)
                     except Exception:
                         pass
-                    for job in (self.collect_costs, self.review_costs, self.check_connections):
+            
+                    for job in (self.collect_costs, self.review_costs, self.expire_transcripts,self.check_connections):
                         try:
                             job()
                         except Exception:
