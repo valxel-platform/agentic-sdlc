@@ -54,10 +54,31 @@ jobs:
           ONLY: ${{ inputs.repo }}
         run: |
           set -o pipefail
-          args=(repos "$ACTION")
-          if [ -n "$ONLY" ]; then args+=(--repo "$ONLY"); fi
           status=0
-          valxel "${args[@]}" | tee standards.txt || status=$?
+          : > standards.txt
+          if [ -n "$ONLY" ]; then
+            repos=("$ONLY")
+          else
+            # config/registry.yaml lists fictional acme-* products. They are examples, and the
+            # GitHub App is not installed there, so the daily check covers the platform repos only.
+            mapfile -t repos < <(python3 - << 'PY'
+          from pathlib import Path
+          text = Path("config/repos.yaml").read_text().split("platform_repos:", 1)[1]
+          for line in text.splitlines():
+              if not line.startswith("  valxel-platform/"):
+                  if line and not line.startswith(" ") and not line.startswith("#"):
+                      break
+                  continue
+              print(line.split(":", 1)[0].strip())
+          PY
+          )
+          fi
+          for repo in "${repos[@]}"; do
+            case "$repo" in
+              acme-*) echo "skip $repo (example org)" | tee -a standards.txt; continue ;;
+            esac
+            valxel repos "$ACTION" --repo "$repo" | tee -a standards.txt || status=$?
+          done
           { echo '```'; cat standards.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
       - if: always()
