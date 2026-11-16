@@ -1537,6 +1537,18 @@ fills in ARNs, and anything tagged for the product that OpenChoreo doesn't know 
 unmanaged, for someone to adopt or remove. Once a day the tool keeps each product's counts per
 environment (`GET /api/inventory/<product>/history`) to show the trend.
 
+### Agent context: how full it gets
+
+Every ledger record also carries the agent session it belongs to (Claude Code's session id, Codex's
+thread) and how it started, the model's context window (`context_windows` in `config/models.yaml`),
+how full the context got (the largest prompt any one call in the session sent, by the vendor's
+count) and an estimate of each prompt layer's size. `valxel usage context [--product P] [--weeks N]`
+and `GET /api/usage/context?product_id=P` group them by week, role and model: average, 90th
+percentile and largest fill, sessions over 70%, the layers that take the most, cache hits and cost.
+These numbers set the caps on prompt layers and the rule for resuming sessions (the design, "Valxel:
+agent context and session management"). A model with no window in config shows as unknown, and
+strict mode warns about it. Codex reports usage per turn, so its fill is an upper bound.
+
 ## Cost: what features and products cost
 
 One cost ledger holds every dollar a product spends, once, in [FinOps FOCUS](https://focus.finops.org/)

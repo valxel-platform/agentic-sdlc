@@ -106,15 +106,18 @@ class ModelGateway:
 
     def record_external(
         self, tags: CallTags, *, runtime: str, model: str, layers: PromptLayers, response: ModelResponse,
-        duration_s: float = 0.0, extra_skills: tuple[str, ...] = (),
+        duration_s: float = 0.0, extra_skills: tuple[str, ...] = (), session_mode: str = "fresh",
     ) -> GatewayResult:
-        """Ledger entry for a call made outside the gateway (e.g. the Claude Agent SDK)."""
+        """Ledger entry for a call made outside the gateway (an agent session: the Claude Agent SDK,
+        Codex). session_mode: how the session started (fresh, resumed, handoff)."""
         provider = model.split("/", 1)[0]
         return self._record(tags, runtime, provider, model, self.settings.role(tags.role).ttl, layers, response,
-                            duration_s=duration_s, extra_skills=extra_skills)
+                            duration_s=duration_s, extra_skills=extra_skills, session_mode=session_mode)
 
     def _record(self, tags, runtime, provider, model, ttl, layers, resp, duration_s: float = 0.0,
-                extra_skills: tuple[str, ...] = ()) -> GatewayResult:
+                extra_skills: tuple[str, ...] = (), session_mode: str = "single") -> GatewayResult:
+        from ..context import layer_tokens
+
         usd, basis = estimate_cost(
             model,
             input_tokens=resp.input_tokens,
@@ -149,6 +152,12 @@ class ModelGateway:
             config_version=self.config_version,
             duration_s=round(float(duration_s), 3),
             extra_skills=",".join(extra_skills),
+            session_id=getattr(resp, "session_id", "") or "",
+            session_mode=session_mode,
+            context_window=int(getattr(resp, "context_window", 0) or self.settings.context_window(model)),
+            context_tokens=int(getattr(resp, "context_tokens", 0) or (
+                resp.input_tokens + resp.cache_creation_input_tokens + resp.cache_read_input_tokens)),
+            layer_tokens=layer_tokens(layers),
             **_trace_fields(),
         )
         self.ledger.record(rec)

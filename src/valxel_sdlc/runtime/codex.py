@@ -142,6 +142,23 @@ def usage_from(events: str) -> dict[str, int]:
     return total
 
 
+def session_from(events: str) -> tuple[str, int]:
+    """The session's thread id and the largest input of any one turn, from `codex exec --json`.
+    Codex reports usage per turn, not per model call, so for a long turn this is an upper bound on
+    how full the context got."""
+    thread, peak = "", 0
+    for line in events.splitlines():
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if ev.get("type") == "thread.started":
+            thread = str(ev.get("thread_id") or thread)
+        elif ev.get("type") == "turn.completed":
+            peak = max(peak, int((ev.get("usage") or {}).get("input_tokens") or 0))
+    return thread, peak
+
+
 def failure_from(events: str) -> str:
     for line in reversed(events.splitlines()):
         try:
@@ -248,12 +265,15 @@ class CodexRuntime:
             last = Path(last_path)
             text = last.read_text() if last.exists() else ""
         u = usage_from(events)
+        thread, peak = session_from(events)
         resp = ModelResponse(
             text=text,
             input_tokens=max(0, u["input_tokens"] - u["cached_input_tokens"]),
             cache_creation_input_tokens=0,
             cache_read_input_tokens=u["cached_input_tokens"],
             output_tokens=u["output_tokens"],
+            context_tokens=peak,
+            session_id=thread,
         )
         extra = plugins.extra(plugins.skills_in_paths(events, PLUGIN_NAMES), task.skills)
         rec = self.gateway.record_external(task.tags, runtime=self.name, model=role.model, layers=task.layers,

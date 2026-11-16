@@ -51,6 +51,15 @@ providers:
   openai:     { base_url: "https://api.openai.com/v1", api_key_env: OPENAI_API_KEY }
   selfhosted: { base_url_env: VALXEL_SELFHOSTED_URL, api_key_env: VALXEL_SELFHOSTED_API_KEY }
 
+# Each model's context window in tokens, from the vendor's model docs. The ledger records how full
+# each session's context got against it (valxel_sdlc.context); a model with none here is reported
+# as unknown, and strict mode refuses a role whose model has none. Claude 5.5 models: 1M
+# (platform.claude.com/docs/en/models). Add the others' from their vendors' docs.
+context_windows:
+  anthropic/claude-opus-5-5: 1000000
+  anthropic/claude-sonnet-5-5: 1000000
+  anthropic/claude-haiku-5-5: 1000000
+
 # USD per million tokens (input, output, cached input) for models the tool has no built-in price
 # for. A role whose model has no price can't run in live mode, so budgets hold whichever vendor
 # does the work. Fill in OpenAI's current prices to turn on coder_codex and reviewer_second.
