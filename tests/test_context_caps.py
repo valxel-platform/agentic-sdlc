@@ -166,8 +166,16 @@ def test_caps_come_from_config_and_a_window_too_small_is_refused(settings):
     assert problem.startswith("router: anthropic/claude-haiku-5-5's 100,000-token window can't hold")
 
 
+def drive_gates(eng, fid):
+    """Approve every gate until the feature stops waiting on one."""
+    while True:
+        gates = [x for x in eng.pending(fid) if x["type"] == "gate"]
+        if not gates or any(x["type"] != "gate" for x in eng.pending(fid)):
+            return eng.view(fid)
+        eng.decide(fid, gates[0]["interrupt_id"], {"decision": "approve", "approver": "maria"})
+
+
 def test_a_stub_feature_builds_with_per_task_context(engine, monkeypatch):
-    from tests.test_quality import drive_gates
     from valxel_sdlc.graph import phase
 
     seen, real = [], phase.call_agent
