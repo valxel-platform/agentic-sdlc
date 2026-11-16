@@ -320,3 +320,29 @@ def test_governance_ci_checks_every_contract_and_compatibility_with_main(tmp_pat
         assert words in out, words
     assert ds.main(["check", "missing-dir"]) == 0
     assert ds.main([]) == 2
+
+
+# --- build: each repo's copy ------------------------------------------------------------------------
+
+def test_the_tool_writes_each_repo_its_schemas_and_lock():
+    files = ds.repo_files([notes()], "valxel-emr/emr-notes-worker")
+    assert sorted(files) == ["contracts/emr.notes.json", "contracts/lock.yaml"]
+    assert jsonschema.Draft202012Validator(__import__("json").loads(files["contracts/emr.notes.json"])).is_valid(
+        {"note_id": "n", "patient_id": "p", "kind": "progress", "clinic_id": "c"})
+    assert ds.repo_files([notes()], "valxel-emr/emr-web") == {}
+    lock = files["contracts/lock.yaml"]
+    assert ds.drift([notes()], "valxel-emr/emr-notes-worker", lock) == []
+    assert "has no contracts/lock.yaml" in ds.drift([notes()], "valxel-emr/emr-notes-worker", None)[0]
+    stale = ds.drift([notes(version="1.4.0")], "valxel-emr/emr-notes-worker", lock)
+    assert stale and "contracts/emr.notes.json is missing or stale" in stale[0]
+    extra = lock + "emr.forms: {sha: x, version: 1.0.0, topic: emr.forms.v1}\n"
+    assert "lists emr.forms, which no approved contract gives it" in ds.drift([notes()], "valxel-emr/emr-notes-worker", extra)[0]
+    assert ds.drift([notes()], "valxel-emr/emr-web", None) == []
+
+
+def test_coders_are_told_to_validate_what_they_publish_and_read():
+    owner = ds.instruction([notes()], "valxel-emr/emr-notes-api")
+    assert "publishes emr.notes on emr.notes.v1" in owner and "dataschema" in owner and "publish nothing" in owner
+    reader = ds.instruction([notes()], "valxel-emr/emr-knowledge")
+    assert "may use only note_id, patient_id, kind, body, clinic_id" in reader and "never its value" in reader
+    assert ds.instruction([notes()], "valxel-emr/emr-web") == ""

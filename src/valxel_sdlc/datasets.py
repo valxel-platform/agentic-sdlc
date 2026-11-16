@@ -308,6 +308,52 @@ def for_repo(contracts: list[dict], repo: str) -> list[dict]:
     return [c for c in contracts if extensions(c).get("owner") == repo or repo in consumers(c)]
 
 
+def repo_files(contracts: list[dict], repo: str) -> dict[str, str]:
+    """What the tool writes into a repo that publishes or reads datasets: contracts/<id>.json (the
+    schema it validates against) and contracts/lock.yaml. Empty when the repo uses none."""
+    mine = for_repo(contracts, repo)
+    if not mine:
+        return {}
+    files = {f"contracts/{c['id']}.json": json.dumps(json_schema(c), indent=2, sort_keys=True) + "\n" for c in mine}
+    files["contracts/lock.yaml"] = lock(mine)
+    return files
+
+
+def drift(contracts: list[dict], repo: str, lock_text: str | None) -> list[str]:
+    """How a repo's contracts/lock.yaml differs from the approved contracts it uses (G5)."""
+    want = {str(c["id"]): fingerprint(c) for c in for_repo(contracts, repo)}
+    if not want:
+        return []
+    if not lock_text:
+        return [f"{repo} has no contracts/lock.yaml; the tool writes it with the schemas it validates against"]
+    have = {k: (v or {}).get("sha") for k, v in (yaml.safe_load(lock_text) or {}).items()}
+    out = [f"{repo}: contracts/{cid}.json is missing or stale (approved {want[cid]}, the repo has {have.get(cid) or 'none'})"
+           for cid in sorted(want) if have.get(cid) != want[cid]]
+    return out + [f"{repo}: contracts/lock.yaml lists {cid}, which no approved contract gives it"
+                  for cid in sorted(set(have) - set(want))]
+
+
+def instruction(contracts: list[dict], repo: str) -> str:
+    """The coder's rules for the datasets this repo publishes or reads."""
+    mine = for_repo(contracts, repo)
+    if not mine:
+        return ""
+    out = []
+    for c in mine:
+        cid, schema = str(c["id"]), f"contracts/{c['id']}.json"
+        if extensions(c).get("owner") == repo:
+            out.append(f" This repo publishes {cid} on {topic(c)} ({', '.join(events(c))}): validate each event's"
+                       f" data against {schema} before publishing (the template's event contracts do it; an event that"
+                       f" fails is a bug: refuse the request and publish nothing) and set the CloudEvent's dataschema"
+                       f" to the schema's $id. Publish only the contract's properties.")
+        else:
+            out.append(f" This repo reads {cid} from {topic(c)} and may use only {', '.join(consumers(c).get(repo, []))}:"
+                       f" drop properties your copy of {schema} doesn't have (a newer compatible producer), validate the"
+                       " rest, and send an event that fails to the dead-letter topic naming the field, never its value.")
+    return ("".join(out) + " The tool writes contracts/ from the approved contracts; never edit it, and change a"
+            " contract only through the design.")
+
+
 # --- the HLD ------------------------------------------------------------------------------------
 
 _BLOCK = re.compile(r"```ya?ml\s*\n(.*?)```", re.S)

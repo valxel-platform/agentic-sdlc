@@ -691,6 +691,13 @@ def acceptance_instruction(ctx: dict, task: dict) -> str:
 EVENT_ROLES = ("provider", "event-worker")
 
 
+def contracts_instruction(ctx: dict, task: dict) -> str:
+    """The data contracts this task's repo publishes or reads (datasets.py)."""
+    from ..datasets import instruction, parse_hld
+
+    return instruction(parse_hld(ctx.get("hld_text") or "")[0], task.get("repo", ""))
+
+
 def events_instruction(ctx: dict, task: dict) -> str:
     role = task.get("role")
     if role not in EVENT_ROLES:
@@ -817,8 +824,15 @@ def build_build_subgraph(services):
 
     def _code(task, ctx, mine, fail, payload):
         from .. import sandbox
+        from ..datasets import parse_hld, repo_files
 
         branch = ctx.get("branch") or f"feature/{ctx['feature_id']}"
+        # The schemas this repo publishes or reads, from the approved contracts: the coder validates
+        # against them, and at run time nothing reads GitHub.
+        for path, content in repo_files(parse_hld(ctx.get("hld_text") or "")[0], task["repo"]).items():
+            if services.github.get_file(repo=task["repo"], path=path, ref=branch) != content:
+                services.github.put_file(repo=task["repo"], branch=branch, path=path, content=content,
+                                         message=f"{ctx['feature_id']} {task['id']}: data contracts")
         # Its own folder: in live mode a checkout of this one repo, cloned with a token for it alone.
         with sandbox.session(services, repo=task["repo"], branch=branch) as box:
             return _code_in(task, ctx, mine, fail, payload, box)
@@ -850,6 +864,7 @@ def build_build_subgraph(services):
                   + ux_instruction(ctx, task)
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
+                  + contracts_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
                     " type the change uses. " + diary.CODER + " " + sessions_instruction()
                   + "\n\n" + structured.instruction(structured.CoderReply)),
@@ -866,6 +881,10 @@ def build_build_subgraph(services):
                 services.github.put_file(repo=task["repo"], branch=branch, path=path, content=content,
                                          message=f"{ctx['feature_id']} {task['id']}: tests")
         found = written_cases(services.github, task["repo"], branch, mine)
+        from ..datasets import drift, parse_hld
+
+        stale = drift(parse_hld(ctx.get("hld_text") or "")[0], task["repo"],
+                      services.github.get_file(repo=task["repo"], path="contracts/lock.yaml", ref=branch))
         result = {**task, "branch": ctx.get("branch") or f"feature/{ctx['feature_id']}", "attempt": attempt,
                   # What the coder says it changed decides the performance test; the plan's list otherwise.
                   "files": list(reply.files) if reply and reply.files else list(task.get("files") or []),
@@ -876,6 +895,10 @@ def build_build_subgraph(services):
                   "notes": diary.entries(list(reply.notes)) if reply else [],
                   "tests": reply.tests.model_dump() if reply else {"passed": False, "failed": [],
                                                                     "error": f"no structured result: {error}"}}
+        if stale:  # the coder changed contracts/: it goes back, whatever its tests said
+            result["tests_passed"] = False
+            result["tests"] = {**result["tests"], "passed": False,
+                               "error": "contracts/ differs from the approved data contracts: " + "; ".join(stale)}
         record = session_record(services, ctx, task, res, reply.handoff if reply else None)
         if record:
             result["session"] = record
