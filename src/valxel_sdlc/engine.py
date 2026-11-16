@@ -415,7 +415,7 @@ class FeatureEngine:
                     except Exception:
                         pass
             
-                    for job in (self.collect_costs, self.review_costs, self.expire_transcripts,self.check_connections):
+                    for job in (self.collect_costs, self.review_costs, self.expire_transcripts, self.check_connections):
                         try:
                             job()
                         except Exception:

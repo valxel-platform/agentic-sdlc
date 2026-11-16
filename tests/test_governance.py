@@ -9,7 +9,6 @@ from urllib.error import HTTPError
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from conftest import approve
 from valxel_sdlc.config import load_settings
 from valxel_sdlc.engine import FeatureEngine
 from valxel_sdlc.governance import (
@@ -67,6 +66,9 @@ def test_snapshot_reads_platform_and_product_from_their_orgs(services):
     ("  - acme-clinic/architects", "  - acme-shop/architects", "outside the product's organization acme-clinic"),
     ("  - acme-clinic/architects", "  - not a handle!", "must be a GitHub user"),
     ("product_id: CLN", "product_id: SHOP", "the registry expects 'CLN'"),
+    ("budget_usd: 150", "budget_usd: 150\nbudget_shares: {build: 70}", "budget_shares add up to 115%, not 100%"),
+    ("budget_usd: 150", "budget_usd: 150\nbudget_shares: {testing: 5}", "unknown group testing"),
+    ("budget_usd: 150", "budget_usd: 150\nbudget_shares: {build: -5, fixes: 80}", "budget_shares.build can't be negative"),
 ])
 def test_manifest_cannot_loosen_platform_limits(local_services, gov_root, old, new, message):
     edit(gov_root / "acme-clinic/cln-governance/product.yaml", old, new)
@@ -114,8 +116,7 @@ def test_a_feature_keeps_its_pinned_constitution_after_an_amendment(local_servic
 def test_raised_budget_is_capped_by_the_platform(local_services):
     engine = FeatureEngine(local_services, InMemorySaver())
     v = engine.start(product_id="FARM", title="Weather alerts", budget_usd=0.000001)
-    v = approve(engine, v["feature_id"], "g1")
-    [esc] = v["pending"]
+    [esc] = v["pending"]  # discovery's share of almost nothing
     v = engine.decide(v["feature_id"], esc["interrupt_id"], {"decision": "retry", "approver": "pm", "budget_usd": 10_000})
     assert v["budget_usd"] == 500
 
@@ -203,3 +204,10 @@ def test_github_app_mints_a_read_only_installation_token_per_org():
     app_jwt = fake.calls[0][2].split(" ", 1)[1]
     claims = jwt.decode(app_jwt, key.public_key(), algorithms=["RS256"])
     assert claims["iss"] == "12345"
+
+
+def test_a_product_can_set_its_own_phase_shares(local_services, gov_root):
+    edit(gov_root / "acme-clinic/cln-governance/product.yaml", "budget_usd: 150",
+         "budget_usd: 150\nbudget_shares: {documents: 25, build: 45}")
+    assert local_services.snapshot("CLN").product.budget_shares == {
+        "documents": 25.0, "plan": 5.0, "build": 45.0, "fixes": 20.0, "release": 5.0}

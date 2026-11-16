@@ -81,6 +81,7 @@ class FeatureState(TypedDict, total=False):
 
     # Written by single nodes or by parallel branches through reducers
     token_budget_usd: Annotated[float, last]  # an escalation can raise it
+    budget_base_usd: Annotated[float, last]  # the budget it started with: phase shares are of this (budgets.py)
     status: Annotated[str, last]  # running | done | aborted
     risk_tier: Annotated[str, last]  # low | high | regulated
     tasks: Annotated[list[dict], last]

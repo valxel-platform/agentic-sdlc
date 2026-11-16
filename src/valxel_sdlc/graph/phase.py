@@ -22,7 +22,7 @@ from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers, skills_dir_of, task_texts
 from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
-from .. import diary, performance
+from .. import budgets, diary, performance
 from .. import evals, lessons, telemetry
 from ..config import ProductConfig
 from ..provisioning import naming_policy
@@ -1057,21 +1057,23 @@ def make_phase_node(phase: str, services):
         product = services.feature_snapshot(state).product
         spent = float(state.get("cost_usd", 0.0))
         budget = float(state.get("token_budget_usd") or product.budget_usd)
-        if spent >= budget:
-            reason = f"token budget exhausted: ${spent:.2f} of ${budget:.2f} (VX-10)"
+        # This phase's share of the budget, with what earlier phases left (valxel_sdlc.budgets).
+        left, reason = budgets.over(phase, state, spent=spent, budget=budget,
+                                    base=float(state.get("budget_base_usd") or budget), shares=product.budget_shares)
+        if reason:
             return {"phase_status": {phase: "escalated"},
                     "escalations": {phase: {"phase": phase, "reason": reason, "findings": []}},
                     "events": [event(phase, "escalated", reason)]}
 
         ctx = feature_ctx(services, state, phase)
-        ctx["budget_remaining_usd"] = budget - spent
+        ctx["budget_remaining_usd"] = left
         all_tasks = list(ctx["tasks"])
         if phase == "build" and state.get("rerun_repos"):
             # CI failed in some repos: only their tasks go back to the coder, with the failures.
             ctx["tasks"] = [t for t in all_tasks if t["repo"] in set(state["rerun_repos"])] or all_tasks
         out = sub.invoke({
             "phase": phase, "ctx": ctx, "attempt": 0, "max_loops": product.max_loops,
-            "threshold": product.critic_threshold, "budget_remaining_usd": budget - spent,
+            "threshold": product.critic_threshold, "budget_remaining_usd": left,
         }, config)
 
         status, usage = out["status"], out.get("usage") or {}

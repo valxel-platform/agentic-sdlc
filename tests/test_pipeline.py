@@ -120,14 +120,15 @@ def test_persistent_failure_escalates_after_the_loop_cap(engine, services):
 
 
 def test_budget_exhaustion_escalates_and_can_be_raised(engine):
+    # The supervisor checks each phase's share of the budget before it runs (valxel_sdlc.budgets):
+    # discovery's 15% of almost nothing is spent at once.
     v = engine.start(product_id="FARM", title="Weather alerts", budget_usd=0.000001)
-    v = approve(engine, v["feature_id"], "g1")  # the supervisor checks the budget before each phase
     [esc] = v["pending"]
-    assert esc["type"] == "escalation" and esc["phase"] == "spec" and "budget" in esc["reason"]
+    assert esc["type"] == "escalation" and esc["phase"] == "discovery" and "share of the budget" in esc["reason"]
     v = engine.decide(v["feature_id"], esc["interrupt_id"],
                       {"decision": "retry", "approver": "pm", "budget_usd": 50})
     assert v["budget_usd"] == 50
-    assert [p["gate"] for p in v["pending"]] == ["g2"]
+    assert [p["gate"] for p in v["pending"]] == ["g1"]
 
 
 def test_build_retries_only_failing_tasks(engine, services):

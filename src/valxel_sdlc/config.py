@@ -46,6 +46,8 @@ class ProductConfig:
     approvers: dict[str, list[str]]
     high_risk_paths: tuple[str, ...]
     kind: str = "product"  # product (owns a runtime) | shared (ships packages, no runtime)
+    # Percent of the feature budget each group of phases may spend (valxel_sdlc.budgets); None: defaults.
+    budget_shares: dict | None = None
     runtime: dict | None = None  # {"openchoreo_project", "pipeline"}; None for shared lanes
     depends_on: tuple[str, ...] = ()
     # External tools: {"diagrams": {"provider": "lucid", ...}, "work_tracking": {"provider": "jira", ...}}

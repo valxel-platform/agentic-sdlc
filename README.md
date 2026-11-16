@@ -1754,6 +1754,29 @@ feature's build cost and run-rate, with totals). The feature page shows the plan
 review. Not covered yet: CI minutes, build and test environment costs before release, cluster
 compute and shared platform costs allocated to products.
 
+
+### A feature's budget, phase by phase
+
+A feature may spend `budget_usd` from `product.yaml` (at most the platform's $500). That money is
+split among groups of phases, so a single phase can't spend the whole budget
+(`src/valxel_sdlc/budgets.py`). The supervisor checks a phase's share before the phase runs. When
+the share is spent, the phase escalates (VX-10), and the escalation names the share. Shares add up
+as the feature goes, so whatever a phase doesn't spend passes to the phases after it. When a person
+adds budget at the escalation, the stuck phase gets all of it, and later phases keep their shares.
+
+| Group | Phases | Share |
+| --- | --- | --- |
+| documents | discovery, spec, design, architecture | 15% |
+| plan | plan | 5% |
+| build | the first build, with its reviews and fixes | 55% |
+| fixes | builds that run again after CI failed | 20% |
+| release | release, operate | 5% |
+
+A product can set its own shares in `product.yaml`, for example
+`budget_shares: {documents: 25, build: 45}`. Any group it leaves out keeps the default. Every
+value must be zero or more, and the shares must add up to 100. These are starting figures, to be
+reset from the ledger once 10 pilot features have run.
+
 ## AWS services (VX-19)
 
 Features that need a managed service get it from the platform's AWS catalog

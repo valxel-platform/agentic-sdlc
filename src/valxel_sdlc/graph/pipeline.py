@@ -167,6 +167,7 @@ def make_intake(services):
             "data_class": product.data_class,
             "constitution_version": snap.version,
             "token_budget_usd": budget,
+            "budget_base_usd": float(state.get("budget_base_usd") or budget),
             "events": [event("intake", "started", state["title"], product=product.product_id,
                              governance=f"{snap.pins['product']['org']}/{snap.pins['product']['repo']}"
                                         f"@{snap.pins['product']['sha'][:7]}")],

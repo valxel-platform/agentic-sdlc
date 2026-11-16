@@ -56,6 +56,10 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         problems.append(f"max_loops {max_loops} must be between 1 and {limits.max_loops}")
     if not 0 < budget <= limits.max_budget_usd:
         problems.append(f"budget_usd {budget} must be above 0 and at most {limits.max_budget_usd}")
+    from ..budgets import check_shares
+
+    shares, share_problems = check_shares(raw.get("budget_shares"))
+    problems += share_problems
 
     repos = []
     for r in raw.get("repos") or []:
@@ -222,6 +226,7 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         data_class=entry.data_class,
         workspace=entry.workspace,
         budget_usd=budget,
+        budget_shares=shares if raw.get("budget_shares") else None,
         critic_threshold=threshold,
         max_loops=max_loops,
         repos=tuple(repos),
