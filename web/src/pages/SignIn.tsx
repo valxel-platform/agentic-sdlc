@@ -5,6 +5,7 @@ import { Mark } from "../components/Mark";
 export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   const [cfg, setCfg] = useState<{ mode: string; teams?: string[] } | null>(null);
   const [login, setLogin] = useState("");
+  const [email, setEmail] = useState("");
   const [teams, setTeams] = useState<string[]>([]);
   const [err, setErr] = useState(new URLSearchParams(location.search).get("signin") === "failed"
     ? "GitHub sign-in was cancelled or failed. Try again." : "");
@@ -14,7 +15,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   async function dev(e: FormEvent) {
     e.preventDefault();
     try {
-      await api.devLogin(login.trim(), teams, []);
+      await api.devLogin(login.trim(), teams, [], email.trim());
       onSignedIn();
     } catch (e2) { setErr((e2 as Error).message); }
   }
@@ -30,16 +31,19 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
       <div className="card">
         <div>
           <h1>Sign in</h1>
-          <p className="muted" style={{ marginTop: 8 }}>Your GitHub teams decide which gates you can approve.</p>
+          <p className="muted" style={{ marginTop: 8 }}>Your GitHub teams and your workspace groups decide which gates you can approve.</p>
         </div>
         {err && <p className="error-note" role="alert">{err}</p>}
         {!cfg && !err && <p className="faint">Checking how to sign in…</p>}
-        {cfg?.mode === "github" && <a className="btn" href="/api/auth/login">Sign in with GitHub</a>}
+        {cfg?.mode === "github" && <a className="btn" href={`/api/auth/login?next=${encodeURIComponent(location.pathname + location.search)}`}>Sign in with GitHub</a>}
         {cfg?.mode === "dev" && (
           <form onSubmit={dev} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p className="note">Development sign-in: choose any identity. Not for production.</p>
             <label className="field">GitHub login
               <input value={login} onChange={(e) => setLogin(e.target.value)} required autoFocus placeholder="your-login" />
+            </label>
+            <label className="field">Email <span className="small muted">optional: to accept an invitation sent to it</span>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
             </label>
             <fieldset className="field">
               <legend className="field">Teams to act as</legend>

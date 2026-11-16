@@ -117,8 +117,18 @@ who aren't in a product's GitHub teams join through it (`src/valxel_sdlc/workspa
 | viewer | see the workspace's products, nothing more |
 
 - **Invitations.** An admin adds a profile (name, email or GitHub login, role, and optionally the
-  products it covers) and gets a one-time link to share. Only the invited person can accept it:
-  they sign in as that login or email. Until invitation emails ship, the admin sends the link.
+  products it covers) on the workspace's People page. The person gets an email with a one-time
+  link when email is set up (`VALXEL_SMTP_HOST` and friends; Amazon SES works through its SMTP
+  endpoint, `email-smtp.<region>.amazonaws.com`). Otherwise the page shows the link for the admin
+  to share. Only the invited person can accept it: they sign in as that GitHub login, or with that
+  email, which GitHub sign-in reads only when GitHub has verified it. Sign-in returns them to the
+  link.
+- **Pages.** Workspace (beside your name) has four tabs:
+  - **People:** roles, products, suspend, remove, a new link.
+  - **Approver groups:** who is in each group.
+  - **Gate approvers:** a grid of gates by groups per product, saved as a new version.
+  - **Audit log:** shown to admins.
+  Every action is checked again by the server.
 - **Approver groups.** Each workspace starts with Product, Design, Architecture, Security, Release
   and On-call; the owner is in all of them. An admin maps groups to each product's gates
   (`PUT /api/workspaces/{ws}/products/{id}/gates`). Mapped groups *add to* `product.yaml`'s

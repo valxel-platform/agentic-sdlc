@@ -41,6 +41,7 @@ from ..web.auth import (
     ESCALATION_GATE,
     SESSION_COOKIE,
     SESSION_TTL,
+    NEXT_COOKIE,
     STATE_COOKIE,
     AuthConfig,
     GitHubOAuth,
@@ -476,13 +477,20 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         resp.set_cookie(SESSION_COOKIE, signer.dumps(session_payload(user)), max_age=SESSION_TTL,
                         httponly=True, samesite="lax", secure=auth.secure_cookies, path="/")
 
+    def local_path(path: str) -> str:
+        """A page of this app to return to after sign-in, or "/": never another site."""
+        ok = path.startswith("/") and not path.startswith(("//", "/\\", "/api/")) and "\n" not in path and "\r" not in path
+        return path[:300] if ok else "/"
+
     @api.get("/auth/login")
-    def login() -> RedirectResponse:
+    def login(next: str = "/") -> RedirectResponse:  # noqa: A002 - the query parameter's name
         if auth.mode != "github":
             raise HTTPException(404, "GitHub sign-in is not enabled")
         st = new_state()
         resp = RedirectResponse(oauth.authorize_url(st), status_code=302)
         resp.set_cookie(STATE_COOKIE, st, max_age=600, httponly=True, samesite="lax",
+                        secure=auth.secure_cookies, path="/api/auth")
+        resp.set_cookie(NEXT_COOKIE, local_path(next), max_age=600, httponly=True, samesite="lax",
                         secure=auth.secure_cookies, path="/api/auth")
         return resp
 
@@ -497,8 +505,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             user = oauth.identity(oauth.exchange(code))
         except PermissionError as exc:
             raise HTTPException(401, str(exc)) from exc
-        resp = RedirectResponse("/", status_code=302)
+        resp = RedirectResponse(local_path(request.cookies.get(NEXT_COOKIE) or "/"), status_code=302)
         resp.delete_cookie(STATE_COOKIE, path="/api/auth")
+        resp.delete_cookie(NEXT_COOKIE, path="/api/auth")
         _set_session(resp, user)
         return resp
 
@@ -990,6 +999,12 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
 
+    def send_invite(member: dict, workspace: str, user: User, url: str) -> bool:
+        n = getattr(eng().services, "notifier", None)
+        name = (wsx().get(workspace) or {}).get("name") or workspace
+        return bool(n and member.get("email") and n.invite(member["email"], workspace=name, by=user.name or user.login,
+                                                           role=member.get("role", "member"), url=url))
+
     @api.get("/workspaces")
     def my_workspaces(user: User = Depends(current_user)) -> list[dict]:
         return [{**(wsx().get(w) or {"id": w, "name": w}), "role": r} for w, r in sorted(user.roles.items())]
@@ -1018,13 +1033,15 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         admin_of(user, workspace)
         m, token = ws_call(wsx().invite, workspace, body.model_dump(), role=body.role, actor=user.login,
                            products=body.products)
-        return {**m, "invite_url": f"{auth.public_url}/join/{workspace}/{token}"}
+        url = f"{auth.public_url}/join/{workspace}/{token}"
+        return {**m, "invite_url": url, "emailed": send_invite(m, workspace, user, url)}
 
     @api.post("/workspaces/{workspace}/members/{member_id}/resend")
     def resend_invite(workspace: str, member_id: str, user: User = Depends(current_user)) -> dict:
         admin_of(user, workspace)
         token = ws_call(wsx().resend, workspace, member_id, actor=user.login)
-        return {"invite_url": f"{auth.public_url}/join/{workspace}/{token}"}
+        url = f"{auth.public_url}/join/{workspace}/{token}"
+        return {"invite_url": url, "emailed": send_invite(wsx().member(workspace, member_id) or {}, workspace, user, url)}
 
     @api.post("/workspaces/{workspace}/join/{token}")
     def join_workspace(workspace: str, token: str, user: User = Depends(current_user)) -> dict:

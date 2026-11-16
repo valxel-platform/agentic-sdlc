@@ -19,8 +19,9 @@ import { InventoryPage } from "./pages/Inventory";
 import { PilotPage } from "./pages/Pilot";
 import { LessonsPage } from "./pages/Lessons";
 import { InceptionPage, ProductsPage } from "./pages/Products";
+import { JoinPage, WorkspacePage, WorkspacesPage } from "./pages/Workspace";
 
-function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
+function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; onChanged: () => void }) {
   const live = useLiveStatus();
   const [mine, setMine] = useState(0);
   const refresh = useCallback(() => { api.inbox(true).then((i) => setMine(i.length)).catch(() => {}); }, []);
@@ -52,6 +53,7 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
             {me.avatar_url ? <img src={me.avatar_url} alt="" /> : <span className="initial" aria-hidden="true">{me.login[0]?.toUpperCase()}</span>}
             <span>{me.name || me.login}</span>
           </div>
+          <NavLink className="linkish" to="/workspaces">{Object.keys(me.roles ?? {}).length === 1 ? "Workspace" : "Workspaces"}</NavLink>
           <button className="linkish" onClick={onSignOut}>Sign out</button>
         </div>
       </header>
@@ -76,6 +78,9 @@ function Shell({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
           <Route path="/incidents/:id" element={<IncidentPage />} />
           <Route path="/intake" element={<Intake me={me} />} />
           <Route path="/intake/:sid" element={<Intake me={me} />} />
+          <Route path="/workspaces" element={<WorkspacesPage />} />
+          <Route path="/workspaces/:id" element={<WorkspacePage me={me} onChanged={onChanged} />} />
+          <Route path="/join/:ws/:token" element={<JoinPage onJoined={onChanged} />} />
           <Route path="*" element={<Navigate to="/inbox" replace />} />
         </Routes>
       </main>
@@ -91,7 +96,7 @@ function App() {
   useEffect(load, [load]);
   if (me === undefined) return null;
   if (me === null) return <SignIn onSignedIn={load} />;
-  return <Shell me={me} onSignOut={() => { api.logout().finally(() => { closeLive(); setMe(null); }); }} />;
+  return <Shell me={me} onChanged={load} onSignOut={() => { api.logout().finally(() => { closeLive(); setMe(null); }); }} />;
 }
 
 createRoot(document.getElementById("root")!).render(

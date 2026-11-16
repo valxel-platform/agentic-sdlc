@@ -1,6 +1,6 @@
 """Sign-in and authorization.
 
-GitHub sign-in (OAuth web flow, scope read:org) records who a person is and which orgs and teams
+GitHub sign-in (OAuth web flow, scopes read:org and user:email) records who a person is and which orgs and teams
 they belong to. The session is an HMAC-signed cookie holding only that identity; the GitHub token
 is used once at sign-in and never stored.
 
@@ -25,6 +25,7 @@ from urllib.request import Request, build_opener
 
 SESSION_COOKIE = "valxel_session"
 STATE_COOKIE = "valxel_oauth_state"
+NEXT_COOKIE = "valxel_next"  # the page to return to after sign-in
 SESSION_TTL = 12 * 3600
 
 # Who may act on an escalation: the approvers of the gate that phase leads to.
@@ -175,7 +176,7 @@ class GitHubOAuth:
 
     def authorize_url(self, state: str) -> str:
         q = urlencode({"client_id": self.cfg.client_id, "redirect_uri": self.cfg.redirect_uri,
-                       "scope": "read:org", "state": state, "allow_signup": "false"})
+                       "scope": "read:org user:email", "state": state, "allow_signup": "false"})
         return f"{self.web}/login/oauth/authorize?{q}"
 
     def _json(self, req: Request) -> dict | list:
@@ -200,8 +201,12 @@ class GitHubOAuth:
         me = get("/user")
         orgs = [o["login"] for o in get("/user/orgs?per_page=100")]
         teams = [f"{t['organization']['login']}/{t['slug']}" for t in get("/user/teams?per_page=100")]
+        try:  # the primary address, and only if GitHub verified it: an invitation can be accepted by email
+            email = next((e["email"] for e in get("/user/emails") if e.get("primary") and e.get("verified")), "")
+        except Exception:  # an app installed before user:email was asked for
+            email = ""
         return User(login=me["login"], name=me.get("name") or "", avatar_url=me.get("avatar_url") or "",
-                    orgs=orgs, teams=teams)
+                    orgs=orgs, teams=teams, email=(email or "").lower())
 
 
 def new_state() -> str:

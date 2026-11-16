@@ -219,3 +219,36 @@ def test_workspaces_persist_in_postgres(settings):
         assert len(again.groups(name)) == 6 and len(again.members(name)) == 2
         assert [m["role"] for m in again.memberships(f"b-{name}")] == ["approver"]
         assert again.store.audit_log(name)[0]["action"] == "member.accept"
+
+
+
+def test_invitations_are_emailed_when_email_is_set_up(engine):
+    from valxel_sdlc.notify import Notifier
+
+    sent = []
+    engine.services.notifier = Notifier(engine.services.settings.artifact_dir,
+                                        send_email=lambda to, subject, text: sent.append((to, subject, text)))
+    engine.services.workspaces.bootstrap_owner(WS, {"name": "Asha", "github_login": "asha"})
+    with TestClient(create_app(engine, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None)) as client:
+        login(client, "asha")
+        r = client.post(f"/api/workspaces/{WS}/members", json={"name": "Ben", "email": "ben@farm.example",
+                                                                "role": "approver"}).json()
+        assert r["emailed"] is True
+        [(to, subject, text)] = sent
+        assert to == "ben@farm.example" and subject == f"Join {WS} in Valxel"
+        assert "asha invited you" in text and "as approver" in text and r["invite_url"] in text
+        again = client.post(f"/api/workspaces/{WS}/members/{r['id']}/resend", json={}).json()
+        assert again["emailed"] is True and again["invite_url"] != r["invite_url"] and len(sent) == 2
+        # A profile with only a GitHub login gets no email: the admin shares the link.
+        r = client.post(f"/api/workspaces/{WS}/members", json={"github_login": "vic", "role": "viewer"}).json()
+        assert r["emailed"] is False and len(sent) == 2
+        assert engine.services.notifier.outbox[-1]["kind"] == "invite"
+        assert r["invite_url"] not in str(engine.services.notifier.outbox)  # the link is never kept
+
+
+def test_without_email_set_up_the_admin_shares_the_link(client, engine, monkeypatch):
+    monkeypatch.delenv("VALXEL_SMTP_HOST", raising=False)
+    engine.services.workspaces.bootstrap_owner(WS, {"github_login": "asha"})
+    login(client, "asha")
+    r = client.post(f"/api/workspaces/{WS}/members", json={"email": "ben@farm.example", "role": "member"}).json()
+    assert r["emailed"] is False and "/join/" in r["invite_url"]
