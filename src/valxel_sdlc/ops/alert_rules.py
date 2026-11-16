@@ -40,15 +40,18 @@ def load(text: str) -> dict:
     return doc
 
 
-def traits_for(doc: dict, component: str, component_type: str = "") -> list[dict]:
+def traits_for(doc: dict, component: str, component_type: str = "", role: str = "") -> list[dict]:
     """The rules as traits for one component. Instance names start with the component's name, so
-    the rules (and the alerts they raise) are told apart across components."""
+    the rules (and the alerts they raise) are told apart across components. A rule with `roles`
+    applies only to components whose repo has one of those roles (config/repos.yaml)."""
     if not doc or not doc.get("rules"):
         return []
     if component_type and not any(fnmatch.fnmatch(component_type, p) for p in doc.get("applies_to") or ["*"]):
         return []
     out = []
     for name, r in doc["rules"].items():
+        if r.get("roles") and role not in r["roles"]:
+            continue
         src = {k: v for k, v in (r.get("source") or {}).items() if k in ("type", "query", "metric")}
         out.append({"name": doc.get("trait", "observability-alert-rule"), "kind": "ClusterTrait",
                     "instanceName": f"{component}-{name}"[:63].rstrip("-"),

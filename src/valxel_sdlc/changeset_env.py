@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 PREFIX = "cs-"
 DEFAULTS = {"enabled": True, "required": False, "max_open": 5, "ttl_hours": 48}
 # Repos that run in the product's runtime; libraries, acceptance tests and store apps don't.
-RUNTIME_ROLES = ("provider", "bff", "consumer", "event-worker", "mcp-server", "agent")
+RUNTIME_ROLES = ("provider", "bff", "consumer", "event-worker", "knowledge", "mcp-server", "agent")
 
 
 def config(runtime: dict | None) -> dict:

@@ -108,10 +108,12 @@ function ReleaseTrace({ t }: { t: ReleaseTraceability }) {
 /** G6: the product's own agents, by their evals, against the last release that changed them. */
 function AgentEvalsPanel({ rows }: { rows: AgentEvals[] }) {
   const stage: Record<string, string> = { pr: "Recorded responses (PR)", dev: "Real model (dev)" };
+  // A knowledge repo's evals are its golden set: recall on the PR, the real embedding model in dev.
+  const knowledgeStage: Record<string, string> = { pr: "Golden set (PR)", dev: "Real models (dev)" };
   const pct = (v: number | null | undefined) => (v == null ? "–" : `${Math.round(v * 100)}%`);
   return (
     <div role="status">
-      <h3>The agents this change ships</h3>
+      <h3>The agents and knowledge this change ships</h3>
       <table className="quality">
         <caption className="visually-hidden">Agent evals by stage, against the previous release</caption>
         <thead><tr><th scope="col">Agent</th><th scope="col">Evals</th><th scope="col">Passed</th>
@@ -119,7 +121,8 @@ function AgentEvalsPanel({ rows }: { rows: AgentEvals[] }) {
         <tbody>
           {rows.flatMap((r) => Object.entries(r.stages).map(([st, e]) => (
             <tr key={`${r.repo}-${st}`}>
-              <th scope="row">{r.repo.split("/").pop()}</th><td>{stage[st] ?? st}</td>
+              <th scope="row">{r.repo.split("/").pop()}</th>
+              <td>{(r.role === "knowledge" ? knowledgeStage : stage)[st] ?? st}</td>
               <td>{e.passed} of {e.passed + e.failed} ({pct(e.rate)})</td>
               <td>{r.previous[st] ? `${pct(r.previous[st].rate)} (${r.previous_feature})` : "first release"}</td>
               <td>{r.change[st] == null ? "–" : `${r.change[st] >= 0 ? "+" : ""}${Math.round(r.change[st] * 100)} points`}</td>

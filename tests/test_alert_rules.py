@@ -34,6 +34,10 @@ def test_the_platform_rules_become_traits_per_component():
     assert traits_for(doc, "x", "proxy/api") == []
     assert traits_for({}, "x") == [] and load("") == {}
     assert missing([{"instanceName": "farm-field-api-memory", "parameters": {"tuned": True}}], traits) == traits[:2]
+    # A knowledge component also gets the rule for a source falling behind; nothing else does.
+    knowledge = traits_for(doc, "emr-knowledge", role="knowledge")
+    assert [t["instanceName"] for t in knowledge][-2:] == ["emr-knowledge-knowledge-lag", "emr-knowledge-memory"]
+    assert knowledge[-2]["parameters"]["source"] == {"type": "log", "query": "knowledge.source_behind"}
 
 
 @pytest.mark.parametrize("bad", [

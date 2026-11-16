@@ -34,6 +34,16 @@ rules:
     condition: { window: 5m, interval: 1m, operator: gt, threshold: 100 }
     says: "Exceptions on most requests: the component is failing. Check the latest release first."
 
+  # Knowledge components (template-knowledge) log knowledge.source_behind while a source's index is
+  # more than an hour behind the product; other components never log it.
+  knowledge-lag:
+    description: "A knowledge source's index is more than an hour behind the product."
+    roles: [knowledge]           # only components whose repo has the knowledge role
+    severity: warning
+    source: { type: log, query: "knowledge.source_behind" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
+    says: "Agents may answer from stale records. Check the knowledge component's ingestion logs and its events topic or scan source."
+
   memory:
     description: "Memory above 90% of its limit for 5 minutes."
     severity: warning

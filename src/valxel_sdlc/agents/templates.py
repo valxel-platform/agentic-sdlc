@@ -220,6 +220,13 @@ def architecture(ctx: dict, defective: bool) -> str:
                   f"- {record}.read: {record} (who opened which {record}, through which service)",
                   f"- {record}.change: {record} (who changed it, on whose behalf, approved by whom)"]
     lines += ["", "## Endpoints", *_endpoint_lines(repos)]
+    knowledge = [r for r in repos if r["role"] == "knowledge"]
+    if knowledge:
+        via = "gateway (BAA)" if ctx.get("data_class") == "phi" else "gateway"
+        record = _slug(ctx["title"]).split("-", 1)[0] or "record"
+        lines += ["", "## Knowledge"] + [
+            f"- {r['name']}: model text-embedding-3-small via {via}; sources: {record}s (events valxel.{record}.changed.v1)"
+            for r in knowledge]
     lines += _data_lines(ctx, repos) + _threat_lines(ctx, repos)
     lines += _resource_lines(ctx, repos, provider, lines)
     if any(r["role"] == "event-worker" for r in repos):
@@ -367,6 +374,11 @@ def _flowchart(ctx: dict, repos: list[dict]) -> str:
             out += [f'  {_node_id(r["name"])} -->|"versioned API"| {_node_id(p["name"])}' for p in providers]
         elif r["role"] == "event-worker":
             out += [f'  {_node_id(p["name"])} -->|"events (Kafka)"| {_node_id(r["name"])}' for p in providers]
+        elif r["role"] == "knowledge":
+            out += [f'  {_node_id(p["name"])} -->|"events (Kafka)"| {_node_id(r["name"])}' for p in providers]
+            out += [f'  {_node_id(a["name"])} -->|"search tools"| {_node_id(r["name"])}'
+                    for a in repos if a["role"] == "agent"]
+            out.append(f'  {_node_id(r["name"])} -->|"embeddings"| llm_gateway["LLM gateway"]')
         elif r["role"] == "mobile":
             out += [f'  {_node_id(r["name"])} -->|"/mobile/api (bearer)"| {_node_id(b["name"])}'
                     for b in repos if b["role"] == "bff"]
@@ -392,6 +404,7 @@ def plan(ctx: dict, defective: bool) -> str:
             "consumer": [f"src/ui/{slug}.tsx", f"tests/{slug}.test.tsx"],
             "library": [f"contracts/{slug}.yaml"],
             "mcp-server": [f"src/mcp_server/tools/{slug}.py", f"tests/test_{slug}_tools.py"],
+            "knowledge": ["knowledge.yaml", "evals/questions.yaml"],
             "agent": [f"src/agent/prompts/{slug}.md", f"evals/cases/{slug}.jsonl"],
             "event-worker": [f"src/main/java/com/valxel/worker/{slug.replace('-', '')}/Handler.java",
                              f"src/main/resources/db/migration/V2__{slug.replace('-', '_')}.sql"],
@@ -469,7 +482,7 @@ def _endpoint_lines(repos: list[dict]) -> list[str]:
         by_role.setdefault(r["role"], []).append(short[r["name"]])
     calls = {
         "bff": by_role.get("provider", []) + by_role.get("consumer", []) + by_role.get("agent", []),
-        "agent": by_role.get("mcp-server", []),
+        "agent": by_role.get("mcp-server", []) + by_role.get("knowledge", []),
         "mcp-server": by_role.get("provider", []),
         "consumer": [],
         "mobile": by_role.get("bff", []),

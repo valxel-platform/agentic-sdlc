@@ -236,7 +236,7 @@ export interface FeatureEvent { at: string; node: string; kind: string; detail?:
 
 export interface EvalCounts { suite: string; passed: number; failed: number; rate: number | null; state: string }
 export interface AgentEvals {
-  repo: string; stages: Record<string, EvalCounts>; previous: Record<string, EvalCounts>;
+  repo: string; role?: "agent" | "knowledge"; stages: Record<string, EvalCounts>; previous: Record<string, EvalCounts>;
   previous_feature: string; change: Record<string, number>;
 }
 

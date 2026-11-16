@@ -70,7 +70,7 @@ Extends: CAP-<id> (<name>)        or        New capability: <why nothing existin
 ## ADRs
 - ADR-<feature id>-<n>: <decision>
 ## Affected repos
-- <org>/<repo> (<role>)        role: provider, consumer, library, event-worker, agent, mcp-server, bff, mobile, acceptance
+- <org>/<repo> (<role>)        role: provider, consumer, library, event-worker, knowledge, agent, mcp-server, bff, mobile, acceptance
 ## New repos                   (only when a repo must be created)
 - <org>/<repo> (<role>): <purpose> [ADR-<feature id>-<n>]   (that ADR must name the repo)
 ## Dependency lanes            (only when a lane's repo changes)
@@ -95,6 +95,8 @@ sequenceDiagram
 - <record>.<action>: <record> (<who did what>)
 ## Endpoints
 - <org>/<repo>: <none|project|namespace|internal|external>; calls <repo>, <repo>
+## Knowledge                   (only with a knowledge repo: what agents search, and the embedding model people decide at G4)
+- <org>/<repo>: model <embedding model> via <gateway (BAA)|gateway|self-hosted>; sources: <name> (<events <topic>|scan <store>|files>), ...
 ## Events                      (when records change through Kafka)
 - valxel.<record>.<event>.v<n>: published by <repo>, applied by <repo>
 ## Instrumentation             (one line for every event in the PRD's Instrumentation section)

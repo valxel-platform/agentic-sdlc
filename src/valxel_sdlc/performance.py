@@ -49,7 +49,7 @@ DEFAULT_BUDGETS: dict[str, dict[str, float]] = {
 # (consumer lag, run timings, app start in Sentry, the rollout's comparison) watch them instead.
 STAGING_ROLES = ("provider", "consumer")
 
-KIND_OF_ROLE = {"provider": "api", "bff": "api", "mcp-server": "api", "consumer": "web", "mobile": "mobile",
+KIND_OF_ROLE = {"provider": "api", "bff": "api", "mcp-server": "api", "knowledge": "api", "consumer": "web", "mobile": "mobile",
                 "event-worker": "event-worker", "agent": "agent"}
 
 DEFAULTS = {

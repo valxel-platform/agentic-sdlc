@@ -22,7 +22,7 @@ from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers, skills_dir_of, task_texts
 from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
-from .. import budgets, diary, performance
+from .. import budgets, retrieval, diary, performance
 from .. import evals, lessons, telemetry
 from ..config import ProductConfig
 from ..provisioning import naming_policy
@@ -571,7 +571,7 @@ def build_phase_subgraph(phase: str, services):
 
 
 # Repos whose code runs where users reach it: their changes go behind the feature's flag.
-FLAGGED_ROLES = ("provider", "consumer", "agent", "mcp-server", "mobile")
+FLAGGED_ROLES = ("provider", "consumer", "agent", "mcp-server", "knowledge", "mobile")
 
 
 def flag_instruction(ctx: dict, task: dict) -> str:
@@ -583,7 +583,7 @@ def flag_instruction(ctx: dict, task: dict) -> str:
 
 
 # Repos that serve or change records: they publish the audit records the HLD names (VX-15).
-AUDITED_ROLES = ("provider", "agent", "mcp-server")
+AUDITED_ROLES = ("provider", "agent", "mcp-server", "knowledge")
 
 
 def audit_instruction(ctx: dict, task: dict) -> str:
@@ -614,6 +614,9 @@ SECURITY = {
     "event-worker": " No endpoint but health and metrics; Kafka as this worker's own identity (VX-17).",
     "mcp-server": (" Each tool requires its scope and checks the caller's access to the records it touches;"
                    " audit on behalf of the person in the token (VX-17)."),
+    "knowledge": (" Every passage carries its record's tenant and allow list from knowledge.yaml, and every search"
+                  " filters by the caller inside the query; row-level security (schema.sql) enforces the same."
+                  " Never index a field the data class forbids, and keep excluded fields out (VX-17)."),
     "agent": (" Call MCP servers only through token exchange for the person behind the step (audience and"
               " scope per server); never a fixed token (VX-13, VX-17)."),
     "consumer": (" The app never holds a token: it calls the API on its own origin through the product's BFF"
@@ -695,6 +698,7 @@ EVENT_APIS = {
     "event-worker": 'ProductEvents.record("<name>") in the handler',
     "agent": 'events.record("<name>", <category>="<value>") from agent.events',
     "mcp-server": 'events.record("<name>") from mcp_server.events',
+    "knowledge": 'events.record("<name>") from knowledge.events',
     "consumer": 'track("<name>") from src/events.ts; names only, no attributes',
     "mobile": 'track("<name>") from src/events.ts; names only, no attributes',
 }
@@ -829,7 +833,7 @@ def build_build_subgraph(services):
                   + instrumentation_instruction(ctx, task)
                   + ux_instruction(ctx, task)
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
-                  + resources_instruction(ctx, task)
+                  + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
                     " type the change uses. " + diary.CODER + " " + sessions_instruction()
                   + "\n\n" + structured.instruction(structured.CoderReply)),

@@ -40,7 +40,7 @@ from .agents.parse import section
 
 ACCESS_VERBS = {"reads": "read", "writes": "write", "deletes": "delete", "publishes": "write"}
 # Roles that run in the platform and may hold an AWS identity.
-AWS_ROLES = ("provider", "event-worker", "agent", "mcp-server", "bff")
+AWS_ROLES = ("provider", "event-worker", "agent", "mcp-server", "knowledge", "bff")
 IDENTITY_TYPE = "workload-identity"
 # Parameters whose change replaces the resource (and its data).
 REPLACING = {"dynamodb-table": ("partition_key", "sort_key"), "sqs-queue": ("fifo",), "sns-topic": ("fifo",),

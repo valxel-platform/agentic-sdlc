@@ -681,13 +681,15 @@ def make_gate(gate: str, services):
     return gate_node, (*dest, phase, END)
 
 
-# The suites that run an agent's evals: replayed on every PR, against the real model after dev.
+# The suites that run an agent's evals (replayed on every PR, against the real model after dev),
+# and a knowledge repo's retrieval evals (the golden set on every PR, the real models after dev).
 AGENT_EVAL_SUITES = {"pr": "evals", "dev": "integration"}
+EVAL_SUITES = {"agent": AGENT_EVAL_SUITES, "knowledge": {"pr": "retrieval", "dev": "integration"}}
 
 
-def _eval_rows(state: dict, repo: str) -> dict[str, dict]:
+def _eval_rows(state: dict, repo: str, role: str = "agent") -> dict[str, dict]:
     out = {}
-    for stage, suite in AGENT_EVAL_SUITES.items():
+    for stage, suite in EVAL_SUITES.get(role, AGENT_EVAL_SUITES).items():
         for r in ((state.get("quality") or {}).get(stage) or {}).get("suites") or []:
             if r.get("suite") == suite and r.get("repo") == repo and r.get("passed") is not None:
                 ran = int(r.get("passed") or 0) + int(r.get("failed") or 0)
@@ -697,11 +699,12 @@ def _eval_rows(state: dict, repo: str) -> dict[str, dict]:
 
 
 def agent_evals(services, state: FeatureState) -> list[dict]:
-    """For each agent repo the change set changes: its evals by stage (replayed on the PR, live in
-    dev) and the same numbers from the last release that changed it, so G6 sees the trend."""
+    """For each agent or knowledge repo the change set changes: its evals by stage (on the PR, live
+    in dev) and the same numbers from the last release that changed it, so G6 sees the trend."""
     roles = {t["repo"]: t.get("role") for t in state.get("tasks") or []}
     out = []
-    for repo in sorted(r for r, role in roles.items() if role == "agent"):
+    for repo in sorted(r for r, role in roles.items() if role in EVAL_SUITES):
+        role = roles[repo] or "agent"
         previous, prev_id = {}, ""
         suspects = getattr(services, "suspects", None)
         if callable(suspects):
@@ -709,14 +712,15 @@ def agent_evals(services, state: FeatureState) -> list[dict]:
                 for f in suspects(state["product_id"], repo):
                     if f.get("feature_id") and f["feature_id"] != state["feature_id"] and not f.get("via"):
                         prev_state = services.feature_state(f["feature_id"]) if callable(getattr(services, "feature_state", None)) else {}
-                        previous, prev_id = _eval_rows(prev_state or {}, repo), f["feature_id"]
+                        previous, prev_id = _eval_rows(prev_state or {}, repo, role), f["feature_id"]
                         break
             except Exception:
                 previous = {}
-        now_rows = _eval_rows(state, repo)
+        now_rows = _eval_rows(state, repo, role)
         trend = {st: round(now_rows[st]["rate"] - previous[st]["rate"], 4)
                  for st in now_rows if st in previous and now_rows[st]["rate"] is not None and previous[st]["rate"] is not None}
-        out.append({"repo": repo, "stages": now_rows, "previous": previous, "previous_feature": prev_id, "change": trend})
+        out.append({"repo": repo, "role": role, "stages": now_rows, "previous": previous, "previous_feature": prev_id,
+                    "change": trend})
     return out
 
 
@@ -1117,12 +1121,12 @@ def _apply_capacity(services, snap, target: dict, env: str) -> dict | None:
         return None
 
 
-def _ensure_alert_rules(services, snap, target: dict) -> list[str]:
+def _ensure_alert_rules(services, snap, target: dict, role: str = "") -> list[str]:
     """Give a component the rules it lacks. A failure here never stops a deployment; the next
     deployment tries again."""
     from ..ops.alert_rules import traits_for
 
-    traits = traits_for(getattr(snap, "alert_rules", None) or {}, target["component"].rsplit("/", 1)[-1])
+    traits = traits_for(getattr(snap, "alert_rules", None) or {}, target["component"].rsplit("/", 1)[-1], role=role)
     ensure = getattr(services.openchoreo, "ensure_traits", None)
     if not traits or not callable(ensure):
         return []
@@ -1684,7 +1688,9 @@ def make_deploy(stage: str, services, nxt: str):
             if env is None:
                 continue
             # The platform's default alert rules, before the component runs anywhere (alert-rules.yaml).
-            added = _ensure_alert_rules(services, snap, t)
+            lane_repos = getattr(lanes.get(repo), "repos", None) or []
+            role = next((getattr(r, "role", "") for r in lane_repos if getattr(r, "name", "") == repo), "")
+            added = _ensure_alert_rules(services, snap, t, role)
             if added:
                 notes.append(f"{t['component']}: alert rules {', '.join(added)}")
             try:

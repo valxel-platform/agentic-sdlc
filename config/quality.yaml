@@ -42,6 +42,14 @@ suites:
     source: github-checks
     match: { checks: ["evals*"] }
     required: false             # required on agent repos by their branch ruleset (config/repos.yaml)
+  # A knowledge repo's golden set (valxel_sdlc.retrieval): recall of the expected passages, and
+  # never a passage for someone who must not see it or from a deleted record.
+  retrieval:
+    kind: test
+    stage: pr
+    source: github-checks
+    match: { checks: ["retrieval*"] }
+    required: false             # required on knowledge repos by their branch ruleset (config/repos.yaml)
   integration:
     kind: test
     stage: dev

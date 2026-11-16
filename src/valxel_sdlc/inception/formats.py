@@ -54,7 +54,7 @@ CONTRACTS = {
 <who and what the product talks to>
 ## Components
 - <component> (<role>): <its one responsibility> [repo: <org>/<repo prefix><name>]
-        roles: provider, consumer, bff, mobile, event-worker, agent, mcp-server, library
+        roles: provider, consumer, bff, mobile, event-worker, knowledge, agent, mcp-server, library
 ## Resources                  (managed services from the platform catalog; omit when the defaults do)
 - <name>: <catalog type>; <key>=<value>, ...[; size <env>=<size>]
     writes: <component>; reads: <component>

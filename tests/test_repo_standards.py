@@ -576,3 +576,36 @@ def test_report_py_without_a_token_only_prints(tmp_path, monkeypatch, capsys):
     assert "0 passed, 0 failed, 0 skipped." in capsys.readouterr().out
     for read in (report.jacoco, report.cobertura, report.istanbul):
         assert read(str(tmp_path / "missing.xml")) is None and read("") is None
+
+
+def test_must_pass_cases_fail_the_status_whatever_the_pass_rate(tmp_path):
+    """A knowledge repo's retrieval evals allow some questions to miss, never a leak."""
+    import subprocess
+    import sys
+    from importlib.resources import files
+
+    cases = [("recall: a", True)] * 18 + [("recall: b", False), ("leak: warfarin", True)]
+    junit = tmp_path / "retrieval.xml"
+
+    def write(leak_ok: bool) -> None:
+        body = "".join(
+            f'<testcase name="{n}">' + ("" if ok else '<failure message="x"/>') + "</testcase>"
+            for n, ok in cases[:-1] + [("leak: warfarin", leak_ok)])
+        junit.write_text(f'<testsuite tests="20" failures="{1 + (not leak_ok)}">{body}</testsuite>')
+
+    script = str(files("valxel_sdlc") / "standard_files" / "report.py")
+
+    def state(*extra: str) -> tuple[int, str]:
+        env = {"PATH": "/usr/bin:/bin", "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md")}
+        r = subprocess.run([sys.executable, script, "--context", "retrieval / report", "--junit", str(junit),
+                            "--min-pass-rate", "0.85", *extra], capture_output=True, text=True, env=env)
+        return r.returncode, r.stdout
+
+    write(leak_ok=True)
+    assert state("--must-pass", "leak:*")[0] == 0  # 19 of 20 pass: above the bar, and no leak
+    write(leak_ok=False)
+    assert state()[0] == 0  # 18 of 20 still clears 85%...
+    code, out = state("--must-pass", "leak:*", "--must-pass", "deleted:*")
+    assert code == 1 and "Must pass, failed: leak: warfarin." in out  # ...but a leak never does
+    report = _report_module()
+    assert report.failed_cases([str(junit)]) == ["recall: b", "leak: warfarin"]

@@ -532,8 +532,25 @@ like any other repo and the provision step creates them on the golden path:
 | --- | --- | --- | --- |
 | `mcp-server` | `valxel-platform/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
 | `agent` | `valxel-platform/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
+| `knowledge` | `valxel-platform/template-knowledge` | `unit`, `retrieval`, `CodeQL` | Retrieval over the product's own records: an index kept from its events (or a scan of a document store) in its Postgres, searched as MCP tools (`search`, `get_document`, `list_sources`), filtered by who is asking with row-level security |
 
-Roles merge and deploy in dependency order: library, provider, event-worker, mcp-server, agent, consumer, bff, acceptance (merged, never deployed).
+Roles merge and deploy in dependency order: library, provider, event-worker, knowledge, mcp-server, agent, consumer, bff, acceptance (merged, never deployed).
+
+**Knowledge repos** (`src/valxel_sdlc/retrieval.py`) are built by Valxel during the product build:
+- **Architecture (G4).** When an HLD needs search over product text, the architecture agent lists
+  a `knowledge` repo. Under `## Knowledge` it names the embedding model and the sources:
+  `- <org>/<repo>: model <model> via <gateway (BAA)|gateway|self-hosted>; sources: notes (events emr.notes.v1), ...`.
+  People decide the model at G4. A PHI product embeds through the gateway under the BAA or with
+  its self-hosted model, and the evaluator says so when the HLD doesn't.
+- **Build (G5).** Coder agents write the repo's `knowledge.yaml` from that line and the product's
+  data model: sources, text, tenant and access fields, and excluded fields. They also draft the
+  golden set (`evals/questions.yaml`), which has recall questions, a leak case for every tenant and
+  team boundary, and a deletion case. People approve both with the code at G5.
+- **Checks.** The `retrieval` suite runs the golden set on every PR. A leak or a deleted record
+  fails it whatever the recall (`report.py --must-pass`). After the dev deploy, the same golden set
+  runs with the real embedding model and reranker. G6 shows the recall beside the last release's.
+- **Production.** A source more than an hour behind the product raises the `knowledge-lag` alert
+  rule. It applies only to knowledge components (`roles:` in `platform/alert-rules.yaml`).
 The `evals` quality suite reads the agent's `evals / report` status on every PR (recorded model
 responses); after a deploy to dev the agent's post-deploy job runs the same evals against the
 real model and reports `integration / report`. Platform articles VX-12 to VX-14 make these

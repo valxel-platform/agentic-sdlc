@@ -234,6 +234,9 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     out += _emitters(text, repos, ctx)
     out += _acceptance(repos, ctx)
     out += _endpoints(text, repos, ctx)
+    from ..retrieval import check as knowledge_check
+
+    out += knowledge_check(text, repos + new, ctx)
     from ..resources import check as resources_check
 
     out += resources_check(text, repos, ctx)
@@ -249,7 +252,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     return out
 
 
-RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server")
+RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge")
 
 
 EXPOSED_ROLES = RUNTIME_ROLES + ("bff", "mobile")

@@ -99,6 +99,7 @@ platform_repos:
   valxel-platform/template-library: { kind: template, role: library }
   valxel-platform/template-agent: { kind: template, role: agent }
   valxel-platform/template-mcp-server: { kind: template, role: mcp-server }
+  valxel-platform/template-knowledge: { kind: template, role: knowledge }
   valxel-platform/template-event-worker: { kind: template, role: event-worker }
   valxel-platform/template-acceptance: { kind: template, role: acceptance }
   valxel-platform/template-bff: { kind: template, role: bff }
@@ -108,7 +109,8 @@ platform_repos:
 # Per role: the template to start from (it carries CI whose job names match required_checks and
 # the quality suites), and how the repo becomes an OpenChoreo component. The templates live in
 # valxel-platform: Java 21 + Spring Boot (service and event worker), React + TypeScript (web), Java
-# library, and Python for agentic work: a LangGraph workflow agent and an MCP server.
+# library, and Python for agentic work: a LangGraph workflow agent, an MCP server and a knowledge
+# index (retrieval over the product's own records).
 roles:
   provider:
     template: valxel-platform/template-service
@@ -128,6 +130,13 @@ roles:
   mcp-server:
     template: valxel-platform/template-mcp-server
     required_checks: [unit, CodeQL]
+    openchoreo: { component_type: deployment/service, workflow: docker }
+  # Retrieval over the product's own records for its agents (valxel_sdlc.retrieval): passages kept
+  # from the product's events in its Postgres (pgvector), searched as MCP tools, filtered by who is
+  # asking with row-level security. The ingestion worker runs in the same service.
+  knowledge:
+    template: valxel-platform/template-knowledge
+    required_checks: [unit, retrieval, CodeQL]  # retrieval: the golden set's evals on every PR
     openchoreo: { component_type: deployment/service, workflow: docker }
   agent:
     template: valxel-platform/template-agent
