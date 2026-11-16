@@ -129,12 +129,13 @@ class PostgresLedger:
 
     def records(self, feature_id: str | None = None, *, product_id: str | None = None,
                 since: str | None = None) -> list[UsageRecord]:
-        where, args = [], []
-        for col, op, val in (("feature_id", "=", feature_id), ("product_id", "=", product_id), ("ts", ">=", since)):
-            if val is not None:
-                where.append(f"{col} {op} %s")
-                args.append(val)
-        sql = "SELECT * FROM valxel_usage" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id"
+        # One fixed statement: a filter left out is NULL and matches every row.
+        sql = ("SELECT * FROM valxel_usage"
+               " WHERE (%(feature_id)s::text IS NULL OR feature_id = %(feature_id)s)"
+               " AND (%(product_id)s::text IS NULL OR product_id = %(product_id)s)"
+               " AND (%(since)s::timestamptz IS NULL OR ts >= %(since)s::timestamptz)"
+               " ORDER BY id")
+        args = {"feature_id": feature_id, "product_id": product_id, "since": since}
         with self.pool.connection() as conn:
             rows = conn.execute(sql, args).fetchall()
         out = []

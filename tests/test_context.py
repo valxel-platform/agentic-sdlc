@@ -50,7 +50,7 @@ def test_a_single_gateway_call_records_its_window_fill_and_layers(services):
 
 
 def test_a_claude_code_session_records_its_id_and_its_largest_prompt(services, monkeypatch):
-    from claude_agent_sdk import types
+    types = pytest.importorskip("claude_agent_sdk.types", reason="the live extra isn't installed")
 
     def turn(inp, read):
         return types.AssistantMessage(content=[], model="claude-sonnet-5-5", session_id="sess-42",
