@@ -632,6 +632,7 @@ jsonschema==4.26.0 \
     # via
     #   claude-agent-sdk
     #   mcp
+    #   valxel-sdlc
 jsonschema-specifications==2025.9.1 \
     --hash=sha256:98802fee3a11ee76ecaca44429fda8a41bff98b00a0f2838151b113f210cc6fe \
     --hash=sha256:b540987f239e745613c7a9176f3edb72b832a4ac465cf02712288397832b5e8d
