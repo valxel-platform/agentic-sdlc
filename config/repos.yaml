@@ -105,6 +105,7 @@ platform_repos:
   valxel-platform/template-job: { kind: template, role: job }
   valxel-platform/template-integration: { kind: template, role: connector }
   valxel-platform/template-code-sandbox: { kind: template, role: code-sandbox }
+  valxel-platform/template-document-intake: { kind: template, role: document-intake }
   valxel-platform/template-event-worker: { kind: template, role: event-worker }
   valxel-platform/template-acceptance: { kind: template, role: acceptance }
   valxel-platform/template-bff: { kind: template, role: bff }
@@ -168,6 +169,14 @@ roles:
     template: valxel-platform/template-integration
     required_checks: [unit, CodeQL]  # unit tests signatures, replays, the egress allowlist and both contracts
     openchoreo: { component_type: deployment/connector, workflow: docker }
+  # Takes documents from people (valxel_sdlc.documents): uploads to a quarantine bucket by presigned
+  # POST, sized, sniffed and malware-scanned before anything reads them, fields read through the LLM
+  # gateway, a review queue for what it isn't sure of, fields published as a data contract. The
+  # HLD's Documents section approves the types at G4; intake.yaml may take no more.
+  document-intake:
+    template: valxel-platform/template-document-intake
+    required_checks: [unit, CodeQL]  # unit runs uploads end to end: checks, tenants, review, audit
+    openchoreo: { component_type: deployment/service, workflow: docker }
   # Where agents run the code they write (valxel_sdlc.sandboxes): the MCP tool run_code, and a fresh
   # single-use Agent Sandbox per run from the platform's warm pool (SandboxTemplate code-runner:
   # gVisor, no network, no service account token, limits). Project-visible, called by agents only.

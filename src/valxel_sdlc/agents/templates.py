@@ -264,6 +264,11 @@ def architecture(ctx: dict, defective: bool) -> str:
         lines += ["", "## Integrations"] + [
             f"- {r['name']}: example-vendor; data {data}; baa {'yes' if data == 'phi' else 'no'}; webhooks updates; "
             "calls api.example-vendor.test; auth oauth2-client-credentials" for r in connectors]
+    intakes = [r for r in repos if r["role"] == "document-intake"]
+    if intakes:
+        lines += ["", "## Documents"] + [
+            f"- {r['name']}: referral; formats pdf, png, jpeg; max 10 MB; keep 2555 days; dataset referral-extracted; "
+            "fields patient_ref*, referred_on*, reason" for r in intakes]
     knowledge = [r for r in repos if r["role"] == "knowledge"]
     if knowledge:
         via = "gateway (BAA)" if ctx.get("data_class") == "phi" else "gateway"
@@ -455,6 +460,7 @@ def plan(ctx: dict, defective: bool) -> str:
             "job": ["job.yaml", "src/job/work.py", "tests/test_work.py"],
             "connector": ["integration.yaml", "src/integration/mapping.py", "tests/test_mapping.py"],
             "code-sandbox": ["workload.yaml", "tests/test_server.py"],
+            "document-intake": ["intake.yaml", "contracts/lock.yaml", "tests/test_api.py"],
             "agent": [f"src/agent/prompts/{slug}.md", f"evals/cases/{slug}.jsonl"],
             "event-worker": [f"src/main/java/com/valxel/worker/{slug.replace('-', '')}/Handler.java",
                              f"src/main/resources/db/migration/V2__{slug.replace('-', '_')}.sql"],

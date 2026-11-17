@@ -493,7 +493,7 @@ repo_standards:
    template repository: `template-service` and `template-event-worker` (Java 21, Spring Boot),
    `template-web` (React, TypeScript), `template-library` (Java), and `template-mcp-server`,
    `template-agent`, `template-knowledge`, `template-reporting`, `template-job`,
-   `template-integration` and `template-code-sandbox` (Python).
+   `template-integration`, `template-code-sandbox` and `template-document-intake` (Python).
    Their CI jobs are named for the required checks
    (`unit`, `contract`) and post `unit / report`-style statuses the quality suites read; their
    `post-deploy.yml` runs integration, e2e and smoke suites when the pipeline dispatches
@@ -547,6 +547,25 @@ request like any other.
 
 Two platform alert rules watch jobs: `job-failed` (a run ended in an error) and `job-missed`
 (`missed_after` scheduled runs passed without a success). In production, each opens an incident.
+
+### Document intake
+
+Documents people upload (a lab report, an insurance card, a referral letter) go through one
+`document-intake` repo.
+
+| Role | Template | Required checks | What it is |
+| --- | --- | --- | --- |
+| `document-intake` | `valxel-platform/template-document-intake` | `unit`, `CodeQL` | Presigned uploads to a quarantine bucket. Before anything reads a file, it is sized, its format is read from content, and it is scanned for malware (ClamAV). Clean files move to a KMS-encrypted bucket. Fields are read through the LLM gateway; low-confidence fields go to a review queue (never reviewed by the uploader); fields are published as a data contract. Tenant-scoped reads, one-minute downloads, retention purge, all audited by id |
+
+The design names each document type under `## Documents`:
+`- <org>/<repo>: <type>; formats pdf, png; max <N> MB; keep <N> days; dataset <name>; fields <name>*, <name>`.
+G4 also wants two `s3-bucket`s in Resources that the intake reads, writes and deletes: a quarantine
+with `expire_days` of at most 7, and a clean bucket. The intake is `project`-visible, reached
+through the BFF. The coder writes the lines into `intake.yaml`, and the build fails when the file
+takes more than the design approved: another type or format, a larger size, a different retention
+or dataset, or more fields. Alert rules: `intake-malware-found` (critical),
+`intake-checks-unavailable`, `intake-documents-failed`. The platform runs ClamAV
+(`clamav.platform-security`) for every product with an intake.
 
 ### Connectors to third parties
 

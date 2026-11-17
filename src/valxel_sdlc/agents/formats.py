@@ -108,6 +108,11 @@ sequenceDiagram
                                (PHI needs baa yes. Hosts by name: no scheme, wildcard or IP. A connector with webhooks
                                 is external in Endpoints, only for /webhooks/<name>; without them, none. Only a
                                 connector talks to a third party: others reach it through data contracts.)
+## Documents                   (only with a document-intake repo: what people upload and what's read from it; approved at G4)
+- <org>/<repo>: <type>; formats <pdf, png, jpeg, tiff>; max <N> MB; keep <N> days; dataset <name>; fields <name>*, <name>
+                               (* marks a required field. The repo also needs two s3-buckets in Resources it reads,
+                                writes and deletes: a quarantine with expire_days of at most 7, and a clean bucket.
+                                Its Endpoints visibility is project: people reach it through the BFF.)
 ## Knowledge                   (only with a knowledge repo: what agents search, and the embedding model people decide at G4)
 - <org>/<repo>: model <embedding model> via <gateway (BAA)|gateway|self-hosted>; sources: <name> (<events <topic>, compacted|scan <store>|files>), ...
                                (an events source is rebuilt by replaying its topic: 'compacted' when its events carry whole

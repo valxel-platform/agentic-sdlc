@@ -106,6 +106,31 @@ rules:
     condition: { window: 15m, interval: 5m, operator: gt, threshold: 10 }
     says: "The vendor is down or refusing the connector's credentials. Nothing is lost: the consumer retries the same event. Check the vendor's status and the connector's token or certificate."
 
+  # Document intake (template-document-intake). None of these markers carries a field value.
+  intake-malware-found:
+    description: "An uploaded document carried malware."
+    roles: [document-intake]
+    severity: critical
+    source: { type: log, query: "intake.malware_found" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
+    says: "The file was deleted before anything read it. Find the uploader from the audit trail (document.declared, by document id) and decide with security whether their account or device needs looking at."
+
+  intake-checks-unavailable:
+    description: "Uploaded documents wait: the malware scanner or the LLM gateway isn't answering."
+    roles: [document-intake]
+    severity: warning
+    source: { type: log, query: "intake.check_unavailable" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 10 }
+    says: "Documents stay uploaded and are tried again; none is treated as clean. Check the platform's ClamAV and the product's LLM gateway."
+
+  intake-documents-failed:
+    description: "Documents gave up after their checks failed five times."
+    roles: [document-intake]
+    severity: warning
+    source: { type: log, query: "intake.document_failed" }
+    condition: { window: 1h, interval: 15m, operator: gt, threshold: 0 }
+    says: "These documents won't be processed without help. Fix the scanner or gateway, then ask the uploaders to upload again."
+
   # Code sandboxes (template-code-sandbox).
   sandbox-pool-exhausted:
     description: "Runs waited for a sandbox and gave up."

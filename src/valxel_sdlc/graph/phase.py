@@ -653,6 +653,10 @@ SECURITY = {
     "agent": (" Call MCP servers only through token exchange for the person behind the step (audience and"
               " scope per server); never a fixed token (VX-13, VX-17). Never run model-written code in this"
               " pod (no exec, eval or subprocess on it): send it to the product's code sandbox's run_code."),
+    "document-intake": (" Every call checks the token before reading a body and the caller's tenant on every"
+                        " document (another tenant's is 404); uploads go to quarantine by presigned POST and"
+                        " are sized, sniffed and scanned before anything reads them; downloads are one-minute"
+                        " links; nobody reviews their own upload; audit by document id only (VX-15, VX-17)."),
     "code-sandbox": (" run_code takes calls only from the agents the design names, with the sandbox:run scope;"
                      " every run gets a fresh sandbox, deleted after; the runner keeps no network, mounts,"
                      " secrets or service account (VX-17)."),
@@ -726,6 +730,24 @@ def schedule_instruction(ctx: dict, task: dict) -> str:
     from ..jobs import coder_instruction
 
     return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
+
+
+def documents_instruction(ctx: dict, task: dict) -> str:
+    """A document intake's intake.yaml from the approved HLD (documents.py)."""
+    if task.get("role") != "document-intake":
+        return ""
+    from ..documents import coder_instruction
+
+    return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
+
+
+def documents_findings(services, ctx: dict, results: dict) -> list[str]:
+    """Deterministic: an intake's intake.yaml on its branch takes no more than its HLD lines."""
+    if not any(r.get("role") == "document-intake" for r in results.values()):
+        return []
+    from ..documents import build_findings
+
+    return build_findings(services.github, ctx.get("hld_text") or "", results)
 
 
 def sandbox_instruction(ctx: dict, task: dict) -> str:
@@ -923,6 +945,7 @@ def build_build_subgraph(services):
                   + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
                   + contracts_instruction(ctx, task) + schedule_instruction(ctx, task)
                   + integration_instruction(ctx, task) + sandbox_instruction(ctx, task)
+                  + documents_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
                     " type the change uses. " + diary.CODER + " " + sessions_instruction()
                   + "\n\n" + structured.instruction(structured.CoderReply)),
@@ -1011,6 +1034,9 @@ def build_build_subgraph(services):
                       + (" Check that the connector's webhooks verify their signature before reading the body, that"
                          " the vendor client is used for every outbound call (no other HTTP client), and that the"
                          " mapping copies no more of a record than its contract allows." if r.get("role") == "connector" else "")
+                      + (" Check that the intake reads no file before its size, format and malware checks, checks"
+                         " the caller's tenant on every document, and logs or audits no field value."
+                         if r.get("role") == "document-intake" else "")
                       + (" Check that the agent runs no model-written code itself (no exec, eval, compile or"
                          " subprocess on it): code goes to the code sandbox's run_code." if r.get("role") == "agent" else "")
                       + (" Check VX-19: AWS services reached only behind a port, names from the environment variables"
@@ -1094,6 +1120,7 @@ def build_build_subgraph(services):
         findings += events_findings(s["ctx"], results)
         findings += instrumentation_findings(s["ctx"], results)
         findings += integration_findings(services, s["ctx"], results)
+        findings += documents_findings(services, s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]
         lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}" + second_line(rv)
                   for tid, rv in sorted(reviews.items())]

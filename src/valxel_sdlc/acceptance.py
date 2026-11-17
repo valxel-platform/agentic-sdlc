@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 
 from .agents.parse import parse_acs, section
 
-RUNTIME_ROLES = ("provider", "event-worker", "consumer", "knowledge", "reporting", "job", "connector", "mcp-server", "code-sandbox", "agent")
+RUNTIME_ROLES = ("provider", "event-worker", "consumer", "knowledge", "reporting", "job", "connector", "document-intake", "mcp-server", "code-sandbox", "agent")
 _LINE = re.compile(
     r"^- (AC-\d+):\s*(extend|replace|add)\s+(\S+\.spec\.ts)"
     r"(?:\s+\"([^\"]+)\")?"

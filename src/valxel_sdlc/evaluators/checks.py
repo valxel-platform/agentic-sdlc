@@ -241,6 +241,9 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     from ..connectors import design_findings as integration_findings
 
     out += integration_findings(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
+    from ..documents import design_findings as documents_design
+
+    out += documents_design(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
     from ..sandboxes import design_findings as sandbox_design
 
     out += sandbox_design(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}],
@@ -264,7 +267,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 
 
 RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge", "reporting", "job",
-                 "connector", "code-sandbox")
+                 "connector", "code-sandbox", "document-intake")
 
 
 EXPOSED_ROLES = RUNTIME_ROLES + ("bff", "mobile")

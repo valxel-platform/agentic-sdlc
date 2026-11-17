@@ -9,6 +9,8 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
   reporting   the product's data contracts into reporting tables and filtered topics (template-reporting)
   job         work that runs on a schedule and exits: a CronJob with a run lock, run history and
               catch-up after missed runs; job.yaml holds its schedule (valxel_sdlc.jobs)
+  document-intake  takes documents from people: checked uploads (size, format by content, malware),
+              fields read through the LLM gateway, a review queue (valxel_sdlc.documents)
   connector   the only component that talks to a third party: signed webhooks in, allowlisted calls
               out, as data contracts on Kafka; integration.yaml holds what's allowed (valxel_sdlc.connectors)
   mcp-server  product capabilities as MCP tools (often over providers' APIs), for agents
@@ -25,6 +27,6 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
 
 from __future__ import annotations
 
-ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "job", "connector", "mcp-server", "code-sandbox", "agent", "consumer", "bff", "mobile", "acceptance")
+ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "job", "connector", "document-intake", "mcp-server", "code-sandbox", "agent", "consumer", "bff", "mobile", "acceptance")
 REPO_ORDER = {role: i for i, role in enumerate(ROLES)}
 ROLE_PATTERN = "|".join(ROLES)
