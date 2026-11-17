@@ -1198,10 +1198,25 @@ def build_build_subgraph(services):
     return g.compile(name="phase_build")
 
 
-def risk_tier(lane_of_repo: dict[str, ProductConfig], product: ProductConfig, tasks: list[dict]) -> str:
+# Files coding agents read as instructions: Claude Code loads the checkout's CLAUDE.md and .claude/
+# (setting_sources=["project"]), and other agents read theirs. Agent PRs and anyone with write access
+# can change them, and the next session follows them, so a change to one is a person's decision (G5).
+AGENT_INSTRUCTIONS = re.compile(
+    r"(^|/)(CLAUDE(\.local)?\.md|AGENTS\.md|GEMINI\.md|\.mcp\.json|\.cursorrules)$"
+    r"|(^|/)\.(claude|cursor|codex|windsurf)/|(^|/)\.github/(copilot-instructions\.md|instructions/|prompts/)")
+
+
+def agent_instructions(paths) -> list[str]:
+    """The paths among these that agents read as instructions."""
+    return sorted({p for p in paths if AGENT_INSTRUCTIONS.search(p or "")})
+
+
+def risk_tier(lane_of_repo: dict[str, ProductConfig], product: ProductConfig, tasks: list[dict],
+              changed: list[str] = ()) -> str:
     """Regulated if this product, or any lane whose repos the change set touches, handles PHI or
-    payments; high if a task changes a high-risk path of the lane that owns its repo, or a
-    dependency manifest (valxel_sdlc.dependencies)."""
+    payments; high if a task changes a high-risk path of the lane that owns its repo, a
+    dependency manifest (valxel_sdlc.dependencies), or a file agents read as instructions
+    (planned, or among the files its pull requests actually changed)."""
     lanes = [product] + [lane_of_repo[t["repo"]] for t in tasks if t.get("repo") in lane_of_repo]
     if any(lane.data_class in ("phi", "payments") for lane in lanes):
         return "regulated"
@@ -1214,6 +1229,8 @@ def risk_tier(lane_of_repo: dict[str, ProductConfig], product: ProductConfig, ta
         # Dependency manifests: what a change brings in is a person's decision (G5), for every product.
         if any(is_manifest(f) for f in task.get("files", [])):
             return "high"
+    if agent_instructions([f for t in tasks for f in t.get("files", [])] + list(changed)):
+        return "high"
     return "low"
 
 
@@ -1346,7 +1363,20 @@ def make_phase_node(phase: str, services):
             prs = {**(state.get("pull_requests") or {}), **delta["pull_requests"]}
             repos = sorted({(p["role"], p["repo"]) for p in prs.values() if p.get("role")},
                            key=lambda x: (REPO_ORDER.get(x[0], 9), x[1]))
-            delta["risk_tier"] = risk_tier(snap.lane_of_repo(), product, all_tasks)
+            # What the pull requests actually changed, beyond the plan: instruction files the coder touched.
+            changed = [f for tid, r in (out.get("task_results") or {}).items() for f in r.get("files") or []]
+            for rv in reviews.values():
+                try:
+                    changed += [f["path"] for f in services.github.pr_files(repo=rv["pr"]["repo"],
+                                                                            number=rv["pr"]["number"]) or []]
+                except Exception:  # unknown files: the plan's list still decides
+                    log.warning("%s: couldn't list the files of %s", state["feature_id"], rv["pr"].get("url"))
+            delta["risk_tier"] = risk_tier(snap.lane_of_repo(), product, all_tasks, changed)
+            touched = agent_instructions(changed)
+            if touched:
+                delta["events"].append(event("build", "agent_instructions_changed",
+                                             "changes files coding agents read as instructions, so people approve "
+                                             "it at G5: " + ", ".join(touched[:10])))
             # The performance test each repo needs: the highest level any of its tasks needs.
             perf = dict(state.get("performance") or {})
             for rv in reviews.values():

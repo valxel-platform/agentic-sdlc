@@ -1629,6 +1629,13 @@ days old (new names are where squatting happens) and carry an allowed license
 (`config/dependencies.yaml`); an OpenSSF Scorecard under 3 is reported. Dependency manifests are
 high-risk paths, so a change to them waits for a person at G5 in every product.
 
+**Agent instructions are high-risk too.** Coder sessions load the checkout's `CLAUDE.md` and
+`.claude/` as instructions, and other coding agents read their own files (`AGENTS.md`, `.mcp.json`,
+Cursor and Copilot rules). An earlier agent pull request, or anyone with write access, could change
+what the next session does. So a change to any of them, whether the plan named it or the pull
+request just contains it, makes the change set `high`: a person approves it at G5, and the
+feature's events say which files.
+
 **Builds are pinned.** Template and tool workflows pin actions by commit; `supply-chain-pins` pins
 Dockerfile base images to their digests and, in Gradle repos, writes `gradle.lockfile` and
 `gradle/verification-metadata.xml`, refreshing both on Dependabot's pull requests. The tool's image
@@ -2751,7 +2758,7 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | Product isolation | `config/registry.yaml`, each org's `product.yaml` | Registry: lane kind, org, data class, workspace. Manifest: repos, approvers, budget, thresholds, high-risk paths, runtime, `depends_on` |
 | Shared services | `governance/loader.py`, `graph/gates.py` | Dependency lanes pinned at intake; their constitutions apply; G4 to G6 need each touched lane; shared repos publish packages (`integrations/packages.py`) |
 | Constitutions | `governance/` | Read from the tools org and each product org, validated, pinned by commit SHA per feature |
-| Risk-tiered merge | `graph/phase.py`, `graph/merge_train.py` | PHI and payments are `regulated`; changes to high-risk paths are `high`; both go through G5 |
+| Risk-tiered merge | `graph/phase.py`, `graph/merge_train.py` | PHI and payments are `regulated`; changes to high-risk paths, dependency manifests or files coding agents read as instructions (`CLAUDE.md`, `.claude/`, `AGENTS.md`, `.mcp.json`, Cursor and Copilot rules: planned, or in what the PRs changed) are `high`; both go through G5 |
 | Multi-repo change set | `graph/merge_train.py`, `graph/delivery.py` | One branch name across repos; the merge train runs libraries, then providers, then consumers |
 | CI/CD | `integrations/openchoreo.py` | Agents promote to staging only; production promotion at G6 is human (VX-3). A production rollback is a person's, or the tool's under the remediation policy |
 | Knowledge write-back | `graph/phase.py` | After Operate, the capability is registered in the catalog |
