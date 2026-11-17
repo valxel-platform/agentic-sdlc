@@ -19,7 +19,8 @@ def test_the_shipped_contract_covers_every_area_and_every_role():
     for role in ROLES:  # every role has its security baseline
         assert {"security-scans", "dependency-review", "dependency-updates", "security-policy"} <= set(tc.required(role))
     for role in c["groups"]["deployed"]:
-        assert {"tracing", "error-reports", "json-logs", "image-scan", "supply-chain-pins"} <= set(tc.required(role))
+        assert {"tracing", "error-reports", "image-scan", "supply-chain-pins"} <= set(tc.required(role))
+        assert role == "consumer" or "json-logs" in tc.required(role)  # a web app's container only serves files
 
 
 def test_a_template_declares_where_each_capability_lives_and_the_check_reads_it():
