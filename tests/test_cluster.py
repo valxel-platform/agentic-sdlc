@@ -80,6 +80,36 @@ def test_one_replica_holds_a_thread_and_a_dead_one_lets_go(pool):
     lease.release()
 
 
+def test_a_thread_lock_key_is_64_bits_and_stable():
+    from valxel_sdlc.cluster import NAMESPACE, lock_key
+
+    keys = {lock_key(NAMESPACE, f"F-{i}") for i in range(20_000)}
+    assert len(keys) == 20_000 and all(-(2**63) <= k < 2**63 for k in keys)
+    assert lock_key(NAMESPACE, "F-1") == lock_key(NAMESPACE, "F-1") != lock_key("other", "F-1")
+
+
+@needs_db
+def test_replicas_on_the_old_and_new_lock_keep_out_of_each_other(pool):
+    """While a deploy rolls, one replica may still take the old two-key lock."""
+    import psycopg
+
+    from valxel_sdlc.cluster import NAMESPACE, PostgresCluster
+
+    new = PostgresCluster(pool, DB)
+    fid = f"T-{uuid.uuid4().hex[:8]}"
+    old_take = "select pg_try_advisory_lock(hashtext(%s), hashtext(%s))"
+    with psycopg.connect(DB, autocommit=True) as old:
+        assert old.execute(old_take, (NAMESPACE, fid)).fetchone()[0]
+        assert new.lock(fid) is None and new.busy(fid)
+        old.execute("select pg_advisory_unlock(hashtext(%s), hashtext(%s))", (NAMESPACE, fid))
+    lease = new.lock(fid)
+    assert lease is not None
+    with psycopg.connect(DB, autocommit=True) as old:
+        assert not old.execute(old_take, (NAMESPACE, fid)).fetchone()[0]
+    lease.release()
+    assert not new.busy(fid)
+
+
 @needs_db
 def test_one_replica_watches_and_another_takes_over(pool):
     from valxel_sdlc.cluster import PostgresCluster

@@ -21,6 +21,7 @@ a database everything is in memory: one process, as before.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from collections.abc import Iterator, MutableMapping
@@ -157,14 +158,34 @@ class MemoryCluster:
 # --------------------------------------------------------------------------- Postgres
 
 NAMESPACE = "valxel:thread"
-_TRY = "select pg_try_advisory_lock(hashtext(%s), hashtext(%s)) as ok"
+
+
+def lock_key(namespace: str, thread: str) -> int:
+    """A thread's advisory lock: one 64-bit key from SHA-256, so two threads running at once
+    practically never share one (Postgres's hashtext gives only 32 bits per thread)."""
+    digest = hashlib.sha256(f"{namespace}\x00{thread}".encode()).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+# Until every replica runs this version, a lease also takes the old two-key lock
+# (hashtext(namespace), hashtext(thread)), so a replica still on the old version sees it held.
+# Remove LEGACY and its statements once no replica older than this runs.
+LEGACY = True
+_TRY = "select pg_try_advisory_lock(%s::bigint) as ok"
+_UNLOCK = "select pg_advisory_unlock(%s::bigint)"
+_TRY_LEGACY = "select pg_try_advisory_lock(hashtext(%s), hashtext(%s)) as ok"
+_UNLOCK_LEGACY = "select pg_advisory_unlock(hashtext(%s), hashtext(%s))"
+# A one-key advisory lock shows in pg_locks as objsubid 1, the key's high 32 bits in classid and
+# its low 32 bits in objid. The old two-key lock shows as objsubid 2.
 _HELD = """
-select t from unnest(%s::text[]) as t
+select t from unnest(%s::text[], %s::bigint[]) as k(t, key)
  where exists (select 1 from pg_locks
-                where locktype = 'advisory' and granted and objsubid = 2
+                where locktype = 'advisory' and granted
                   and database = (select oid from pg_database where datname = current_database())
-                  and classid = (hashtext(%s)::bigint & 4294967295)::oid
-                  and objid = (hashtext(t)::bigint & 4294967295)::oid)
+                  and ((objsubid = 1 and ((classid::bigint << 32) | objid::bigint) = k.key)
+                    or (objsubid = 2
+                        and classid = (hashtext(%s)::bigint & 4294967295)::oid
+                        and objid = (hashtext(k.t)::bigint & 4294967295)::oid)))
 """
 SCHEMA = (
     "create table if not exists valxel_claims (key text primary key, at timestamptz not null default now())",
@@ -190,7 +211,9 @@ class _PostgresLease:
 
     def release(self) -> None:
         try:
-            self.conn.execute("select pg_advisory_unlock(hashtext(%s), hashtext(%s))", (self.namespace, self.thread))
+            self.conn.execute(_UNLOCK, (lock_key(self.namespace, self.thread),))
+            if LEGACY:
+                self.conn.execute(_UNLOCK_LEGACY, (self.namespace, self.thread))
         except Exception:  # noqa: BLE001, S110 - closing the session releases it anyway
             pass
         finally:
@@ -214,12 +237,14 @@ class PostgresCluster:
     def lock(self, thread: str) -> Lease | None:
         conn = self.connect()
         try:
-            ok = _first(conn.execute(_TRY, (NAMESPACE, thread)).fetchone())
+            ok = _first(conn.execute(_TRY, (lock_key(NAMESPACE, thread),)).fetchone())
+            if ok and LEGACY and not _first(conn.execute(_TRY_LEGACY, (NAMESPACE, thread)).fetchone()):
+                ok = False  # a replica on the old version runs it
         except Exception:
             conn.close()
             raise
         if not ok:
-            conn.close()
+            conn.close()  # closing the session drops any lock it took
             return None
         return _PostgresLease(conn, NAMESPACE, thread)
 
@@ -227,7 +252,8 @@ class PostgresCluster:
         if not threads:
             return set()
         with self.pool.connection() as conn:
-            rows = conn.execute(_HELD, (list(threads), NAMESPACE)).fetchall()
+            rows = conn.execute(_HELD, (list(threads), [lock_key(NAMESPACE, t) for t in threads],
+                                        NAMESPACE)).fetchall()
         return {_first(r) for r in rows}
 
     def busy(self, thread: str) -> bool:
