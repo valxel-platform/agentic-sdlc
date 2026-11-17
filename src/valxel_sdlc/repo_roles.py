@@ -6,6 +6,9 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
   event-worker  applies a product's events to a data store (Postgres, a search index), once and in order
   knowledge   retrieval over the product's own records for its agents: an index kept from the
               product's events, searched as MCP tools, filtered by who is asking (valxel_sdlc.retrieval)
+  reporting   the product's data contracts into reporting tables and filtered topics (template-reporting)
+  job         work that runs on a schedule and exits: a CronJob with a run lock, run history and
+              catch-up after missed runs; job.yaml holds its schedule (valxel_sdlc.jobs)
   mcp-server  product capabilities as MCP tools (often over providers' APIs), for agents
   agent       a workflow agent: uses MCP tools, models through the LLM gateway, people approve changes
   consumer    a web app or other client of the APIs and agents
@@ -18,6 +21,6 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
 
 from __future__ import annotations
 
-ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "mcp-server", "agent", "consumer", "bff", "mobile", "acceptance")
+ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "job", "mcp-server", "agent", "consumer", "bff", "mobile", "acceptance")
 REPO_ORDER = {role: i for i, role in enumerate(ROLES)}
 ROLE_PATTERN = "|".join(ROLES)

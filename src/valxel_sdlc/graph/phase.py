@@ -637,6 +637,11 @@ SECURITY = {
                   " generalize what a de-identified destination gets, never send a secret field, and set tenant on"
                   " every table that has one; reporting-admin check must pass. Reports read through"
                   " reporting_reader with row-level security; Kafka as this component's own identity (VX-17)."),
+    "job": (" job.yaml's schedule and time zone are the HLD's Schedules line for this repo; the work covers"
+            " run.window_start to run.window_end, is safe to run twice over the same window (upserts keyed by"
+            " the item, or a record of what was sent), calls run.check() between items and changes nothing on"
+            " a dry run. It reaches other components through their APIs or events, never their databases, as"
+            " its own identity (VX-17)."),
     "agent": (" Call MCP servers only through token exchange for the person behind the step (audience and"
               " scope per server); never a fixed token (VX-13, VX-17)."),
     "consumer": (" The app never holds a token: it calls the API on its own origin through the product's BFF"
@@ -700,6 +705,15 @@ def contracts_instruction(ctx: dict, task: dict) -> str:
     from ..datasets import instruction, parse_hld
 
     return instruction(parse_hld(ctx.get("hld_text") or "")[0], task.get("repo", ""))
+
+
+def schedule_instruction(ctx: dict, task: dict) -> str:
+    """A job's schedule from the approved HLD, for its job.yaml (jobs.py)."""
+    if task.get("role") != "job":
+        return ""
+    from ..jobs import coder_instruction
+
+    return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
 
 
 def events_instruction(ctx: dict, task: dict) -> str:
@@ -868,7 +882,7 @@ def build_build_subgraph(services):
                   + ux_instruction(ctx, task)
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
-                  + contracts_instruction(ctx, task)
+                  + contracts_instruction(ctx, task) + schedule_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
                     " type the change uses. " + diary.CODER + " " + sessions_instruction()
                   + "\n\n" + structured.instruction(structured.CoderReply)),

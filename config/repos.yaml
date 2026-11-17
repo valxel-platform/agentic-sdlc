@@ -102,6 +102,7 @@ platform_repos:
   valxel-platform/template-mcp-server: { kind: template, role: mcp-server }
   valxel-platform/template-knowledge: { kind: template, role: knowledge }
   valxel-platform/template-reporting: { kind: template, role: reporting }
+  valxel-platform/template-job: { kind: template, role: job }
   valxel-platform/template-event-worker: { kind: template, role: event-worker }
   valxel-platform/template-acceptance: { kind: template, role: acceptance }
   valxel-platform/template-bff: { kind: template, role: bff }
@@ -148,6 +149,14 @@ roles:
     template: valxel-platform/template-reporting
     required_checks: [unit, CodeQL]  # unit runs reporting-admin check and the row-level security tests
     openchoreo: { component_type: deployment/worker, workflow: docker }
+  # Work due at a time, not in reply to a request or an event: reminders, reconciliations,
+  # retention purges, report builds. OpenChoreo runs it as a CronJob; the tool sets its schedule,
+  # time zone, time limit and suspend flag per environment from the repo's job.yaml on every deploy
+  # (valxel_sdlc.jobs), and the HLD's Schedules section names each job's schedule for G4.
+  job:
+    template: valxel-platform/template-job
+    required_checks: [unit, CodeQL]  # unit checks job.yaml for every environment and tests the lock
+    openchoreo: { component_type: cronjob/scheduled-task, workflow: docker }
   agent:
     template: valxel-platform/template-agent
     required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR

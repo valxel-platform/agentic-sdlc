@@ -211,9 +211,10 @@ def make_deploy(stage: str, services, nxt: str):
                 rec = services.openchoreo.promote(component=t["component"], env=env, actor=f"agent:{stage}",
                                                   actor_type="agent", project=t["project"],
                                                   namespace=t["namespace"], pipeline=t["pipeline"])
-                sized = _apply_capacity(services, snap, t, env)
+                sized = _apply_capacity(services, snap, t, env, repo=repo, role=role, ref=run.get("sha", ""))
                 deps[repo] = {"repo": repo, **t, "pipeline": list(t["pipeline"]), "env": env,
-                              "release": rec.get("release", ""), **({"capacity": sized} if sized else {})}
+                              "release": rec.get("release", ""), "role": role, "sha": run.get("sha", ""),
+                              **({"capacity": sized} if sized else {})}
             except Exception as exc:
                 failures.append({"repo": repo, "component": t["component"], "state": "failure",
                                  "message": f"{type(exc).__name__}: {exc}"})

@@ -56,15 +56,19 @@ def _capacity_change(services, state: FeatureState, snap) -> list[dict]:
         return []
 
 
-def _apply_capacity(services, snap, target: dict, env: str) -> dict | None:
+def _apply_capacity(services, snap, target: dict, env: str, *, repo: str = "", role: str = "",
+                    ref: str = "") -> dict | None:
     """The environment's replicas, CPU, memory and autoscaling from the product's approved capacity
-    plan (runtime/capacity.yaml); the last environment in the pipeline is production."""
+    plan (runtime/capacity.yaml); for a job, its schedule, time zone and time limit from job.yaml at
+    the commit being deployed (jobs.py). The last environment in the pipeline is production."""
     from ..environments import apply_capacity
+    from ..jobs import ROLE, read_configs
 
     pipeline = list(target.get("pipeline") or [])
     name = "production" if pipeline and env == pipeline[-1] else env
+    extra = read_configs(services.github, repo, ref, name) if role == ROLE and repo else {}
     try:
-        return apply_capacity(services, snap, target, name)
+        return apply_capacity(services, snap, target, name, extra=extra)
     except Exception:
         return None
 

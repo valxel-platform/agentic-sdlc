@@ -491,8 +491,8 @@ repo_standards:
 **Setup once per org.**
 1. Publish the templates named in `config/repos.yaml` to `valxel-platform` and mark each one a
    template repository: `template-service` and `template-event-worker` (Java 21, Spring Boot),
-   `template-web` (React, TypeScript), `template-library` (Java), `template-mcp-server` and
-   `template-agent` (Python).
+   `template-web` (React, TypeScript), `template-library` (Java), and `template-mcp-server`,
+   `template-agent`, `template-knowledge`, `template-reporting` and `template-job` (Python).
    Their CI jobs are named for the required checks
    (`unit`, `contract`) and post `unit / report`-style statuses the quality suites read; their
    `post-deploy.yml` runs integration, e2e and smoke suites when the pipeline dispatches
@@ -522,6 +522,30 @@ An HLD with event workers has an `## Events` section, one line per event type
 publish or apply those events, reviewers check VX-16, and the build fails if a named event isn't
 published or applied by any task. Services coordinate through events; a central orchestrator needs
 an ADR.
+
+### Scheduled jobs
+
+Work due at a time goes in a `job` repo, not inside a service's timer. Reminders, nightly
+reconciliations, retention purges and report builds are examples. Work that reacts to events goes
+in an event worker.
+
+| Role | Template | Required checks | What it is |
+| --- | --- | --- | --- |
+| `job` | `valxel-platform/template-job` | `unit`, `CodeQL` | One run, then exit, as an OpenChoreo `cronjob/scheduled-task`. A Postgres lock keeps runs from overlapping. Each run covers the time since the last success, so a run after an outage makes up for the missed ones. A time limit stops runs cleanly, and every run is recorded in `job_runs` |
+
+The design names each job's schedule under `## Schedules`:
+`- <org>/<repo>: <minute> <hour> <day of month> <month> <day of week> <time zone>; <what it does>`.
+The fields are numbers only, and the time zone is an IANA name. G4 refuses a job repo with no
+schedule, a schedule Kubernetes wouldn't accept, or a line that doesn't say what the job does. The
+coder writes that schedule into the repo's `job.yaml`.
+
+On every deploy, the tool reads `job.yaml` at the commit it deploys and sets the CronJob's settings
+for the environment (`jobs.py`): its schedule, time zone, time limit and `suspend`. `job.yaml` can
+give dev and staging their own schedules, or suspend them. A schedule change is therefore a pull
+request like any other.
+
+Two platform alert rules watch jobs: `job-failed` (a run ended in an error) and `job-missed`
+(`missed_after` scheduled runs passed without a success). In production, each opens an incident.
 
 ## Agentic features in products
 

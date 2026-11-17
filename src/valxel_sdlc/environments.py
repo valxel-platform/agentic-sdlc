@@ -203,19 +203,20 @@ def environments(services, *, product_id: str, approver: str, mode: str = "full"
 
 # ------------------------------------------------------------------------------ on deployment
 
-def apply_capacity(services, snap, target: dict, env: str) -> dict | None:
-    """Give a component's binding in `env` its capacity. A failure never stops a deployment; the
-    next deployment tries again."""
+def apply_capacity(services, snap, target: dict, env: str, *, extra: dict | None = None) -> dict | None:
+    """Give a component's binding in `env` its capacity, and `extra` settings of its type (a job's
+    schedule). A failure never stops a deployment; the next deployment tries again."""
     from .capacity import binding_configs
 
     cap = getattr(snap, "capacity", None) or {}
     configure = getattr(services.openchoreo, "configure_binding", None)
-    if not cap or not callable(configure):
+    if not callable(configure) or not (cap or extra):
         return None
-    got = binding_configs(cap, target["component"], env)
-    if not got:
+    got = binding_configs(cap, target["component"], env) if cap else None
+    if not got and not extra:
         return None
-    configs, traits = got
+    configs, traits = got or ({}, {})
+    configs = {**configs, **(extra or {})}
     short = target["component"].rsplit("/", 1)[-1]
     try:
         if traits:
@@ -229,8 +230,8 @@ def apply_capacity(services, snap, target: dict, env: str) -> dict | None:
                   project=target.get("project"), namespace=target.get("namespace"))
     except Exception as exc:
         return {"component": target["component"], "env": env, "error": f"{type(exc).__name__}: {exc}"}
-    return {"component": target["component"], "env": env, "replicas": configs["replicas"],
-            "autoscaler": traits or None}
+    return {"component": target["component"], "env": env, "replicas": configs.get("replicas"),
+            "autoscaler": traits or None, **({"schedule": extra} if extra else {})}
 
 
 def load(text: str) -> dict:

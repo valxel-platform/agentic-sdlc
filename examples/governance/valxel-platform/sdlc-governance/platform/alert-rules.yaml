@@ -55,6 +55,24 @@ rules:
     condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
     says: "Agents may answer from stale records. Check the knowledge component's ingestion logs and its events topic or scan source."
 
+  # Jobs (template-job) log "valxel.job failed" when a run ends in an error, and "valxel.job.missed"
+  # when scheduled runs passed without a success (the run after an outage, or after failures).
+  job-failed:
+    description: "A scheduled job's run failed."
+    roles: [job]
+    severity: warning
+    source: { type: log, query: "valxel.job failed" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
+    says: "The run's work was not done. Read the run's error in its logs; the next run covers the same window again, or start one now from OpenChoreo once it's fixed."
+
+  job-missed:
+    description: "Scheduled runs of a job passed without a success."
+    roles: [job]
+    severity: warning
+    source: { type: log, query: "valxel.job.missed" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
+    says: "The job didn't run, or kept failing, for longer than job.yaml's missed_after allows. Its latest run covers the missed time; check that it finished, and why the runs were missed (suspended, failing, or the cluster down)."
+
   memory:
     description: "Memory above 90% of its limit for 5 minutes."
     severity: warning

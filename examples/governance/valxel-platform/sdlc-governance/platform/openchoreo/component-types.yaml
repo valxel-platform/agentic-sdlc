@@ -199,3 +199,86 @@ spec:
           maxUnavailable: 1
           selector:
             matchLabels: ${metadata.podSelectors}
+---
+# A product's scheduled job (repos.yaml role `job`, template-job): a CronJob whose pod runs once and
+# exits. The Valxel SDLC sets environment, schedule, timeZone, suspend and activeDeadlineSeconds per environment
+# from the repo's job.yaml on every deploy, so the schedule changes through a pull request. Runs never
+# overlap (concurrencyPolicy Forbid; the job's own Postgres lock also covers a run started by hand),
+# a failed run isn't retried by Kubernetes (the next run covers its window again), and a run that
+# couldn't start within 10 minutes of its time is skipped rather than started late.
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterComponentType
+metadata:
+  name: scheduled-task
+spec:
+  workloadType: cronjob
+  allowedTraits:
+    - { kind: ClusterTrait, name: observability-alert-rule }
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      properties:
+        # The environment's name, for job.yaml's per-environment schedule (JOB_ENVIRONMENT).
+        environment: { type: string, enum: [dev, staging, production], default: dev }
+        schedule: { type: string, default: "15 3 * * *" }
+        timeZone: { type: string, default: "UTC" }
+        suspend: { type: boolean, default: false }
+        activeDeadlineSeconds: { type: integer, minimum: 60, maximum: 86400, default: 1800 }
+        resources:
+          type: object
+          properties:
+            requests:
+              type: object
+              properties:
+                cpu: { type: string, default: "250m" }
+                memory: { type: string, default: "256Mi" }
+            limits:
+              type: object
+              properties:
+                memory: { type: string, default: "256Mi" }
+  resources:
+    - id: cronjob
+      template:
+        apiVersion: batch/v1
+        kind: CronJob
+        metadata:
+          name: ${metadata.name}
+        spec:
+          schedule: ${environmentConfigs.schedule}
+          timeZone: ${environmentConfigs.timeZone}
+          suspend: ${environmentConfigs.suspend}
+          concurrencyPolicy: Forbid
+          startingDeadlineSeconds: 600
+          successfulJobsHistoryLimit: 3
+          failedJobsHistoryLimit: 3
+          jobTemplate:
+            spec:
+              backoffLimit: 0
+              activeDeadlineSeconds: ${environmentConfigs.activeDeadlineSeconds}
+              ttlSecondsAfterFinished: 86400
+              template:
+                metadata:
+                  labels: ${metadata.podSelectors}
+                spec:
+                  restartPolicy: Never
+                  automountServiceAccountToken: false
+                  securityContext:
+                    runAsNonRoot: true
+                    runAsUser: 10001
+                    seccompProfile: { type: RuntimeDefault }
+                  terminationGracePeriodSeconds: 45     # the job stops itself 30 s before its limit
+                  containers:
+                    - name: main
+                      image: ${workload.containers.main.image}
+                      env:
+                        - { name: JOB_ENVIRONMENT, value: '${environmentConfigs.environment}' }
+                      resources: ${environmentConfigs.resources}
+                      securityContext:
+                        readOnlyRootFilesystem: true
+                        allowPrivilegeEscalation: false
+                        capabilities: { drop: [ALL] }
+                      volumeMounts:
+                        - { name: tmp, mountPath: /tmp }
+                  volumes:
+                    - name: tmp
+                      emptyDir: { sizeLimit: 128Mi }

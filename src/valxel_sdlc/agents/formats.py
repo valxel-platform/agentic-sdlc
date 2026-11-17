@@ -95,6 +95,11 @@ sequenceDiagram
 - <record>.<action>: <record> (<who did what>)
 ## Endpoints
 - <org>/<repo>: <none|project|namespace|internal|external>; calls <repo>, <repo>
+## Schedules                   (only with a job repo: when each job runs and what for; people approve it at G4)
+- <org>/<repo>: <minute> <hour> <day of month> <month> <day of week> <IANA time zone>; <what it does>
+                               (numbers only, e.g. '15 3 * * * America/Chicago'; its work covers the time since its last
+                                success and must be safe to run twice. Choose a job for work due at a time; an
+                                event worker for work that reacts to events.)
 ## Knowledge                   (only with a knowledge repo: what agents search, and the embedding model people decide at G4)
 - <org>/<repo>: model <embedding model> via <gateway (BAA)|gateway|self-hosted>; sources: <name> (<events <topic>, compacted|scan <store>|files>), ...
                                (an events source is rebuilt by replaying its topic: 'compacted' when its events carry whole

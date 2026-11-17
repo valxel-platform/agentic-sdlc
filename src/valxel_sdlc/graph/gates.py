@@ -385,7 +385,8 @@ def make_gate(gate: str, services):
                 rec = services.openchoreo.promote(component=t["component"], env=env, actor=d["approver"],
                                                   actor_type="human", project=t["project"],
                                                   namespace=t["namespace"], pipeline=t["pipeline"])
-                sized = _apply_capacity(services, snap, t, env)
+                sized = _apply_capacity(services, snap, t, env, repo=repo, role=prior.get("role", ""),
+                                        ref=prior.get("sha", ""))
                 update.setdefault("deployments", {})[repo] = {"repo": repo, **t, "env": env,
                                                               "release": rec.get("release", ""),
                                                               "pipeline": list(t["pipeline"]),

@@ -235,6 +235,9 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     out += _emitters(text, repos, ctx)
     out += _acceptance(repos, ctx)
     out += _endpoints(text, repos, ctx)
+    from ..jobs import design_findings as schedule_findings
+
+    out += schedule_findings(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
     from ..retrieval import check as knowledge_check
 
     out += knowledge_check(text, repos + new, ctx)
@@ -253,7 +256,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     return out
 
 
-RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge", "reporting")
+RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge", "reporting", "job")
 
 
 EXPOSED_ROLES = RUNTIME_ROLES + ("bff", "mobile")
