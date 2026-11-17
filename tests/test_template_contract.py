@@ -72,7 +72,41 @@ def test_an_instrumentation_event_goes_only_to_a_repo_that_can_record_it():
 @pytest.mark.parametrize("bad", ["capabilities: {x: {area: style, roles: all, marker: a}}",
                                  "capabilities: {x: {area: audit, roles: nobody, marker: a}}",
                                  "capabilities: {x: {area: audit, roles: [job], marker: '('}}",
-                                 "capabilities: {x: {area: audit, roles: [job]}}"])
+                                 "capabilities: {x: {area: audit, roles: [job]}}",
+                                 "audit_event: {repos: {a/b: f.py}}",
+                                 "audit_event: {type: valxel.audit.v1, repos: [a/b]}",
+                                 "capabilities: {audit: {area: audit, roles: [job], marker: 'x\\.audit\\.v1'}}\n"
+                                 "audit_event: {type: valxel.audit.v1}"])
 def test_a_broken_contract_is_refused(bad):
     with pytest.raises(tc.ContractError):
         tc.parse(bad)
+
+
+def test_a_template_on_another_audit_type_fails_the_contract():
+    gh = StubGitHub()
+    repo = "valxel-platform/template-job"
+    gh.files[(repo, "main", ".valxel/capabilities.yaml")] = "audit: src/job/audit.py\n"
+    gh.files[(repo, "main", "src/job/audit.py")] = 'EVENT_TYPE = "vrixel.audit.v1"\nclass Auditor: ...\n'
+    assert "audit" in {g["capability"] for g in tc.check(gh, repo, "job")}
+    gh.files[(repo, "main", "src/job/audit.py")] = 'EVENT_TYPE = "valxel.audit.v1"\n'
+    assert "audit" not in {g["capability"] for g in tc.check(gh, repo, "job")}
+
+
+def test_the_audit_sink_and_its_producers_name_the_same_type():
+    c = tc.contract()
+    assert c["audit_event"]["type"] == "valxel.audit.v1"
+    sink, gateway = "valxel-shared-services/ss-audit-sink", "valxel-shared-services/ss-llm-gateway"
+    assert {sink, gateway} <= set(c["audit_event"]["repos"])
+    gh = StubGitHub()
+    gh.files[(sink, "main", "src/audit_sink/records.py")] = (
+        'EVENT_TYPE = "valxel.audit.v1"\nEVENT_TYPES = (EVENT_TYPE, "vrixel.audit.v1")\n')
+    gh.files[(gateway, "main", "src/llm_gateway/audit.py")] = 'EVENT_TYPE = "vrixel.audit.v1"\n'
+    assert tc.audit_event_check(gh, sink) == []  # still accepting the old name as well is fine
+    assert tc.audit_event_check(gh, gateway)[0]["problem"] == "src/llm_gateway/audit.py doesn't name valxel.audit.v1"
+    gh.files[(gateway, "main", "src/llm_gateway/audit.py")] = 'EVENT_TYPE = "xvalxel.audit.v1"\n'
+    assert tc.audit_event_check(gh, gateway)  # a longer name that merely contains it doesn't count
+    assert tc.audit_event_check(gh, "valxel-shared-services/ss-governance") == []  # not listed: not asked
+    del gh.files[(sink, "main", "src/audit_sink/records.py")]
+    assert "doesn't exist" in tc.audit_event_check(gh, sink)[0]["problem"]
+    drift = capability_drift(gh, Target(gateway, "lane", "SS", {"role": "provider"}))
+    assert [d.item for d in drift] == ["audit-event-type"] and drift[0].fix == "manual"

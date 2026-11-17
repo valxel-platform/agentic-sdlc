@@ -47,7 +47,16 @@ def parse(text: str) -> dict:
             raise ContractError(f"{name}: needs a marker")
         caps[name] = {"area": c["area"], "roles": tuple(roles), "says": str(c.get("says") or ""),
                       "marker": str(c["marker"])}
-    return {"capabilities": caps, "groups": groups}
+    event = raw.get("audit_event") or {}
+    if event and not str(event.get("type") or "").strip():
+        raise ContractError("audit_event: needs a type")
+    if not isinstance(event.get("repos") or {}, dict):
+        raise ContractError("audit_event.repos: a map of repo to the file that names the type")
+    audit_event = {"type": str(event.get("type") or ""),
+                   "repos": {str(k): str(v) for k, v in (event.get("repos") or {}).items()}}
+    if audit_event["type"] and "audit" in caps and not re.search(caps["audit"]["marker"], audit_event["type"]):
+        raise ContractError(f"audit: marker doesn't match audit_event.type {audit_event['type']}")
+    return {"capabilities": caps, "groups": groups, "audit_event": audit_event}
 
 
 @cache
@@ -100,6 +109,24 @@ def check(gh, repo: str, role: str, c: dict | None = None) -> list[dict]:
             out.append({"capability": name, "area": cap["area"], "says": cap["says"],
                         "problem": f"{path} doesn't contain /{cap['marker']}/"})
     return out
+
+
+def audit_event_check(gh, repo: str, c: dict | None = None) -> list[dict]:
+    """For a repo listed under audit_event.repos: its file must name the audit event type, so a
+    producer or the sink can't drift to another name unnoticed."""
+    c = c or contract()
+    event = c.get("audit_event") or {}
+    path = (event.get("repos") or {}).get(repo)
+    if not path:
+        return []
+    says = f"sends or receives audit events as {event['type']}"
+    text = gh.get_file(repo=repo, path=path, ref="")
+    if text is None:
+        return [{"capability": "audit-event-type", "area": "audit", "says": says, "problem": f"{path} doesn't exist"}]
+    if not re.search(rf"(?<![\w.]){re.escape(event['type'])}(?![\w.])", text):
+        return [{"capability": "audit-event-type", "area": "audit", "says": says,
+                 "problem": f"{path} doesn't name {event['type']}"}]
+    return []
 
 
 def matrix(gh, templates: dict[str, str], c: dict | None = None) -> dict[str, dict[str, str]]:

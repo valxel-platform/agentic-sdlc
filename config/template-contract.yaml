@@ -81,7 +81,8 @@ capabilities:
     area: audit
     roles: [provider, knowledge, reporting, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, bff]
     says: "who did what to which records, as valxel.audit.v1 events to the product's audit topic, ids only"
-    marker: "(?i)valxel\\.audit|Auditor|SignInAudit"
+    # The exact event type (audit_event.type below), so a template that sends another can't pass.
+    marker: "valxel\\.audit\\.v1"
 
   # --- business metrics
   product-events:
@@ -104,3 +105,12 @@ capabilities:
     roles: [provider, event-worker, knowledge, reporting, connector, document-intake, channel]
     says: "events published and received per data contract (valxel.datasets), for staging's reconciliation"
     marker: "valxel\\.datasets|DatasetCounts"
+
+# The audit trail's CloudEvents type, and the repos outside the templates that send or receive it:
+# the audit sink rejects any other type, so a producer on an old name loses its records. Each
+# listed file must name the type; `valxel repos check` reports one that doesn't.
+audit_event:
+  type: valxel.audit.v1
+  repos:
+    valxel-shared-services/ss-audit-sink: src/audit_sink/records.py
+    valxel-shared-services/ss-llm-gateway: src/llm_gateway/audit.py

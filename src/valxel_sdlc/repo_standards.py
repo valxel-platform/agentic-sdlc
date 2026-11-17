@@ -297,10 +297,11 @@ def managed_drift(gh, t: Target) -> list[Drift]:
 def capability_drift(gh, t: Target) -> list[Drift]:
     """A template's gaps against the template contract (config/template-contract.yaml): security,
     observability, the audit trail and business metrics every repo of its role starts with."""
-    from .template_contract import check
+    from .template_contract import audit_event_check, check
 
-    return [Drift("capabilities", g["capability"], g["says"], g["problem"], fix="manual")
-            for g in check(gh, t.repo, t.plan["role"])]
+    gaps = check(gh, t.repo, t.plan["role"]) if t.kind == "template" and t.plan.get("role") else []
+    gaps += audit_event_check(gh, t.repo)
+    return [Drift("capabilities", g["capability"], g["says"], g["problem"], fix="manual") for g in gaps]
 
 
 # -- applying ----------------------------------------------------------------------------
@@ -325,7 +326,7 @@ def reconcile(gh, t: Target, *, apply: bool) -> Report:
             rep.drift += managed_drift(gh, t)
         except GitHubError as exc:
             rep.errors.append(f"managed files: {exc}")
-        if t.kind == "template" and t.plan.get("role"):
+        if t.kind != "governance":
             try:
                 rep.drift += capability_drift(gh, t)
             except GitHubError as exc:
