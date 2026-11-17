@@ -276,3 +276,29 @@ def test_a_sandbox_not_yet_reachable_is_retried_before_the_session_is_sent():
     http = Flaky()
     ex = session_runner.KubernetesExecutor(namespace="n", pool="t", api=FakeApi(), http=http, sleep=lambda s: None)
     assert ex.run(_spec())["ok"] and len(http.posts) == 1
+
+
+def test_the_cluster_is_called_with_the_pods_own_service_account(tmp_path, monkeypatch):
+    import httpx
+
+    sa = tmp_path / "sa"
+    sa.mkdir()
+    (sa / "token").write_text("sa-token\n")
+    seen = []
+
+    def handler(req):
+        seen.append((req.method, str(req.url), req.headers["authorization"]))
+        return httpx.Response(200, json={"status": {}})
+
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+    monkeypatch.setattr(session_runner.InClusterApi, "SA", sa)
+    api = session_runner.InClusterApi(http=httpx.Client(transport=httpx.MockTransport(handler)))
+    api.create_namespaced_custom_object(session_runner.GROUP, session_runner.API_VERSION, "valxel-sessions",
+                                        session_runner.PLURAL, {"kind": "SandboxClaim"})
+    api.delete_namespaced_custom_object(session_runner.GROUP, session_runner.API_VERSION, "valxel-sessions",
+                                        session_runner.PLURAL, "session-1")
+    assert seen == [
+        ("POST", "https://10.0.0.1:443/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/valxel-sessions/sandboxclaims",
+         "Bearer sa-token"),
+        ("DELETE", "https://10.0.0.1:443/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/valxel-sessions/"
+                   "sandboxclaims/session-1", "Bearer sa-token")]

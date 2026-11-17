@@ -293,11 +293,41 @@ class KubernetesExecutor:
         raise Unavailable("no session sandbox was ready in time")
 
 
-def _custom_objects() -> Any:
-    from kubernetes import client, config
+class InClusterApi:
+    """The three calls the executor makes, against the cluster's API with this pod's service
+    account (no kubernetes client library: httpx is already in the image)."""
 
-    config.load_incluster_config()
-    return client.CustomObjectsApi()
+    SA = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+
+    def __init__(self, http: Any = None) -> None:
+        import httpx
+
+        host, port = os.environ["KUBERNETES_SERVICE_HOST"], os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+        self.base = f"https://{host}:{port}"
+        self.http = http or httpx.Client(verify=str(self.SA / "ca.crt"), timeout=30, trust_env=False)
+
+    def _url(self, group, version, ns, plural, name="") -> str:
+        return f"{self.base}/apis/{group}/{version}/namespaces/{ns}/{plural}" + (f"/{name}" if name else "")
+
+    def _call(self, method: str, url: str, body: dict | None = None) -> dict:
+        token = (self.SA / "token").read_text().strip()  # rotated by the kubelet: read each time
+        resp = self.http.request(method, url, json=body, headers={"Authorization": f"Bearer {token}"})
+        if resp.status_code >= 400:
+            raise Unavailable(f"the cluster refused {method} {url.rsplit('/', 2)[-2:]}: {resp.status_code}")
+        return resp.json() if resp.content else {}
+
+    def create_namespaced_custom_object(self, group, version, ns, plural, body):
+        return self._call("POST", self._url(group, version, ns, plural), body)
+
+    def get_namespaced_custom_object(self, group, version, ns, plural, name):
+        return self._call("GET", self._url(group, version, ns, plural, name))
+
+    def delete_namespaced_custom_object(self, group, version, ns, plural, name):
+        return self._call("DELETE", self._url(group, version, ns, plural, name))
+
+
+def _custom_objects() -> Any:
+    return InClusterApi()
 
 
 _executor: Executor | None = None
