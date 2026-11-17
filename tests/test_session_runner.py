@@ -163,6 +163,7 @@ def test_each_session_claims_a_sandbox_and_the_claim_is_deleted():
     assert ex.run(_spec()) == {"ok": True, "text": "done"}
     [(ns, body)] = api.created
     assert ns == "valxel-sessions" and body["spec"] == {"sandboxTemplateRef": {"name": "agent-session"}}
+    assert body["apiVersion"] == "extensions.agents.x-k8s.io/v1beta1"
     assert http.posts[0][0] == "http://sbx-1.valxel-sessions.svc.cluster.local:8081/run"
     assert api.deleted == [body["metadata"]["name"]]
 
@@ -254,3 +255,22 @@ def test_with_sandboxes_codex_never_runs_in_the_tools_container(services, monkey
         CodexRuntime(services.gateway).run(_task(str(tmp_path)))
     choice = second_opinion(services.settings, set(services.settings.roles), "reviewer", "general")
     assert choice.role is None and "Codex can't run in a session sandbox yet" in choice.skipped
+
+
+def test_a_sandbox_not_yet_reachable_is_retried_before_the_session_is_sent():
+    import httpx
+
+    class Flaky(FakeHttp):
+        def __init__(self):
+            super().__init__()
+            self.fails = 2
+
+        def post(self, url, json, timeout):
+            if self.fails:
+                self.fails -= 1
+                raise httpx.ConnectError("name does not resolve yet")
+            return super().post(url, json, timeout)
+
+    http = Flaky()
+    ex = session_runner.KubernetesExecutor(namespace="n", template="t", api=FakeApi(), http=http, sleep=lambda s: None)
+    assert ex.run(_spec())["ok"] and len(http.posts) == 1

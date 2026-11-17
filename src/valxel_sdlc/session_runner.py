@@ -45,7 +45,8 @@ from typing import Any, Callable, Protocol
 log = logging.getLogger(__name__)
 
 VERSION = 1
-GROUP, API_VERSION, PLURAL = "extensions.agents.x-k8s.io", "v1alpha1", "sandboxclaims"
+# Agent Sandbox 1.0 serves its extensions at v1beta1 only.
+GROUP, API_VERSION, PLURAL = "extensions.agents.x-k8s.io", "v1beta1", "sandboxclaims"
 # Set by the runner itself, never taken from the spec.
 _OWN = ("cwd", "settings", "env", "plugins", "resume")
 
@@ -246,7 +247,7 @@ class KubernetesExecutor:
         http = self.http or httpx.Client(follow_redirects=False, trust_env=False)
         try:
             host = self._ready(name)
-            resp = http.post(f"http://{host}:{self.port}/run", json=spec, timeout=spec.get("timeout_s", 3600) + 60)
+            resp = self._post(http, f"http://{host}:{self.port}/run", spec)
             if resp.status_code != 200:
                 raise Unavailable(f"the session's sandbox answered {resp.status_code}")
             return resp.json()
@@ -257,6 +258,20 @@ class KubernetesExecutor:
                 self.api.delete_namespaced_custom_object(GROUP, API_VERSION, self.namespace, PLURAL, name)
             except Exception:  # noqa: BLE001 - the claim's TTL removes it anyway
                 log.warning("session sandbox claim %s not deleted", name)
+
+    def _post(self, http, url: str, spec: dict):
+        """A new sandbox's name may not resolve yet, nor its runner listen: retry connecting for a
+        little while. Once connected, the session runs once: nothing is sent twice."""
+        import httpx
+
+        deadline = self.clock() + min(self.ready_s, 30.0)
+        while True:
+            try:
+                return http.post(url, json=spec, timeout=spec.get("timeout_s", 3600) + 60)
+            except httpx.ConnectError:
+                if self.clock() >= deadline:
+                    raise
+                self.sleep(1.0)
 
     def _ready(self, name: str) -> str:
         deadline = self.clock() + self.ready_s
