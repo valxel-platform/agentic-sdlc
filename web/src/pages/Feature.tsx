@@ -5,6 +5,7 @@ import { CostTable } from "../components/Costs";
 import { AgentSessions } from "../components/AgentSessions";
 import { useLive } from "../live";
 import { Resize } from "../components/Resize";
+import { Stopped } from "../components/Stopped";
 import { NotifyPanel, PathPanel } from "../components/Path";
 import { NextInInitiative } from "../components/NextSteps";
 import { ChangeRequest } from "../components/ChangeRequest";
@@ -174,7 +175,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
           built={f.rail.some((s) => s.key === "g4" && (s.state === "done" || s.state === "skipped"))} />
       )}
       {f.initiative_id && (f.status === "released" || f.status === "done") && <NextInInitiative initiativeId={f.initiative_id} />}
-      {f.error && <p className="error-note" role="alert" style={{ marginBottom: 20 }}>The pipeline stopped with an error: {f.error}</p>}
+      {f.error && <Stopped id={f.feature_id} error={f.error} what="pipeline" style={{ marginBottom: 20 }} onResumed={load} />}
 
       {people.length > 0 && (
         <div style={{ marginBottom: 20 }}>

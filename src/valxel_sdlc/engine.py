@@ -36,11 +36,12 @@ from .engine_parts.watching import WatchingMixin
 from .engine_parts.roadmap import RoadmapMixin
 from .engine_parts.operations import OperationsMixin
 from .engine_parts.costs import CostsMixin
+from .engine_parts.recovery import RecoveryMixin
 
 log = logging.getLogger(__name__)
 
 
-class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin):
+class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, RecoveryMixin):
     def __init__(self, services: Services, checkpointer, index: FeatureIndex | None = None,
                  bus: EventBus | None = None, workers: int = 4, work: WorkSync | None = None,
                  cluster: Cluster | None = None) -> None:
@@ -140,6 +141,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin):
         self._inventory_day = ""
         self._outcomes_day = ""
         self._envs_swept = 0.0
+        self._recovered = 0.0
         # Scan upkeep: security findings on products' default branches (valxel_sdlc.upkeep).
         from .upkeep.service import Upkeep
 
@@ -164,6 +166,10 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin):
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="feature")
         self.running: set[str] = set()  # queued or running on this replica
         self.errors = Notes(self.cluster, "error")  # a thread's last error, whichever replica ran it
+        # Crash recovery (engine_parts/recovery.py): work queued on some replica and not yet started,
+        # and how often the reaper has restarted a thread from the same checkpoint.
+        self.queued = Notes(self.cluster, "queued")
+        self.recoveries = Notes(self.cluster, "recovery")
         self.work = work or WorkSync(services, InMemoryLinkStore(),
                                      os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080")
         self.sync_errors = Notes(self.cluster, "sync_error")
@@ -187,6 +193,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin):
         """Run the thread until it finishes or waits on a human, publishing each node as it ends.
         Only one replica runs a thread at a time: the one holding its lock."""
         lease = self.cluster.lock(feature_id)
+        self.queued.pop(feature_id, None)  # started, or refused: either way no longer waiting here
         if lease is None:
             self.running.discard(feature_id)
             raise Busy(f"{feature_id} is running on another replica")
@@ -195,7 +202,9 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin):
             self.errors.pop(feature_id, None)
             self.bus.publish({"type": "feature.running", "feature_id": feature_id})
             try:
-                while payload is not None:
+                first = True  # None as the first payload: carry on from the checkpoint (a resume)
+                while first or payload is not None:
+                    first = False
                     for chunk in self._g(feature_id).stream(payload, self._config(feature_id), stream_mode="updates"):
                         for node in chunk:
                             if node != "__interrupt__":
@@ -203,6 +212,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin):
                         if not lease.alive():  # another replica may carry it on from the last checkpoint
                             raise LeaseLost(f"{feature_id}: this replica lost the thread's lock")
                     payload = self._ready_wait(feature_id)  # CI or a deploy already done: carry on
+                self.recoveries.pop(feature_id, None)  # ran through: a later restart counts from one
                 self._prune(feature_id)
             except LeaseLost:
                 raise
@@ -266,6 +276,9 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin):
         # Running from the moment the work is queued, not when a worker picks it up: otherwise a
         # caller (or a second decision) can see the old state between the two.
         self.running.add(feature_id)
+        from .cluster import stamp
+
+        self.queued[feature_id] = stamp()  # other replicas see it's queued (engine_parts/recovery.py)
 
         def run():
             try:

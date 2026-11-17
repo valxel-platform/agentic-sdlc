@@ -304,8 +304,15 @@ Run as many replicas as you like behind one load balancer, all on the same Postg
 - **One run per feature.** The replica that moves a feature, incident, release or initiative on
   holds its Postgres advisory lock while it runs. Another replica asked to move it on at the same
   time answers that it is still running, and every replica shows it as running. A replica that
-  dies lets go with its connection; one that loses its lock connection stops before the next step,
-  and the work carries on from the last checkpoint.
+  dies lets go with its connection; one that loses its lock connection stops before the next step.
+- **Picked up after a crash.** A replica that dies mid-step (a crash, an out-of-memory kill, a
+  deploy) leaves the thread at its last checkpoint, and work it had queued but not started is
+  visible to the others. The watcher resumes such threads from their checkpoint within a minute
+  (`engine_parts/recovery.py`), the step that was cut off running again from its start. A thread
+  restarted 3 times from the same step (`VALXEL_RUN_RECOVERY_LIMIT`) is stopped with an error
+  instead. A thread that stopped on an error stays stopped until someone presses Resume on its
+  page (`POST /api/features/{id}/resume`); resuming can't skip a gate. Queued work counts as
+  dropped after `VALXEL_RUN_QUEUE_STALE_S` (900 s).
 - **One watcher.** Every replica starts the watcher; only the one holding its lock polls CI and
   OpenChoreo and runs the daily inventory and hourly cost review. If it goes, another takes over on
   its next tick.

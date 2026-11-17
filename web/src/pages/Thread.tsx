@@ -5,6 +5,7 @@ import { api, ApiError, type InitiativeView, type PendingItem, type ReleaseView,
 import { useLive } from "../live";
 import { DecisionPanel } from "../components/Decision";
 import { Resize } from "../components/Resize";
+import { Stopped } from "../components/Stopped";
 import { RecordPrs, StartFeatures } from "../components/NextSteps";
 import { HORIZONS, MODELS, money, threadPath, waitingLabel } from "../vocab";
 
@@ -69,7 +70,7 @@ export function InitiativePage() {
           <Record pr={v.record_pr} />
         </div>
       </div>
-      {v.error && <p className="error-note" role="alert">The workflow stopped with an error: {v.error}</p>}
+      {v.error && <Stopped id={v.feature_id} error={v.error} onResumed={load} />}
       <Pending items={v.pending} id={v.feature_id} title={v.title} onDone={load} />
       <Resize id={v.feature_id} kind="initiative" pending={v.pending} />
       {v.status === "approved" && <RecordPrs id={v.feature_id} />}
@@ -149,7 +150,7 @@ export function ReleasePage() {
           <Record pr={v.record_pr} />
         </div>
       </div>
-      {v.error && <p className="error-note" role="alert">The workflow stopped with an error: {v.error}</p>}
+      {v.error && <Stopped id={v.feature_id} error={v.error} onResumed={load} />}
       <Pending items={v.pending} id={v.feature_id} title={v.title} onDone={load} />
 
       <div className="split">

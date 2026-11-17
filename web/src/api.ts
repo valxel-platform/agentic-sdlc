@@ -699,6 +699,7 @@ export const api = {
   features: () => request<FeatureSummary[]>("GET", "/features"),
   products: () => request<Record<string, { name?: string; kind: string; ok: boolean; data_class?: string; profiles?: Profile[];
                                             default_profile?: Profile }>>("GET", "/products"),
+  resume: (id: string) => request<{ accepted: boolean }>("POST", `/features/${encodeURIComponent(id)}/resume`, {}),
   syncWork: (id: string) => request<unknown>("POST", `/features/${encodeURIComponent(id)}/sync`, {}),
   feature: (id: string) => request<Feature>("GET", `/features/${encodeURIComponent(id)}`),
   initiative: (id: string) => request<InitiativeView>("GET", `/features/${encodeURIComponent(id)}`),

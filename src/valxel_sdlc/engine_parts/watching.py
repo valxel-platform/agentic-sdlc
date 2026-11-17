@@ -100,6 +100,12 @@ class WatchingMixin:
                     continue  # another replica watches; this one takes over if that one goes
                 for fid in self.waiting_on_external():
                     self.poke(fid)
+                if time.time() - self._recovered > 60:  # threads a replica dropped (engine_parts/recovery.py)
+                    self._recovered = time.time()
+                    try:
+                        self.recover_stranded()
+                    except Exception:
+                        log.exception("crash recovery sweep failed")
                 today = time.strftime("%Y-%m-%d", time.gmtime())
                 if today != self._inventory_day:  # one inventory snapshot a day, for the trend
                     self._inventory_day = today

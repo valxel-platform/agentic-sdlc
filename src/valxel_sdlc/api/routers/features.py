@@ -340,6 +340,22 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             return {"summary": {"lines": decisions._skim(item["preview"]), "by": "document"}}
         return {"summary": {"lines": [], "by": "document"}}
 
+    @api.post("/features/{feature_id}/resume", status_code=202)
+    def resume(feature_id: str, user: User = Depends(current_user)) -> dict:
+        """Carry a stopped feature (or incident, release, initiative) on from its last checkpoint:
+        one that stopped on an error, or that a replica dropped mid-step. It can't pass a gate:
+        gates wait for their decision as before."""
+        try:
+            pid = eng().view(feature_id)["product_id"]
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if pid not in lanes_for(user):
+            raise HTTPException(403, f"Only members of {pid}'s organization can resume its work")
+        try:
+            return eng().resume(feature_id, by=user.login)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
     @api.post("/features/{feature_id}/sync")
     def sync(feature_id: str, user: User = Depends(current_user)) -> dict:
         """Retry the work-tracker sync now, e.g. after a tracker outage."""

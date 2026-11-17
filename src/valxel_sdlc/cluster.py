@@ -7,7 +7,8 @@ process used to keep for itself is here, so any replica can serve any request:
   holds the thread's Postgres advisory lock while it runs. Another replica asked to move it on at
   the same time refuses (a decision says "still running"), and every replica can tell it is
   running. A replica that dies lets go with its connection; one that loses its lock connection
-  stops before the next step.
+  stops before the next step. The watcher resumes a thread dropped either way from its checkpoint
+  (engine_parts/recovery.py).
 - **One watcher.** Polling CI and OpenChoreo, the daily inventory and the hourly cost review run on
   the replica that holds the watcher's lock; if it goes, another takes over on its next tick.
 - **Asked once.** What the tool has asked GitHub to run (post-deploy and acceptance runs) and when
