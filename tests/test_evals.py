@@ -85,7 +85,8 @@ def test_the_cli_exports_and_runs_from_a_file(engine, services, tmp_path, capsys
                      "--out", str(out), "--limit", "1"])
     assert code == 0 and "no regression" in capsys.readouterr().out
     report = json.loads(out.read_text())
-    assert report["comparison"]["ok"] and report["comparison"]["cases"] == 5  # the newest case of each phase
+    # the newest case of each phase, and the five injection cases every run includes
+    assert report["comparison"]["ok"] and report["comparison"]["cases"] == 10
     assert cli.main(["eval", "export", "--mode", "stub", "--cases", str(path), "--data-class", "phi",
                      "--out", str(tmp_path / "phi.jsonl")]) == 0
     assert (tmp_path / "phi.jsonl").read_text() == ""  # FARM is general: nothing regulated leaves

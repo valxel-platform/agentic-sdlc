@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -17,6 +18,8 @@ from ...web.auth import (
 )
 from ..models import SubmitIn, IntakeStartIn, MessageIn, DraftIn
 
+
+log = logging.getLogger(__name__)
 
 def build(ctx: SimpleNamespace) -> APIRouter:
     api = APIRouter()
@@ -155,6 +158,18 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             raise HTTPException(404, f"No attachment {aid}")
         return attachment_response(eng().services.attachments.path(meta, feature_id=feature_id), meta)
 
+    def keep_case(s) -> None:
+        """An intake eval case: what the person said, and the draft they confirmed (valxel_sdlc.evals)."""
+        store = getattr(eng().services, "evals", None)
+        if store is None:
+            return
+        from ...intake import eval_case
+
+        try:
+            store.capture(eval_case(eng().services, s))
+        except Exception:
+            log.warning("intake %s: eval case not kept", s.id, exc_info=True)
+
     def submit_sized(s, user: User) -> dict:
         """An initiative (to G0) or a new product (to inception) from the front door."""
         from ...intake import AGENT_PROPOSES
@@ -188,6 +203,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             raise HTTPException(424, f"Product governance could not be loaded: {exc}") from exc
         s.messages.append({"role": "agent", "text": f"Started {s.feature_id}, {what}.", "at": s.messages[-1]["at"]})
         stores["intakes"].save(s)
+        keep_case(s)
         return s.to_dict()
 
     @api.post("/intake/{sid}/submit", status_code=201)
@@ -221,6 +237,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         s.messages.append({"role": "agent", "text": f"Submitted as {s.feature_id}. Agents have started on it.",
                            "at": s.messages[-1]["at"]})
         stores["intakes"].save(s)
+        keep_case(s)
         return s.to_dict()
 
     return api

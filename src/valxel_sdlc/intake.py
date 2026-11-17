@@ -743,3 +743,63 @@ class IntakeAgent:
             s.draft.not_duplicate_reason = ""
             s.draft.related_capability = self._overlap(s.draft)
             s.overlap_checked = True
+
+
+# --------------------------------------------------------------------------- evals
+
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def eval_case(services, s: IntakeSession):
+    """The eval case a submitted intake leaves (valxel_sdlc.evals): what the person said, in order,
+    and the draft they confirmed. Its data class is the product's; a new product's is phi."""
+    from .evals import EvalCase, now as at
+
+    d = s.draft
+    data_class = "phi"
+    if d.product_id and d.size != "product":
+        try:
+            data_class = services.snapshot(d.product_id).product.data_class
+        except Exception:
+            pass
+    confirmed = {k: getattr(d, k) for k in ("size", "product_id", "title", "problem", "users", "success_metric")}
+    return EvalCase(id=f"intake-{s.id}", product_id=d.product_id or "INCEPTION", feature_id=s.feature_id,
+                    phase="intake", data_class=data_class, at=at(), config_version=getattr(services.gateway, "config_version", ""),
+                    ctx={"lanes": list(s.lanes), "starter": s.starter, "user": [m["text"] for m in s.messages if m["role"] == "user"],
+                         "size_suggested": d.size_suggested},
+                    output=json.dumps(confirmed), status="passed", label={"decision": "submitted", **confirmed})
+
+
+def invented_numbers(said: list[str], measure: str) -> list[str]:
+    """Numbers in a success measure that nothing the person said contains: a target made up."""
+    if not measure or measure == AGENT_PROPOSES:
+        return []
+    heard = set(_NUMBER.findall(" ".join(said)))
+    return list(dict.fromkeys(n for n in _NUMBER.findall(measure) if n not in heard))
+
+
+def replay(services, case) -> dict:
+    """The person's messages through a fresh intake under the services' config; the person's own
+    size choice stands in for their click when the agent asks."""
+    lab = case.label or {}
+    s = IntakeSession(id=f"eval-{uuid.uuid4().hex[:8]}", owner="valxel-eval", lanes=list(case.ctx.get("lanes") or []),
+                      starter=bool(case.ctx.get("starter")))
+    agent = IntakeAgent(services)
+    for text in case.ctx.get("user") or []:
+        if s.awaiting == "size" and lab.get("size") and not size_said(text):
+            agent.set_size(s, lab["size"])
+            s.awaiting = ""
+        agent.respond(s, text)
+    guessed = s.draft.size_suggested or s.draft.size
+    if not s.draft.size and lab.get("size"):
+        agent.set_size(s, lab["size"])
+    d = s.draft
+    needed = [f for f in NEEDS.get(lab.get("size") or "feature", FIELDS)]
+    filled = sum(1 for f in needed if getattr(d, f, ""))
+    invented = invented_numbers(case.ctx.get("user") or [], d.success_metric)
+    product_ok = None if lab.get("size") == "product" else d.product_id == lab.get("product_id")
+    size_ok = None if not guessed else guessed == lab.get("size")
+    return {"passed": bool(product_ok is not False and size_ok is not False and not invented),
+            "product_agrees": product_ok, "size_agrees": size_ok, "invented": bool(invented),
+            "invented_numbers": invented, "filled": round(filled / len(needed), 4) if needed else 1.0,
+            "draft": {k: getattr(d, k) for k in ("size", "product_id", "title", "problem", "users", "success_metric")}}

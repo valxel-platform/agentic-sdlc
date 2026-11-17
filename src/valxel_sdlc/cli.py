@@ -234,6 +234,8 @@ def _eval(args: argparse.Namespace) -> int:
         pool = ConnectionPool(os.environ["DATABASE_URL"], max_size=2, kwargs={"autocommit": True, "row_factory": dict_row})
         cases = evals.PostgresEvalStore(pool).cases(product_id=args.product, phases=phases, data_classes=classes,
                                                      limit_per_phase=args.limit)
+    if args.action == "run" and not args.no_injection:
+        cases += evals.injection_cases()
     if args.action == "export":
         evals.dump_jsonl(cases, args.out or "cases.jsonl")
         print(f"{len(cases)} cases written to {args.out or 'cases.jsonl'} (data classes: {', '.join(classes)})")
@@ -444,6 +446,7 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     e.add_argument("--max-drop", type=float, default=0.05, help="Largest drop in a rate that isn't a regression")
     e.add_argument("--max-cost-increase", type=float, default=None, help="e.g. 0.25 fails a run that costs 25%% more")
     e.add_argument("--budget", type=float, default=None, help="Dollars each config's run may spend")
+    e.add_argument("--no-injection", action="store_true", help="Leave out the prompt-injection suite (run by default)")
     e.add_argument("--mode", default="live", choices=["live", "stub"])
     e.add_argument("--out", help="Write cases (export) or the full results (run) here")
     inc = sub.add_parser("inception", help="Draft a product's brief, then (with the approved brief) its "
