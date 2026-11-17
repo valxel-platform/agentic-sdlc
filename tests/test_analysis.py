@@ -131,7 +131,7 @@ def test_the_analysis_is_waited_for_then_given_up_on(tmp_path, root, monkeypatch
         def now(cls, tz=None):
             return real.now(tz) + timedelta(minutes=9)
 
-    monkeypatch.setattr("valxel_sdlc.engine.datetime", Later)
+    monkeypatch.setattr("valxel_sdlc.engine_parts.watching.datetime", Later)
     eng.poke_now(iid)
     assert gate(eng, iid)
     assert "didn't finish in time" in urgent(svc)[0]["payload"]["custom_details"]["why on-call"]

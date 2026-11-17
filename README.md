@@ -2657,7 +2657,8 @@ src/valxel_sdlc/
   gateway/         gateway, providers, prompt layers, pricing, ledger
   runtime/         generic and Claude Code runtimes
   integrations/    GitHub, OpenChoreo, capability catalog, MCP client, diagrams, Jira, OpenProject
-  engine.py        start, inbox, decide, view; resolves CI and OpenChoreo waits
+  engine.py        start, inbox, decide, view; runs threads one replica at a time
+  engine_parts/    the engine's other areas: watching (waits, the watcher), roadmap, operations, costs
   waits.py         checks CI, builds and deployments for waiting features
   provisioning.py  new repos: standards, proposal checks, provisioner
   repo_roles.py    repo roles (library, provider, event-worker, mcp-server, agent, consumer, bff, acceptance) and merge order
