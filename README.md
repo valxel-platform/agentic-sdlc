@@ -492,8 +492,8 @@ repo_standards:
 1. Publish the templates named in `config/repos.yaml` to `valxel-platform` and mark each one a
    template repository: `template-service` and `template-event-worker` (Java 21, Spring Boot),
    `template-web` (React, TypeScript), `template-library` (Java), and `template-mcp-server`,
-   `template-agent`, `template-knowledge`, `template-reporting`, `template-job` and
-   `template-integration` (Python).
+   `template-agent`, `template-knowledge`, `template-reporting`, `template-job`,
+   `template-integration` and `template-code-sandbox` (Python).
    Their CI jobs are named for the required checks
    (`unit`, `contract`) and post `unit / report`-style statuses the quality suites read; their
    `post-deploy.yml` runs integration, e2e and smoke suites when the pipeline dispatches
@@ -598,6 +598,16 @@ like any other repo and the provision step creates them on the golden path:
 | `mcp-server` | `valxel-platform/template-mcp-server` | `unit`, `CodeQL` | Product capabilities as MCP tools over Streamable HTTP: OAuth scopes, annotated tools, idempotent writes, audit, PHI-minimal results |
 | `agent` | `valxel-platform/template-agent` | `unit`, `evals`, `CodeQL` | A durable LangGraph workflow agent: MCP tools on an allowlist, models through the product's LLM gateway, a person approves every change |
 | `knowledge` | `valxel-platform/template-knowledge` | `unit`, `retrieval`, `CodeQL` | Retrieval over the product's own records: an index kept from its events (or a scan of a document store) in its Postgres, searched as MCP tools (`search`, `get_document`, `list_sources`), filtered by who is asking with row-level security |
+| `code-sandbox` | `valxel-platform/template-code-sandbox` | `unit`, `CodeQL` | Where agents run the code they write: the MCP tool `run_code`, with a fresh single-use Agent Sandbox per run (gVisor, no network, no service account token, CPU, memory, time and output limits). Only the agents the design names may call it; each run is audited by the code's SHA-256 |
+
+An agent never runs model-written code in its own pod: the agent component type, its coder rules and
+its review all say so. When the HLD has an agent run code (a code interpreter, generated Python over
+a table), G4 wants a `code-sandbox` in the design or the product, called by that agent in Endpoints.
+A code sandbox is `project`-visible, calls nothing, and is called by agents only; its coder sets
+`SANDBOX_ALLOWED_CLIENTS` to exactly those agents. The platform's `SandboxTemplate` and warm pool
+(example `agent-sandbox/code-runner.yaml`) give each run its isolation; the template's post-deploy
+suite proves it from inside real sandboxes (no network or DNS, no service account token, a clean
+start every run). Alert rules: `sandbox-pool-exhausted`, `sandbox-claims-left`.
 
 Roles merge and deploy in dependency order: library, provider, event-worker, knowledge, mcp-server, agent, consumer, bff, acceptance (merged, never deployed).
 

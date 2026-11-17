@@ -651,7 +651,11 @@ SECURITY = {
                   " never logged or put in errors. Events in and out are checked against their contracts; audit"
                   " integration.received and integration.sent by id. Kafka as this connector's own identity (VX-17)."),
     "agent": (" Call MCP servers only through token exchange for the person behind the step (audience and"
-              " scope per server); never a fixed token (VX-13, VX-17)."),
+              " scope per server); never a fixed token (VX-13, VX-17). Never run model-written code in this"
+              " pod (no exec, eval or subprocess on it): send it to the product's code sandbox's run_code."),
+    "code-sandbox": (" run_code takes calls only from the agents the design names, with the sandbox:run scope;"
+                     " every run gets a fresh sandbox, deleted after; the runner keeps no network, mounts,"
+                     " secrets or service account (VX-17)."),
     "consumer": (" The app never holds a token: it calls the API on its own origin through the product's BFF"
                  " and sends X-XSRF-TOKEN on writes. Its endpoint is project-visible only (VX-17)."),
     "bff": (" One route per service the HLD lets it call, each with TokenRelay and the session cookie"
@@ -720,6 +724,15 @@ def schedule_instruction(ctx: dict, task: dict) -> str:
     if task.get("role") != "job":
         return ""
     from ..jobs import coder_instruction
+
+    return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
+
+
+def sandbox_instruction(ctx: dict, task: dict) -> str:
+    """A code sandbox's allowed agents from the approved HLD (sandboxes.py)."""
+    if task.get("role") != "code-sandbox":
+        return ""
+    from ..sandboxes import coder_instruction
 
     return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
 
@@ -909,7 +922,7 @@ def build_build_subgraph(services):
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
                   + contracts_instruction(ctx, task) + schedule_instruction(ctx, task)
-                  + integration_instruction(ctx, task)
+                  + integration_instruction(ctx, task) + sandbox_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
                     " type the change uses. " + diary.CODER + " " + sessions_instruction()
                   + "\n\n" + structured.instruction(structured.CoderReply)),
@@ -998,6 +1011,8 @@ def build_build_subgraph(services):
                       + (" Check that the connector's webhooks verify their signature before reading the body, that"
                          " the vendor client is used for every outbound call (no other HTTP client), and that the"
                          " mapping copies no more of a record than its contract allows." if r.get("role") == "connector" else "")
+                      + (" Check that the agent runs no model-written code itself (no exec, eval, compile or"
+                         " subprocess on it): code goes to the code sandbox's run_code." if r.get("role") == "agent" else "")
                       + (" Check VX-19: AWS services reached only behind a port, names from the environment variables"
                          " workload.yaml binds, the SDK's default credentials (no keys), and only the access the HLD's"
                          " Resources section gives this component." if resources_instruction(ctx, r) else "")

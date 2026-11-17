@@ -95,6 +95,8 @@ sequenceDiagram
 - <record>.<action>: <record> (<who did what>)
 ## Endpoints
 - <org>/<repo>: <none|project|namespace|internal|external>; calls <repo>, <repo>
+                               (An agent that runs code it writes calls the product's code sandbox (role
+                                code-sandbox): project-visible, calling nothing, called by agents only.)
 ## Schedules                   (only with a job repo: when each job runs and what for; people approve it at G4)
 - <org>/<repo>: <minute> <hour> <day of month> <month> <day of week> <IANA time zone>; <what it does>
                                (numbers only, e.g. '15 3 * * * America/Chicago'; its work covers the time since its last

@@ -454,6 +454,7 @@ def plan(ctx: dict, defective: bool) -> str:
             "reporting": ["reporting.yaml"],
             "job": ["job.yaml", "src/job/work.py", "tests/test_work.py"],
             "connector": ["integration.yaml", "src/integration/mapping.py", "tests/test_mapping.py"],
+            "code-sandbox": ["workload.yaml", "tests/test_server.py"],
             "agent": [f"src/agent/prompts/{slug}.md", f"evals/cases/{slug}.jsonl"],
             "event-worker": [f"src/main/java/com/valxel/worker/{slug.replace('-', '')}/Handler.java",
                              f"src/main/resources/db/migration/V2__{slug.replace('-', '_')}.sql"],
@@ -531,7 +532,7 @@ def _endpoint_lines(repos: list[dict]) -> list[str]:
         by_role.setdefault(r["role"], []).append(short[r["name"]])
     calls = {
         "bff": by_role.get("provider", []) + by_role.get("consumer", []) + by_role.get("agent", []),
-        "agent": by_role.get("mcp-server", []) + by_role.get("knowledge", []),
+        "agent": by_role.get("mcp-server", []) + by_role.get("knowledge", []) + by_role.get("code-sandbox", []),
         "mcp-server": by_role.get("provider", []),
         "consumer": [],
         "mobile": by_role.get("bff", []),

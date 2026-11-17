@@ -1,0 +1,68 @@
+# The sandboxes a product's code sandbox (role `code-sandbox`) runs code in: kubernetes-sigs/agent-sandbox.
+# Applied to each product namespace that has a code sandbox. Each run claims one (SandboxClaim), sends
+# it one job and deletes it; the warm pool keeps a few started so a run doesn't wait for a pod.
+# The image is the product's code-sandbox image, run as `sandbox-runner` (one job on 8888, then exit).
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxTemplate
+metadata:
+  name: code-runner
+spec:
+  podTemplate:
+    metadata:
+      labels: { valxel.io/sandbox: code-runner }
+    spec:
+      runtimeClassName: gvisor                 # its own kernel: system calls never reach the node's
+      automountServiceAccountToken: false      # no Kubernetes API from inside
+      enableServiceLinks: false                # no other services' addresses in its environment
+      hostNetwork: false
+      dnsPolicy: None                          # no resolver: names don't resolve
+      dnsConfig: { nameservers: ["127.0.0.1"] }
+      restartPolicy: Never
+      activeDeadlineSeconds: 300               # however a run goes, the pod is gone within 5 minutes
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: runner
+          image: registry.example.com/emr/emr-code-sandbox:latest  # set per product: the code sandbox's own image
+          command: [sandbox-runner]
+          env:
+            - { name: SANDBOX_WORKDIR, value: /work }
+          ports: [{ containerPort: 8888 }]
+          readinessProbe: { httpGet: { path: /healthz, port: 8888 }, periodSeconds: 1 }
+          resources:
+            requests: { cpu: "500m", memory: "640Mi" }
+            limits: { cpu: "1", memory: "640Mi", ephemeral-storage: "256Mi" }
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: work, mountPath: /work }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: work, emptyDir: { sizeLimit: 128Mi } }
+        - { name: tmp, emptyDir: { sizeLimit: 64Mi } }
+---
+apiVersion: extensions.agents.x-k8s.io/v1alpha1
+kind: SandboxWarmPool
+metadata:
+  name: code-runner
+spec:
+  replicas: 3
+  sandboxTemplateRef: { name: code-runner }
+---
+# No network for sandboxes: in from the code sandbox server only (the job), out to nothing.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: code-runner
+spec:
+  podSelector: { matchLabels: { valxel.io/sandbox: code-runner } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { valxel.io/role: code-sandbox } } }]
+      ports: [{ protocol: TCP, port: 8888 }]
+  egress: []

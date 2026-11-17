@@ -106,6 +106,23 @@ rules:
     condition: { window: 15m, interval: 5m, operator: gt, threshold: 10 }
     says: "The vendor is down or refusing the connector's credentials. Nothing is lost: the consumer retries the same event. Check the vendor's status and the connector's token or certificate."
 
+  # Code sandboxes (template-code-sandbox).
+  sandbox-pool-exhausted:
+    description: "Runs waited for a sandbox and gave up."
+    roles: [code-sandbox]
+    severity: warning
+    source: { type: log, query: "sandbox.pool_exhausted" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 3 }
+    says: "Agents asked for more runs than the warm pool could start. Raise the SandboxWarmPool's replicas, or check that sandbox pods start (gVisor nodes, image pulls, quota)."
+
+  sandbox-claims-left:
+    description: "Sandbox claims weren't deleted after their runs."
+    roles: [code-sandbox]
+    severity: warning
+    source: { type: log, query: "sandbox.claim_not_deleted" }
+    condition: { window: 1h, interval: 15m, operator: gt, threshold: 0 }
+    says: "A finished run's sandbox is still claimed. Its pod's deadline removes it, but check the server's access to sandboxclaims and the Kubernetes API."
+
   memory:
     description: "Memory above 90% of its limit for 5 minutes."
     severity: warning

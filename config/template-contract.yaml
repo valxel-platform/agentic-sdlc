@@ -14,9 +14,9 @@
 version: 1
 
 groups:
-  all: [provider, event-worker, knowledge, reporting, job, connector, mcp-server, agent, consumer, bff, mobile, library, acceptance]
+  all: [provider, event-worker, knowledge, reporting, job, connector, mcp-server, code-sandbox, agent, consumer, bff, mobile, library, acceptance]
   # Built into an image and run by OpenChoreo.
-  deployed: [provider, event-worker, knowledge, reporting, job, connector, mcp-server, agent, consumer, bff]
+  deployed: [provider, event-worker, knowledge, reporting, job, connector, mcp-server, code-sandbox, agent, consumer, bff]
 
 capabilities:
   # --- security
@@ -59,44 +59,44 @@ capabilities:
     marker: "(?i)opentelemetry"
   error-reports:
     area: observability
-    roles: [provider, event-worker, knowledge, reporting, job, connector, mcp-server, agent, consumer, bff, mobile]
+    roles: [provider, event-worker, knowledge, reporting, job, connector, mcp-server, code-sandbox, agent, consumer, bff, mobile]
     says: "unhandled errors to Sentry or GlitchTip, tagged with the component so the tool routes the issue"
     marker: "(?i)sentry"
   json-logs:
     area: observability
     # A web app's container only serves files; its errors are reported from the browser (error-reports).
-    roles: [provider, event-worker, knowledge, reporting, job, connector, mcp-server, agent, bff]
+    roles: [provider, event-worker, knowledge, reporting, job, connector, mcp-server, code-sandbox, agent, bff]
     says: "one JSON object a line, the exception under error.stack_trace (the platform's alert rules read it)"
     marker: "(?i)stack_trace|logstash|ecs"
   post-deploy:
     area: observability
     # Components people or other services call; the headless ones (event-worker, reporting, job)
     # are exercised by the product's acceptance tests and watched by their alert rules.
-    roles: [provider, knowledge, connector, mcp-server, agent, consumer, bff]
+    roles: [provider, knowledge, connector, mcp-server, code-sandbox, agent, consumer, bff]
     says: "after each deploy, the stage's suite against the deployed component: integration, e2e, smoke"
     marker: "valxel-deployed"
 
   # --- audit trail
   audit:
     area: audit
-    roles: [provider, knowledge, reporting, job, connector, mcp-server, agent, bff]
+    roles: [provider, knowledge, reporting, job, connector, mcp-server, code-sandbox, agent, bff]
     says: "who did what to which records, as valxel.audit.v1 events to the product's audit topic, ids only"
     marker: "(?i)valxel\\.audit|Auditor|SignInAudit"
 
   # --- business metrics
   product-events:
     area: business-metrics
-    roles: [provider, event-worker, knowledge, job, connector, mcp-server, agent, consumer, mobile]
+    roles: [provider, event-worker, knowledge, job, connector, mcp-server, code-sandbox, agent, consumer, mobile]
     says: "the events a feature's goal counts (valxel.events), recorded where they happen"
     marker: "valxel\\.events|valxel_events_total|ProductEvents"
   flags:
     area: business-metrics
-    roles: [provider, event-worker, knowledge, job, connector, mcp-server, agent, consumer, mobile]
+    roles: [provider, event-worker, knowledge, job, connector, mcp-server, code-sandbox, agent, consumer, mobile]
     says: "the feature's flag read through OpenFeature from the product's Flipt, default off"
     marker: "(?i)openfeature|ofrep"
   flag-cohorts:
     area: business-metrics
-    roles: [provider, event-worker, knowledge, job, connector, mcp-server, agent, consumer, mobile, bff]
+    roles: [provider, event-worker, knowledge, job, connector, mcp-server, code-sandbox, agent, consumer, mobile, bff]
     says: "users (or items) with the flag on against off, counted so the tool can stop a release that hurts"
     marker: "(?i)flag_cohorts|FlagCohort"
   dataset-counts:

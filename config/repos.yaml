@@ -104,6 +104,7 @@ platform_repos:
   valxel-platform/template-reporting: { kind: template, role: reporting }
   valxel-platform/template-job: { kind: template, role: job }
   valxel-platform/template-integration: { kind: template, role: connector }
+  valxel-platform/template-code-sandbox: { kind: template, role: code-sandbox }
   valxel-platform/template-event-worker: { kind: template, role: event-worker }
   valxel-platform/template-acceptance: { kind: template, role: acceptance }
   valxel-platform/template-bff: { kind: template, role: bff }
@@ -167,6 +168,13 @@ roles:
     template: valxel-platform/template-integration
     required_checks: [unit, CodeQL]  # unit tests signatures, replays, the egress allowlist and both contracts
     openchoreo: { component_type: deployment/connector, workflow: docker }
+  # Where agents run the code they write (valxel_sdlc.sandboxes): the MCP tool run_code, and a fresh
+  # single-use Agent Sandbox per run from the platform's warm pool (SandboxTemplate code-runner:
+  # gVisor, no network, no service account token, limits). Project-visible, called by agents only.
+  code-sandbox:
+    template: valxel-platform/template-code-sandbox
+    required_checks: [unit, CodeQL]  # unit runs real code under the runner's limits
+    openchoreo: { component_type: deployment/code-sandbox, workflow: docker }
   agent:
     template: valxel-platform/template-agent
     required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR

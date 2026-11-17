@@ -241,6 +241,10 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     from ..connectors import design_findings as integration_findings
 
     out += integration_findings(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
+    from ..sandboxes import design_findings as sandbox_design
+
+    out += sandbox_design(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}],
+                          ctx.get("repos") or [])
     from ..retrieval import check as knowledge_check
 
     out += knowledge_check(text, repos + new, ctx)
@@ -260,7 +264,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 
 
 RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge", "reporting", "job",
-                 "connector")
+                 "connector", "code-sandbox")
 
 
 EXPOSED_ROLES = RUNTIME_ROLES + ("bff", "mobile")
@@ -310,8 +314,10 @@ def _endpoints(text: str, repos: list[dict], ctx: dict) -> list[str]:
         if unknown:
             out.append(f"{repo} calls {', '.join(unknown)}, which isn't in this design or the product")
     from ..connectors import endpoint_findings
+    from ..sandboxes import endpoint_findings as sandbox_findings
 
-    return out + endpoint_findings(text, declared)
+    every = {**{r["name"]: r["role"] for r in ctx.get("repos") or []}, **roles}
+    return out + endpoint_findings(text, declared) + sandbox_findings(declared, every)
 
 
 DATA_ROLES = ("provider", "event-worker")

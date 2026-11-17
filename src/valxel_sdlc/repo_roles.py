@@ -12,6 +12,8 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
   connector   the only component that talks to a third party: signed webhooks in, allowlisted calls
               out, as data contracts on Kafka; integration.yaml holds what's allowed (valxel_sdlc.connectors)
   mcp-server  product capabilities as MCP tools (often over providers' APIs), for agents
+  code-sandbox  runs code agents write, one fresh isolated sandbox per run, as the MCP tool run_code
+              (valxel_sdlc.sandboxes)
   agent       a workflow agent: uses MCP tools, models through the LLM gateway, people approve changes
   consumer    a web app or other client of the APIs and agents
   bff         the product's backend-for-frontend: browser sign-in, server-side tokens, its only
@@ -23,6 +25,6 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
 
 from __future__ import annotations
 
-ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "job", "connector", "mcp-server", "agent", "consumer", "bff", "mobile", "acceptance")
+ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "job", "connector", "mcp-server", "code-sandbox", "agent", "consumer", "bff", "mobile", "acceptance")
 REPO_ORDER = {role: i for i, role in enumerate(ROLES)}
 ROLE_PATTERN = "|".join(ROLES)
