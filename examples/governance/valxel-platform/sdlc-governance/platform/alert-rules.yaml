@@ -73,6 +73,39 @@ rules:
     condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
     says: "The job didn't run, or kept failing, for longer than job.yaml's missed_after allows. Its latest run covers the missed time; check that it finished, and why the runs were missed (suspended, failing, or the cluster down)."
 
+  # Connectors (template-integration) log these markers; none carries a field value.
+  connector-signatures-rejected:
+    description: "Many webhook deliveries failed their signature or timestamp check."
+    roles: [connector]
+    severity: warning
+    source: { type: log, query: "integration.signature_rejected" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 20 }
+    says: "Someone is sending unsigned or replayed webhooks, or the vendor rotated its signing secret. Check the vendor's dashboard; if it rotated, mount the new value as the current line and keep the old one as the second."
+
+  connector-deliveries-refused:
+    description: "Webhook deliveries map to events that break their data contract."
+    roles: [connector]
+    severity: warning
+    source: { type: log, query: "integration.delivery_refused" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
+    says: "The vendor sent data the approved contract doesn't allow; it was kept as failed and not published. The log names the field. Fix the mapping, or change the contract through a design change."
+
+  connector-events-parked:
+    description: "Events to the vendor were parked on the dead-letter topic."
+    roles: [connector]
+    severity: warning
+    source: { type: log, query: "integration.event_parked" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
+    says: "The vendor refused events for good, or they broke their contract; they're on <topic>.dlt with the field and rule in the headers. Fix the cause and replay them."
+
+  connector-vendor-unavailable:
+    description: "Calls to the vendor keep failing; events wait."
+    roles: [connector]
+    severity: critical
+    source: { type: log, query: "integration.vendor_unavailable" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 10 }
+    says: "The vendor is down or refusing the connector's credentials. Nothing is lost: the consumer retries the same event. Check the vendor's status and the connector's token or certificate."
+
   memory:
     description: "Memory above 90% of its limit for 5 minutes."
     severity: warning

@@ -205,7 +205,7 @@ def environments(services, *, product_id: str, approver: str, mode: str = "full"
 
 def apply_capacity(services, snap, target: dict, env: str, *, extra: dict | None = None) -> dict | None:
     """Give a component's binding in `env` its capacity, and `extra` settings of its type (a job's
-    schedule). A failure never stops a deployment; the next deployment tries again."""
+    schedule, a connector's routes and egress). A failure never stops a deployment; the next deployment tries again."""
     from .capacity import binding_configs
 
     cap = getattr(snap, "capacity", None) or {}
@@ -231,7 +231,7 @@ def apply_capacity(services, snap, target: dict, env: str, *, extra: dict | None
     except Exception as exc:
         return {"component": target["component"], "env": env, "error": f"{type(exc).__name__}: {exc}"}
     return {"component": target["component"], "env": env, "replicas": configs.get("replicas"),
-            "autoscaler": traits or None, **({"schedule": extra} if extra else {})}
+            "autoscaler": traits or None, **({"settings": extra} if extra else {})}
 
 
 def load(text: str) -> dict:

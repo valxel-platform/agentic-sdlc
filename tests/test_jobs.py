@@ -60,7 +60,7 @@ def test_a_deploy_sets_the_cronjob_from_job_yaml_at_the_deployed_commit(services
               "pipeline": ("dev", "staging", "production")}
     got = _apply_capacity(services, type("Snap", (), {"capacity": {}})(), target, "production",
                           repo="acme-farm/farm-reminders", role="job", ref="abc123")
-    assert got["schedule"]["schedule"] == "15 3 * * *"
+    assert got["settings"]["schedule"] == "15 3 * * *"
     applied = services.openchoreo.binding_configs[("farm-reminders", "production")]["configs"]
     assert applied["timeZone"] == "America/Chicago" and applied["activeDeadlineSeconds"] == 1200
     # Not a job, or no job.yaml: nothing to set without a capacity plan.

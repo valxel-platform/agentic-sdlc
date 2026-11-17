@@ -258,6 +258,12 @@ def architecture(ctx: dict, defective: bool) -> str:
     if jobs:
         lines += ["", "## Schedules"] + [f"- {r['name']}: 15 3 * * * America/Chicago; runs {_slug(ctx['title'])} "
                                          "for the day before" for r in jobs]
+    connectors = [r for r in repos if r["role"] == "connector"]
+    if connectors:
+        data = ctx.get("data_class") or "general"
+        lines += ["", "## Integrations"] + [
+            f"- {r['name']}: example-vendor; data {data}; baa {'yes' if data == 'phi' else 'no'}; webhooks updates; "
+            "calls api.example-vendor.test; auth oauth2-client-credentials" for r in connectors]
     knowledge = [r for r in repos if r["role"] == "knowledge"]
     if knowledge:
         via = "gateway (BAA)" if ctx.get("data_class") == "phi" else "gateway"
@@ -447,6 +453,7 @@ def plan(ctx: dict, defective: bool) -> str:
             "knowledge": ["knowledge.yaml", "evals/questions.yaml"],
             "reporting": ["reporting.yaml"],
             "job": ["job.yaml", "src/job/work.py", "tests/test_work.py"],
+            "connector": ["integration.yaml", "src/integration/mapping.py", "tests/test_mapping.py"],
             "agent": [f"src/agent/prompts/{slug}.md", f"evals/cases/{slug}.jsonl"],
             "event-worker": [f"src/main/java/com/valxel/worker/{slug.replace('-', '')}/Handler.java",
                              f"src/main/resources/db/migration/V2__{slug.replace('-', '_')}.sql"],
@@ -534,7 +541,8 @@ def _endpoint_lines(repos: list[dict]) -> list[str]:
     for r in repos:
         if r["role"] in ("library", "acceptance"):
             continue
-        vis = {"bff": "external", "event-worker": "none", "mobile": "none", "job": "none"}.get(r["role"], "project")
+        vis = {"bff": "external", "event-worker": "none", "mobile": "none", "job": "none",
+               "connector": "external"}.get(r["role"], "project")
         targets = calls.get(r["role"], [])
         out.append(f"- {r['name']}: {vis}" + (f"; calls {', '.join(targets)}" if targets else ""))
     return out

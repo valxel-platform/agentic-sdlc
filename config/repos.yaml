@@ -103,6 +103,7 @@ platform_repos:
   valxel-platform/template-knowledge: { kind: template, role: knowledge }
   valxel-platform/template-reporting: { kind: template, role: reporting }
   valxel-platform/template-job: { kind: template, role: job }
+  valxel-platform/template-integration: { kind: template, role: connector }
   valxel-platform/template-event-worker: { kind: template, role: event-worker }
   valxel-platform/template-acceptance: { kind: template, role: acceptance }
   valxel-platform/template-bff: { kind: template, role: bff }
@@ -157,6 +158,15 @@ roles:
     template: valxel-platform/template-job
     required_checks: [unit, CodeQL]  # unit checks job.yaml for every environment and tests the lock
     openchoreo: { component_type: cronjob/scheduled-task, workflow: docker }
+  # The only component that talks to a third party (a lab, a payer, a CRM): signed webhooks in,
+  # allowlisted vendor calls out, both as data contracts on Kafka. The HLD's Integrations section
+  # approves the vendor, data class, BAA, webhooks, hosts and auth at G4; integration.yaml on the
+  # branch may allow no more (valxel_sdlc.connectors); on every deploy its webhook paths and hosts
+  # become the binding's route and egress, so the platform exposes and allows nothing else.
+  connector:
+    template: valxel-platform/template-integration
+    required_checks: [unit, CodeQL]  # unit tests signatures, replays, the egress allowlist and both contracts
+    openchoreo: { component_type: deployment/connector, workflow: docker }
   agent:
     template: valxel-platform/template-agent
     required_checks: [unit, evals, CodeQL]  # evals: recorded agent evaluations on every PR

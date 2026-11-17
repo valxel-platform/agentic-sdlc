@@ -513,7 +513,7 @@ def check_doc(arch: str, comps: list[dict], resources: list[dict]) -> list[str]:
         if len(fields.get("when down", "").split()) < 3:
             out.append(f"{d['from']} -> {d['to']}: say what people see when it's down")
     for n, c in names.items():
-        if c["role"] in ("bff", "consumer", "event-worker", "agent", "mcp-server", "knowledge", "reporting", "job") and n not in callers:
+        if c["role"] in ("bff", "consumer", "event-worker", "agent", "mcp-server", "knowledge", "reporting", "job", "connector") and n not in callers:
             out.append(f"{n}: say under '## Failure' what happens when what it calls is slow or down")
     for r in resources:
         if r.get("type", "").startswith(("postgres", "dynamodb", "redis", "s3")) and r["name"] not in f["recovery"]:

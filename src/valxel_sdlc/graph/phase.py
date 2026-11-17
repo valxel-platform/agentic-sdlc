@@ -645,6 +645,11 @@ SECURITY = {
             " the item, or a record of what was sent), calls run.check() between items and changes nothing on"
             " a dry run. It reaches other components through their APIs or events, never their databases, as"
             " its own identity (VX-17)."),
+    "connector": (" Only /webhooks/<name> routes take outside calls: each verifies its signature over the timestamp"
+                  " and raw body before reading it and dedupes by delivery id; the vendor client calls only"
+                  " integration.yaml's allowed_hosts and never follows a redirect; secrets are mounted files,"
+                  " never logged or put in errors. Events in and out are checked against their contracts; audit"
+                  " integration.received and integration.sent by id. Kafka as this connector's own identity (VX-17)."),
     "agent": (" Call MCP servers only through token exchange for the person behind the step (audience and"
               " scope per server); never a fixed token (VX-13, VX-17)."),
     "consumer": (" The app never holds a token: it calls the API on its own origin through the product's BFF"
@@ -717,6 +722,24 @@ def schedule_instruction(ctx: dict, task: dict) -> str:
     from ..jobs import coder_instruction
 
     return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
+
+
+def integration_instruction(ctx: dict, task: dict) -> str:
+    """A connector's integration.yaml from the approved HLD (connectors.py)."""
+    if task.get("role") != "connector":
+        return ""
+    from ..connectors import coder_instruction
+
+    return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
+
+
+def integration_findings(services, ctx: dict, results: dict) -> list[str]:
+    """Deterministic: a connector's integration.yaml on its branch allows no more than its HLD line."""
+    if not any(r.get("role") == "connector" for r in results.values()):
+        return []
+    from ..connectors import build_findings
+
+    return build_findings(services.github, ctx.get("hld_text") or "", results)
 
 
 def events_instruction(ctx: dict, task: dict) -> str:
@@ -886,6 +909,7 @@ def build_build_subgraph(services):
                   + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
                   + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
                   + contracts_instruction(ctx, task) + schedule_instruction(ctx, task)
+                  + integration_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
                     " type the change uses. " + diary.CODER + " " + sessions_instruction()
                   + "\n\n" + structured.instruction(structured.CoderReply)),
@@ -971,6 +995,9 @@ def build_build_subgraph(services):
                       + (" Check VX-17: no endpoint without a permission, record access checked, no token in the"
                          " browser or in fixed configuration, exposure as the HLD's Endpoints section says."
                          if r.get("role") in SECURITY else "")
+                      + (" Check that the connector's webhooks verify their signature before reading the body, that"
+                         " the vendor client is used for every outbound call (no other HTTP client), and that the"
+                         " mapping copies no more of a record than its contract allows." if r.get("role") == "connector" else "")
                       + (" Check VX-19: AWS services reached only behind a port, names from the environment variables"
                          " workload.yaml binds, the SDK's default credentials (no keys), and only the access the HLD's"
                          " Resources section gives this component." if resources_instruction(ctx, r) else "")
@@ -1051,6 +1078,7 @@ def build_build_subgraph(services):
         findings += audit_findings(s["ctx"], results)
         findings += events_findings(s["ctx"], results)
         findings += instrumentation_findings(s["ctx"], results)
+        findings += integration_findings(services, s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]
         lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}" + second_line(rv)
                   for tid, rv in sorted(reviews.items())]

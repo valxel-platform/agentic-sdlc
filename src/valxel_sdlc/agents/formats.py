@@ -100,6 +100,12 @@ sequenceDiagram
                                (numbers only, e.g. '15 3 * * * America/Chicago'; its work covers the time since its last
                                 success and must be safe to run twice. Choose a job for work due at a time; an
                                 event worker for work that reacts to events.)
+## Integrations                (only with a connector repo: who's on the other side and what may cross; approved at G4)
+- <org>/<repo>: <vendor>; data <general|payments|phi>; baa <yes|no>; webhooks <name, ...|none>; calls <host, ...|none>;
+  auth <oauth2-client-credentials|api-key|mtls|none>
+                               (PHI needs baa yes. Hosts by name: no scheme, wildcard or IP. A connector with webhooks
+                                is external in Endpoints, only for /webhooks/<name>; without them, none. Only a
+                                connector talks to a third party: others reach it through data contracts.)
 ## Knowledge                   (only with a knowledge repo: what agents search, and the embedding model people decide at G4)
 - <org>/<repo>: model <embedding model> via <gateway (BAA)|gateway|self-hosted>; sources: <name> (<events <topic>, compacted|scan <store>|files>), ...
                                (an events source is rebuilt by replaying its topic: 'compacted' when its events carry whole

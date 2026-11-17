@@ -492,7 +492,8 @@ repo_standards:
 1. Publish the templates named in `config/repos.yaml` to `valxel-platform` and mark each one a
    template repository: `template-service` and `template-event-worker` (Java 21, Spring Boot),
    `template-web` (React, TypeScript), `template-library` (Java), and `template-mcp-server`,
-   `template-agent`, `template-knowledge`, `template-reporting` and `template-job` (Python).
+   `template-agent`, `template-knowledge`, `template-reporting`, `template-job` and
+   `template-integration` (Python).
    Their CI jobs are named for the required checks
    (`unit`, `contract`) and post `unit / report`-style statuses the quality suites read; their
    `post-deploy.yml` runs integration, e2e and smoke suites when the pipeline dispatches
@@ -546,6 +547,46 @@ request like any other.
 
 Two platform alert rules watch jobs: `job-failed` (a run ended in an error) and `job-missed`
 (`missed_after` scheduled runs passed without a success). In production, each opens an incident.
+
+### Connectors to third parties
+
+A lab, a payer, a CRM or a payment processor is reached through one `connector` repo. Nothing else in
+the product calls the vendor, and the vendor calls nothing else. They meet as data contracts on Kafka.
+
+| Role | Template | Required checks | What it is |
+| --- | --- | --- | --- |
+| `connector` | `valxel-platform/template-integration` | `unit`, `CodeQL` | Signed webhooks in: HMAC over the timestamp and raw body, a replay window, a size cap, a rate limit, dedupe by delivery id, then an outbox. Vendor calls out: https to allowed hosts only, no redirects, OAuth client credentials, an API key or mTLS, retries, a rate limit, a circuit breaker and Idempotency-Key. Contracts are checked both ways, and refusals are parked on `<topic>.dlt` |
+
+The design names what may cross under `## Integrations`:
+`- <org>/<repo>: <vendor>; data <general|payments|phi>; baa <yes|no>; webhooks <name, ...|none>;
+calls <host, ...|none>; auth <oauth2-client-credentials|api-key|mtls|none>`.
+
+**G4 refuses:**
+- PHI without `baa yes`;
+- hosts given as URLs, wildcards, IP addresses or platform-internal names;
+- `auth none` for PHI or payments;
+- a connector with no line, or a line for a repo that isn't a connector.
+
+In Endpoints, a connector is `external` exactly when it receives webhooks, and needs no ADR for it.
+
+What's approved is enforced three times (`connectors.py`):
+- **Coder.** The coder writes the line into `integration.yaml`.
+- **Build.** The build fails when the file on the branch allows more than the line: another host,
+  another webhook, a lower data class, other auth.
+- **Deploy.** On every deploy, the tool reads `integration.yaml` at the deployed commit. It sets the
+  binding's `webhookPaths`, the only routes the gateway exposes, and its `egressHosts`, the only
+  hosts its FQDN egress policy allows (example type `deployment/connector`).
+
+Vendor secrets are mounted files, never environment variables. Its post-deploy suite checks from
+outside that:
+- each webhook refuses unsigned and wrongly signed deliveries;
+- health and metrics aren't reachable.
+
+Four alert rules watch connectors:
+- `connector-signatures-rejected`
+- `connector-deliveries-refused`
+- `connector-events-parked`
+- `connector-vendor-unavailable`
 
 ## Agentic features in products
 
