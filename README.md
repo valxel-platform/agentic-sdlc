@@ -1639,8 +1639,9 @@ uses Claude Code's weaker sandbox in containers that can't create user namespace
 
 **In production, each session runs in a sandbox of its own** (`valxel_sdlc/session_runner.py`,
 `VALXEL_SESSION_EXECUTOR=kubernetes`; strict mode requires it in live mode). The tool claims a fresh
-sandbox from the platform's warm pool (Agent Sandbox: a `SandboxClaim` on the `agent-session`
-template in `VALXEL_SESSION_NAMESPACE`), posts the session to the runner there (`valxel
+sandbox from the platform's warm pool (Agent Sandbox 1.0: a `SandboxClaim` on the `agent-session`
+warm pool in `VALXEL_SESSION_NAMESPACE`, `VALXEL_SESSION_POOL`; it deletes itself at its shutdown time
+should the tool not get to it), posts the session to the runner there (`valxel
 session-runner`, the tool's own image) and deletes the claim when it answers. Only the session
 crosses: its prompt and options, the feature's documents it reads, the repository and branch with a
 token for that one repository (a coder) or read-only tokens for the repositories it reads (the

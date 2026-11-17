@@ -5,7 +5,7 @@ Run as a child of the tool's process, it shared the tool's container, user and f
 GitHub App's key, the database URL and every other workspace's work. Here each session runs in a
 fresh sandbox instead, the pattern template-code-sandbox uses for product agents:
 
-    tool ──SandboxClaim (agent-session)──▶ warm pool
+    tool ──SandboxClaim (warm pool agent-session)──▶ a ready sandbox
          ──POST /run: the session spec──▶ runner (gVisor, egress to registries, GitHub and the model)
          ◀── the outcome ── the sandbox is deleted
 
@@ -226,23 +226,28 @@ class LocalExecutor:
 
 
 class KubernetesExecutor:
-    """Each session claims a fresh sandbox from the warm pool, runs there, and the claim is deleted."""
+    """Each session claims a fresh sandbox from the warm pool, runs there, and the claim is deleted.
+    The claim also deletes itself at its shutdown time, should the tool not get to it."""
 
-    def __init__(self, *, namespace: str, template: str, port: int = 8081, ready_s: float = 120.0, api: Any = None,
+    def __init__(self, *, namespace: str, pool: str, port: int = 8081, ready_s: float = 120.0, api: Any = None,
                  http: Any = None, sleep: Callable[[float], None] = time.sleep,
-                 clock: Callable[[], float] = time.monotonic) -> None:
-        self.namespace, self.template, self.port, self.ready_s = namespace, template, port, ready_s
+                 clock: Callable[[], float] = time.monotonic, now: Callable[[], float] = time.time) -> None:
+        self.namespace, self.pool, self.port, self.ready_s = namespace, pool, port, ready_s
         self.api = api or _custom_objects()
         self.http = http
-        self.sleep, self.clock = sleep, clock
+        self.sleep, self.clock, self.now = sleep, clock, now
 
     def run(self, spec: dict) -> dict:
         import httpx
+        from datetime import datetime, timezone
 
         name = f"session-{spec.get('id') or uuid.uuid4().hex[:16]}"
+        ends = datetime.fromtimestamp(self.now() + spec.get("timeout_s", 3600) + 900, timezone.utc)
         body = {"apiVersion": f"{GROUP}/{API_VERSION}", "kind": "SandboxClaim",
                 "metadata": {"name": name, "labels": {"valxel.io/agent-session": "true"}},
-                "spec": {"sandboxTemplateRef": {"name": self.template}}}
+                "spec": {"warmPoolRef": {"name": self.pool},
+                         "lifecycle": {"shutdownPolicy": "Delete",
+                                       "shutdownTime": ends.strftime("%Y-%m-%dT%H:%M:%SZ")}}}
         self.api.create_namespaced_custom_object(GROUP, API_VERSION, self.namespace, PLURAL, body)
         http = self.http or httpx.Client(follow_redirects=False, trust_env=False)
         try:
@@ -279,9 +284,11 @@ class KubernetesExecutor:
             claim = self.api.get_namespaced_custom_object(GROUP, API_VERSION, self.namespace, PLURAL, name)
             status = claim.get("status") or {}
             ready = any(c.get("type") == "Ready" and c.get("status") == "True" for c in status.get("conditions") or [])
-            sandbox = (status.get("sandbox") or {}).get("Name") or (status.get("sandbox") or {}).get("name")
-            if ready and sandbox:
-                return f"{sandbox}.{self.namespace}.svc.cluster.local"
+            sb = status.get("sandbox") or {}
+            # The pod's own address: a new sandbox's Service name may not resolve yet.
+            host = next(iter(sb.get("podIPs") or []), "") or sb.get("serviceFQDN") or ""
+            if ready and host:
+                return f"[{host}]" if ":" in host else host
             self.sleep(0.5)
         raise Unavailable("no session sandbox was ready in time")
 
@@ -303,7 +310,7 @@ def executor() -> Executor:
         kind = os.environ.get("VALXEL_SESSION_EXECUTOR", "local").lower()
         if kind == "kubernetes":
             _executor = KubernetesExecutor(namespace=os.environ.get("VALXEL_SESSION_NAMESPACE", "valxel-sessions"),
-                                           template=os.environ.get("VALXEL_SESSION_TEMPLATE", "agent-session"),
+                                           pool=os.environ.get("VALXEL_SESSION_POOL", "agent-session"),
                                            port=int(os.environ.get("VALXEL_SESSION_RUNNER_PORT", "8081")),
                                            ready_s=float(os.environ.get("VALXEL_SESSION_READY_S", "120")))
         elif kind == "local":

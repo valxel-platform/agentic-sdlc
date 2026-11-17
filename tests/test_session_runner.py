@@ -139,7 +139,8 @@ class FakeApi:
         self.polls += 1
         if self.polls < self.ready_after:
             return {"status": {}}
-        return {"status": {"conditions": [{"type": "Ready", "status": "True"}], "sandbox": {"Name": "sbx-1"}}}
+        return {"status": {"conditions": [{"type": "Ready", "status": "True"}],
+                           "sandbox": {"name": "sbx-1", "podIPs": ["10.1.2.3"], "serviceFQDN": "sbx-1.n.svc"}}}
 
     def delete_namespaced_custom_object(self, group, version, ns, plural, name):
         self.deleted.append(name)
@@ -158,26 +159,27 @@ class FakeHttp:
 
 def test_each_session_claims_a_sandbox_and_the_claim_is_deleted():
     api, http = FakeApi(ready_after=2), FakeHttp()
-    ex = session_runner.KubernetesExecutor(namespace="valxel-sessions", template="agent-session", api=api, http=http,
+    ex = session_runner.KubernetesExecutor(namespace="valxel-sessions", pool="agent-session", api=api, http=http,
                                            sleep=lambda s: None)
     assert ex.run(_spec()) == {"ok": True, "text": "done"}
     [(ns, body)] = api.created
-    assert ns == "valxel-sessions" and body["spec"] == {"sandboxTemplateRef": {"name": "agent-session"}}
+    assert ns == "valxel-sessions" and body["spec"]["warmPoolRef"] == {"name": "agent-session"}
+    assert body["spec"]["lifecycle"]["shutdownPolicy"] == "Delete" and body["spec"]["lifecycle"]["shutdownTime"]
     assert body["apiVersion"] == "extensions.agents.x-k8s.io/v1beta1"
-    assert http.posts[0][0] == "http://sbx-1.valxel-sessions.svc.cluster.local:8081/run"
+    assert http.posts[0][0] == "http://10.1.2.3:8081/run"  # the pod's address, from the claim
     assert api.deleted == [body["metadata"]["name"]]
 
 
 def test_no_sandbox_in_time_or_a_bad_answer_is_unavailable_and_still_cleans_up():
     t = iter(range(1000))
     api = FakeApi(ready_after=10**6)
-    ex = session_runner.KubernetesExecutor(namespace="n", template="t", api=api, http=FakeHttp(), ready_s=5,
+    ex = session_runner.KubernetesExecutor(namespace="n", pool="t", api=api, http=FakeHttp(), ready_s=5,
                                            sleep=lambda s: None, clock=lambda: next(t))
     with pytest.raises(session_runner.Unavailable, match="ready in time"):
         ex.run(_spec())
     assert len(api.deleted) == 1
     api = FakeApi()
-    ex = session_runner.KubernetesExecutor(namespace="n", template="t", api=api, http=FakeHttp(status=502),
+    ex = session_runner.KubernetesExecutor(namespace="n", pool="t", api=api, http=FakeHttp(status=502),
                                            sleep=lambda s: None)
     with pytest.raises(session_runner.Unavailable, match="502"):
         ex.run(_spec())
@@ -272,5 +274,5 @@ def test_a_sandbox_not_yet_reachable_is_retried_before_the_session_is_sent():
             return super().post(url, json, timeout)
 
     http = Flaky()
-    ex = session_runner.KubernetesExecutor(namespace="n", template="t", api=FakeApi(), http=http, sleep=lambda s: None)
+    ex = session_runner.KubernetesExecutor(namespace="n", pool="t", api=FakeApi(), http=http, sleep=lambda s: None)
     assert ex.run(_spec())["ok"] and len(http.posts) == 1
