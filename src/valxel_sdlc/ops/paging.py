@@ -166,7 +166,9 @@ class PagerDutyPager(RecordingPager):
         self._queue = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pagerduty")
 
     def _send(self, incident_id: str, action: str, body: dict) -> Future:  # type: ignore[override]
-        return self._queue.submit(self._deliver, incident_id, action, body)
+        from ..tenancy import carry
+
+        return self._queue.submit(carry(self._deliver), incident_id, action, body)
 
     def _deliver(self, incident_id: str, action: str, body: dict) -> None:
         from urllib.error import HTTPError

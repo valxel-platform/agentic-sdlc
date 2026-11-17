@@ -24,7 +24,8 @@ def kind_of(thread_id: str) -> str:
 class FeatureIndex(Protocol):
     """Every thread the engine has started: features, initiatives and releases."""
 
-    def add(self, feature_id: str, product_id: str, title: str, seq: int, kind: str = "feature") -> None: ...
+    def add(self, feature_id: str, product_id: str, title: str, seq: int, kind: str = "feature",
+            workspace: str = "") -> None: ...
     def next_number(self, product_id: str, kind: str = "feature") -> int: ...
     def all(self) -> list[dict]: ...
 
@@ -34,10 +35,10 @@ class InMemoryIndex:
         self._rows: list[dict] = []
         self._lock = threading.Lock()
 
-    def add(self, feature_id, product_id, title, seq, kind="feature") -> None:
+    def add(self, feature_id, product_id, title, seq, kind="feature", workspace="") -> None:
         with self._lock:
             self._rows.append({"feature_id": feature_id, "product_id": product_id, "title": title, "seq": seq,
-                               "kind": kind})
+                               "kind": kind, "workspace": workspace})
 
     def next_number(self, product_id, kind="feature") -> int:
         with self._lock:
@@ -63,14 +64,19 @@ class PostgresIndex:
             conn.execute(self.DDL)
             # Initiatives and releases share the index (added after features; existing rows are features).
             conn.execute("ALTER TABLE valxel_features ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'feature'")
+            # The thread's workspace, for row-level security (valxel_sdlc.tenancy).
+            conn.execute("ALTER TABLE valxel_features ADD COLUMN IF NOT EXISTS workspace TEXT NOT NULL DEFAULT ''")
 
-    def add(self, feature_id, product_id, title, seq, kind="feature") -> None:
+    def add(self, feature_id, product_id, title, seq, kind="feature", workspace="") -> None:
         with self.pool.connection() as conn:
-            conn.execute("INSERT INTO valxel_features (feature_id, product_id, title, seq, kind) "
-                         "VALUES (%s, %s, %s, %s, %s)", (feature_id, product_id, title, seq, kind))
+            conn.execute("INSERT INTO valxel_features (feature_id, product_id, title, seq, kind, workspace) "
+                         "VALUES (%s, %s, %s, %s, %s, %s)", (feature_id, product_id, title, seq, kind, workspace))
 
     def next_number(self, product_id, kind="feature") -> int:
-        with self.pool.connection() as conn:
+        from ..tenancy import PLATFORM, bound
+
+        # Numbers are shared across workspaces (one INCEPTION series): count every thread, read nothing else.
+        with bound(PLATFORM), self.pool.connection() as conn:
             row = conn.execute("SELECT COALESCE(MAX(seq), 0) + 1 AS n FROM valxel_features "
                                "WHERE product_id = %s AND kind = %s", (product_id, kind)).fetchone()
         return int(row["n"])

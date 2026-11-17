@@ -54,6 +54,12 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         from .outcomes.review import build_review_graph
         from .roadmap.graphs import build_initiative_graph, build_release_graph
 
+        from .tenancy import thread_bound
+
+        # Writes LangGraph commits from its own worker threads carry no scope: they belong to the
+        # thread's own workspace (valxel_sdlc.tenancy). Looked up once per thread.
+        self._thread_ws: dict[str, str] = {}
+        checkpointer = thread_bound(checkpointer, self._cached_workspace) if checkpointer is not None else None
         self.checkpointer = checkpointer
         self.graph = build_pipeline(services, checkpointer=checkpointer)
         self.graphs = {"feature": self.graph,
@@ -192,7 +198,15 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
 
     def _execute(self, feature_id: str, payload) -> None:
         """Run the thread until it finishes or waits on a human, publishing each node as it ends.
-        Only one replica runs a thread at a time: the one holding its lock."""
+        Only one replica runs a thread at a time: the one holding its lock. It runs in its own
+        workspace's scope, whoever started it (valxel_sdlc.tenancy); a thread of the platform's own,
+        such as the product council's inception, in the platform's."""
+        from .tenancy import PLATFORM, bound
+
+        with bound(self.workspace_of(feature_id) or PLATFORM):
+            return self._execute_scoped(feature_id, payload)
+
+    def _execute_scoped(self, feature_id: str, payload) -> None:
         lease = self.cluster.lock(feature_id)
         self.queued.pop(feature_id, None)  # started, or refused: either way no longer waiting here
         if lease is None:
@@ -318,16 +332,37 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
     def _rows(self, product_id: str, kind: str) -> list[dict]:
         return [r for r in self.index.all() if r["product_id"] == product_id and r.get("kind", "feature") == kind]
 
-    def _new_id(self, product_id: str, kind: str, title: str) -> str:
+    def _new_id(self, product_id: str, kind: str, title: str, workspace: str | None = None) -> str:
         with self._create_lock:
-            return self._new_id_locked(product_id, kind, title)
+            return self._new_id_locked(product_id, kind, title, workspace)
 
-    def _new_id_locked(self, product_id: str, kind: str, title: str) -> str:
+    def _new_id_locked(self, product_id: str, kind: str, title: str, workspace: str | None = None) -> str:
         tag = {v: k for k, v in KINDS.items()}[kind]
         seq = self.index.next_number(product_id, kind)
         thread_id = f"{product_id}-{tag}-{seq}"
-        self.index.add(thread_id, product_id, title, seq, kind)
+        self.index.add(thread_id, product_id, title, seq, kind, self.workspace_of_product(product_id)
+                       if workspace is None else workspace)
         return thread_id
+
+    def workspace_of_product(self, product_id: str) -> str:
+        entry = self.services.settings.registry.get(product_id)
+        return getattr(entry, "workspace", "") or ""
+
+    def _cached_workspace(self, thread_id: str) -> str:
+        ws = self._thread_ws.get(thread_id)
+        if ws is None:
+            ws = self._thread_ws[thread_id] = self.workspace_of(thread_id)
+        return ws
+
+    def workspace_of(self, thread_id: str) -> str:
+        """The workspace a thread belongs to, from the index ('' for the platform's own threads)."""
+        from .tenancy import PLATFORM, bound
+
+        with bound(PLATFORM):
+            row = next((r for r in self.index.all() if r["feature_id"] == thread_id), None)
+        if row is None:
+            return self.workspace_of_product(thread_id.rsplit("-", 2)[0])
+        return row.get("workspace") or self.workspace_of_product(row["product_id"])
 
     def similar(self, product_id: str, title: str, description: str = "", exclude: str = "") -> list[dict]:
         from .duplicates import find_similar
@@ -360,7 +395,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
                 raise DuplicateIntent(similar)
             seq = self.index.next_number(product_id)
             feature_id = f"{product_id}-FEAT-{seq}"
-            self.index.add(feature_id, product_id, title, seq)
+            self.index.add(feature_id, product_id, title, seq, workspace=self.workspace_of_product(product_id))
         inp = {"feature_id": feature_id, "product_id": product_id, "title": title, "description": description,
                "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins,
                "related_features": similar, "not_duplicate_reason": not_duplicate_reason.strip(),

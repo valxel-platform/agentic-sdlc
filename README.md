@@ -323,6 +323,29 @@ Run as many replicas as you like behind one load balancer, all on the same Postg
 
 Without a database (development) everything is in memory: run one process.
 
+### Tenant isolation in the database
+
+Every workspace (customer) shares the tool's database, so a query that forgot to filter by product
+would show one customer another's work. Postgres row-level security makes the database refuse it
+(`src/valxel_sdlc/tenancy.py`). Set `VALXEL_TENANCY=rls`; strict mode requires it.
+
+- **Each connection states whose rows it may see,** set from the work it does when it leaves the
+  pool: a request, the workspaces of every product the signed-in person may see; a feature's run,
+  its own workspace, whoever started it; the watcher, daily jobs, the CLI and startup, the platform
+  (all). A connection that states nothing sees nothing.
+- **Each table has a policy:** by product (usage, costs, changes, signals, findings, eval cases and
+  the rest), by thread (LangGraph's checkpoints, notes, work items: the feature index records each
+  thread's workspace), by workspace column, by owner (intake chats, which have no product yet) or
+  platform only (signals that matched no product). The claims and provisioning queue hold keys and
+  plumbing, not customer content, and stay open.
+- **The tool's login must not bypass it.** Postgres never applies row-level security to a superuser
+  or a role with `BYPASSRLS`, so connect as an ordinary role that owns the tables. The policies are
+  forced, so the owner is held to them too. With `VALXEL_TENANCY=rls`, startup checks the login and
+  strict mode refuses one that bypasses it.
+- **What it doesn't cover:** documents, transcripts and screenshots on disk (`VALXEL_ARTIFACT_DIR`)
+  are kept per feature and served only through the API's checks; separate deployments per regulated
+  customer ("cells") are a separate decision.
+
 ## Organizations and product governance
 
 The products in this repo (Clinic records, Farm app, Shop, Dental, Payments platform and Shared

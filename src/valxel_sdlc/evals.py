@@ -645,7 +645,12 @@ class ConfigGate:
             self.runs[run_id] = run
         self._status(ref, "pending", "Replaying past documents under this config", run_id)
         if self.background:
-            threading.Thread(target=self._run, args=(run_id,), name=f"valxel-{run_id}", daemon=True).start()
+            from .tenancy import PLATFORM, bound
+
+            def in_platform(rid: str) -> None:
+                with bound(PLATFORM):  # cases from every product (valxel_sdlc.tenancy)
+                    self._run(rid)
+            threading.Thread(target=in_platform, args=(run_id,), name=f"valxel-{run_id}", daemon=True).start()
         else:
             self._run(run_id)
         return dict(run)

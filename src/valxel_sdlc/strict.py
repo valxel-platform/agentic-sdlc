@@ -42,6 +42,11 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("VALXEL_GOVERNANCE_SOURCE is not github: governance is read from local files")
     if not s.database_url:
         out.append("DATABASE_URL is not set: features, the catalog and the audit trail are lost on restart")
+    from .tenancy import enforced
+
+    if s.database_url and not enforced(env):
+        out.append("VALXEL_TENANCY is not rls: every workspace's rows are open to any query that forgets to "
+                   "filter (valxel_sdlc.tenancy)")
     out += weak_secrets(env, database_url=s.database_url)
     out += secrets_in_environment(env)
     out += provisioning_split(env)

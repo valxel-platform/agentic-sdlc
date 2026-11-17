@@ -51,6 +51,11 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
         user.groups = ws.groups_of({m["id"] for m in mine}, set(user.roles))
         return user
 
+    def signed_in(request: Request) -> User | None:
+        """Who sent this request, with their memberships, or None: no checks beyond the session."""
+        user = user_from_payload(signer.loads(request.cookies.get(SESSION_COOKIE)))
+        return with_memberships(user) if user is not None else None
+
     def current_user(request: Request) -> User:
         user = user_from_payload(signer.loads(request.cookies.get(SESSION_COOKIE)))
         if user is None:
@@ -154,4 +159,4 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
                 raise HTTPException(404, f"Unknown product {product_id}")
             raise HTTPException(403, f"You aren't a member of {product_id}'s organization")
 
-    return SimpleNamespace(state=state, auth=auth, signer=signer, oauth=oauth, stores=stores, eng=eng, with_memberships=with_memberships, current_user=current_user, lanes_for=lanes_for, role_in=role_in, may_start=may_start, founder_of=founder_of, admin_of=admin_of, item_approvers=item_approvers, decorate=decorate, local_path=local_path, config_gate=config_gate, wsx=wsx, member_of=member_of)
+    return SimpleNamespace(state=state, auth=auth, signer=signer, oauth=oauth, stores=stores, eng=eng, with_memberships=with_memberships, signed_in=signed_in, current_user=current_user, lanes_for=lanes_for, role_in=role_in, may_start=may_start, founder_of=founder_of, admin_of=admin_of, item_approvers=item_approvers, decorate=decorate, local_path=local_path, config_gate=config_gate, wsx=wsx, member_of=member_of)

@@ -93,6 +93,12 @@ class WatchingMixin:
             return
 
         def loop():
+            from ..tenancy import PLATFORM, bound
+
+            with bound(PLATFORM):  # the platform's own work, across workspaces (valxel_sdlc.tenancy)
+                watch()
+
+        def watch():
             import time
 
             while not self._stop.wait(interval_s):

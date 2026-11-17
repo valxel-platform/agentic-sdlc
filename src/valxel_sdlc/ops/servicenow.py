@@ -141,7 +141,9 @@ class ServiceNowReceipts:
             self.store.put(rec["id"], {"status": "not_sent", "detail": f"set VALXEL_SERVICENOW_AUTH_{rec['product_id'].upper()}"})
             return
         self.store.put(rec["id"], {"status": "queued", "instance": spec["instance"]})
-        self._queue.submit(self._deliver, rec, spec, auth)
+        from ..tenancy import carry
+
+        self._queue.submit(carry(self._deliver), rec, spec, auth)
 
     def flush(self, timeout: float = 30.0) -> None:
         self._queue.submit(lambda: None).result(timeout=timeout)

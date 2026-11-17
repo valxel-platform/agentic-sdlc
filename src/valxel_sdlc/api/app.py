@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -44,14 +44,23 @@ log = logging.getLogger(__name__)
 
 
 def create_engine_from_env() -> tuple[FeatureEngine, Any]:
+    from ..tenancy import PLATFORM, bound
+
+    with bound(PLATFORM):  # setting up is the platform's work (valxel_sdlc.tenancy)
+        return _create_engine_from_env()
+
+
+def _create_engine_from_env() -> tuple[FeatureEngine, Any]:
     settings = load_settings()
     if settings.database_url:
         from langgraph.checkpoint.postgres import PostgresSaver
         from psycopg.rows import dict_row
-        from psycopg_pool import ConnectionPool
 
-        pool = ConnectionPool(settings.database_url, max_size=10,
-                              kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
+        from ..tenancy import make_pool
+
+        # Each connection says whose rows it may see, from the scope it is checked out in.
+        pool = make_pool(settings.database_url, max_size=10,
+                         kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
         saver = PostgresSaver(pool)
         saver.setup()
         from ..integrations.catalog import PostgresCatalog
@@ -129,9 +138,22 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             if strict.enabled():  # refuse to serve while anything would quietly run as a stand-in
                 strict.check(state["engine"].services, auth_mode=auth.mode)
             if state["pool"] is not None:
+                from .. import tenancy
                 from ..intake import PostgresIntakeStore
 
-                stores["intakes"] = PostgresIntakeStore(state["pool"])
+                with tenancy.bound(tenancy.PLATFORM):
+                    stores["intakes"] = PostgresIntakeStore(state["pool"])
+                    # Every table exists now: turn row-level security on (VALXEL_TENANCY=rls) or off.
+                    tenancy.apply(state["pool"], state["engine"].services.settings.registry)
+                    if tenancy.enforced():
+                        with state["pool"].connection() as conn:
+                            why = tenancy.bypasses(conn)
+                        if why:  # Postgres never holds such a login to row-level security
+                            msg = (f"VALXEL_TENANCY is rls, but the database login is {why}: row-level security "
+                                   "doesn't apply to it. Connect as a role without SUPERUSER and BYPASSRLS.")
+                            if strict.enabled():
+                                raise strict.StrictModeError(msg)
+                            log.warning(msg)
             # Polls CI and OpenChoreo for features waiting on them; webhooks make it immediate.
             state["engine"].start_watcher(float(os.environ.get("VALXEL_WATCH_INTERVAL_S", "30")))
         yield
@@ -140,6 +162,20 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             state["pool"].close()
 
     app = FastAPI(title="Valxel SDLC", version="0.2.0", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def tenant_scope(request: Request, call_next):
+        """Each request sees the rows of the signed-in person's workspaces (valxel_sdlc.tenancy).
+        A request nobody signed in to (sign-in, health, a webhook that checks its signature) does the
+        platform's work, as it always has."""
+        from .. import tenancy
+
+        with tenancy.bound(tenancy.PLATFORM):  # who it is: memberships span workspaces
+            who = ctx.signed_in(request) if state["engine"] is not None else None
+            scope = (tenancy.workspaces_of(state["engine"].services.settings.registry, ctx.lanes_for(who))
+                     if who is not None else tenancy.PLATFORM)
+        with tenancy.bound(scope, who.login if who is not None else ""):
+            return await call_next(request)
     api = APIRouter(prefix="/api")
     for group in (auth_routes, signals, evals, features, findings, workspaces, reports, threads, intake, events):
         api.include_router(group.build(ctx))

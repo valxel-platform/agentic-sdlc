@@ -126,9 +126,9 @@ def _verify_changes(log=None) -> int:
             print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
             return 2
         from psycopg.rows import dict_row
-        from psycopg_pool import ConnectionPool
+        from .tenancy import make_pool
 
-        pool = ConnectionPool(url, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
+        pool = make_pool(url, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
         log = PostgresChangeLog(pool)
     out = verify(log.all())
     if out["ok"]:
@@ -229,9 +229,9 @@ def _eval(args: argparse.Namespace) -> int:
         if not os.environ.get("DATABASE_URL"):
             raise SystemExit("valxel eval reads cases from the tool's database (DATABASE_URL), or give --cases FILE")
         from psycopg.rows import dict_row
-        from psycopg_pool import ConnectionPool
+        from .tenancy import make_pool
 
-        pool = ConnectionPool(os.environ["DATABASE_URL"], max_size=2, kwargs={"autocommit": True, "row_factory": dict_row})
+        pool = make_pool(os.environ["DATABASE_URL"], max_size=2, kwargs={"autocommit": True, "row_factory": dict_row})
         cases = evals.PostgresEvalStore(pool).cases(product_id=args.product, phases=phases, data_classes=classes,
                                                      limit_per_phase=args.limit)
     if args.action == "run" and not args.no_injection:
@@ -325,11 +325,11 @@ def _outcomes(args, services=None) -> int:
         services = build_services(settings)
         if settings.database_url:
             from psycopg.rows import dict_row
-            from psycopg_pool import ConnectionPool
+            from .tenancy import make_pool
 
             from .outcomes.store import PostgresReadingStore
 
-            pool = ConnectionPool(settings.database_url, max_size=2,
+            pool = make_pool(settings.database_url, max_size=2,
                                   kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
             services.readings = PostgresReadingStore(pool)
         elif args.action == "record":
@@ -377,6 +377,14 @@ def _outcomes(args, services=None) -> int:
 
 
 def main(argv: list[str] | None = None, *, github=None) -> int:
+    """The command line does the platform's own work, across workspaces (valxel_sdlc.tenancy)."""
+    from .tenancy import PLATFORM, bound
+
+    with bound(PLATFORM):
+        return _main(argv, github=github)
+
+
+def _main(argv: list[str] | None = None, *, github=None) -> int:
     p = argparse.ArgumentParser(prog="valxel")
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo", help="Run one feature end to end with auto-approved gates")

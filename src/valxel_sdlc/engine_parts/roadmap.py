@@ -281,7 +281,7 @@ class RoadmapMixin:
 
         from ..inception.graph import PRODUCT_ID
 
-        tid = self._new_id(PRODUCT_ID, "inception", vision.name)
+        tid = self._new_id(PRODUCT_ID, "inception", vision.name, workspace=vision.workspace or "")
         inp = {"inception_id": tid, "product_id": PRODUCT_ID, "title": vision.name, "vision": asdict(vision),
                "created_by": created_by, "status": "researching"}
         self.bus.publish({"type": "feature.created", "feature_id": tid, "product_id": PRODUCT_ID})
