@@ -122,6 +122,7 @@ class FeatureEngine:
         from .outcomes.review import build_review_graph
         from .roadmap.graphs import build_initiative_graph, build_release_graph
 
+        self.checkpointer = checkpointer
         self.graph = build_pipeline(services, checkpointer=checkpointer)
         self.graphs = {"feature": self.graph,
                        "initiative": build_initiative_graph(services, checkpointer=checkpointer),
@@ -271,6 +272,7 @@ class FeatureEngine:
                         if not lease.alive():  # another replica may carry it on from the last checkpoint
                             raise LeaseLost(f"{feature_id}: this replica lost the thread's lock")
                     payload = self._ready_wait(feature_id)  # CI or a deploy already done: carry on
+                self._prune(feature_id)
             except LeaseLost:
                 raise
             except Exception as exc:  # surfaced on the feature page; the checkpoint keeps the last good step
@@ -286,6 +288,21 @@ class FeatureEngine:
         finally:
             lease.release()
         self._wake_release_waits(feature_id)
+
+    def _prune(self, thread_id: str) -> None:
+        """Keep only the thread's latest checkpoint. The tool never goes back to an earlier one, and
+        without this every step's copy of the state stays in Postgres: about 95% of what a finished
+        feature stored. Runs while this replica holds the thread's lock, so no run of it is under
+        way; a run that ended in an error keeps its history until the next one succeeds."""
+        prune = getattr(self.checkpointer, "prune", None)
+        if prune is None:
+            return
+        try:
+            prune([thread_id], strategy="keep_latest")
+        except NotImplementedError:  # the in-memory saver: nothing piles up past the process
+            return
+        except Exception as exc:  # noqa: BLE001 - pruning is housekeeping: the next run tries again
+            log.warning("could not prune %s's checkpoints: %s", thread_id, exc)
 
     def _flag_on(self, s: dict) -> bool | None:
         """Whether the feature is visible to users: its flag as the flag service has it now."""

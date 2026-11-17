@@ -2558,7 +2558,7 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | Multi-repo change set | `graph/pipeline.py` | One branch name across repos; the merge train runs libraries, then providers, then consumers |
 | CI/CD | `integrations/openchoreo.py` | Agents promote to staging only; production promotion at G6 is human (VX-3). A production rollback is a person's, or the tool's under the remediation policy |
 | Knowledge write-back | `graph/phase.py` | After Operate, the capability is registered in the catalog |
-| Durability | `api/app.py` | `PostgresSaver` checkpointer; threads survive restarts and wait at gates for days |
+| Durability | `api/app.py` | `PostgresSaver` checkpointer; threads survive restarts and wait at gates for days; after each run a thread keeps only its latest checkpoint (`engine.py` `_prune`) |
 | Replicas | `cluster.py`, `events.py`, `intake.py` | Advisory lock per thread, the elected watcher, claims for GitHub requests, shared notes; live updates over NOTIFY; intake chats in Postgres |
 
 ## Decisions
