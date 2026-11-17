@@ -11,6 +11,8 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
               catch-up after missed runs; job.yaml holds its schedule (valxel_sdlc.jobs)
   document-intake  takes documents from people: checked uploads (size, format by content, malware),
               fields read through the LLM gateway, a review queue (valxel_sdlc.documents)
+  channel     people talk to the product over Slack, Teams, SMS or email: provider signatures,
+              identity linking, consent and opt-out (valxel_sdlc.channels)
   connector   the only component that talks to a third party: signed webhooks in, allowlisted calls
               out, as data contracts on Kafka; integration.yaml holds what's allowed (valxel_sdlc.connectors)
   mcp-server  product capabilities as MCP tools (often over providers' APIs), for agents
@@ -27,6 +29,6 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
 
 from __future__ import annotations
 
-ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "job", "connector", "document-intake", "mcp-server", "code-sandbox", "agent", "consumer", "bff", "mobile", "acceptance")
+ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "job", "connector", "document-intake", "channel", "mcp-server", "code-sandbox", "agent", "consumer", "bff", "mobile", "acceptance")
 REPO_ORDER = {role: i for i, role in enumerate(ROLES)}
 ROLE_PATTERN = "|".join(ROLES)

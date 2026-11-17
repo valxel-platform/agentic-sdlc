@@ -106,6 +106,7 @@ platform_repos:
   valxel-platform/template-integration: { kind: template, role: connector }
   valxel-platform/template-code-sandbox: { kind: template, role: code-sandbox }
   valxel-platform/template-document-intake: { kind: template, role: document-intake }
+  valxel-platform/template-channel: { kind: template, role: channel }
   valxel-platform/template-event-worker: { kind: template, role: event-worker }
   valxel-platform/template-acceptance: { kind: template, role: acceptance }
   valxel-platform/template-bff: { kind: template, role: bff }
@@ -168,6 +169,13 @@ roles:
   connector:
     template: valxel-platform/template-integration
     required_checks: [unit, CodeQL]  # unit tests signatures, replays, the egress allowlist and both contracts
+    openchoreo: { component_type: deployment/connector, workflow: docker }
+  # Where people talk to the product (valxel_sdlc.channels): Slack, Teams, SMS and email, each
+  # provider's signature checked, only linked people reaching the product, STOP honoured, addresses
+  # encrypted. Deployed on the connector type: its routes and egress come from channel.yaml.
+  channel:
+    template: valxel-platform/template-channel
+    required_checks: [unit, CodeQL]  # unit runs every provider's signature, linking, consent and replies
     openchoreo: { component_type: deployment/connector, workflow: docker }
   # Takes documents from people (valxel_sdlc.documents): uploads to a quarantine bucket by presigned
   # POST, sized, sniffed and malware-scanned before anything reads them, fields read through the LLM

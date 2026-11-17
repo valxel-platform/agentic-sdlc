@@ -264,6 +264,10 @@ def architecture(ctx: dict, defective: bool) -> str:
         lines += ["", "## Integrations"] + [
             f"- {r['name']}: example-vendor; data {data}; baa {'yes' if data == 'phi' else 'no'}; webhooks updates; "
             "calls api.example-vendor.test; auth oauth2-client-credentials" for r in connectors]
+    chans = [r for r in repos if r["role"] == "channel"]
+    if chans:
+        full = "slack full baa" if ctx.get("data_class") == "phi" else "slack full"
+        lines += ["", "## Channels"] + [f"- {r['name']}: {full}; sms notice" for r in chans]
     intakes = [r for r in repos if r["role"] == "document-intake"]
     if intakes:
         lines += ["", "## Documents"] + [
@@ -461,6 +465,7 @@ def plan(ctx: dict, defective: bool) -> str:
             "connector": ["integration.yaml", "src/integration/mapping.py", "tests/test_mapping.py"],
             "code-sandbox": ["workload.yaml", "tests/test_server.py"],
             "document-intake": ["intake.yaml", "contracts/lock.yaml", "tests/test_api.py"],
+            "channel": ["channel.yaml", "contracts/lock.yaml", "tests/test_channels.py"],
             "agent": [f"src/agent/prompts/{slug}.md", f"evals/cases/{slug}.jsonl"],
             "event-worker": [f"src/main/java/com/valxel/worker/{slug.replace('-', '')}/Handler.java",
                              f"src/main/resources/db/migration/V2__{slug.replace('-', '_')}.sql"],
@@ -549,7 +554,7 @@ def _endpoint_lines(repos: list[dict]) -> list[str]:
         if r["role"] in ("library", "acceptance"):
             continue
         vis = {"bff": "external", "event-worker": "none", "mobile": "none", "job": "none",
-               "connector": "external"}.get(r["role"], "project")
+               "connector": "external", "channel": "external"}.get(r["role"], "project")
         targets = calls.get(r["role"], [])
         out.append(f"- {r['name']}: {vis}" + (f"; calls {', '.join(targets)}" if targets else ""))
     return out

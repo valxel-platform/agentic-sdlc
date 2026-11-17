@@ -63,7 +63,7 @@ def _apply_capacity(services, snap, target: dict, env: str, *, repo: str = "", r
     the commit being deployed (jobs.py); for a connector, the webhook paths its route exposes and the
     hosts its egress allows, from integration.yaml at that commit (connectors.py). The last
     environment in the pipeline is production."""
-    from .. import connectors, jobs
+    from .. import channels, connectors, jobs
     from ..environments import apply_capacity
 
     pipeline = list(target.get("pipeline") or [])
@@ -73,6 +73,8 @@ def _apply_capacity(services, snap, target: dict, env: str, *, repo: str = "", r
         extra = jobs.read_configs(services.github, repo, ref, name)
     elif repo and role == connectors.ROLE:
         extra = connectors.read_configs(services.github, repo, ref)
+    elif repo and role == channels.ROLE:
+        extra = channels.read_configs(services.github, repo, ref)
     try:
         return apply_capacity(services, snap, target, name, extra=extra)
     except Exception:

@@ -493,7 +493,8 @@ repo_standards:
    template repository: `template-service` and `template-event-worker` (Java 21, Spring Boot),
    `template-web` (React, TypeScript), `template-library` (Java), and `template-mcp-server`,
    `template-agent`, `template-knowledge`, `template-reporting`, `template-job`,
-   `template-integration`, `template-code-sandbox` and `template-document-intake` (Python).
+   `template-integration`, `template-code-sandbox`, `template-document-intake` and
+   `template-channel` (Python).
    Their CI jobs are named for the required checks
    (`unit`, `contract`) and post `unit / report`-style statuses the quality suites read; their
    `post-deploy.yml` runs integration, e2e and smoke suites when the pipeline dispatches
@@ -547,6 +548,24 @@ request like any other.
 
 Two platform alert rules watch jobs: `job-failed` (a run ended in an error) and `job-missed`
 (`missed_after` scheduled runs passed without a success). In production, each opens an incident.
+
+### Conversation channels
+
+People talk to the product (often its agent) over Slack, Teams, SMS or email through one `channel`
+repo.
+
+| Role | Template | Required checks | What it is |
+| --- | --- | --- | --- |
+| `channel` | `valxel-platform/template-channel` | `unit`, `CodeQL` | Each provider's own signature or token is checked before a message is read. Only people who linked their identity, by signing in through the BFF, reach the product. STOP, START and HELP are honoured, and nothing goes to opted-out people. Addresses are hashed and encrypted. Messages and replies travel as data contracts |
+
+The design names each channel and what it carries under `## Channels`:
+`- <org>/<repo>: slack full baa; sms notice; email notice`. `notice` sends a sign-in notice instead
+of the text, and in a PHI product `full` needs `baa`. A channel repo is `external` in Endpoints
+without an ADR. The build fails when `channel.yaml` adds a channel, sends full text where the design
+said notice, or claims a BAA the design didn't record. On every deploy, its routes
+(`/channels/<kind>`), its egress (the providers' hosts) and its one in-product caller (the BFF) come
+from `channel.yaml`, on the connector's component type. Alert rules:
+`channel-signatures-rejected`, `channel-replies-parked`, `channel-provider-unavailable`.
 
 ### Document intake
 

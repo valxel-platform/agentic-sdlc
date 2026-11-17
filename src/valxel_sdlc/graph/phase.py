@@ -653,6 +653,10 @@ SECURITY = {
     "agent": (" Call MCP servers only through token exchange for the person behind the step (audience and"
               " scope per server); never a fixed token (VX-13, VX-17). Never run model-written code in this"
               " pod (no exec, eval or subprocess on it): send it to the product's code sandbox's run_code."),
+    "channel": (" Each /channels/<kind> route checks its provider's signature or token before reading the body;"
+                " unlinked people get only a sign-in link; STOP, START and HELP are honoured; replies go only to"
+                " linked people who haven't opted out; addresses are hashed to find and encrypted to reply, never"
+                " logged, published or audited; provider secrets are mounted files (VX-15, VX-17)."),
     "document-intake": (" Every call checks the token before reading a body and the caller's tenant on every"
                         " document (another tenant's is 404); uploads go to quarantine by presigned POST and"
                         " are sized, sniffed and scanned before anything reads them; downloads are one-minute"
@@ -730,6 +734,24 @@ def schedule_instruction(ctx: dict, task: dict) -> str:
     from ..jobs import coder_instruction
 
     return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
+
+
+def channels_instruction(ctx: dict, task: dict) -> str:
+    """A channel repo's channel.yaml from the approved HLD (channels.py)."""
+    if task.get("role") != "channel":
+        return ""
+    from ..channels import coder_instruction
+
+    return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""), ctx.get("data_class") or "general")
+
+
+def channels_findings(services, ctx: dict, results: dict) -> list[str]:
+    """Deterministic: a channel repo's channel.yaml on its branch says no more than its HLD line."""
+    if not any(r.get("role") == "channel" for r in results.values()):
+        return []
+    from ..channels import build_findings
+
+    return build_findings(services.github, ctx.get("hld_text") or "", results, ctx.get("data_class") or "general")
 
 
 def documents_instruction(ctx: dict, task: dict) -> str:
@@ -945,7 +967,7 @@ def build_build_subgraph(services):
                   + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
                   + contracts_instruction(ctx, task) + schedule_instruction(ctx, task)
                   + integration_instruction(ctx, task) + sandbox_instruction(ctx, task)
-                  + documents_instruction(ctx, task)
+                  + documents_instruction(ctx, task) + channels_instruction(ctx, task)
                   + " The summary is the PR description: what changed, and every flag, audit record and event"
                     " type the change uses. " + diary.CODER + " " + sessions_instruction()
                   + "\n\n" + structured.instruction(structured.CoderReply)),
@@ -1034,6 +1056,9 @@ def build_build_subgraph(services):
                       + (" Check that the connector's webhooks verify their signature before reading the body, that"
                          " the vendor client is used for every outbound call (no other HTTP client), and that the"
                          " mapping copies no more of a record than its contract allows." if r.get("role") == "connector" else "")
+                      + (" Check that each channel route verifies its provider before reading the body, that nothing"
+                         " reaches the product from an unlinked identity or goes to an opted-out one, and that no"
+                         " address appears in logs, events or audit." if r.get("role") == "channel" else "")
                       + (" Check that the intake reads no file before its size, format and malware checks, checks"
                          " the caller's tenant on every document, and logs or audits no field value."
                          if r.get("role") == "document-intake" else "")
@@ -1121,6 +1146,7 @@ def build_build_subgraph(services):
         findings += instrumentation_findings(s["ctx"], results)
         findings += integration_findings(services, s["ctx"], results)
         findings += documents_findings(services, s["ctx"], results)
+        findings += channels_findings(services, s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]
         lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}" + second_line(rv)
                   for tid, rv in sorted(reviews.items())]

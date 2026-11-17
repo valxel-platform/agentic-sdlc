@@ -241,6 +241,10 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     from ..connectors import design_findings as integration_findings
 
     out += integration_findings(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
+    from ..channels import design_findings as channels_design
+
+    out += channels_design(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}],
+                           ctx.get("data_class") or "general")
     from ..documents import design_findings as documents_design
 
     out += documents_design(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
@@ -267,7 +271,8 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 
 
 RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge", "reporting", "job",
-                 "connector", "code-sandbox", "document-intake")
+                 "connector", "code-sandbox", "document-intake",
+                 "channel")
 
 
 EXPOSED_ROLES = RUNTIME_ROLES + ("bff", "mobile")
@@ -295,7 +300,7 @@ def _endpoints(text: str, repos: list[dict], ctx: dict) -> list[str]:
         if bad:
             out.append(f"{repo}: unknown visibility {', '.join(bad)} (use {', '.join(VISIBILITIES)})")
         # A connector is external exactly when the vendor calls its webhooks (connectors.endpoint_findings).
-        if "external" in e["visibility"] and roles.get(repo) not in ("bff", "connector"):
+        if "external" in e["visibility"] and roles.get(repo) not in ("bff", "connector", "channel"):
             if roles.get(repo) == "consumer":
                 out.append(f"{repo} is a web app: it reaches the internet through the product's BFF, not directly (VX-17)")
             elif not external_adr:

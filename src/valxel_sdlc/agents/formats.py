@@ -108,6 +108,11 @@ sequenceDiagram
                                (PHI needs baa yes. Hosts by name: no scheme, wildcard or IP. A connector with webhooks
                                 is external in Endpoints, only for /webhooks/<name>; without them, none. Only a
                                 connector talks to a third party: others reach it through data contracts.)
+## Channels                    (only with a channel repo: where people talk to the product and what's said there; approved at G4)
+- <org>/<repo>: <slack|teams|sms|email> <full|notice> [baa]; ...
+                               (full sends the text; notice sends a sign-in notice. In a PHI product, full needs
+                                baa: a BAA with that provider. A channel repo is external in Endpoints: providers
+                                call its /channels/<kind> routes.)
 ## Documents                   (only with a document-intake repo: what people upload and what's read from it; approved at G4)
 - <org>/<repo>: <type>; formats <pdf, png, jpeg, tiff>; max <N> MB; keep <N> days; dataset <name>; fields <name>*, <name>
                                (* marks a required field. The repo also needs two s3-buckets in Resources it reads,

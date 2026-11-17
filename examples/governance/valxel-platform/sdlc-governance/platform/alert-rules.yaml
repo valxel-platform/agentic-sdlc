@@ -106,6 +106,31 @@ rules:
     condition: { window: 15m, interval: 5m, operator: gt, threshold: 10 }
     says: "The vendor is down or refusing the connector's credentials. Nothing is lost: the consumer retries the same event. Check the vendor's status and the connector's token or certificate."
 
+  # Channel services (template-channel). None of these markers carries an address or a message.
+  channel-signatures-rejected:
+    description: "Many messages failed their provider's signature or token check."
+    roles: [channel]
+    severity: warning
+    source: { type: log, query: "channel.signature_rejected" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 20 }
+    says: "Someone is posting to a channel route without the provider's signature, or a signing secret was rotated at the provider. Check the provider's console; after a rotation, mount the new value as the current line."
+
+  channel-replies-parked:
+    description: "Replies to people were parked on the dead-letter topic."
+    roles: [channel]
+    severity: warning
+    source: { type: log, query: "channel.reply_parked" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
+    says: "The provider refused replies for good, or they broke their contract; they're on <topic>.dlt with the rule in the headers. Fix the cause and replay them."
+
+  channel-provider-unavailable:
+    description: "A channel's provider keeps failing; replies wait."
+    roles: [channel]
+    severity: critical
+    source: { type: log, query: "channel.provider_unavailable" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 10 }
+    says: "Replies are retried, not lost. Check the provider's status and the channel's credentials."
+
   # Document intake (template-document-intake). None of these markers carries a field value.
   intake-malware-found:
     description: "An uploaded document carried malware."

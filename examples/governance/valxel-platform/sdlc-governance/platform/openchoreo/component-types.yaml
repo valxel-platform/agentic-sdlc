@@ -319,7 +319,8 @@ spec:
             - to: '${environmentConfigs.apiServerCIDRs.map(c, {"ipBlock": {"cidr": c}})}'
               ports: [{ protocol: TCP, port: 443 }]
 ---
-# A product's connector to a third party (repos.yaml role `connector`, template-integration): the same
+# A product's connector to a third party (repos.yaml role `connector`, template-integration), and its
+# channel service (role `channel`, template-channel, the same shape): the same
 # lock-down as an agent, plus a closed door each way. In: the gateway routes only the webhook paths in
 # the repo's integration.yaml, and only the gateway reaches the pod. Out: DNS, telemetry, the product's
 # database and brokers, and HTTPS to the vendor hosts in integration.yaml, by name (Cilium FQDN
@@ -358,6 +359,9 @@ spec:
         webhookPaths: { type: array, items: { type: string, pattern: "^/webhooks/[a-z0-9-]+$" }, default: [] }
         egressHosts: { type: array, items: { type: string }, default: [] }
         dataClass: { type: string, enum: [general, payments, phi], default: general }
+        # Components inside the product that may call it, by role: none for a connector; the BFF for a
+        # channel service (people confirm a channel link through it). Set by the Valxel SDLC.
+        callerRoles: { type: array, items: { type: string }, default: [] }
   resources:
     - id: deployment
       template:
@@ -430,10 +434,27 @@ spec:
             matchLabels: ${metadata.podSelectors}
           policyTypes: [Ingress]
           ingress:
-            # The gateway (webhooks) and the observability plane (metrics); no other component calls a connector.
+            # The gateway (webhooks) and the observability plane (metrics); callerRoles below adds others.
             - from:
                 - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: gateway } }
                 - namespaceSelector: { matchLabels: { valxel.io/plane: observability } }
+              ports: [{ protocol: TCP, port: 8080 }]
+    - id: callers
+      includeWhen: ${size(environmentConfigs.callerRoles) > 0}
+      template:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        metadata:
+          name: ${metadata.name}-callers
+        spec:
+          podSelector:
+            matchLabels: ${metadata.podSelectors}
+          policyTypes: [Ingress]
+          ingress:
+            - from:
+                - podSelector:
+                    matchExpressions:
+                      - { key: valxel.io/role, operator: In, values: '${environmentConfigs.callerRoles}' }
               ports: [{ protocol: TCP, port: 8080 }]
     - id: egress
       template:
