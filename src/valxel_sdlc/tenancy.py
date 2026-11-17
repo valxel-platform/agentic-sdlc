@@ -165,6 +165,22 @@ FUNCTIONS = (
     """create or replace function valxel_thread_visible(id text) returns boolean language sql stable as
        $$ select valxel_platform() or exists (select 1 from valxel_features f
             where f.feature_id = id and f.workspace <> '' and f.workspace = any (valxel_scope())) $$""",
+    # One table's policy on or off; identifiers quoted by format(%I). Returns 'on', 'off' or 'missing'.
+    """create or replace function valxel_apply_policy(tbl text, cond text, enforce boolean) returns text
+       language plpgsql as $$
+       begin
+         if to_regclass(tbl) is null then return 'missing'; end if;
+         execute format('drop policy if exists valxel_tenant on %I', tbl);
+         if enforce then
+           execute format('create policy valxel_tenant on %I using (%s) with check (%s)', tbl, cond, cond);
+           execute format('alter table %I enable row level security', tbl);
+           execute format('alter table %I force row level security', tbl);
+           return 'on';
+         end if;
+         execute format('alter table %I no force row level security', tbl);
+         execute format('alter table %I disable row level security', tbl);
+         return 'off';
+       end $$""",
 )
 
 
@@ -193,29 +209,14 @@ def apply(pool: Any, registry: dict, *, enforce: bool | None = None) -> dict[str
     tables' owner, in the platform's scope. Returns {table: 'on' | 'off' | 'missing'}."""
     enforce = enforced() if enforce is None else enforce
     out: dict[str, str] = {}
-    from psycopg import sql
-
     with bound(PLATFORM), pool.connection() as conn:
         for statement in FUNCTIONS:
             conn.execute(statement)
         refresh(conn, registry)
+        # The conditions are this module's constants, never input.
         for table, cond in _conditions().items():
-            exists = conn.execute("select to_regclass(%s) is not null as ok", (table,)).fetchone()
-            if not (exists["ok"] if isinstance(exists, dict) else exists[0]):
-                out[table] = "missing"
-                continue
-            t = sql.Identifier(table)
-            conn.execute(sql.SQL("drop policy if exists {} on {}").format(sql.Identifier(POLICY), t))
-            if enforce:
-                conn.execute(sql.SQL("create policy {} on {} using ({}) with check ({})").format(
-                    sql.Identifier(POLICY), t, sql.SQL(cond), sql.SQL(cond)))
-                conn.execute(sql.SQL("alter table {} enable row level security").format(t))
-                conn.execute(sql.SQL("alter table {} force row level security").format(t))
-                out[table] = "on"
-            else:
-                conn.execute(sql.SQL("alter table {} no force row level security").format(t))
-                conn.execute(sql.SQL("alter table {} disable row level security").format(t))
-                out[table] = "off"
+            row = conn.execute("select valxel_apply_policy(%s, %s, %s) as state", (table, cond, enforce)).fetchone()
+            out[table] = row["state"] if isinstance(row, dict) else row[0]
     log.info("tenancy: row-level security %s on %d tables", "on" if enforce else "off",
              sum(1 for v in out.values() if v != "missing"))
     return out
