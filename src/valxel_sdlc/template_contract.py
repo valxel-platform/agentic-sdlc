@@ -56,10 +56,10 @@ def contract() -> dict:
     as for the rest of the config)."""
     import os
 
-    from .config import _repo_root
+    from .config import _repo_root, config_file
 
     cfg = Path(os.environ.get("VALXEL_CONFIG_DIR") or _repo_root() / "config")
-    return parse((cfg / "template-contract.yaml").read_text())
+    return parse(config_file(cfg, "template-contract.yaml").read_text())
 
 
 def required(role: str, c: dict | None = None) -> dict[str, dict]:

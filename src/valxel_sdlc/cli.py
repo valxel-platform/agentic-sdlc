@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import json
+from pathlib import Path
 import sys
 import tempfile
 
@@ -48,10 +49,22 @@ def _demo(args: argparse.Namespace) -> int:
     return 0 if view["status"] == "done" else 1
 
 
+def _examples_only(settings) -> bool:
+    """True when the settings come from the tool's own config directory (the example products)."""
+    from .config import _repo_root
+
+    return Path(settings.config_dir).resolve() == (_repo_root() / "config").resolve()
+
+
 def _repos(args: argparse.Namespace, github=None) -> int:
     from . import repo_standards
 
     settings = load_settings(mode="stub", database_url="")
+    if settings.governance_source == "github" and _examples_only(settings):
+        # The built-in registry lists fictional products (for tests and local work): checking them on
+        # GitHub only reports orgs that don't exist, and the real products go unchecked.
+        raise SystemExit("valxel repos is reading the example registry: set VALXEL_CONFIG_DIR to the "
+                         "deployment's config (valxel-platform/sdlc-config/config)")
     services = build_services(settings)
     gh = github or _admin_github(settings)
     reports = repo_standards.run(services, gh, apply=args.action == "apply", only=args.repo or None)

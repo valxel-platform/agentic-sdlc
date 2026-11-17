@@ -289,6 +289,14 @@ class Settings:
 DEFAULT_CONTEXT_CAPS = {"L2": 15000, "L3": 8000, "L4": 10000, "L5": 25000, "reserve": 64000}
 
 
+def config_file(cfg_dir: Path | str, name: str) -> Path:
+    """A config file from the deployment's directory (VALXEL_CONFIG_DIR), or, when the deployment
+    doesn't override it, the tool's own default. A deployment keeps only what it changes (its
+    registry, its models), so it never carries a stale copy of the golden path or the contract."""
+    path = Path(cfg_dir) / name
+    return path if path.exists() else _repo_root() / "config" / name
+
+
 def load_settings(
     *,
     mode: str | None = None,
@@ -303,7 +311,7 @@ def load_settings(
     art_dir = Path(artifact_dir or os.environ.get("VALXEL_ARTIFACT_DIR") or root / ".artifacts")
 
     reg = yaml.safe_load((cfg_dir / "registry.yaml").read_text())
-    models_raw = yaml.safe_load((cfg_dir / "models.yaml").read_text())
+    models_raw = yaml.safe_load(config_file(cfg_dir, "models.yaml").read_text())
     gov = reg.get("governance", {})
     gov_root = Path(governance_root or os.environ.get("VALXEL_GOVERNANCE_ROOT") or gov.get("local_root", "examples/governance"))
     if not gov_root.is_absolute():
@@ -352,11 +360,11 @@ def load_settings(
         prices={m: tuple(float(x) for x in v) for m, v in (models_raw.get("prices") or {}).items()},
         context_windows={m: int(v) for m, v in (models_raw.get("context_windows") or {}).items()},
         context_caps={**DEFAULT_CONTEXT_CAPS, **{k: int(v) for k, v in (models_raw.get("context_caps") or {}).items()}},
-        tools=load_tools(cfg_dir / "tools.yaml"),
-        quality=_load_quality(cfg_dir / "quality.yaml"),
-        knowledge=_load_knowledge(cfg_dir / "knowledge.yaml"),
-        repos=_load_repos(cfg_dir / "repos.yaml"),
-        plugins=_load_plugins(cfg_dir / "plugins.yaml"),
+        tools=load_tools(config_file(cfg_dir, "tools.yaml")),
+        quality=_load_quality(config_file(cfg_dir, "quality.yaml")),
+        knowledge=_load_knowledge(config_file(cfg_dir, "knowledge.yaml")),
+        repos=_load_repos(config_file(cfg_dir, "repos.yaml")),
+        plugins=_load_plugins(config_file(cfg_dir, "plugins.yaml")),
         skills_dir=os.environ.get("VALXEL_SKILLS_DIR", ""),
         inception=dict(reg.get("inception") or {}),
     )

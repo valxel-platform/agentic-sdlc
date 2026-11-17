@@ -616,3 +616,25 @@ def test_must_pass_cases_fail_the_status_whatever_the_pass_rate(tmp_path):
     assert code == 1 and "Must pass, failed: leak: warfarin." in out  # ...but a leak never does
     report = _report_module()
     assert report.failed_cases([str(junit)]) == ["recall: b", "leak: warfarin"]
+
+
+def test_repos_never_checks_the_example_products_on_github(monkeypatch, tmp_path):
+    """The tool's own registry lists fictional products: on GitHub, the deployment's config is required."""
+    monkeypatch.delenv("VALXEL_CONFIG_DIR", raising=False)
+    monkeypatch.setenv("VALXEL_GOVERNANCE_SOURCE", "github")
+    with pytest.raises(SystemExit, match="VALXEL_CONFIG_DIR"):
+        main(["repos", "check"], github=StubGitHub())
+
+
+def test_a_deployment_config_keeps_only_what_it_changes(tmp_path):
+    """Files a deployment doesn't carry come from the tool: no stale copies of the golden path."""
+    import shutil
+
+    from valxel_sdlc.config import _repo_root, config_file, load_settings
+
+    for name in ("registry.yaml", "models.yaml"):
+        shutil.copy(_repo_root() / "config" / name, tmp_path / name)
+    settings = load_settings(mode="stub", database_url="", config_dir=tmp_path)
+    assert config_file(tmp_path, "repos.yaml") == _repo_root() / "config" / "repos.yaml"
+    assert config_file(tmp_path, "registry.yaml") == tmp_path / "registry.yaml"
+    assert "channel" in settings.repos.roles and settings.config_dir == tmp_path

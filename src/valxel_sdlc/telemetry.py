@@ -108,7 +108,9 @@ def _headers(raw: str) -> dict:
 
 def load_config(config_dir: Path | str, env=None) -> TelemetryConfig:
     env = env if env is not None else os.environ
-    path = Path(config_dir) / "telemetry.yaml"
+    from .config import config_file
+
+    path = config_file(config_dir, "telemetry.yaml")
     raw = yaml.safe_load(path.read_text()) if path.exists() else {}
     raw = raw or {}
     content = {str(k): str(v) for k, v in (raw.get("content") or {}).items()}
