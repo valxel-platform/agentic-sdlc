@@ -27,6 +27,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from ..agents import untrusted
+from ..agents.parse import section
 from ..roadmap import governance_pr
 from ..roadmap.graphs import _decide, event, lane_approvers, now, run_agent
 from ..state import last, merge_dict
@@ -67,10 +68,6 @@ class IncidentState(TypedDict, total=False):
     analysis: Annotated[dict, last]  # OpenChoreo's root-cause (or FinOps) analysis: {kind, report_id, status, report}
     escalated: Annotated[bool, last]  # on-call was paged urgently (or told it waits for them)
 
-
-def section(text: str, heading: str) -> str:
-    m = re.search(rf"^## {re.escape(heading)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
-    return m.group(1).strip() if m else ""
 
 
 def parse_actions(text: str) -> list[dict]:

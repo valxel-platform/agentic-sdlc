@@ -168,6 +168,21 @@ def _usage_context(args, engine=None) -> int:
     return 0
 
 
+def _scaffolding(args, engine=None) -> int:
+    from .scaffolding import markdown, report
+
+    if engine is None:
+        if not os.environ.get("DATABASE_URL"):
+            print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
+            return 2
+        from .api.app import create_engine_from_env
+
+        engine, _ = create_engine_from_env()
+    rep = report(engine, args.product, since=args.since)
+    print(json.dumps(rep, indent=2) if args.json else markdown(rep))
+    return 0
+
+
 def _pilot_report(args, engine=None) -> int:
     from .pilot import markdown, report
 
@@ -392,6 +407,11 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
     us.add_argument("--product", default=None, help="Only this product")
     us.add_argument("--weeks", type=int, default=4, help="How many weeks back (default 4)")
     us.add_argument("--json", action="store_true")
+    sc = sub.add_parser("scaffolding", help="How much of the coder's output is scaffolding a generator could write, "
+                                           "by repo role (DATABASE_URL)")
+    sc.add_argument("product")
+    sc.add_argument("--since", default="", help="Only features started on or after this date (YYYY-MM-DD)")
+    sc.add_argument("--json", action="store_true")
     pr = sub.add_parser("pilot-report", help="The pilot's numbers for a product, as Markdown (DATABASE_URL)")
     pr.add_argument("product")
     pr.add_argument("--all", action="store_true", help="Every feature, not only those created as pilot features")
@@ -516,6 +536,8 @@ def main(argv: list[str] | None = None, *, github=None) -> int:
         return _eval(args)
     if args.cmd == "pilot-report":
         return _pilot_report(args)
+    if args.cmd == "scaffolding":
+        return _scaffolding(args)
     if args.cmd == "workspaces":
         return _workspaces(args)
     if args.cmd == "usage":

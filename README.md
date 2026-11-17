@@ -1898,6 +1898,20 @@ A product can set its own shares in `product.yaml`, for example
 value must be zero or more, and the shares must add up to 100. These are starting figures, to be
 reset from the ledger once 10 pilot features have run.
 
+### Is boilerplate worth a code generator?
+
+Slice generators in the templates (one command writes a controller, its DTOs, repository and
+tests) would save the coder's output tokens, but only where boilerplate is a real share of what
+it writes. `valxel scaffolding <product>` measures that from real features. For each repo role
+it reads the coder's pull requests from GitHub and its calls from the usage ledger. It reports
+the lines the coder added in new files shaped like scaffolding, other new lines and changed
+lines, beside the coder's output tokens. The scaffold shapes per role are in
+`src/valxel_sdlc/scaffolding.py`.
+
+A role is worth a generator once it has at least 10 coder tasks and scaffolding is at least 30%
+of the lines added. Lines stand in for tokens, so "tokens a generator would save" is an
+estimate. Build generators only for roles the report marks.
+
 ## AWS services (VX-19)
 
 Features that need a managed service get it from the platform's AWS catalog
@@ -2653,7 +2667,8 @@ src/valxel_sdlc/
   governance/      sources (local, GitHub), GitHub App tokens, manifest validation, pinned loader
   graph/           pipeline.py wires the graph; routing, briefs, gates, provision, infra, merge_train,
                    delivery and rollout hold its nodes; phase.py the phase subgraphs
-  agents/          roster, prompt-layer builder, stub templates, section parsers
+  agents/          roster, prompt-layer builder, stub templates, section parsers (parse.py: tolerant of
+                   '*', '1.', bold ids, typographic arrows and heading variants)
   evaluators/      deterministic checks, rubric critic
   gateway/         gateway, providers, prompt layers, pricing, ledger
   runtime/         generic and Claude Code runtimes

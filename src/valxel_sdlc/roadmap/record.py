@@ -21,6 +21,8 @@ import re
 
 import yaml
 
+from ..agents.parse import section
+
 HORIZONS = ("now", "next", "later")
 INITIATIVE_STATUSES = ("proposed", "approved", "active", "done", "dropped")
 RELEASE_MODELS = ("launch", "train")
@@ -38,10 +40,6 @@ def _split(text: str) -> tuple[dict, str] | None:
         return None
     return (meta, m.group(2)) if isinstance(meta, dict) and meta.get("id") else None
 
-
-def section(body: str, heading: str) -> str:
-    m = re.search(rf"^## {re.escape(heading)}\s*$(.*?)(?=^## |\Z)", body, re.M | re.S)
-    return m.group(1).strip() if m else ""
 
 
 def candidates(body: str) -> list[dict]:

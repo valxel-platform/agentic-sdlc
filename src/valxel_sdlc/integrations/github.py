@@ -126,6 +126,8 @@ class GitHub(Protocol):
     def dependabot_alerts(self, *, repo: str) -> list | None: ...  # open alerts on the default branch
     # Open pull requests: {number, title, body, author, branch, head_sha} (Dependabot's, for upkeep).
     def open_pull_requests(self, *, repo: str) -> list[dict]: ...
+    # A pull request's files: {path, status (added|modified|removed|renamed), additions}; None if unknown.
+    def pr_files(self, *, repo: str, number: int) -> list[dict] | None: ...
     # Provisioning new repositories (see valxel_sdlc.provisioning); each call is idempotent.
     def get_file(self, *, repo: str, path: str, ref: str) -> str | None: ...  # ref '' = default branch
     def get_bytes(self, *, repo: str, path: str, ref: str) -> bytes | None: ...  # a binary file (a screenshot)
@@ -245,6 +247,16 @@ class StubGitHub:
 
     def dependabot_alerts(self, *, repo):
         return list(self.dependabot.get(repo, []))
+
+    def pr_files(self, *, repo, number):
+        pr = self.prs.get(f"{repo}#{number}")
+        if pr is None:
+            return None
+        out = []
+        for path in pr["files"]:
+            content = self.files.get((repo, pr["branch"], path), "")
+            out.append({"path": path, "status": "added", "additions": len(content.splitlines()) or 1})
+        return out
 
     def open_pull_requests(self, *, repo):
         with self._lock:
@@ -544,6 +556,18 @@ class GitHubRest:
 
     def dependabot_alerts(self, *, repo):
         return self._maybe(repo, "/dependabot/alerts?state=open&per_page=100")
+
+    def pr_files(self, *, repo, number):
+        out: list[dict] = []
+        for page in range(1, 31):  # GitHub lists at most 3,000 files
+            rows = self._call("GET", repo, f"/pulls/{int(number)}/files?per_page=100&page={page}", ok404=True)
+            if rows is None:
+                return None
+            out += [{"path": f["filename"], "status": f.get("status", "modified"),
+                     "additions": int(f.get("additions") or 0)} for f in rows]
+            if len(rows) < 100:
+                break
+        return out
 
     def open_pull_requests(self, *, repo):
         rows = self._call("GET", repo, "/pulls?state=open&per_page=100") or []

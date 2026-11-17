@@ -23,9 +23,47 @@ _JSON_BLOCK = re.compile(r"```json\n(.*?)\n```", re.S)
 
 
 def section(text: str, heading: str) -> str:
-    """Body of a '## heading' section, up to the next '## ' heading."""
-    m = re.search(rf"^## {re.escape(heading)}\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
-    return m.group(1).strip() if m else ""
+    """Body of a '## heading' section, up to the next '## ' heading, with its lists tidied (tidy).
+
+    The heading matches whatever its case, with a number in front ('## 3. Acceptance criteria'),
+    bold, or a colon after it, since models and people write all of these."""
+    pattern = rf"^##[ \t]+(?:\d+[.)][ \t]*)?(?:\*\*|__)?{re.escape(heading)}(?:\*\*|__)?[ \t]*:?[ \t]*$(.*?)(?=^##[ \t]|\Z)"
+    m = re.search(pattern, text or "", re.M | re.S | re.I)
+    return tidy(m.group(1).strip()) if m else ""
+
+
+_MARKER = re.compile(r"^ {0,3}(?:[-*+\u2022]|\d{1,3}[.)])[ \t]+")
+_WRAPPED = re.compile(r"^(\*\*|__)(.+?)\1(.*)$")
+_ARROW = re.compile(r"[ \t]*(?:\u2192|\u27f6|=>|[\u2013\u2014]>|-{2,}>)[ \t]*")
+_ID_DASH = re.compile(r"\b(AC|NFR|TC|TASK|GOAL|ADR|REQ)[\u2010\u2011\u2012\u2013\u2014](?=\w)")
+_TICKED = re.compile(r"`([^`\s]+)`")
+
+
+def tidy(body: str) -> str:
+    """List items written the ways Markdown allows, as the '- ' items the parsers read.
+
+    A line that is a list item at the top level ('* x', '+ x', '\u2022 x', '1. x', up to three spaces
+    in) becomes '- x'. In an item, emphasis around its start ('**AC-1** (G1): ...' or
+    '**AC-1 (G1):** ...') goes, typographic arrows become '->', a typographic dash in an id
+    ('AC\u20111') becomes '-', backticks around a single token ('`org/repo`') go, and curly quotes
+    become straight ones. Other lines, items nested deeper and code blocks are left as they are."""
+    out, fenced = [], False
+    for line in body.splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        m = None if fenced else _MARKER.match(line)
+        if not m:
+            out.append(line)
+            continue
+        item = line[m.end():].strip()
+        if w := _WRAPPED.match(item):
+            item = (w.group(2) + w.group(3)).strip()
+        item = _ARROW.sub(" -> ", item)
+        item = _ID_DASH.sub(r"\1-", item)
+        item = _TICKED.sub(r"\1", item)
+        item = item.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+        out.append("- " + item)
+    return "\n".join(out)
 
 
 def split_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
