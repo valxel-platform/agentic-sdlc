@@ -44,7 +44,7 @@ from .agents.parse import section
 
 ACCESS_VERBS = {"reads": "read", "writes": "write", "deletes": "delete", "publishes": "write"}
 # Roles that run in the platform and may hold an AWS identity.
-AWS_ROLES = ("provider", "event-worker", "agent", "mcp-server", "knowledge", "bff")
+AWS_ROLES = ("provider", "event-worker", "agent", "mcp-server", "knowledge", "bff", "reporting", "job")
 IDENTITY_TYPE = "workload-identity"
 KAFKA_USER_TYPE = "kafka-user"
 RETENTION_DAYS = {"d": 1, "m": 30, "y": 365}

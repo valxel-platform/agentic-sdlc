@@ -26,6 +26,7 @@ from .. import budgets, retrieval, diary, performance
 from .. import evals, lessons, telemetry
 from ..config import ProductConfig
 from ..provisioning import naming_policy
+from ..template_contract import roles_with
 from ..evaluators import critique, run_checks, weakening
 from ..agents import formats, structured, untrusted
 from ..gateway import CallTags, ProviderUnavailable
@@ -586,8 +587,9 @@ def build_phase_subgraph(phase: str, services):
     return g.compile(name=f"phase_{phase}")
 
 
-# Repos whose code runs where users reach it: their changes go behind the feature's flag.
-FLAGGED_ROLES = ("provider", "consumer", "agent", "mcp-server", "knowledge", "mobile")
+# Repos whose template reads the feature's flag (config/template-contract.yaml `flags`): their
+# changes go behind it.
+FLAGGED_ROLES = roles_with("flags")
 
 
 def flag_instruction(ctx: dict, task: dict) -> str:
@@ -598,8 +600,9 @@ def flag_instruction(ctx: dict, task: dict) -> str:
             " cover both. Name the flag key in the patch summary.")
 
 
-# Repos that serve or change records: they publish the audit records the HLD names (VX-15).
-AUDITED_ROLES = ("provider", "agent", "mcp-server", "knowledge")
+# Repos that serve or change records, whose template has an auditor (the contract's `audit`):
+# they publish the audit records the HLD names (VX-15).
+AUDITED_ROLES = roles_with("audit")
 
 
 def audit_instruction(ctx: dict, task: dict) -> str:

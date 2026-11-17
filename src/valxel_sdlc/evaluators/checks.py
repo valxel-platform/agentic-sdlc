@@ -478,6 +478,12 @@ def _emitters(text: str, repos: list[dict], ctx: dict) -> list[str]:
            for e in wanted if e not in emits]
     out += [f"Event {e} is recorded by {r}, which isn't an affected repo" for e, r in emits.items()
             if e in wanted and names and r not in names]
+    from ..template_contract import roles_with
+
+    can = roles_with("product-events")
+    role = {r["name"]: r.get("role", "") for r in repos}
+    out += [f"Event {e} is recorded by {r}, but a {role[r]} repo has no product events module: give it to a "
+            f"repo that records them ({', '.join(can)})" for e, r in emits.items() if role.get(r) and role[r] not in can]
     out += [f"Event {e} under Instrumentation isn't in the PRD" for e in emits if e not in wanted]
     return out
 

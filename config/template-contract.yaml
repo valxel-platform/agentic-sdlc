@@ -1,0 +1,106 @@
+# What every template provides, so no role ships without security, observability, an audit trail
+# or business metrics (valxel_sdlc.template_contract).
+#
+# Each capability names the roles whose template must have it, and a marker: text that must appear
+# in the file that implements it. A template lists where each capability lives in
+# .valxel/capabilities.yaml (`<capability>: <path>`); `valxel repos check` reads that file from
+# every template in platform_repos and reports a capability its role needs that is missing,
+# points at a file that isn't there, or whose file lacks the marker. A new template starts from
+# this list.
+#
+# The tool's own rules come from the same list: the coder is told to put changes behind the
+# feature's flag in roles with `flags`, to publish audit records in roles with `audit`, and the
+# design may give an Instrumentation event only to a repo whose role has `product-events`.
+version: 1
+
+groups:
+  all: [provider, event-worker, knowledge, reporting, job, mcp-server, agent, consumer, bff, mobile, library, acceptance]
+  # Built into an image and run by OpenChoreo.
+  deployed: [provider, event-worker, knowledge, reporting, job, mcp-server, agent, consumer, bff]
+
+capabilities:
+  # --- security
+  security-scans:
+    area: security
+    roles: all
+    says: "Semgrep, gitleaks and SonarQube on every pull request (the platform's managed security.yml)"
+    marker: "gitleaks"
+  dependency-review:
+    area: security
+    roles: all
+    says: "new dependencies with known high or critical vulnerabilities fail the pull request"
+    marker: "dependency-review-action"
+  dependency-updates:
+    area: security
+    roles: all
+    says: "Dependabot for every ecosystem, with a week's cooldown on new versions"
+    marker: "cooldown"
+  security-policy:
+    area: security
+    roles: all
+    says: "how to report a vulnerability"
+    marker: "vulnerab"
+  image-scan:
+    area: security
+    roles: deployed
+    says: "the image's SBOM, and a failed build on high or critical vulnerabilities with a fix"
+    marker: "grype"
+  supply-chain-pins:
+    area: security
+    roles: deployed
+    says: "every base image pinned to its digest, kept pinned weekly and on Dependabot's pull requests"
+    marker: "supply-chain-pins"
+
+  # --- observability
+  tracing:
+    area: observability
+    roles: deployed
+    says: "OpenTelemetry traces exported to the data plane's collector, with trace ids on every log line"
+    marker: "(?i)opentelemetry"
+  error-reports:
+    area: observability
+    roles: [provider, event-worker, knowledge, reporting, job, mcp-server, agent, consumer, bff, mobile]
+    says: "unhandled errors to Sentry or GlitchTip, tagged with the component so the tool routes the issue"
+    marker: "(?i)sentry"
+  json-logs:
+    area: observability
+    # A web app's container only serves files; its errors are reported from the browser (error-reports).
+    roles: [provider, event-worker, knowledge, reporting, job, mcp-server, agent, bff]
+    says: "one JSON object a line, the exception under error.stack_trace (the platform's alert rules read it)"
+    marker: "(?i)stack_trace|logstash|ecs"
+  post-deploy:
+    area: observability
+    # Components people or other services call; the headless ones (event-worker, reporting, job)
+    # are exercised by the product's acceptance tests and watched by their alert rules.
+    roles: [provider, knowledge, mcp-server, agent, consumer, bff]
+    says: "after each deploy, the stage's suite against the deployed component: integration, e2e, smoke"
+    marker: "valxel-deployed"
+
+  # --- audit trail
+  audit:
+    area: audit
+    roles: [provider, knowledge, reporting, job, mcp-server, agent, bff]
+    says: "who did what to which records, as valxel.audit.v1 events to the product's audit topic, ids only"
+    marker: "(?i)valxel\\.audit|Auditor|SignInAudit"
+
+  # --- business metrics
+  product-events:
+    area: business-metrics
+    roles: [provider, event-worker, knowledge, job, mcp-server, agent, consumer, mobile]
+    says: "the events a feature's goal counts (valxel.events), recorded where they happen"
+    marker: "valxel\\.events|valxel_events_total|ProductEvents"
+  flags:
+    area: business-metrics
+    roles: [provider, event-worker, knowledge, job, mcp-server, agent, consumer, mobile]
+    says: "the feature's flag read through OpenFeature from the product's Flipt, default off"
+    marker: "(?i)openfeature|ofrep"
+  flag-cohorts:
+    area: business-metrics
+    roles: [provider, event-worker, knowledge, job, mcp-server, agent, consumer, mobile, bff]
+    says: "users (or items) with the flag on against off, counted so the tool can stop a release that hurts"
+    marker: "(?i)flag_cohorts|FlagCohort"
+  dataset-counts:
+    area: business-metrics
+    roles: [provider, event-worker, knowledge, reporting]
+    says: "events published and received per data contract (valxel.datasets), for staging's reconciliation"
+    marker: "valxel\\.datasets|DatasetCounts"

@@ -27,6 +27,16 @@ def _summary(text: str) -> dict:
     return out
 
 
+POST_DEPLOY_SUITES = ("integration", "e2e", "smoke")
+
+
+def headless(role: str) -> bool:
+    """A deployed role whose template runs no post-deploy suite (event worker, reporting, job)."""
+    from ..template_contract import contract, roles_with
+
+    return role in contract()["groups"].get("deployed", []) and role not in roles_with("post-deploy")
+
+
 class GitHubChecks:
     """Check runs and commit statuses whose names match `match.checks`. Counts and coverage come
     from the check's summary text when the reporter writes them ("42 passed", "Coverage: 81%")."""
@@ -38,6 +48,11 @@ class GitHubChecks:
         patterns = (spec.get("match") or {}).get("checks") or [suite]
         out = []
         for t in targets:
+            if suite in POST_DEPLOY_SUITES and headless(t.get("role", "")):
+                # No post-deploy suite of its own (the template contract's `post-deploy`): the product's
+                # acceptance tests exercise it, and its alert rules show at G6.
+                out.append(SuiteResult(suite=suite, kind=spec["kind"], stage=stage, state="not_needed", repo=t["repo"]))
+                continue
             res = self.services.github.checks(repo=t["repo"], sha=t["sha"])
             mine = [c for c in res.get("checks", []) if match_any(c.get("name", ""), patterns)]
             if not mine:

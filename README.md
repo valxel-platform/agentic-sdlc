@@ -1165,6 +1165,33 @@ repo users reach must have an `## Audit` section naming its audited actions
 (`- consent.read: consent`); coders are told to publish those records, reviewers to check them,
 and the build fails its check if an action the HLD names appears in no task.
 
+## The template contract: what every template brings
+
+Security, observability, the audit trail and business metrics come with a repo's template, not
+with each feature. A template missing one makes every repo of its role ship without it.
+`config/template-contract.yaml` lists the capabilities and the roles that need each:
+
+| Area | Capabilities |
+| --- | --- |
+| Security | `security-scans` (Semgrep, gitleaks, SonarQube), `dependency-review`, `dependency-updates` (Dependabot with a week's cooldown), `security-policy`, `image-scan` (SBOM, Grype), `supply-chain-pins` |
+| Observability | `tracing` (OpenTelemetry), `error-reports` (Sentry or GlitchTip), `json-logs`, `post-deploy` (the stage's suite after each deploy) |
+| Audit trail | `audit` (`valxel.audit.v1` events, ids only) |
+| Business metrics | `product-events` (`valxel.events`, for goal metrics), `flags` (OpenFeature), `flag-cohorts`, `dataset-counts` |
+
+Each template says where it implements its capabilities in `.valxel/capabilities.yaml`
+(`<capability>: <path>`). `valxel repos check` reads that file from every template in
+`platform_repos`, and checks that each path exists and contains the capability's marker. A
+template that falls behind fails the daily repo-standards run, and so does a new template that
+never caught up.
+
+The tool's own rules read the same list:
+- Roles with `flags` are told to put changes behind the feature's flag.
+- Roles with `audit` are told to publish the HLD's audit records.
+- An Instrumentation event may go only to a repo whose role has `product-events`.
+- Deployed roles without `post-deploy` (event worker, reporting, job) aren't asked for an
+  integration, e2e or smoke report. The product's acceptance tests exercise them, and their alert
+  rules show at G6.
+
 ## Keeping repos on the standards
 
 The provision step applies the standards to repos it creates; `valxel repos` keeps every managed

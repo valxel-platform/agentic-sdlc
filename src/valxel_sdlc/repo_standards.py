@@ -65,7 +65,9 @@ class Report:
 
     @property
     def ok(self) -> bool:
-        return self.exists and not [d for d in self.drift if d.fix == "apply"] and not self.errors
+        # A template missing a capability needs code, not an apply, but still fails the check.
+        return (self.exists and not [d for d in self.drift if d.fix == "apply" or d.area == "capabilities"]
+                and not self.errors)
 
     def as_dict(self) -> dict:
         return {"repo": self.repo, "kind": self.kind, "exists": self.exists, "ok": self.ok,
@@ -290,6 +292,15 @@ def managed_drift(gh, t: Target) -> list[Drift]:
     return out
 
 
+def capability_drift(gh, t: Target) -> list[Drift]:
+    """A template's gaps against the template contract (config/template-contract.yaml): security,
+    observability, the audit trail and business metrics every repo of its role starts with."""
+    from .template_contract import check
+
+    return [Drift("capabilities", g["capability"], g["says"], g["problem"], fix="manual")
+            for g in check(gh, t.repo, t.plan["role"])]
+
+
 # -- applying ----------------------------------------------------------------------------
 
 
@@ -312,6 +323,11 @@ def reconcile(gh, t: Target, *, apply: bool) -> Report:
             rep.drift += managed_drift(gh, t)
         except GitHubError as exc:
             rep.errors.append(f"managed files: {exc}")
+        if t.kind == "template" and t.plan.get("role"):
+            try:
+                rep.drift += capability_drift(gh, t)
+            except GitHubError as exc:
+                rep.errors.append(f"capabilities: {exc}")
     if not apply:
         return rep
     p, areas = t.plan, {d.area for d in rep.drift if d.fix == "apply"}
