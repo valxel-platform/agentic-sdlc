@@ -2666,6 +2666,9 @@ src/valxel_sdlc/
   knowledge/       design knowledge: architecture record, contracts, design check, write-back
   worksync.py      keeps the work tracker in step with each feature
   api/app.py       FastAPI service under /api; serves web/dist
+  api/context.py   what every route group shares: the engine, sign-in, who may do what
+  api/routers/     one module per route group (auth, signals, features, workspaces, intake, ...)
+  api/models.py    request bodies
   web/auth.py      GitHub OAuth, signed sessions, approver matching
   intake.py        guided intake agent
   duplicates.py    finds features and capabilities a new request repeats
