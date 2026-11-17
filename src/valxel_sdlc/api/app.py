@@ -149,12 +149,15 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     if web_dist and (web_dist / "index.html").is_file():
         app.mount("/assets", StaticFiles(directory=web_dist / "assets"), name="assets")
 
+        root = os.path.realpath(web_dist)
+
         @app.get("/{path:path}", include_in_schema=False)
         def spa(path: str) -> FileResponse:
-            candidate = (web_dist / path).resolve()
-            if path and candidate.is_file() and web_dist.resolve() in candidate.parents:
+            # Inside web/dist only: the containment check comes before anything touches the path.
+            candidate = os.path.realpath(os.path.join(root, path))
+            if path and candidate.startswith(root + os.sep) and os.path.isfile(candidate):
                 return FileResponse(candidate)
-            return FileResponse(web_dist / "index.html")
+            return FileResponse(os.path.join(root, "index.html"))
 
     return app
 

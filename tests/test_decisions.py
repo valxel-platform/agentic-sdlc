@@ -113,6 +113,7 @@ def test_the_inbox_groups_and_batch_approves_only_low_risk(client, engine):
                                                           for i in mine] + [{"feature_id": "FARM-FEAT-99", "interrupt_id": "x"}]})
     out = r.json()
     assert sorted(out["approved"]) == sorted(farm) and out["skipped"][0]["feature_id"] == "FARM-FEAT-99"
+    assert out["skipped"][0]["why"] in ("no longer waiting for a decision", "not yours to decide")
 
 
 def test_a_request_changes_before_the_build_and_the_waiting_gate_goes_back(engine):
@@ -140,3 +141,16 @@ def test_a_diagram_section_is_left_out_of_the_summary():
     lines = decisions._skim(doc)
     assert not any("mermaid" in x or x.startswith("Diagram") for x in lines)
     assert "Contracts: api: minor bump" in lines
+
+
+def test_the_web_app_serves_its_own_files_and_nothing_outside_them(engine, tmp_path):
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<p>app</p>")
+    (dist / "logo.svg").write_text("<svg/>")
+    (tmp_path / "secret.txt").write_text("nope")
+    c = TestClient(create_app(engine=engine, auth=AuthConfig(mode="dev", secret=SECRET), web_dist=dist))
+    assert c.get("/logo.svg").text == "<svg/>"
+    assert c.get("/features/FARM-FEAT-1").text == "<p>app</p>"  # the app's own routes
+    for bad in ("/../secret.txt", "/%2e%2e/secret.txt", "/..%2fsecret.txt"):
+        assert "nope" not in c.get(bad).text

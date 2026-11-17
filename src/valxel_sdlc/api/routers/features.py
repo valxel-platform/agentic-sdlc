@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from types import SimpleNamespace
 
@@ -21,6 +22,9 @@ from ...web.auth import (
     needs_passkey,
 )
 from ..models import FeatureIn, ProblemIn, BatchIn, DecisionIn
+
+
+log = logging.getLogger(__name__)
 
 
 def build(ctx: SimpleNamespace) -> APIRouter:
@@ -232,7 +236,12 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                               "feedback": f"Approved with {len(body.items)} low-risk decisions"}, background=True)
                 approved.append(ref.feature_id)
             except (KeyError, RuntimeError, InvalidDecision) as exc:
-                skipped.append({"feature_id": ref.feature_id, "why": str(exc)[:200]})
+                # A fixed reason per kind of failure: the exception's text stays in the log.
+                log.info("batch approval skipped %s: %s", ref.feature_id, exc)
+                why = ("no longer waiting for a decision" if isinstance(exc, KeyError)
+                       else "doesn't take this decision" if isinstance(exc, InvalidDecision)
+                       else "running right now: try again in a moment")
+                skipped.append({"feature_id": ref.feature_id, "why": why})
         return {"approved": approved, "skipped": skipped}
 
     @api.post("/features/{feature_id}/decisions/{interrupt_id}", status_code=202)
