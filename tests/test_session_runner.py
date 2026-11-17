@@ -298,7 +298,7 @@ def test_the_cluster_is_called_with_the_pods_own_service_account(tmp_path, monke
     api.delete_namespaced_custom_object(session_runner.GROUP, session_runner.API_VERSION, "valxel-sessions",
                                         session_runner.PLURAL, "session-1")
     assert seen == [
-        ("POST", "https://10.0.0.1:443/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/valxel-sessions/sandboxclaims",
+        ("POST", "https://10.0.0.1/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/valxel-sessions/sandboxclaims",
          "Bearer sa-token"),
-        ("DELETE", "https://10.0.0.1:443/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/valxel-sessions/"
+        ("DELETE", "https://10.0.0.1/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/valxel-sessions/"
                    "sandboxclaims/session-1", "Bearer sa-token")]
