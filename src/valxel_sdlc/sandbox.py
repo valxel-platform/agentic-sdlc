@@ -6,8 +6,12 @@ script runs with whatever the session can reach. So every session gets:
 
     environment   only an allowlist (PATH, locale, its model credentials, telemetry); every other
                   variable the tool has is blanked, so `env` in the session shows none of them
-    files         Read is denied on the tool's own files and secrets (the App key, /app, /data);
-                  the session works in its own folder outside them
+    files         Read is denied on the tool's own files and secrets (the App key, /app, /data) and
+                  on all of /proc (other processes' environments, memory maps, command lines); the
+                  session works in its own folder outside them
+    the tool      makes itself non-dumpable before the first session starts (protect_process): the
+                  kernel then refuses /proc/<pid>/environ and /proc/<pid>/mem of the tool's process
+                  to every other process of the same user, by whatever route (Read, a shell, Codex)
     hooks         none: `disableAllHooks`, so a repository's .claude/settings.json runs nothing
     shell         Claude Code's sandbox for every Bash command (no way around it), with network
                   only to the package registries and GitHub (config/egress.yaml); Codex runs in its
@@ -54,7 +58,7 @@ MODEL_KEYS = {
 NO_SCRIPTS = {"npm_config_ignore_scripts": "true", "YARN_ENABLE_SCRIPTS": "false", "PNPM_IGNORE_SCRIPTS": "true",
               "GIT_TERMINAL_PROMPT": "0"}
 # Never readable from a session (absolute paths; Claude Code's '//' form is added when rendered).
-DENY_READ = ("/app", "/data", "/run/secrets", "/var/run/secrets", "/etc/valxel", "/proc/self/environ")
+DENY_READ = ("/app", "/data", "/run/secrets", "/var/run/secrets", "/etc/valxel", "/proc")
 DEFAULT_EGRESS = ("registry.npmjs.org", "pypi.org", "files.pythonhosted.org", "repo.maven.apache.org",
                   "repo1.maven.org", "plugins.gradle.org", "services.gradle.org", "github.com",
                   "codeload.github.com", "objects.githubusercontent.com")
@@ -109,8 +113,33 @@ def clean_env(runtime: str, home: str, extra: dict | None = None, base: dict | N
 
 def claude_settings(workspace: str) -> dict:
     """Claude Code settings for every session: no hooks, the tool's files unreadable."""
-    deny = [f"Read(/{p}/**)" if not p.endswith("environ") else f"Read(/{p})" for p in secret_paths()]
+    deny = [f"Read(/{p}/**)" for p in secret_paths()]
     return {"disableAllHooks": True, "permissions": {"deny": deny}}
+
+
+PR_SET_DUMPABLE, PR_GET_DUMPABLE = 4, 3
+_protected = False
+
+
+def protect_process() -> bool:
+    """Make this process non-dumpable (Linux prctl): /proc/<pid>/environ, mem and maps of the tool
+    become root-owned, so a session running as the same user can't read the tool's environment
+    (DATABASE_URL, webhook secrets, a key left in an environment variable) or memory. Sessions are
+    started with exec, which makes them dumpable again, so their own behaviour doesn't change.
+    False where the kernel has no such switch (not Linux)."""
+    global _protected
+    if _protected:
+        return True
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+            return False
+        _protected = libc.prctl(PR_GET_DUMPABLE, 0, 0, 0, 0) == 0
+    except (OSError, AttributeError):
+        return False
+    return _protected
 
 
 def claude_sandbox() -> dict:
@@ -153,6 +182,8 @@ def _askpass(folder: Path, token: str) -> Path:
 @contextlib.contextmanager
 def session(services, *, repo: str = "", branch: str = "", clone: bool | None = None):
     """A folder for one agent session, and for a coder a checkout of its repo on its branch."""
+    if not protect_process():
+        log.warning("couldn't make the tool non-dumpable: a session could read its environment through /proc")
     root = _root() / uuid.uuid4().hex[:12]
     home = root / "home"
     (home / "tmp").mkdir(parents=True, exist_ok=True)

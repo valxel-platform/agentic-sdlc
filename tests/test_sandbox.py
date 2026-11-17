@@ -36,7 +36,7 @@ def test_no_hooks_the_tools_files_unreadable_and_the_shell_sandboxed(monkeypatch
     s = sandbox.claude_settings("/tmp/w")
     assert s["disableAllHooks"] is True
     deny = s["permissions"]["deny"]
-    assert {"Read(//app/**)", "Read(//data/**)", "Read(//etc/valxel-keys/**)", "Read(//proc/self/environ)"} <= set(deny)
+    assert {"Read(//app/**)", "Read(//data/**)", "Read(//etc/valxel-keys/**)", "Read(//proc/**)"} <= set(deny)
     egress = tmp_path / "egress.yaml"
     egress.write_text("allowed: [registry.npmjs.org, github.com]\n")
     monkeypatch.setenv("VALXEL_EGRESS_CONFIG", str(egress))
@@ -142,3 +142,24 @@ def test_git_asks_for_the_token_from_the_sessions_own_file(tmp_path):
     assert out.stdout.strip() == "ghs_scoped"
     assert subprocess.run([str(script), "Username for 'https://github.com':"], capture_output=True, text=True).stdout.strip() == "x-access-token"
     assert oct((tmp_path / ".token").stat().st_mode)[-3:] == "600"
+
+
+def test_protect_process_hides_the_tools_environment_from_same_user_processes():
+    import subprocess
+    import sys
+
+    from valxel_sdlc import sandbox
+
+    if not sys.platform.startswith("linux"):
+        assert sandbox.protect_process() is False
+        return
+    # In a child, so this test process stays dumpable for the rest of the suite.
+    code = ("import os,subprocess,sys;from valxel_sdlc import sandbox;assert sandbox.protect_process();"
+            "r=subprocess.run(['cat',f'/proc/{os.getpid()}/environ'],capture_output=True);"
+            "own=subprocess.run(['sh','-c','cat /proc/$$/environ'],capture_output=True);"
+            "print(r.returncode, own.returncode)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split()
+    if os.geteuid() == 0:  # root reads any process's /proc; the check means something only as the tool's user
+        return
+    assert out[0] != "0"  # the tool's environment: refused
+    assert out[1] == "0"  # a session (exec'd) is dumpable again, so its own tools still work
