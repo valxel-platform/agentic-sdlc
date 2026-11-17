@@ -131,6 +131,14 @@ rules:
     condition: { window: 15m, interval: 5m, operator: gt, threshold: 10 }
     says: "Replies are retried, not lost. Check the provider's status and the channel's credentials."
 
+  channel-link-offers-limited:
+    description: "Unlinked senders hit the cap on sign-in links: possibly SMS pumping."
+    roles: [channel]
+    severity: warning
+    source: { type: log, query: "channel.link_offers_limited" }
+    condition: { window: 15m, interval: 5m, operator: gt, threshold: 0 }
+    says: "More unlinked people wrote in a minute than CHANNEL_LINK_OFFERS_PER_MINUTE allows, so some got no sign-in link. A burst of new numbers usually means someone is trying to run up the texting bill: check the senders' country codes at the provider and block the ranges there. If it's real growth, raise the limit."
+
   # Document intake (template-document-intake). None of these markers carries a field value.
   intake-malware-found:
     description: "An uploaded document carried malware."

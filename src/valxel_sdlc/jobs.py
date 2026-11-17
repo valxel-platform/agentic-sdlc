@@ -94,8 +94,19 @@ def coder_instruction(hld: str, repo: str) -> str:
     line = next((s for s in parse_schedules(hld) if s["repo"] == repo and not s["problem"]), None)
     if line is None:
         return ""
-    return (f" Set job.yaml's schedule to \"{line['schedule']}\" and its timezone to {line['timezone']}, as the HLD's "
+    return services_instruction(hld, repo) + (f" Set job.yaml's schedule to \"{line['schedule']}\" and its timezone to {line['timezone']}, as the HLD's "
             "Schedules section says; keep its name.")
+
+
+def services_instruction(hld: str, repo: str) -> str:
+    """The components this job may call (run.call), from the approved HLD's Endpoints."""
+    from .agents.parse import parse_endpoints
+
+    calls = next((e["calls"] for e in parse_endpoints(hld) if e["repo"] == repo), [])
+    if not calls:
+        return " The HLD's Endpoints say this job calls no component: leave JOB_SERVICES empty."
+    return (f" JOB_SERVICES (workload.yaml) names exactly {', '.join(sorted(calls))}, the components the HLD's "
+            "Endpoints say this job calls, each reached with run.call as the job's own OAuth client.")
 
 
 def binding_configs(text: str, env: str) -> dict:

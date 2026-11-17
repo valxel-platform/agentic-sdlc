@@ -75,3 +75,15 @@ def test_the_job_role_is_registered_everywhere_roles_are_listed():
 
     assert "job" in repo_roles.ROLES and "job" in changeset_env.RUNTIME_ROLES and "job" in acceptance.RUNTIME_ROLES
     assert "job" in checks.RUNTIME_ROLES and catalog_info.TYPES["job"] == "job" and "job.yaml" in SECURITY["job"]
+
+
+def test_a_job_calls_exactly_what_the_design_says_as_itself():
+    hld = ("## Schedules\n- acme-farm/farm-reminders: 15 3 * * * America/Chicago; sends the morning reminders\n\n"
+           "## Endpoints\n- acme-farm/farm-reminders: none; calls farm-api, farm-notify\n")
+    said = jobs.coder_instruction(hld, "acme-farm/farm-reminders")
+    assert "JOB_SERVICES (workload.yaml) names exactly farm-api, farm-notify" in said and "15 3 * * *" in said
+    alone = hld.replace("; calls farm-api, farm-notify", "")
+    assert "leave JOB_SERVICES empty" in jobs.coder_instruction(alone, "acme-farm/farm-reminders")
+    from valxel_sdlc.graph.phase import SECURITY
+
+    assert "run.call" in SECURITY["job"] and "no fixed token" in SECURITY["job"]

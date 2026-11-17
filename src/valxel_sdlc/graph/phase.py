@@ -644,7 +644,9 @@ SECURITY = {
             " run.window_start to run.window_end, is safe to run twice over the same window (upserts keyed by"
             " the item, or a record of what was sent), calls run.check() between items and changes nothing on"
             " a dry run. It reaches other components through their APIs or events, never their databases, as"
-            " its own identity (VX-17)."),
+            " its own identity: run.call(<component>, ...), with JOB_SERVICES naming exactly the components"
+            " the HLD's Endpoints say it calls and the client secret a mounted file; no other HTTP client"
+            " and no fixed token (VX-17)."),
     "connector": (" Only /webhooks/<name> routes take outside calls: each verifies its signature over the timestamp"
                   " and raw body before reading it and dedupes by delivery id; the vendor client calls only"
                   " integration.yaml's allowed_hosts and never follows a redirect; secrets are mounted files,"
@@ -1059,6 +1061,9 @@ def build_build_subgraph(services):
                       + (" Check that each channel route verifies its provider before reading the body, that nothing"
                          " reaches the product from an unlinked identity or goes to an opted-out one, and that no"
                          " address appears in logs, events or audit." if r.get("role") == "channel" else "")
+                      + (" Check that the job calls other components only through run.call, with JOB_SERVICES"
+                         " limited to what the HLD's Endpoints say it calls, and holds no token or secret in code"
+                         " or environment variables." if r.get("role") == "job" else "")
                       + (" Check that the intake reads no file before its size, format and malware checks, checks"
                          " the caller's tenant on every document, and logs or audits no field value."
                          if r.get("role") == "document-intake" else "")
