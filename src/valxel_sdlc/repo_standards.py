@@ -22,6 +22,8 @@ Every apply is safe to repeat: it changes only what differs, and rulesets are up
 
 from __future__ import annotations
 
+import hashlib
+
 from dataclasses import dataclass, field
 
 from .integrations.github import GitHubError, repo_settings_body, ruleset_body
@@ -368,10 +370,15 @@ def reconcile(gh, t: Target, *, apply: bool) -> Report:
     if workflows:
         def open_pr():
             nonlocal pr_url
-            branch = "valxel/managed-files"
             names = t.plan.get("managed_files") or {}
+            contents = {d.item: standard_file(names[d.item]) for d in workflows}
+            # A branch per content: once a pull request for one version merges, the next version of
+            # the platform's files gets a new branch and pull request (a fixed branch name would keep
+            # finding the merged one and never bring the files up to date again).
+            digest = hashlib.sha256("".join(f"{k}\0{v}\0" for k, v in sorted(contents.items())).encode())
+            branch = f"valxel/managed-files-{digest.hexdigest()[:10]}"
             for d in workflows:
-                gh.put_file(repo=t.repo, branch=branch, path=d.item, content=standard_file(names[d.item]),
+                gh.put_file(repo=t.repo, branch=branch, path=d.item, content=contents[d.item],
                             message=f"Bring {d.item} back to the platform's copy")
             pr = gh.open_pr(repo=t.repo, branch=branch, title="Update the platform's managed workflows",
                             body="The Valxel SDLC manages these files (config/repos.yaml `managed_files`); this "

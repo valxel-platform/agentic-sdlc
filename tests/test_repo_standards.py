@@ -359,7 +359,7 @@ def test_a_dependency_graph_that_is_off_is_reported_for_a_person(svc):
     assert d.fix == "manual" and "Settings > Advanced Security > Dependency graph" in d.needs
 
 
-def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(svc):
+def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(svc, monkeypatch):
     gh = StubGitHub()
     lane, gov = "acme-clinic/cln-intake-api", "acme-clinic/cln-governance"
     existing(gh, lane, workflows=False)
@@ -381,14 +381,23 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     assert "managed files" in after.applied and after.ok
     pending = [d for d in after.drift if d.area == "workflows"]
     assert len(pending) == 2 and all(d.fix == "pending" and "pull request" in d.have for d in pending)
-    pr = next(p for p in gh.prs.values() if p["repo"] == lane and p["branch"] == "valxel/managed-files")
-    assert gh.files[(lane, "valxel/managed-files", ".github/workflows/security.yml")] == rs.standard_file("security.yml")
-    assert gh.files[(lane, "valxel/managed-files", ".github/scripts/report.py")] == rs.standard_file("report.py")
+    pr = next(p for p in gh.prs.values() if p["repo"] == lane and p["branch"].startswith("valxel/managed-files-"))
+    branch = pr["branch"]
+    assert gh.files[(lane, branch, ".github/workflows/security.yml")] == rs.standard_file("security.yml")
+    assert gh.files[(lane, branch, ".github/scripts/report.py")] == rs.standard_file("report.py")
     assert "agentic-sdlc" in pr["body"]
     # Once it merges, the repo is on standard again.
+    pr["state"] = "merged"
     gh.files[(lane, "main", ".github/workflows/security.yml")] = rs.standard_file("security.yml")
     gh.files[(lane, "main", ".github/scripts/report.py")] = rs.standard_file("report.py")
     assert not [d for d in rs.reconcile(gh, target(svc, lane), apply=False).drift if d.area == "workflows"]
+    # The platform's copy changes later: a new branch and pull request, never the merged one again.
+    original = rs.standard_file
+    monkeypatch.setattr(rs, "standard_file", lambda name: original(name) + ("# v2\n" if name == "report.py" else ""))
+    rs.reconcile(gh, target(svc, lane), apply=True)
+    [newer] = [p for p in gh.prs.values() if p["repo"] == lane and p["state"] == "open"
+               and p["branch"].startswith("valxel/managed-files-")]
+    assert newer["branch"] != branch and gh.files[(lane, newer["branch"], ".github/scripts/report.py")].endswith("# v2\n")
 
 
 def test_the_managed_workflows_pin_actions_by_commit():
