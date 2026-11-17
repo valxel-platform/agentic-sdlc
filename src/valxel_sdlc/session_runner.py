@@ -88,14 +88,14 @@ def spec_for(task, options: dict, *, transcript: str = "", fallback_prompt: str 
 
 # --------------------------------------------------------------------------- the sandbox's side
 
-_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*")
+_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9_.-]{1,100}")  # GitHub's own limits
 _SHA = re.compile(r"[0-9a-f]{40}")
 _SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,63}")
 
 
 def _repo(name: str) -> str:
     """`owner/name` as GitHub spells them, nothing that could walk out of the work area."""
-    if not isinstance(name, str) or not _REPO.fullmatch(name) or ".." in name:
+    if not isinstance(name, str) or len(name) > 140 or not _REPO.fullmatch(name) or name.endswith(("/.", "/..")):
         raise ValueError(f"not a repository name: {name!r}")
     return name
 
