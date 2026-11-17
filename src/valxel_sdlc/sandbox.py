@@ -158,10 +158,13 @@ class Box:
     repo: str = ""
     branch: str = ""
     token_scope: dict = field(default_factory=dict)
+    # Sessions in their own sandbox (valxel_sdlc.session_runner): the checkout the runner makes
+    # there, with a token for this one repository. Nothing is cloned here.
+    checkout: dict = field(default_factory=dict)
 
     @property
     def spec(self) -> dict:
-        return {"cwd": self.cwd, "home": self.home}
+        return {"cwd": self.cwd, "home": self.home, **({"checkout": self.checkout} if self.checkout else {})}
 
 
 def _root() -> Path:
@@ -192,7 +195,10 @@ def session(services, *, repo: str = "", branch: str = "", clone: bool | None = 
     box = Box(cwd=str(cwd), home=str(home), root=str(root), repo=repo, branch=branch)
     try:
         do_clone = clone if clone is not None else bool(repo) and getattr(services.settings, "mode", "") == "live"
-        if do_clone:
+        if do_clone and remote():  # the session's own sandbox clones it: only the token goes there
+            box.checkout = {"repo": repo, "branch": branch, "token": repo_token(services, repo)}
+            box.token_scope = {"repo": repo, "permissions": {"contents": "write"}}
+        elif do_clone:
             box.cwd, box.token_scope = _checkout(services, repo, branch, root)
         yield box
     finally:
@@ -203,14 +209,30 @@ def session(services, *, repo: str = "", branch: str = "", clone: bool | None = 
         shutil.rmtree(root, onerror=fix)
 
 
-def _checkout(services, repo: str, branch: str, root: Path) -> tuple[str, dict]:
+def remote() -> bool:
+    """Whether agent sessions run in sandboxes of their own (VALXEL_SESSION_EXECUTOR=kubernetes)."""
+    return os.environ.get("VALXEL_SESSION_EXECUTOR", "local").lower() == "kubernetes"
+
+
+def repo_token(services, repo: str) -> str:
+    """A token for this one repository, contents:write and nothing else, living an hour at most."""
     tokens = getattr(services.github, "tokens", None)
     scoped = getattr(tokens, "scoped", None)
     if not callable(scoped):
         raise RuntimeError("This GitHub client can't mint a token for one repository; coder sessions need the "
                            "GitHub App (VALXEL_GITHUB_APP_ID and its key)")
     org, name = repo.split("/", 1)
-    token = scoped(org, [name], {"contents": "write"})
+    return scoped(org, [name], {"contents": "write"})
+
+
+def _checkout(services, repo: str, branch: str, root: Path) -> tuple[str, dict]:
+    return clone(repo, branch, repo_token(services, repo), root), {"repo": repo, "permissions": {"contents": "write"}}
+
+
+def clone(repo: str, branch: str, token: str, root: Path) -> str:
+    """A checkout of `repo` on `branch` (new if it doesn't exist yet) under root/work, pushing with
+    `token` through an askpass script only root holds. Here, or in a session's sandbox."""
+    name = repo.split("/", 1)[1]
     dest = root / "work" / name
     askpass = _askpass(root, token)
     env = {"PATH": os.environ.get("PATH", ""), "GIT_ASKPASS": str(askpass), "GIT_TERMINAL_PROMPT": "0",
@@ -231,4 +253,4 @@ def _checkout(services, repo: str, branch: str, root: Path) -> tuple[str, dict]:
     for k, v in (("credential.helper", ""), ("core.askPass", str(askpass)),
                  ("user.name", "valxel-coder"), ("user.email", "valxel-coder@users.noreply.github.com")):
         subprocess.run(["git", "-C", str(dest), "config", k, v], check=True, capture_output=True, timeout=30)
-    return str(dest), {"repo": repo, "permissions": {"contents": "write"}}
+    return str(dest)

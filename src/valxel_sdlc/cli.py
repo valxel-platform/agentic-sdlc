@@ -395,6 +395,9 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
                    help="Make the first N attempts of PHASE defective, e.g. spec=1")
     d.add_argument("--revise", action="store_true", help="Send the design back once at G3")
     d.add_argument("--artifacts", help="Directory for artifacts (default: a temp dir)")
+    sr = sub.add_parser("session-runner", help="Run one agent session in this sandbox (valxel_sdlc.session_runner): "
+                                               "the image's command in an agent-session sandbox")
+    sr.add_argument("--port", type=int, default=int(os.environ.get("VALXEL_SESSION_RUNNER_PORT", "8081")))
     pv = sub.add_parser("provisioner", help="Run the provisioning worker: create the repos the queue asks for, with "
                                              "the Provisioning GitHub App, after checking each against governance")
     pv.add_argument("--once", action="store_true", help="Run what's queued now, then stop")
@@ -555,6 +558,11 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
         print(f"Design record drafted: {', '.join(out['files'])} -> {out['pr']['url']}")
         for repo, sha in out["read"].items():
             print(f"  read {repo} @ {sha[:7]}")
+        return 0
+    if args.cmd == "session-runner":
+        from .session_runner import serve
+
+        serve(args.port)
         return 0
     if args.cmd == "eval":
         return _eval(args)

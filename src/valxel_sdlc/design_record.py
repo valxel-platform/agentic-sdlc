@@ -231,7 +231,8 @@ def draft_for_existing(services, product_id: str) -> dict:
     try:
         res = services.runtime_for("designer").run(AgentTask(
             role="designer", phase="design", tags=tags, layers=layers, skills=("design:design-system",),
-            stub_text=stub, max_tokens=6000, cwd=(co or {}).get("root"), read_only=bool(co)))
+            stub_text=stub, max_tokens=6000, cwd=(co or {}).get("root"), read_only=bool(co),
+            sandbox=workspace.session_box(co)))
     finally:
         workspace.release(co)
     files = split_files(res.text) or split_files(stub)

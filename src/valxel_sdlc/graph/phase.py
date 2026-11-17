@@ -310,7 +310,8 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
                                         max_budget_usd=None if left is None else max(0.0, float(left)),
                                         # A box is a session's own writable checkout; a bare cwd is a
                                         # read-only one (valxel_sdlc.sandbox, valxel_sdlc.workspace).
-                                        cwd=(box or {}).get("cwd") or cwd, read_only=bool(cwd) and not box,
+                                        cwd=(box or {}).get("cwd") or cwd,
+                                        read_only=(bool(cwd) and not box) or bool((box or {}).get("read_only")),
                                         sandbox=box, **session_args))
         except ProviderUnavailable as exc:
             if i == len(candidates) - 1:
@@ -541,7 +542,8 @@ def build_phase_subgraph(phase: str, services):
 
                     tail = workspace.describe(co) + "\n\n" + tail
                 res = call_agent(services, role=spec.role, phase=phase, ctx=ctx, skills=spec.skills, tail=tail,
-                                 stub_text=template(ctx, defective), budget_usd=left, cwd=(co or {}).get("root"))
+                                 stub_text=template(ctx, defective), budget_usd=left, cwd=(co or {}).get("root"),
+                                 box=workspace.session_box(co) if co else None)
         finally:
             if co:
                 from .. import workspace

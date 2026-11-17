@@ -215,6 +215,11 @@ class CodexRuntime:
         self.home_template = home_template if home_template is not None else os.environ.get("VALXEL_CODEX_HOME", "")
 
     def run(self, task: AgentTask) -> AgentResult:
+        from ..sandbox import remote
+
+        if remote():  # sessions run in sandboxes, and Codex can't yet: never in the tool's own container
+            raise ProviderUnavailable("codex: sessions run in sandboxes (VALXEL_SESSION_EXECUTOR=kubernetes), "
+                                      "which Codex can't use yet")
         settings = self.gateway.settings
         role = settings.role(task.role)
         if not self.gateway.allowed(role.provider, task.tags.data_class):

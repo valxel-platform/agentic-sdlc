@@ -41,7 +41,10 @@ def _readonly(path: Path) -> None:
 def checkout(services, repos: list[str], *, key: str) -> dict | None:
     if not available(services) or not repos:
         return None
-    from .sandbox import _root
+    from .sandbox import _root, remote
+
+    if remote():  # the session's own sandbox clones them (valxel_sdlc.session_runner): nothing here
+        return remote_checkout(services, repos)
 
     # Outside /data and /app, which agent sessions may not read (valxel_sdlc.sandbox).
     root = _root() / "checkouts" / key
@@ -71,6 +74,35 @@ def checkout(services, repos: list[str], *, key: str) -> dict | None:
             log.warning("checking out %s failed: %s", repo, msg)
             out["repos"][repo] = {"skipped": f"couldn't be read ({type(exc).__name__})"}
     return out
+
+
+def remote_checkout(services, repos: list[str]) -> dict:
+    """What a session's sandbox needs to make the same read-only checkouts: each repo's default
+    branch head, and a contents:read token per org for just these repos. No code comes here."""
+    gh = services.github
+    out: dict = {"root": "", "repos": {}, "remote": []}
+    by_org: dict[str, list[str]] = {}
+    for repo in dict.fromkeys(repos):
+        try:
+            meta = gh._call("GET", repo, "")
+            if int(meta.get("size") or 0) > MAX_MB * 1024:
+                out["repos"][repo] = {"skipped": f"larger than {MAX_MB} MB"}
+                continue
+            head = gh._call("GET", repo, f"/commits/{meta.get('default_branch') or 'main'}")
+            out["repos"][repo] = {"sha": head["sha"]}
+            by_org.setdefault(repo.split("/", 1)[0], []).append(repo)
+        except Exception as exc:  # one unreadable repo doesn't stop the others
+            log.warning("checking out %s failed: %s", repo, exc)
+            out["repos"][repo] = {"skipped": f"couldn't be read ({type(exc).__name__})"}
+    for org, names in by_org.items():
+        token = gh.tokens.scoped(org, [r.split("/", 1)[1] for r in names], {"contents": "read"})
+        out["remote"] += [{"repo": r, "sha": out["repos"][r]["sha"], "token": token} for r in names]
+    return out
+
+
+def session_box(co: dict | None) -> dict | None:
+    """For a session in its own sandbox: the read-only checkouts to make there."""
+    return {"read_checkouts": co["remote"], "read_only": True} if co and co.get("remote") else None
 
 
 def release(co: dict | None) -> None:

@@ -44,6 +44,10 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("DATABASE_URL is not set: features, the catalog and the audit trail are lost on restart")
     from .tenancy import enforced
 
+    if s.mode == "live" and env.get("VALXEL_SESSION_EXECUTOR", "local").lower() != "kubernetes":
+        out.append("VALXEL_SESSION_EXECUTOR is not kubernetes: agent sessions run in the tool's own container, "
+                   "beside its keys and every workspace's work (valxel_sdlc.session_runner)")
+
     if s.database_url and not enforced(env):
         out.append("VALXEL_TENANCY is not rls: every workspace's rows are open to any query that forgets to "
                    "filter (valxel_sdlc.tenancy)")

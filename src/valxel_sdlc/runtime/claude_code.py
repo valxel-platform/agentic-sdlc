@@ -133,6 +133,10 @@ class ClaudeCodeRuntime:
             kwargs = session_options(task, role, model, cwd=self.cwd, plugin_dirs=self.plugins_for(task.role), home=home)
             store = sessions.TranscriptStore(self.gateway.settings.artifact_dir)
             fid = task.tags.feature_id
+            from ..sandbox import remote
+
+            if remote():  # in a sandbox of its own (valxel_sdlc.session_runner)
+                return self._run_remote(task, model, kwargs, store, tmp_home)
             if task.resume:
                 try:  # the kept transcript where Claude Code looks for this working directory's sessions
                     store.restore(fid, task.resume, sessions.claude_project_dir(home, kwargs["cwd"] or os.getcwd())
@@ -156,47 +160,65 @@ class ClaudeCodeRuntime:
                     log.info("%s %s/%s: no transcript to keep for session %s", fid, task.phase, task.role, res.session_id)
             return res
 
-    async def _query(self, task: AgentTask, model: str, options, session_mode: str = "fresh") -> AgentResult:
-        from claude_agent_sdk import ResultMessage, query  # lazy import
+    def _run_remote(self, task: AgentTask, model: str, kwargs: dict, store, scratch: str) -> AgentResult:
+        """The session in its own sandbox: hand over the spec, account for the outcome here."""
+        from .. import session_runner
 
-        text, result, loaded = "", None, set()
-        peak, session_id = 0, ""  # the largest prompt of any one call, and the session (valxel_sdlc.context)
-        started = time.monotonic()
-        async for message in query(prompt=task.layers.tail, options=options):
-            loaded |= skills_used(message)
-            peak = max(peak, prompt_tokens(getattr(message, "usage", None)) if not isinstance(message, ResultMessage) else 0)
-            session_id = getattr(message, "session_id", None) or session_id
-            if getattr(message, "subtype", None) == "init":
-                data = getattr(message, "data", {}) or {}
-                for err in data.get("plugin_errors") or []:
-                    log.warning("%s/%s: a plugin did not load: %s", task.phase, task.role, err)
-            if isinstance(message, ResultMessage):
-                result = message
-                if getattr(message, "is_error", False) and is_transient(str(getattr(message, "result", ""))):
-                    raise ProviderUnavailable(f"claude_code: {getattr(message, 'result', '')}")
-                structured = getattr(message, "structured_output", None)
-                text = (json.dumps(structured) if structured is not None else getattr(message, "result", "")) or text
-        usage = (getattr(result, "usage", None) or {}) if result else {}
+        fid = task.tags.feature_id
+        transcript = ""
+        if task.resume and store.has(fid, task.resume):
+            transcript = store.restore(fid, task.resume, Path(scratch) / "resume.jsonl").read_text(encoding="utf-8")
+        spec = session_runner.spec_for(task, kwargs, transcript=transcript,
+                                       fallback_prompt=task.fresh_tail or task.layers.tail,
+                                       fallback_mode="handoff" if task.fresh_tail else task.session_mode,
+                                       plugins_on=bool(self.plugins_for(task.role)))
+        out = session_runner.executor().run(spec)
+        if not out.get("ok"):
+            raise RuntimeError(f"the session failed in its sandbox: {out.get('error')}")
+        used = task
+        if task.resume and not out.get("resumed"):
+            log.warning("%s %s/%s: couldn't resume session %s in its sandbox; started fresh", fid, task.phase,
+                        task.role, task.resume)
+            used = dataclasses.replace(task, resume="", layers=dataclasses.replace(
+                task.layers, tail=task.fresh_tail or task.layers.tail))
+        res = self._finish(used, model, out, str(out.get("session_mode") or task.session_mode))
+        res.resumed = bool(out.get("resumed"))
+        if task.keep_transcript and res.session_id and out.get("transcript"):
+            kept = Path(scratch) / f"{res.session_id}.jsonl"
+            kept.write_text(out["transcript"], encoding="utf-8")
+            store.keep(fid, res.session_id, kept)
+        return res
+
+    async def _query(self, task: AgentTask, model: str, options, session_mode: str = "fresh") -> AgentResult:
+        return self._finish(task, model, await run_query(task.layers.tail, options), session_mode)
+
+    def _finish(self, task: AgentTask, model: str, out: dict, session_mode: str) -> AgentResult:
+        """A session's outcome (run_query, here or in its sandbox) into the ledger and a result."""
+        if out.get("is_error") and is_transient(str(out.get("error") or "")):
+            raise ProviderUnavailable(f"claude_code: {out.get('error')}")
+        for err in out.get("plugin_errors") or []:
+            log.warning("%s/%s: a plugin did not load: %s", task.phase, task.role, err)
+        usage = out.get("usage") or {}
         resp = ModelResponse(
-            text=text,
+            text=out.get("text") or "",
             input_tokens=int(usage.get("input_tokens", 0)),
             cache_creation_input_tokens=int(usage.get("cache_creation_input_tokens", 0)),
             cache_read_input_tokens=int(usage.get("cache_read_input_tokens", 0)),
             output_tokens=int(usage.get("output_tokens", 0)),
-            context_tokens=peak,
-            session_id=str(session_id or ""),
-            context_window=reported_window(result, model),
+            context_tokens=int(out.get("peak") or 0),
+            session_id=str(out.get("session_id") or ""),
+            context_window=window_of(out.get("model_usage") or {}, model),
         )
-        extra = plugins.extra(loaded, task.skills)
+        extra = plugins.extra(set(out.get("skills") or ()), task.skills)
         if extra:
             log.info("%s/%s loaded skills beyond its phase's: %s", task.phase, task.role, ", ".join(extra))
         rec = self.gateway.record_external(
             task.tags, runtime=self.name, model=model, layers=task.layers, response=resp,
-            duration_s=time.monotonic() - started, extra_skills=extra, session_mode=session_mode,
+            duration_s=float(out.get("duration_s") or 0.0), extra_skills=extra, session_mode=session_mode,
         )
-        sdk_cost = getattr(result, "total_cost_usd", None) if result else None
+        sdk_cost = out.get("total_cost_usd")
         return AgentResult(
-            text=text,
+            text=resp.text,
             tokens=rec.total_tokens,
             cost_usd=float(sdk_cost) if sdk_cost is not None else rec.cost_usd,
             request_ids=[resp.request_id],
@@ -206,6 +228,33 @@ class ClaudeCodeRuntime:
             model=model,
             runtime=self.name,
         )
+
+
+async def run_query(prompt: str, options) -> dict:
+    """One Claude Code session through the SDK, as a plain outcome: what the tool needs of it.
+    The same here and in a session's sandbox (valxel_sdlc.session_runner)."""
+    from claude_agent_sdk import ResultMessage, query  # lazy import
+
+    text, result, loaded, errors = "", None, set(), []
+    peak, session_id = 0, ""  # the largest prompt of any one call, and the session (valxel_sdlc.context)
+    started = time.monotonic()
+    async for message in query(prompt=prompt, options=options):
+        loaded |= skills_used(message)
+        peak = max(peak, prompt_tokens(getattr(message, "usage", None)) if not isinstance(message, ResultMessage) else 0)
+        session_id = getattr(message, "session_id", None) or session_id
+        if getattr(message, "subtype", None) == "init":
+            errors += list((getattr(message, "data", {}) or {}).get("plugin_errors") or [])
+        if isinstance(message, ResultMessage):
+            result = message
+            structured = getattr(message, "structured_output", None)
+            text = (json.dumps(structured) if structured is not None else getattr(message, "result", "")) or text
+    return {"text": text, "usage": (getattr(result, "usage", None) or {}) if result else {},
+            "peak": peak, "session_id": str(session_id or ""), "skills": sorted(loaded), "plugin_errors": errors,
+            "is_error": bool(getattr(result, "is_error", False)) if result else False,
+            "error": str(getattr(result, "result", "") or "") if result and getattr(result, "is_error", False) else "",
+            "model_usage": (getattr(result, "model_usage", None) or {}) if result else {},
+            "total_cost_usd": getattr(result, "total_cost_usd", None) if result else None,
+            "duration_s": round(time.monotonic() - started, 3)}
 
 
 def prompt_tokens(usage) -> int:
@@ -218,7 +267,10 @@ def prompt_tokens(usage) -> int:
 
 def reported_window(result, model: str) -> int:
     """The context window Claude Code reported for the model with its result, 0 when it didn't."""
-    usage = getattr(result, "model_usage", None) or {}
+    return window_of(getattr(result, "model_usage", None) or {}, model)
+
+
+def window_of(usage: dict, model: str) -> int:
     name = model.split("/", 1)[-1]
     for key, u in usage.items() if isinstance(usage, dict) else ():
         if isinstance(u, dict) and (key == name or key.startswith(name)):

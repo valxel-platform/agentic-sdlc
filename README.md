@@ -1637,6 +1637,25 @@ repository. Its folder is deleted when the session ends. `VALXEL_AGENT_ENV_PASS`
 variable a deployment's sessions need (e.g. `AWS_REGION` for Bedrock); `VALXEL_AGENT_SANDBOX_WEAKER=1`
 uses Claude Code's weaker sandbox in containers that can't create user namespaces.
 
+**In production, each session runs in a sandbox of its own** (`valxel_sdlc/session_runner.py`,
+`VALXEL_SESSION_EXECUTOR=kubernetes`; strict mode requires it in live mode). The tool claims a fresh
+sandbox from the platform's warm pool (Agent Sandbox: a `SandboxClaim` on the `agent-session`
+template in `VALXEL_SESSION_NAMESPACE`), posts the session to the runner there (`valxel
+session-runner`, the tool's own image) and deletes the claim when it answers. Only the session
+crosses: its prompt and options, the feature's documents it reads, the repository and branch with a
+token for that one repository (a coder) or read-only tokens for the repositories it reads (the
+architect), its model credentials and telemetry settings, and an earlier transcript to resume. The
+runner clones there, runs Claude Code, and returns the reply, usage, session id, skills loaded and
+the transcript to keep; the coder pushes its branch from the sandbox. The tool's App key, database,
+webhook secrets and other workspaces' files never reach it, and the tool no longer clones customer
+code into its own container. The template, owned by the platform
+(`platform-foundation/gitops/apps/agent-sessions`), runs it under gVisor with no service account
+token, a read-only root, resource limits and a deadline, and network only to the package
+registries, GitHub, the model provider and the telemetry collector. Codex can't run there yet: with
+sandboxes on, its roles (the coder's fallbacks, the reviewer's second opinion) are skipped rather than
+run in the tool's container. `local` (the default) runs sessions in the tool's process, for
+development.
+
 **Only images the platform's build signed run** (`platform/openchoreo/` in the platform governance
 repo). The pipeline builds only merge commits that passed the gates. The build scans the image
 (high and critical CVEs fail it), writes a CycloneDX SBOM, signs the image with a KMS key only the

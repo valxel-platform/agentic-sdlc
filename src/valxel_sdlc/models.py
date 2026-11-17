@@ -108,11 +108,19 @@ def second_opinion(settings: Settings, available: set[str], role: str, data_clas
             why.append(f"{other}: same model as the review")
         elif other not in available:
             why.append(f"{other}: provider not configured")
+        elif settings.role(other).runtime == "codex" and _sandboxed():
+            why.append(f"{other}: Codex can't run in a session sandbox yet")
         elif not _allowed(settings, settings.role(other).provider, data_class):
             why.append(f"{other}: {data_class} data may not reach {settings.role(other).provider}")
         else:
             return Choice(other)
     return Choice(None, "; ".join(why))
+
+
+def _sandboxed() -> bool:
+    from .sandbox import remote
+
+    return remote()
 
 
 def _allowed(settings: Settings, provider: str, data_class: str) -> bool:
