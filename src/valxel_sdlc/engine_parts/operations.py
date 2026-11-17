@@ -411,6 +411,14 @@ class OperationsMixin:
                         if d.get("env") == "production" and d.get("kind") not in ("resource", "store") and d.get("repo")})
         return {"risk_tier": s.get("risk_tier"), "components": comps}
 
+    def shadow_record(self, window_days: int = 90) -> dict:
+        """How triage's shadow choices compared with what fixed each incident, across all products
+        (ops/remediation.py shadow mode): triage is one config for all of them."""
+        from ..ops.remediation import shadow_record
+
+        rows = [r for r in self.index.all() if r.get("kind") == "incident"]
+        return shadow_record([self._state(r["feature_id"]) for r in rows], window_days)
+
     def remediation_record(self, product_id: str, window_days: int = 90) -> dict:
         """How the tool's own fixes went for a product (ops/remediation.py calibration)."""
         from ..ops.remediation import track_record

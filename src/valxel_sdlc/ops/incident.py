@@ -18,6 +18,7 @@ person's decision. SEV1s also send on-call a low-urgency heads-up as they open (
 
 from __future__ import annotations
 
+import logging
 import operator
 import re
 from datetime import datetime, timedelta, timezone
@@ -37,7 +38,9 @@ from .signals import resolves, still_firing
 ACTIONS = ("flag_off", "rollback", "hotfix", "intent_change", "monitor")
 DECISIONS = ("approve", "revise", "resolve", "merge")
 CLOSE_DECISIONS = ("approve", "revise")
+TRIAGE_SKILLS = ("engineering:incident-response", "engineering:debug")
 RECOVERY_MINUTES = {"sev1": 30, "sev2": 60, "sev3": 240, "sev4": 1440}
+log = logging.getLogger(__name__)
 _ACTION = re.compile(r"^-\s*(flag_off|rollback|hotfix|intent_change|monitor)\s*:\s*(.*)$", re.M)
 
 
@@ -67,6 +70,7 @@ class IncidentState(TypedDict, total=False):
     auto_attempts: Annotated[int, operator.add]  # mitigations the tool took by itself
     analysis: Annotated[dict, last]  # OpenChoreo's root-cause (or FinOps) analysis: {kind, report_id, status, report}
     escalated: Annotated[bool, last]  # on-call was paged urgently (or told it waits for them)
+    shadow: Annotated[dict, last]  # what the tool would have done in shadow mode: {actions: [{type, target}], at}
 
 
 
@@ -287,7 +291,7 @@ def build_incident_graph(services, checkpointer=None):
             "Recent changes to the component (most recent first):",
             *[f"- {x['feature_id']} {x['title']}: released {x.get('released_at', '')}, flag "
               f"{'on' if x.get('flag_on') else 'off' if x.get('flag') else 'none'}" for x in ctx["suspects"][:10]],
-            "Recent logs (may be partial):", untrusted.lines("logs", (ctx["observed"].get("logs") or [])[-40:]),
+            "Recent logs (may be partial):", logs := untrusted.lines("logs", (ctx["observed"].get("logs") or [])[-40:]),
             "Metrics:", untrusted.wrap("metrics", str(ctx["observed"].get("metrics") or {})[:1500]),
             *([f"Look again, because: {state['feedback']}"] if state.get("feedback") else []),
             "Write Markdown: ## Summary, ## Impact, ## Likely cause, ## Proposed actions with one bullet per action:"
@@ -302,12 +306,35 @@ def build_incident_graph(services, checkpointer=None):
             " spend must stop now, and never roll back for cost alone."
             " Never include patient data or identifiers.",
         ])
+        stub = stub_triage(ctx)
         res = run_agent(services, role="ops", product_id=state["product_id"], thread_id=state["incident_id"],
-                        phase="incident", skills=("engineering:incident-response", "engineering:debug"),
-                        tail=tail, stub_text=stub_triage(ctx))
+                        phase="incident", skills=TRIAGE_SKILLS, tail=tail, stub_text=stub)
+        keep_case(state, ctx, tail, logs, stub, res.text)
         return {"triage": res.text, "actions": parse_actions(res.text), "status": "awaiting_decision",
                 "cost_usd": res.cost_usd, "tokens_used": res.tokens,
                 "events": [event("triage", "triaged", f"{len(parse_actions(res.text))} actions proposed")]}
+
+    def keep_case(state: IncidentState, ctx: dict, tail: str, logs: str, stub: str, output: str) -> None:
+        """Each triage is an eval case (valxel_sdlc.evals), labeled with what fixed the incident when it
+        closes. Logs are kept only for general data; for any other class the case says they're left out."""
+        store = getattr(services, "evals", None)
+        if store is None:
+            return
+        try:
+            from .. import evals
+
+            data_class = services.snapshot(state["product_id"]).product.data_class
+            if data_class != "general" and logs:
+                tail = tail.replace(logs, "(logs not kept with the eval case for this data class)")
+            n = sum(1 for e in state.get("events") or [] if e.get("node") == "triage" and e.get("kind") == "triaged")
+            store.capture(evals.EvalCase(
+                id=f"{state['incident_id']}:triage:{n + 1}", product_id=state["product_id"],
+                feature_id=state["incident_id"], phase="triage", data_class=data_class, at=evals.now(),
+                config_version=getattr(services.gateway, "config_version", ""),
+                ctx={"tail": tail, "stub": stub, "component": state.get("component", ""), "data_class": data_class},
+                output=output, status="passed"))
+        except Exception:
+            log.warning("%s: triage eval case not kept", state["incident_id"], exc_info=True)
 
     def policy(state: IncidentState) -> dict:
         try:
@@ -360,6 +387,17 @@ def build_incident_graph(services, checkpointer=None):
         events.append(event("auto", "agreed" if ok else "not_confident", why))
         if not ok:
             return Command(goto="escalate", update={"feedback": why, "events": events})
+        if pol.get("shadow"):  # triage hasn't earned acting alone yet: say what it would do, page on-call
+            record = services.shadow_record(pol["shadow"]["window_days"]) \
+                if callable(getattr(services, "shadow_record", None)) else {"agreed": 0, "disagreed": 0}
+            earned, why = remediation.shadow_open(record, pol["shadow"])
+            if not earned:
+                would = remediation.mitigations(chosen, state.get("component", ""))
+                said = ", ".join(f"{w['type'].replace('_', ' ')} {w['target']}".strip() for w in would)
+                return Command(goto="escalate", update={
+                    "shadow": {"actions": would, "at": now()},
+                    "feedback": f"shadow mode: the tool would have done this itself ({said}), but {why}",
+                    "events": events + [event("auto", "shadow", f"would {said}; {why}")]})
         rec = {"gate": "remediation", "lane": state["product_id"], "at": now(), "decision": "approve",
                "approver": remediation.AGENT, "action_ids": [a["id"] for a in chosen]}
         return Command(goto="act", update={
@@ -639,6 +677,14 @@ def build_incident_graph(services, checkpointer=None):
             pr = {"error": f"{type(exc).__name__}: {exc}"}
             events.append(event("close", "postmortem_pr_failed", pr["error"]))
         services.close_incident(state["incident_id"])
+        if getattr(services, "evals", None) is not None:  # the triage that led here: what fixed it
+            try:
+                end = remediation.what_fixed_it(state)
+                services.evals.label(state["incident_id"], "triage", {
+                    "decision": "recovered" if end["recovered"] else "resolved" if end["resolved_by_person"] else "unresolved",
+                    **end})
+            except Exception:
+                log.warning("%s: triage eval case not labeled", state["incident_id"], exc_info=True)
         return Command(goto=END, update={"gate_decisions": [rec], "status": "closed", "record_pr": pr, "events": events})
 
     g = StateGraph(IncidentState)

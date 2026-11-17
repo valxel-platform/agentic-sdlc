@@ -22,6 +22,7 @@ turn it off in product.yaml (`runtime.remediation`), never widen it:
                              # cause from OpenChoreo point at the same component and change
     without_analysis: page   # no analysis for this product: page (default) or act on suspects alone
     calibration: {window_days: 90, min_samples: 5, suspend_below: 0.6}
+    shadow: {min_samples: 10, agree_at_least: 0.8, window_days: 90}
     gradual_release:         # G6 approves the plan; the tool steps up while it stays quiet
       steps: [5, 25, 50, 100]
       bake_minutes: {low: 30, high: 60, regulated: 120}
@@ -36,6 +37,16 @@ agent is configured with, so it runs only for a data class that may go to that p
 tool's own `data_classes` setting) and outside excluded regions. Calibration keeps the tool honest:
 an action whose automatic uses recovered the incident less often than `suspend_below` (over at
 least `min_samples` in `window_days`) is suspended for that product until its record improves.
+
+Shadow mode covers the time before there is any such record. With `shadow` set, the tool doesn't
+act alone until triage has earned it: on each incident where it would have acted, it records what
+it would have done and pages on-call instead. Once on-call has handled the incident, the shadow
+choice agreed if the incident recovered after on-call took that same action (same flag, same
+component); it disagreed if they did something else, nothing, or it didn't recover. The tool acts
+alone once at least `min_samples` shadow choices in `window_days`, across all products (triage is
+one config for all of them), agreed `agree_at_least` of the time. The offline side is the eval set:
+each triage is an eval case, labeled with what fixed the incident, so a config change that makes
+triage pick worse actions fails its pull request (valxel_sdlc.evals).
 """
 
 from __future__ import annotations
@@ -104,7 +115,8 @@ def load_policy(text: str) -> dict:
             and isinstance(cal["window_days"], int) and cal["window_days"] >= 1):
         raise PolicyError("remediation calibration: window_days and min_samples are whole numbers, suspend_below 0 to 1")
     gradual = doc.get("gradual_release")
-    return {"autonomous": {k: {"released_within_hours": float((v or {}).get("released_within_hours", 24))}
+    shadow = _shadow(doc.get("shadow"))
+    return {"shadow": shadow, "autonomous": {k: {"released_within_hours": float((v or {}).get("released_within_hours", 24))}
                            for k, v in auto.items()},
             "start_hotfix": doc.get("start_hotfix", True) is True, "attempts": attempts,
             "quiet_minutes": quiet, "page": {"heads_up": heads_up}, "analysis": parsed_analysis,
@@ -133,15 +145,17 @@ def _gradual(raw: dict) -> dict:
             "compare": {"min_requests": int(cmp_["min_requests"]), "z": float(cmp_["z"]),
                         "min_increase": float(cmp_["min_increase"]), "relative": float(cmp_["relative"])}}
 
-def _gradual(raw: dict) -> dict:
-    steps = raw.get("steps") or []
-    if (not isinstance(steps, list) or not steps or any(not isinstance(s, (int, float)) or isinstance(s, bool) for s in steps)
-            or steps != sorted(set(steps)) or steps[-1] != 100 or steps[0] <= 0):
-        raise PolicyError("gradual_release.steps rise from above 0 to 100, e.g. [5, 25, 50, 100]")
-    bake = {"low": 30, "high": 60, "regulated": 120, **(raw.get("bake_minutes") or {})}
-    if set(bake) - set(RISK_TIERS) or not all(isinstance(v, int) and v >= 1 for v in bake.values()):
-        raise PolicyError("gradual_release.bake_minutes are whole minutes per risk tier (low, high, regulated)")
-    return {"steps": [float(s) for s in steps], "bake_minutes": bake}
+def _shadow(raw) -> dict | None:
+    if raw is None or raw is False:
+        return None
+    s = {"min_samples": 10, "agree_at_least": 0.8, "window_days": 90, **({} if raw is True else raw or {})}
+    if (set(s) - {"min_samples", "agree_at_least", "window_days"}
+            or not (isinstance(s["min_samples"], int) and not isinstance(s["min_samples"], bool) and s["min_samples"] >= 1)
+            or not (isinstance(s["window_days"], int) and s["window_days"] >= 1)
+            or not 0 < float(s["agree_at_least"]) <= 1):
+        raise PolicyError("remediation shadow: min_samples and window_days are whole numbers, agree_at_least above 0 to 1")
+    return {"min_samples": s["min_samples"], "agree_at_least": float(s["agree_at_least"]), "window_days": s["window_days"]}
+
 
 def for_product(policy: dict, runtime: dict | None, data_class: str = "", data_classes: dict | None = None) -> dict:
     """The platform's policy as it applies to one product: `runtime.remediation.autonomous` false
@@ -152,7 +166,7 @@ def for_product(policy: dict, runtime: dict | None, data_class: str = "", data_c
         return {"autonomous": {}, "start_hotfix": False, "attempts": 0, "quiet_minutes": dict(QUIET_MINUTES),
                 "page": {"heads_up": ["sev1"]}, "analysis": {}, "require_agreement": True,
                 "without_analysis": "page", "calibration": {"window_days": 90, "min_samples": 5, "suspend_below": 0.6},
-                "gradual_release": None}
+                "gradual_release": None, "shadow": None}
     own = (runtime or {}).get("remediation") or {}
     allowed = own.get("autonomous", True)
     auto = dict(policy["autonomous"])
@@ -350,3 +364,67 @@ def _parse(value) -> datetime | None:
     except ValueError:
         return None
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+# --- shadow mode: what the tool would have done, against what fixed it ------------------------
+
+def target_of(action: dict, component: str = "") -> str:
+    """What a flag off or rollback acts on: the feature, or the component."""
+    return str(action.get("feature_id") or "") if action.get("type") == "flag_off" else str(action.get("component") or component or "")
+
+
+def mitigations(actions: list[dict], component: str = "") -> list[dict]:
+    """The flag offs and rollbacks among actions, as {type, target}, in order."""
+    return [{"type": a["type"], "target": target_of(a, component)} for a in actions if a.get("type") in ACTIONS]
+
+
+def what_fixed_it(inc: dict) -> dict:
+    """How an incident ended, for shadow mode and the triage eval label: whether it recovered, and
+    the flag offs and rollbacks that were taken (by anyone) before it did."""
+    recovered = any(e.get("kind") == "recovered" for e in inc.get("events") or [])
+    taken = [t for t in inc.get("taken") or [] if t.get("ok")]
+    resolved = any(g.get("decision") == "resolve" for g in inc.get("gate_decisions") or [])
+    return {"recovered": recovered, "resolved_by_person": resolved,
+            "mitigations": mitigations(taken, inc.get("component", "")) if recovered else [],
+            "by_tool": any(t.get("by") == AGENT for t in taken)}
+
+
+SETTLED = ("postmortem", "closed")
+
+
+def shadow_outcome(inc: dict) -> bool | None:
+    """Whether the tool's shadow choice on this incident agreed with what fixed it; None while the
+    incident is open, or when there was no shadow choice."""
+    would = (inc.get("shadow") or {}).get("actions") or []
+    if not would or inc.get("status") not in SETTLED:
+        return None
+    end = what_fixed_it(inc)
+    return end["recovered"] and all(w in end["mitigations"] for w in would)
+
+
+def shadow_record(incidents: list[dict], window_days: int, now: datetime | None = None) -> dict:
+    """{"agreed", "disagreed"} over the window, across the incidents given."""
+    now = now or datetime.now(timezone.utc)
+    out = {"agreed": 0, "disagreed": 0}
+    for inc in incidents:
+        at = _parse((inc.get("shadow") or {}).get("at"))
+        if not at or now - at > timedelta(days=window_days):
+            continue
+        ok = shadow_outcome(inc)
+        if ok is not None:
+            out["agreed" if ok else "disagreed"] += 1
+    return out
+
+
+def shadow_open(record: dict, shadow: dict | None) -> tuple[bool, str]:
+    """Whether triage has earned acting alone: (True, why) or (False, why not)."""
+    if not shadow:
+        return True, "no shadow period set"
+    n = record.get("agreed", 0) + record.get("disagreed", 0)
+    rate = record.get("agreed", 0) / n if n else 0.0
+    said = f"its choice agreed with what fixed the incident {record.get('agreed', 0)} of {n} times in {shadow['window_days']} days"
+    if n < shadow["min_samples"]:
+        return False, f"{said}; it acts alone after {shadow['min_samples']}"
+    if rate < shadow["agree_at_least"]:
+        return False, f"{said}, below {int(shadow['agree_at_least'] * 100)}%"
+    return True, said

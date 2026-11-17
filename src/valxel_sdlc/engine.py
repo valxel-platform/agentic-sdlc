@@ -153,6 +153,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
 
             services.agents = agents_from_env(services.settings, openchoreo_auth())
         services.remediation_record = self.remediation_record
+        services.shadow_record = self.shadow_record
         services.feature_info = self.feature_info
         if getattr(services, "cohort_logs", None) is None:
             from .ops.cohorts import from_env as cohorts_from_env

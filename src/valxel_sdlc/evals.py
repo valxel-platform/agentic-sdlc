@@ -7,6 +7,14 @@ request, the parent documents, the product's knowledge), what it wrote, and the 
 The gate that follows labels it with what people decided (approved first time, sent back and why,
 taken over), and the version people finally approved becomes the case's reference.
 
+Incident triage leaves a case too (phase `triage`): the prompt it was given (without the logs,
+unless the product's data is general) and what it proposed. When the incident closes, the case is
+labeled with what fixed it: whether it recovered, and the flag offs and rollbacks taken before it
+did. Replayed, a triage case passes when the first flag off or rollback the new triage proposes is
+one that fixed the incident (or it proposes none, when it recovered without one), and counts as a
+wrong action when it proposes one that didn't. The tool may take that first action by itself
+(ops/remediation.py), so a rise in wrong actions fails the comparison like a drop in pass rate.
+
 **A run replays cases** under a config (config/models.yaml and the rest), with its own ledger, a
 stand-in GitHub and OpenChoreo, so nothing real is touched and no feature's cost moves. For each
 case it measures:
@@ -238,7 +246,40 @@ def _pairwise_order(case_id: str) -> bool:
     return int(hashlib.sha1(case_id.encode()).hexdigest(), 16) % 2 == 0
 
 
+def triage_score(proposed_text: str, label: dict, component: str = "") -> tuple[bool | None, bool | None]:
+    """(passed, wrong_action) for a triage against what fixed its incident; (None, None) when the
+    incident didn't recover, so nothing says what the right action was."""
+    from .ops.incident import parse_actions
+    from .ops.remediation import mitigations
+
+    if not (label or {}).get("recovered"):
+        return None, None
+    first = (mitigations(parse_actions(proposed_text), component) or [None])[0]
+    fixed = label.get("mitigations") or []
+    if not fixed:  # recovered without a flag off or rollback: proposing one would have undone a change for nothing
+        return first is None, first is not None
+    return first in fixed, first is not None and first not in fixed
+
+
+def _replay_triage(services, case: EvalCase) -> dict:
+    from .ops.incident import TRIAGE_SKILLS
+    from .roadmap.graphs import run_agent
+
+    started = time.monotonic()
+    before = len(services.ledger.records())
+    res = run_agent(services, role="ops", product_id=case.product_id, thread_id=case.feature_id, phase="incident",
+                    skills=TRIAGE_SKILLS, tail=case.ctx.get("tail", ""), stub_text=case.ctx.get("stub", ""))
+    passed, wrong = triage_score(res.text, case.label or {}, case.ctx.get("component", ""))
+    rows = services.ledger.records()[before:]
+    return {"case_id": case.id, "phase": case.phase, "data_class": case.data_class, "passed": passed,
+            "wrong_action": wrong, "findings": 0, "must_met": None, "critic_agrees": None, "pairwise": None,
+            "cost_usd": round(sum(r.est_cost_usd for r in rows), 6), "duration_s": round(time.monotonic() - started, 3),
+            "trace_ids": sorted({r.trace_id for r in rows if r.trace_id})}
+
+
 def replay(services, case: EvalCase, *, pairwise: bool = False) -> dict:
+    if case.phase == "triage":
+        return _replay_triage(services, case)
     from .agents import PHASE_SPECS, templates
     from .evaluators import run_checks
     from .evaluators.critic import critique
@@ -327,7 +368,9 @@ def summarize(results: list[dict]) -> dict:
         duels = [r["pairwise"] for r in rs if r.get("pairwise")]
         agree = [r["critic_agrees"] for r in rs if r.get("critic_agrees") is not None]
         return {"cases": len(rs), "errors": sum(1 for r in rs if r.get("error")),
-                "pass_rate": _mean([1.0 if r["passed"] else 0.0 for r in rs]),
+                "pass_rate": _mean([None if r["passed"] is None else 1.0 if r["passed"] else 0.0 for r in rs]),
+                "wrong_action_rate": _mean([None if r.get("wrong_action") is None else 1.0 if r["wrong_action"] else 0.0
+                                            for r in rs]),
                 "must_met_rate": _mean([r["must_met"] for r in rs]),
                 "critic_agreement": _mean([1.0 if a else 0.0 for a in agree]),
                 "pairwise": {k: duels.count(k) for k in ("win", "tie", "loss")} if duels else None,
@@ -359,6 +402,12 @@ def compare(base: dict, cand: dict, *, max_drop: float = 0.05, max_cost_increase
             row[m] = {"base": bs[m], "candidate": cs[m], "delta": delta}
             if delta < -max_drop:
                 regressions.append(f"{scope}: {m.replace('_', ' ')} fell from {bs[m]:.0%} to {cs[m]:.0%}")
+        bw, cw = bs.get("wrong_action_rate"), cs.get("wrong_action_rate")
+        if cw is not None:
+            row["wrong_action_rate"] = {"base": bw, "candidate": cw, "delta": round(cw - (bw or 0.0), 4)}
+            if cw - (bw or 0.0) > max_drop:
+                regressions.append(f"{scope}: triage proposed a wrong flag off or rollback first in {cw:.0%} of "
+                                   f"incidents, up from {bw or 0.0:.0%}")
         if cs.get("pairwise_loss_rate") is not None and cs["pairwise_loss_rate"] > max_drop + (bs.get("pairwise_loss_rate") or 0.0):
             regressions.append(f"{scope}: the candidate's documents lost to the approved ones in "
                                f"{cs['pairwise_loss_rate']:.0%} of comparisons")
