@@ -2535,14 +2535,14 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 
 | Design element | Where | Notes |
 | --- | --- | --- |
-| Supervisor, phases, gates | `graph/pipeline.py` | Gates and escalations are `interrupt()` nodes; Design and Architecture run in parallel and join before Plan |
+| Supervisor, phases, gates | `graph/pipeline.py` (wiring), `graph/gates.py`, `graph/routing.py` | Gates and escalations are `interrupt()` nodes; Design and Architecture run in parallel and join before Plan |
 | Phase subgraphs | `graph/phase.py` | Each phase is a compiled subgraph: produce, deterministic checks, critic, loop up to `max_loops`, else escalate |
 | Build fan-out | `graph/phase.py` | One coder agent per task through `Send`; a reviewer agent per PR; only failing tasks are retried |
 | Agent roster and skills | `agents/roles.py` | Plugin skills per phase; critic skills double as evaluators |
 | Performance tests | `performance.py`, `config/quality.yaml` | Budgets over industry defaults, the rules that pick none, smoke or full per repo, the PR labels and the staging request |
-| Takeover and lessons | `graph/pipeline.py`, `lessons.py` | Gate history and revision limits; the person's version kept on hand-back; corrections recorded, lessons distilled and proposed as governance PRs, then pinned per feature into prompts and the critic's checklist |
-| Fixing failures before production | `graph/pipeline.py` (`fix_or_ask`, `failing_repos`) | Failures in CI, the build, dev and staging go back to the coders of the repos they point at, on a fix branch after merge; people decide when the tries run out |
-| Workflow profiles | `profiles.py`, `graph/pipeline.py` | Feature and express routes; the profile brief, the gates a profile decides, and the guard that keeps architecture, G5 and G6 |
+| Takeover and lessons | `graph/gates.py`, `lessons.py` | Gate history and revision limits; the person's version kept on hand-back; corrections recorded, lessons distilled and proposed as governance PRs, then pinned per feature into prompts and the critic's checklist |
+| Fixing failures before production | `graph/merge_train.py` (`fix_or_ask`, `failing_repos`) | Failures in CI, the build, dev and staging go back to the coders of the repos they point at, on a fix branch after merge; people decide when the tries run out |
+| Workflow profiles | `profiles.py`, `graph/briefs.py` | Feature and express routes; the profile brief, the gates a profile decides, and the guard that keeps architecture, G5 and G6 |
 | Agent notes | `diary.py`, `graph/phase.py` | The `## Agent notes` section and the coder's notes, kept per phase and shown at the gates and in PR descriptions |
 | Traceability | `traceability.py` | Metrics, goals, criteria, tasks, PRs, acceptance results, deployments and incidents in one view, with gaps; reverse lookup by repo or PR |
 | Pilot | `pilot.py` | People's effort, the shadow automatic-approval rule, and the report against the 15% target |
@@ -2552,10 +2552,10 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | Usage ledger | `gateway/ledger.py` | In-memory or Postgres; `summarize()` gives cache-hit rate, write share, cost by phase and model |
 | Runtimes | `runtime/` | `GatewayRuntime` (generic, any model) and `ClaudeCodeRuntime` (Claude Agent SDK, live mode) |
 | Product isolation | `config/registry.yaml`, each org's `product.yaml` | Registry: lane kind, org, data class, workspace. Manifest: repos, approvers, budget, thresholds, high-risk paths, runtime, `depends_on` |
-| Shared services | `governance/loader.py`, `graph/pipeline.py` | Dependency lanes pinned at intake; their constitutions apply; G4 to G6 need each touched lane; shared repos publish packages (`integrations/packages.py`) |
+| Shared services | `governance/loader.py`, `graph/gates.py` | Dependency lanes pinned at intake; their constitutions apply; G4 to G6 need each touched lane; shared repos publish packages (`integrations/packages.py`) |
 | Constitutions | `governance/` | Read from the tools org and each product org, validated, pinned by commit SHA per feature |
-| Risk-tiered merge | `graph/phase.py`, `graph/pipeline.py` | PHI and payments are `regulated`; changes to high-risk paths are `high`; both go through G5 |
-| Multi-repo change set | `graph/pipeline.py` | One branch name across repos; the merge train runs libraries, then providers, then consumers |
+| Risk-tiered merge | `graph/phase.py`, `graph/merge_train.py` | PHI and payments are `regulated`; changes to high-risk paths are `high`; both go through G5 |
+| Multi-repo change set | `graph/merge_train.py`, `graph/delivery.py` | One branch name across repos; the merge train runs libraries, then providers, then consumers |
 | CI/CD | `integrations/openchoreo.py` | Agents promote to staging only; production promotion at G6 is human (VX-3). A production rollback is a person's, or the tool's under the remediation policy |
 | Knowledge write-back | `graph/phase.py` | After Operate, the capability is registered in the catalog |
 | Durability | `api/app.py` | `PostgresSaver` checkpointer; threads survive restarts and wait at gates for days; after each run a thread keeps only its latest checkpoint (`engine.py` `_prune`) |
@@ -2651,7 +2651,8 @@ config/            knowledge.yaml (design knowledge sources), repos.yaml (golden
 examples/governance/  sample governance repos for the tools org and each product org
 src/valxel_sdlc/
   governance/      sources (local, GitHub), GitHub App tokens, manifest validation, pinned loader
-  graph/           pipeline (supervisor, gates, escalations, merge train), phase subgraphs
+  graph/           pipeline.py wires the graph; routing, briefs, gates, provision, infra, merge_train,
+                   delivery and rollout hold its nodes; phase.py the phase subgraphs
   agents/          roster, prompt-layer builder, stub templates, section parsers
   evaluators/      deterministic checks, rubric critic
   gateway/         gateway, providers, prompt layers, pricing, ledger

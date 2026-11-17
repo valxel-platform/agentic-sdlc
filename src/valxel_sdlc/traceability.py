@@ -13,7 +13,7 @@ and lists the gaps: a requirement with no goal, task or test case, a test case w
 its branch, hasn't passed or is manual, a task without a pull request, a goal without a metric or
 requirement, an affected repo nothing changes. A requirement the plan defers (with a reason) is
 listed apart, not as a gap. With no gaps the matrix is complete, which G6 requires before
-production (graph/pipeline.py); `rows` and `csv` give the matrix as a table to export.
+production (graph/gates.py); `rows` and `csv` give the matrix as a table to export.
 
 Nothing is stored twice: the documents, the feature's state and the incidents are the record, so
 the view is always what the pipeline has now. `search` answers the other direction across a

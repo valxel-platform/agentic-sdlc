@@ -17,7 +17,7 @@ change the intent (ops/incident.py).
 
 No profile skips architecture (it finds the repos, contracts and lanes a change touches), planning,
 tests, security scans, the performance rules, G5 for risky changes, or G6 before production. An
-incident's hotfix is its own track (graph/pipeline.py hotfix_brief), decided by on-call.
+incident's hotfix is its own track (graph/briefs.py make_hotfix_brief), decided by on-call.
 
 Products choose which profiles their people may use (product.yaml `workflow.profiles`; feature and
 nothing else by default). Express needs listing explicitly, and never applies to PHI or payments

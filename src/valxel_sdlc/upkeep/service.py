@@ -10,7 +10,7 @@
                               deadline, or goes to its own G6 on its release-by date
     accept(...)               a security approver accepts the risk until a date (moves the deadline)
 
-Fix features are the hotfix track (graph/pipeline.py hotfix_brief): the policy, which governance
+Fix features are the hotfix track (graph/briefs.py make_hotfix_brief): the policy, which governance
 owns, decided the fix is needed, so they start at planning. Tests, scans, G5 for risky changes and
 G6 stay. G5 goes to the lane's security approvers; G6 to its release approvers as usual.
 """

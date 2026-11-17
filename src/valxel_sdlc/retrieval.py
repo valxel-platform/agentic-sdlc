@@ -16,7 +16,7 @@ Valxel builds a product's knowledge repo itself, during the product build:
                 the topic compacted. People approve all of it with the code at G5.
   every PR      The `retrieval` suite: recall of the expected passages, and never a passage for
                 someone who must not see it or from a deleted record.
-  G6            The release's recall beside the last release's (graph.pipeline.agent_evals).
+  G6            The release's recall beside the last release's (graph.gates.agent_evals).
   production    A source more than an hour behind raises the knowledge-lag alert (alert-rules.yaml).
 """
 
