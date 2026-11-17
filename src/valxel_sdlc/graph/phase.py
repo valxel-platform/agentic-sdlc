@@ -891,6 +891,32 @@ def perf_pending(services, pr: dict, level: str) -> None:
         pass
 
 
+def coder_tail(ctx: dict, task: dict, fix: list[str], mine: list[dict], live: bool) -> str:
+    """The coder's instructions for a task: the same for a build and for its eval replay
+    (valxel_sdlc.code_evals)."""
+    payload = {"fix": fix}
+    return (f"Implement {task['id']} in {task['repo']} on branch {ctx.get('branch') or 'feature/' + ctx['feature_id']}. "
+          + ("Your working directory is its checkout on that branch: commit there and push the branch "
+             "(git push origin HEAD). You can't push anywhere else, and your shell reaches only the "
+             "package registries and GitHub. " if live else "")
+          + f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run the tests and report what they said."
+          + (f" Fix this first: {ctx['feedback']}" if ctx.get("feedback") else "")
+          + (" The review blocked your last attempt; fix each of these without weakening any check: "
+             + "; ".join(payload["fix"]) + "." if payload.get("fix") else "")
+          + cases_instruction(mine)
+          + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
+          + instrumentation_instruction(ctx, task)
+          + ux_instruction(ctx, task)
+          + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
+          + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
+          + contracts_instruction(ctx, task) + schedule_instruction(ctx, task)
+          + integration_instruction(ctx, task) + sandbox_instruction(ctx, task)
+          + documents_instruction(ctx, task) + channels_instruction(ctx, task)
+          + " The summary is the PR description: what changed, and every flag, audit record and event"
+            " type the change uses. " + diary.CODER + " " + sessions_instruction()
+          + "\n\n" + structured.instruction(structured.CoderReply))
+
+
 def build_build_subgraph(services):
     """Build fans out one coder agent per task (Send), then a reviewer agent per PR."""
     spec = PHASE_SPECS["build"]
@@ -947,35 +973,33 @@ def build_build_subgraph(services):
                  + (" The review blocked your last attempt; fix each of these without weakening any check: "
                     + "; ".join(payload["fix"]) + "." if payload.get("fix") else ""))
         prev = payload.get("session")
-        return call_agent(
+        res = call_agent(
             services, role="coder", phase="build", ctx=for_task(ctx, task, where), skills=spec.skills, box=box.spec,
             task_id=task["id"], prev_session=prev, keep_transcript=True,
             # Resumed, the session already has the task and everything it read: only what to fix now.
             resume_tail=(f"Continue {task['id']} on the same branch, in a fresh checkout of it." + fixes
                          + " Run the tests again and reply in the same JSON format, handoff included.") if prev and fixes else "",
-            tail=(f"Implement {task['id']} in {task['repo']} on branch {ctx.get('branch') or 'feature/' + ctx['feature_id']}. "
-                  + ("Your working directory is its checkout on that branch: commit there and push the branch "
-                     "(git push origin HEAD). You can't push anywhere else, and your shell reaches only the "
-                     "package registries and GitHub. " if live else "")
-                  + f"Cover {', '.join(task['acs']) or 'the planned behavior'}; run the tests and report what they said."
-                  + (f" Fix this first: {ctx['feedback']}" if ctx.get("feedback") else "")
-                  + (" The review blocked your last attempt; fix each of these without weakening any check: "
-                     + "; ".join(payload["fix"]) + "." if payload.get("fix") else "")
-                  + cases_instruction(mine)
-                  + flag_instruction(ctx, task) + audit_instruction(ctx, task) + events_instruction(ctx, task)
-                  + instrumentation_instruction(ctx, task)
-                  + ux_instruction(ctx, task)
-                  + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
-                  + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
-                  + contracts_instruction(ctx, task) + schedule_instruction(ctx, task)
-                  + integration_instruction(ctx, task) + sandbox_instruction(ctx, task)
-                  + documents_instruction(ctx, task) + channels_instruction(ctx, task)
-                  + " The summary is the PR description: what changed, and every flag, audit record and event"
-                    " type the change uses. " + diary.CODER + " " + sessions_instruction()
-                  + "\n\n" + structured.instruction(structured.CoderReply)),
+            tail=coder_tail(ctx, task, payload.get("fix") or [], mine, live),
             stub_text=templates.code_result(ctx, task, passed=not fail),
             schema=structured.schema(structured.CoderReply),
         )
+        if payload.get("attempt") == 1 and not prev and not payload.get("fix"):
+            keep_code_case("coder", ctx, task, res.text)
+        return res
+
+    def keep_code_case(phase: str, ctx: dict, task: dict, output: str, tail: str = "", pr_url: str = "") -> None:
+        """A coder or reviewer eval case (valxel_sdlc.code_evals), labeled when the change merges."""
+        if getattr(services, "evals", None) is None:
+            return
+        from .. import code_evals
+
+        try:
+            ctx = {**ctx, "data_class": product_data_class(services, ctx)}
+            version = getattr(services.gateway, "config_version", "")
+            services.evals.capture(code_evals.coder_case(ctx, task, output, config_version=version) if phase == "coder"
+                                   else code_evals.reviewer_case(ctx, task, tail, pr_url, output, config_version=version))
+        except Exception:
+            log.warning("%s %s: %s eval case not kept", ctx.get("feature_id"), task.get("id"), phase, exc_info=True)
 
     def _coded(task, ctx, attempt, mine, fail, res):
         # The coder's own test run gates review; CI on the pull request is the final word (ci_wait).
@@ -1089,6 +1113,8 @@ def build_build_subgraph(services):
                 schema=structured.schema(structured.ReviewReply),
             )
             reply, error = structured.parse(res.text, structured.ReviewReply)
+            if earlier is None:  # the first review of this task: an eval case
+                keep_code_case("reviewer", ctx, r, res.text, tail=review_tail, pr_url=pr["url"])
             if reply and reply.performance:  # the reviewer can only raise the level
                 before = perf.level
                 perf = performance.decide(r["repo"], r.get("role", ""), r["files"], hld=ctx.get("hld_text", ""),

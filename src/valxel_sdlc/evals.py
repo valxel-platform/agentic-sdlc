@@ -13,7 +13,13 @@ labeled with what fixed it: whether it recovered, and the flag offs and rollback
 did. Replayed, a triage case passes when the first flag off or rollback the new triage proposes is
 one that fixed the incident (or it proposes none, when it recovered without one), and counts as a
 wrong action when it proposes one that didn't. The tool may take that first action by itself
-(ops/remediation.py), so a rise in wrong actions fails the comparison like a drop in pass rate.
+(ops/remediation.py), so any rise in wrong actions fails the comparison: the bar is zero.
+
+The coder and the reviewer are replayed against changes people merged (valxel_sdlc.code_evals):
+the coder passes when the tests people merged pass on its code, and is flagged when its change
+weakens a check; the reviewer is scored on the bugs it catches when one is planted in a merged change
+and the false alarms it raises on the change as merged. Those replays run model-written code, so
+only a disposable runner runs them (VALXEL_EVAL_RUNNER=1); the config gate leaves them out.
 
 **A run replays cases** under a config (config/models.yaml and the rest), with its own ledger, a
 stand-in GitHub and OpenChoreo, so nothing real is touched and no feature's cost moves. For each
@@ -55,6 +61,7 @@ from typing import Protocol
 log = logging.getLogger(__name__)
 
 DOC_PHASES = ("discovery", "spec", "design", "architecture", "plan")
+CODE_PHASES = ("coder", "reviewer")  # replayed only in a disposable runner (valxel_sdlc.code_evals)
 # What a replay doesn't need from the phase's context, or must not inherit from the run it came from.
 _DROP = ("feedback", "prior_findings", "simulate_faults", "budget_remaining_usd", "pilot", "deployments", "quality")
 
@@ -280,6 +287,10 @@ def _replay_triage(services, case: EvalCase) -> dict:
 def replay(services, case: EvalCase, *, pairwise: bool = False) -> dict:
     if case.phase == "triage":
         return _replay_triage(services, case)
+    if case.phase in CODE_PHASES:
+        from . import code_evals
+
+        return (code_evals.replay_coder if case.phase == "coder" else code_evals.replay_reviewer)(services, case)
     from .agents import PHASE_SPECS, templates
     from .evaluators import run_checks
     from .evaluators.critic import critique
@@ -342,6 +353,13 @@ def _pairwise(services, case: EvalCase, content: str, ctx: dict) -> str:
 
 def run(services, cases: list[EvalCase], *, pairwise: bool = False, budget_usd: float | None = None) -> dict:
     """Replay every case (until the budget is spent); per-case results and a summary."""
+    from .code_evals import runner_allowed
+
+    if not runner_allowed():  # model-written code runs only in a disposable runner
+        skipped = [c for c in cases if c.phase in CODE_PHASES]
+        if skipped:
+            log.info("%d coder and reviewer cases left to the eval runner", len(skipped))
+        cases = [c for c in cases if c.phase not in CODE_PHASES]
     results, spent = [], 0.0
     for c in cases:
         if budget_usd is not None and spent >= budget_usd:
@@ -363,6 +381,10 @@ def _mean(xs):
     return round(sum(xs) / len(xs), 4) if xs else None
 
 
+def _flag_rate(rs: list[dict], key: str):
+    return _mean([None if r.get(key) is None else 1.0 if r[key] else 0.0 for r in rs])
+
+
 def summarize(results: list[dict]) -> dict:
     def block(rs):
         duels = [r["pairwise"] for r in rs if r.get("pairwise")]
@@ -371,6 +393,8 @@ def summarize(results: list[dict]) -> dict:
                 "pass_rate": _mean([None if r["passed"] is None else 1.0 if r["passed"] else 0.0 for r in rs]),
                 "wrong_action_rate": _mean([None if r.get("wrong_action") is None else 1.0 if r["wrong_action"] else 0.0
                                             for r in rs]),
+                "weakened_rate": _flag_rate(rs, "weakened"), "catch_rate": _flag_rate(rs, "caught"),
+                "false_alarm_rate": _flag_rate(rs, "false_alarm"),
                 "must_met_rate": _mean([r["must_met"] for r in rs]),
                 "critic_agreement": _mean([1.0 if a else 0.0 for a in agree]),
                 "pairwise": {k: duels.count(k) for k in ("win", "tie", "loss")} if duels else None,
@@ -382,7 +406,11 @@ def summarize(results: list[dict]) -> dict:
     return {"all": block(results), "phases": {p: block([r for r in results if r["phase"] == p]) for p in phases}}
 
 
-METRICS = ("pass_rate", "must_met_rate", "critic_agreement")
+METRICS = ("pass_rate", "must_met_rate", "critic_agreement", "catch_rate")
+# Rates that must not rise: (metric, what it means, the most it may rise by; None means max_drop).
+RISES = (("wrong_action_rate", "triage proposed a wrong flag off or rollback first", 0.0),
+         ("weakened_rate", "the coder's change weakened a check", None),
+         ("false_alarm_rate", "the reviewer blocked a change people merged", None))
 
 
 def compare(base: dict, cand: dict, *, max_drop: float = 0.05, max_cost_increase: float | None = None) -> dict:
@@ -402,12 +430,13 @@ def compare(base: dict, cand: dict, *, max_drop: float = 0.05, max_cost_increase
             row[m] = {"base": bs[m], "candidate": cs[m], "delta": delta}
             if delta < -max_drop:
                 regressions.append(f"{scope}: {m.replace('_', ' ')} fell from {bs[m]:.0%} to {cs[m]:.0%}")
-        bw, cw = bs.get("wrong_action_rate"), cs.get("wrong_action_rate")
-        if cw is not None:
-            row["wrong_action_rate"] = {"base": bw, "candidate": cw, "delta": round(cw - (bw or 0.0), 4)}
-            if cw - (bw or 0.0) > max_drop:
-                regressions.append(f"{scope}: triage proposed a wrong flag off or rollback first in {cw:.0%} of "
-                                   f"incidents, up from {bw or 0.0:.0%}")
+        for m, what, limit in RISES:
+            bw, cw = bs.get(m), cs.get(m)
+            if cw is None:
+                continue
+            row[m] = {"base": bw, "candidate": cw, "delta": round(cw - (bw or 0.0), 4)}
+            if cw - (bw or 0.0) > (max_drop if limit is None else limit) + 1e-9:
+                regressions.append(f"{scope}: {what} in {cw:.0%} of cases, up from {bw or 0.0:.0%}")
         if cs.get("pairwise_loss_rate") is not None and cs["pairwise_loss_rate"] > max_drop + (bs.get("pairwise_loss_rate") or 0.0):
             regressions.append(f"{scope}: the candidate's documents lost to the approved ones in "
                                f"{cs['pairwise_loss_rate']:.0%} of comparisons")

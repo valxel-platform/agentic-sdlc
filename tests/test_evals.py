@@ -30,7 +30,7 @@ def released_with_a_revision(engine):
 
 def test_document_phases_leave_cases_labelled_by_the_gates(engine, services):
     fid = released_with_a_revision(engine)
-    cases = services.evals.cases(product_id="FARM", labeled=False)
+    cases = services.evals.cases(product_id="FARM", labeled=False, phases=evals.DOC_PHASES)
     assert {c.phase for c in cases} == {"discovery", "spec", "design", "architecture", "plan"}
     spec = sorted((c for c in cases if c.phase == "spec"), key=lambda c: c.at)
     assert [c.id for c in spec] == [f"{fid}:spec:1", f"{fid}:spec:2"]
@@ -46,7 +46,7 @@ def test_document_phases_leave_cases_labelled_by_the_gates(engine, services):
 
 def test_a_run_measures_documents_and_the_critic_against_people(engine, services):
     released_with_a_revision(engine)
-    cases = services.evals.cases(product_id="FARM")
+    cases = services.evals.cases(product_id="FARM", phases=evals.DOC_PHASES)
     res = evals.run(evals.services_for(services.settings), cases, pairwise=True)
     s = res["summary"]
     assert s["all"]["cases"] == len(cases) and s["all"]["pass_rate"] == 1.0 and s["all"]["errors"] == 0
@@ -62,7 +62,7 @@ def test_a_run_measures_documents_and_the_critic_against_people(engine, services
 
 def test_a_worse_config_is_a_regression(engine, services, monkeypatch):
     released_with_a_revision(engine)
-    cases = services.evals.cases(product_id="FARM")
+    cases = services.evals.cases(product_id="FARM", phases=evals.DOC_PHASES)
     base = evals.run(evals.services_for(services.settings), cases)
     from valxel_sdlc.evaluators import critic
 
@@ -79,7 +79,7 @@ def test_a_worse_config_is_a_regression(engine, services, monkeypatch):
 def test_the_cli_exports_and_runs_from_a_file(engine, services, tmp_path, capsys):
     released_with_a_revision(engine)
     path = tmp_path / "cases.jsonl"
-    evals.dump_jsonl(services.evals.cases(product_id="FARM"), path)
+    evals.dump_jsonl(services.evals.cases(product_id="FARM", phases=evals.DOC_PHASES), path)
     out = tmp_path / "results.json"
     code = cli.main(["eval", "run", "--mode", "stub", "--cases", str(path), "--config", str(services.settings.config_dir),
                      "--out", str(out), "--limit", "1"])

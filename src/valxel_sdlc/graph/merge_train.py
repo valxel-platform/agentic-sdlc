@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
@@ -12,6 +14,8 @@ from .phase import event, gates_status, now
 from .infra import oc_target
 from .routing import ESCALATION_DECISIONS, SECURITY_DECISIONS, _record, after_ci, bump_for, normalize
 
+
+log = logging.getLogger(__name__)
 
 def make_merge_train(services):
     def merge_train(state: FeatureState) -> dict:
@@ -70,6 +74,14 @@ def make_merge_train(services):
                 runs[repo] = {"repo": repo, "sha": sha, **t, "pipeline": list(t["pipeline"]),
                               "run_id": run["run_id"], "url": run.get("url", "")}
         cs |= {"merged": True, "published": published, "packages": packages, "runs": runs}
+        if merged and getattr(services, "evals", None) is not None:  # coder and reviewer cases: what merged
+            from .. import code_evals
+
+            try:
+                code_evals.label_merged(services.evals, state["feature_id"], merged,
+                                        lambda repo, n: services.github.pr_files(repo=repo, number=n))
+            except Exception:
+                log.warning("%s: coder and reviewer eval cases not labeled", state["feature_id"], exc_info=True)
         return {"pull_requests": merged, "change_set": cs,
                 "events": teardown_events + [event("merge_train", "merged", f"{len(merged)} PRs by {actor}",
                                  order=cs.get("merge_order", []), published=published,

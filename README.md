@@ -2419,6 +2419,31 @@ pairwise judgment against the approved version, and cost and time. The compariso
 cases under the config in use and the candidate and fails when a rate drops by more than
 `max_drop` (5 points by default) or, if set, cost rises more than `max_cost_increase`.
 
+**Incident triage, the coder and the reviewer** are evaluated too: they are the agents that act
+on production and write and approve code.
+
+- **Triage** cases are kept for each incident (logs only for `general` data) and labeled with what
+  fixed it. Replayed, a case passes when the first flag off or rollback triage proposes is one that
+  fixed the incident. Any rise in wrong first actions fails the comparison: the bar is zero.
+  Autonomous remediation also waits for triage's live record (shadow mode, `ops/remediation.py`).
+- **Coder** cases are kept on each task's first attempt and labeled, when the change set merges,
+  with the merge commit and the tests the pull request added or changed. Replayed from the merge
+  commit's parent with the same instructions, the coder passes when those tests pass on its code
+  (the repository's own test command, with no secret in its environment); a change that weakens a
+  check (a skipped test, a lowered threshold) counts against it.
+- **Reviewer** cases are replayed on the merged diff twice: as merged, where blocking it is a false
+  alarm, and with one bug planted (a flipped condition, a removed assertion, a skipped test, a key in
+  the code), where approving it is a miss. The comparison fails when the catch rate drops, or false
+  alarms or weakened changes rise, by more than `max_drop`.
+- **Coder and reviewer cases run only in a disposable runner**, because a replay runs model-written
+  code against a clone of the product's repository: `VALXEL_EVAL_RUNNER=1 valxel eval run --phase
+  coder --phase reviewer --config path/to/candidate/config`, as a one-off job with the tool's
+  database (read-only is enough), model credentials and the GitHub App, which it uses for a
+  read-only token per repository. No code is kept: a case holds the repository, the merge commit and
+  test paths, and the clone is deleted when the replay ends. The config gate below replays the
+  other phases and leaves these out. Each coder case is a full coding session: size `--limit` and
+  `--budget` for it.
+
 - **Pull requests to the config repo** (`VALXEL_CONFIG_REPO`, e.g. `valxel-platform/sdlc-config`): the
   GitHub App's `pull_request` webhook makes the tool replay the newest labelled cases (5 per phase,
   `VALXEL_EVAL_CASES_PER_PHASE`; up to `VALXEL_EVAL_BUDGET_USD`, 20 by default, per config) under
