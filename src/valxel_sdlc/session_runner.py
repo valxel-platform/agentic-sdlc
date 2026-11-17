@@ -35,6 +35,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -87,6 +88,27 @@ def spec_for(task, options: dict, *, transcript: str = "", fallback_prompt: str 
 
 # --------------------------------------------------------------------------- the sandbox's side
 
+_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*")
+_SHA = re.compile(r"[0-9a-f]{40}")
+_SESSION_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,63}")
+
+
+def _repo(name: str) -> str:
+    """`owner/name` as GitHub spells them, nothing that could walk out of the work area."""
+    if not isinstance(name, str) or not _REPO.fullmatch(name) or ".." in name:
+        raise ValueError(f"not a repository name: {name!r}")
+    return name
+
+
+def _inside(base: Path, rel: str) -> Path:
+    """`rel` under `base`, refusing anything that resolves outside it."""
+    root = os.path.realpath(base)
+    full = os.path.normpath(os.path.join(root, rel))
+    if not full.startswith(root + os.sep):
+        raise ValueError(f"a path outside {base}: {rel!r}")
+    return Path(full)
+
+
 def run_spec(spec: dict, root: Path | None = None, *, query=None) -> dict:
     """Run one session from its spec, in `root` (the sandbox's work area): the outcome, with the
     transcript when asked. `query` stands in for the SDK in tests."""
@@ -100,14 +122,12 @@ def run_spec(spec: dict, root: Path | None = None, *, query=None) -> dict:
     home = root / "home"
     (home / "tmp").mkdir(parents=True, exist_ok=True)
     for rel, text in (spec.get("files") or {}).items():
-        dest = (home / rel).resolve()
-        if home.resolve() not in dest.parents:
-            raise ValueError(f"a file outside the session's home: {rel}")
+        dest = _inside(home, rel)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text, encoding="utf-8")
     co = spec.get("checkout") or {}
     if co:
-        cwd = clone(co["repo"], co["branch"], co["token"], root)
+        cwd = clone(_repo(co["repo"]), co["branch"], co["token"], root)
     else:
         cwd = str(root / "work")
         Path(cwd).mkdir(parents=True, exist_ok=True)
@@ -122,6 +142,8 @@ def run_spec(spec: dict, root: Path | None = None, *, query=None) -> dict:
     out = None
     r = spec.get("resume") or {}
     if r:
+        if not _SESSION_ID.fullmatch(str(r.get("session_id", ""))):
+            raise ValueError("not a session id")
         dest = sessions.claude_project_dir(str(home), cwd) / f"{r['session_id']}.jsonl"
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(r["transcript"], encoding="utf-8")
@@ -146,7 +168,9 @@ def read_clone(repo: str, sha: str, token: str, root: Path) -> str:
 
     from .sandbox import _askpass
 
-    dest = root / "work" / repo.split("/", 1)[1]
+    if not _SHA.fullmatch(str(sha)):
+        raise ValueError(f"not a commit sha: {sha!r}")
+    dest = _inside(root / "work", _repo(repo).split("/", 1)[1])
     dest.mkdir(parents=True, exist_ok=True)
     folder = root / ".git-read"
     folder.mkdir(exist_ok=True)
@@ -198,11 +222,18 @@ def make_app(work: Path = Path("/work"), query=None):
         state["used"] = True
         try:
             return {"ok": True, **run_spec(spec, work, query=query)}
-        except Exception as exc:  # the tool reports it as the session's error
+        except Exception as exc:  # the tool reports it as the session's error; details stay in this log
             log.exception("session failed")
-            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            return _failed(exc)
 
     return app
+
+
+def _failed(exc: Exception) -> dict:
+    """What the tool hears about a failed session: its kind, and whether trying again could work."""
+    from .gateway import is_transient
+
+    return {"ok": False, "error": type(exc).__name__, "transient": is_transient(str(exc))}
 
 
 # --------------------------------------------------------------------------- executors

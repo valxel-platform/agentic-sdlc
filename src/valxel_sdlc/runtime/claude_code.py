@@ -174,6 +174,8 @@ class ClaudeCodeRuntime:
                                        plugins_on=bool(self.plugins_for(task.role)))
         out = session_runner.executor().run(spec)
         if not out.get("ok"):
+            if out.get("transient"):
+                raise ProviderUnavailable(f"claude_code: the session's provider was unavailable ({out.get('error')})")
             raise RuntimeError(f"the session failed in its sandbox: {out.get('error')}")
         used = task
         if task.resume and not out.get("resumed"):

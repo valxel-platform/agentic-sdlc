@@ -123,7 +123,7 @@ def test_a_sandbox_runs_one_session(tmp_path):
     assert c.post("/run", json=_spec()).json()["ok"] is True
     assert c.post("/run", json=_spec()).status_code == 409
     bad = TestClient(session_runner.make_app(tmp_path / "x", query=FakeSDK())).post("/run", json=_spec(version=2))
-    assert bad.json() == {"ok": False, "error": "ValueError: unknown session spec"}
+    assert bad.json() == {"ok": False, "error": "ValueError", "transient": False}
 
 
 # --------------------------------------------------------------------------- the claim
@@ -200,6 +200,7 @@ def test_with_sandboxes_a_coder_box_holds_a_token_not_a_clone(services, monkeypa
 
 
 def test_the_runtime_sends_the_session_and_accounts_for_it_here(services, monkeypatch, tmp_path):
+    pytest.importorskip("claude_agent_sdk", reason="the live extra isn't installed")
     from valxel_sdlc.runtime.claude_code import ClaudeCodeRuntime
 
     monkeypatch.setenv("VALXEL_SESSION_EXECUTOR", "kubernetes")
@@ -302,3 +303,27 @@ def test_the_cluster_is_called_with_the_pods_own_service_account(tmp_path, monke
          "Bearer sa-token"),
         ("DELETE", "https://10.0.0.1/apis/extensions.agents.x-k8s.io/v1beta1/namespaces/valxel-sessions/"
                    "sandboxclaims/session-1", "Bearer sa-token")]
+
+
+def test_the_runner_refuses_paths_and_names_that_leave_its_work_area(tmp_path):
+    base = {"version": session_runner.VERSION, "runtime": "claude_code", "prompt": "p",
+            "fallback": {"prompt": "p", "session_mode": "fresh"}}
+    for bad in ({"files": {"../escape": "x"}}, {"files": {"/etc/passwd": "x"}},
+                {"checkout": {"repo": "../../etc", "branch": "b", "token": "t"}},
+                {"read_checkouts": [{"repo": "o/r", "sha": "not-a-sha", "token": "t"}]},
+                {"read_checkouts": [{"repo": "o/..", "sha": "a" * 40, "token": "t"}]},
+                {"resume": {"session_id": "../../x", "transcript": ""}}):
+        with pytest.raises(ValueError):
+            session_runner.run_spec({**base, **bad}, tmp_path, query=lambda p, o: {"session_id": "s"})
+
+
+def test_a_failed_session_reports_its_kind_not_its_text(tmp_path):
+    from fastapi.testclient import TestClient
+
+    def boom(prompt, options):
+        raise RuntimeError("overloaded_error: secret detail at /work/home")
+
+    app = session_runner.make_app(tmp_path, query=boom)
+    out = TestClient(app).post("/run", json={"version": session_runner.VERSION, "runtime": "claude_code",
+                                            "prompt": "p", "fallback": {"prompt": "p", "session_mode": "fresh"}}).json()
+    assert out == {"ok": False, "error": "RuntimeError", "transient": True}
