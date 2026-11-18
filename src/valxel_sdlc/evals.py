@@ -19,7 +19,9 @@ The coder and the reviewer are replayed against changes people merged (valxel_sd
 the coder passes when the tests people merged pass on its code, and is flagged when its change
 weakens a check; the reviewer is scored on the bugs it catches when one is planted in a merged change
 and the false alarms it raises on the change as merged. Those replays run model-written code, so
-only a disposable runner runs them (VALXEL_EVAL_RUNNER=1); the config gate leaves them out.
+only a disposable runner runs them (VALXEL_EVAL_RUNNER=1). The config gate runs them in a sandbox
+of their own when sessions have sandboxes (valxel_sdlc.code_eval_runner) and posts them as
+`valxel / evals (code)`; without sandboxes it leaves them out.
 
 Intake leaves a case at each submission: what the person said, in order, and the draft they
 confirmed. Replayed, the same messages go through a fresh intake; it passes when it picks the
@@ -629,9 +631,9 @@ class ConfigGate:
                           data_classes=tuple(c for c in env.get("VALXEL_EVAL_DATA_CLASSES", "general").split(",") if c),
                           pairwise=env.get("VALXEL_EVAL_PAIRWISE", "") in ("1", "true"))
 
-    def _status(self, sha: str, state: str, description: str, run_id: str) -> None:
+    def _status(self, sha: str, state: str, description: str, run_id: str, context: str = "") -> None:
         try:
-            self.github.set_status(repo=self.config_repo, sha=sha, context=self.CONTEXT, state=state,
+            self.github.set_status(repo=self.config_repo, sha=sha, context=context or self.CONTEXT, state=state,
                                    description=description[:140],
                                    url=f"{self.public_url}/api/evals/runs/{run_id}" if self.public_url else "")
         except Exception:
@@ -678,6 +680,7 @@ class ConfigGate:
             lf = Langfuse.from_env()
             if lf is not None:
                 lf.sync(cases, run_id, cand["results"], content_classes=("general",))
+            self._run_code(run, base_dir, cand_dir)
         except Exception as exc:
             log.warning("evals: run %s failed", run_id, exc_info=True)
             run |= {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
@@ -686,4 +689,37 @@ class ConfigGate:
             run["finished_at"] = now()
 
 
+    def _run_code(self, run: dict, base_dir, cand_dir) -> None:
+        """The coder and reviewer cases, replayed in a sandbox (valxel_sdlc.code_eval_runner), posted
+        as their own status: model-written code never runs in the tool."""
+        from . import code_eval_runner
+
+        if not code_eval_runner.enabled():
+            return
+        cases = _code_cases(self.services, self.data_classes, self.limit_per_phase)
+        ctx = code_eval_runner.CONTEXT
+        if not cases:
+            self._status(run["ref"], "success", "No merged coder or reviewer cases yet: nothing to compare", run["id"], ctx)
+            return
+        self._status(run["ref"], "pending", "Replaying merged changes in a sandbox under this config", run["id"], ctx)
+        try:
+            import os
+
+            out = code_eval_runner.run(self.services, cases, base_dir, cand_dir, budget_usd=self.budget_usd,
+                                       timeout_s=int(os.environ.get("VALXEL_EVAL_CODE_TIMEOUT_S", "3600")))
+            cmp = compare(out["baseline"], out["candidate"], max_drop=self.max_drop)
+            run["code"] = {"status": "passed" if cmp["ok"] else "failed", "comparison": cmp,
+                           "markdown": markdown(cmp, out["baseline"], out["candidate"])}
+            self._status(run["ref"], "success" if cmp["ok"] else "failure", headline(cmp), run["id"], ctx)
+        except Exception as exc:
+            log.warning("evals: code run for %s failed", run["id"], exc_info=True)
+            run["code"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
+            self._status(run["ref"], "error", f"The code eval run failed: {type(exc).__name__}: {exc}", run["id"], ctx)
+
 run_cases = run  # the gate's name for `run`, which its own method shadows
+
+
+def _code_cases(services, data_classes, limit_per_phase) -> list:
+    """Coder and reviewer cases labeled with a merged change: what a code replay is checked against."""
+    out = services.evals.cases(phases=CODE_PHASES, data_classes=data_classes, limit_per_phase=limit_per_phase)
+    return [c for c in out if (c.label or {}).get("decision") == "merged" and (c.label or {}).get("merge_sha")]

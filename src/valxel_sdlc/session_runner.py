@@ -116,6 +116,10 @@ def run_spec(spec: dict, root: Path | None = None, *, query=None) -> dict:
     from .runtime.claude_code import plugin_dirs_from
     from .sandbox import NO_SCRIPTS, claude_settings, clone
 
+    if spec.get("runtime") == "eval":  # a config PR's coder and reviewer evals (valxel_sdlc.code_eval_runner)
+        from .code_eval_runner import run_spec as run_eval_spec
+
+        return run_eval_spec(spec, Path(root or tempfile.mkdtemp(prefix="valxel-eval-")))
     if spec.get("version") != VERSION or spec.get("runtime") not in ("claude_code", "codex"):
         raise ValueError("unknown session spec")
     root = Path(root or tempfile.mkdtemp(prefix="valxel-run-"))
