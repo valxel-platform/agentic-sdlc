@@ -12,6 +12,7 @@ import pytest
 
 from valxel_sdlc import sessions
 from valxel_sdlc.sessions import Handoff, TranscriptStore, may_resume
+from valxel_sdlc.tenancy import thread_folder
 
 NOW = 1_800_000_000.0
 
@@ -53,7 +54,7 @@ def test_transcripts_are_kept_a_day_then_deleted(tmp_path):
     assert decide(prev(session_id="s-9"), transcripts=store, feature_id="CLN-FEAT-1").why == "its transcript is gone"
     out = store.restore("CLN-FEAT-1", "s-1", tmp_path / "home" / "p" / "s-1.jsonl")
     assert out.read_text() == src.read_text()
-    kept = tmp_path / "CLN-FEAT-1" / "sessions" / "s-1.jsonl.gz"
+    kept = thread_folder(tmp_path, "CLN-FEAT-1") / "sessions" / "s-1.jsonl.gz"
     assert kept.is_file() and kept.read_bytes()[:2] == b"\x1f\x8b"  # gzipped
     os.utime(kept, (time.time() - 25 * 3600,) * 2)
     assert store.expire() == 1 and not store.has("CLN-FEAT-1", "s-1")
@@ -112,7 +113,7 @@ def test_a_coder_fixing_its_own_failing_tests_resumes_and_the_feature_keeps_the_
     assert s["TASK-1"]["session_id"] == o1.session_id and s["TASK-1"]["resumed"] is True
     assert s["TASK-1"]["role"] == "coder" and s["TASK-1"]["runtime"] == "claude_code"
     # The first attempt's handoff is in the feature's artifacts.
-    assert any(p.name.startswith("HANDOFF-TASK-1.v") for p in (engine.services.settings.artifact_dir / fid).iterdir())
+    assert any(p.name.startswith("HANDOFF-TASK-1.v") for p in thread_folder(engine.services.settings.artifact_dir, fid).iterdir())
 
 
 def drive(eng, fid):
@@ -198,7 +199,7 @@ def test_the_watcher_deletes_old_transcripts(engine, tmp_path):
     src.write_text("{}")
     store.keep("CLN-FEAT-9", "s-old", src)
     store.keep("CLN-FEAT-9", "s-new", src)
-    old = engine.services.settings.artifact_dir / "CLN-FEAT-9" / "sessions" / "s-old.jsonl.gz"
+    old = thread_folder(engine.services.settings.artifact_dir, "CLN-FEAT-9") / "sessions" / "s-old.jsonl.gz"
     os.utime(old, (time.time() - 2 * 24 * 3600,) * 2)
     assert engine.expire_transcripts() == 1
     assert store.has("CLN-FEAT-9", "s-new") and not store.has("CLN-FEAT-9", "s-old")

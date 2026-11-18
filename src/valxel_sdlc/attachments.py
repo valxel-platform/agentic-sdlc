@@ -112,9 +112,11 @@ class AttachmentStore:
         return self.root / "intake" / sid
 
     def _feature_dir(self, feature_id: str) -> Path:
+        from .tenancy import thread_folder
+
         if not _SAFE_DIR.match(feature_id):
             raise AttachmentError("Unsafe feature id")
-        return self.root / feature_id / "attachments"
+        return thread_folder(self.root, feature_id) / "attachments"
 
     def add(self, sid: str, existing: list[dict], name: str, data: bytes) -> dict:
         name = clean_name(name)

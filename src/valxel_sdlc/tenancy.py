@@ -231,3 +231,67 @@ def bypasses(conn: Any) -> str:
 
 def workspaces_of(registry: dict, products: Iterable[str]) -> set[str]:
     return {getattr(registry[p], "workspace", "") for p in products if p in registry} - {""}
+
+
+# --------------------------------------------------------------------------- files
+
+# Files kept for a thread (its documents, session transcripts, attachments) are in its workspace's
+# folder of the artifact root, <root>/<workspace>/<thread>/, and are held to the same scope as its
+# rows: with VALXEL_TENANCY=rls a request or a run may read or write only its own workspaces'
+# folders (the platform, all of them; no scope, none). The workspace is the thread's product's, from
+# the registry (build_services calls use_registry). Shared storage (the tools cluster's EFS) holds
+# every workspace's files, and every pod mounts it, so this check is what keeps them apart.
+
+PLATFORM_FOLDER = "_platform"  # threads of no product: the platform's own (inception)
+_registry: dict = {}
+
+
+class WorkspaceDenied(PermissionError):
+    """A file of a workspace outside the current scope."""
+
+
+def use_registry(registry: dict) -> None:
+    _registry.clear()
+    _registry.update(registry or {})
+
+
+def workspace_for_thread(thread_id: str) -> str:
+    """The workspace of a thread's files: its product's ('' for the platform's own threads)."""
+    entry = _registry.get(str(thread_id).rsplit("-", 2)[0])
+    return str(getattr(entry, "workspace", "") or "") if entry is not None else ""
+
+
+def may_touch(workspace: str) -> bool:
+    """Whether the current scope may read or write a workspace's files ('' : the platform's)."""
+    if not enforced():
+        return True
+    v = scope.get()
+    if not v:
+        return False
+    if v == PLATFORM:
+        return True
+    return bool(workspace) and workspace in v.split(SEP)
+
+
+def thread_folder(root: Any, thread_id: str) -> Any:
+    """<root>/<workspace>/<thread>, once the current scope may touch that workspace's files."""
+    from pathlib import Path
+
+    ws = workspace_for_thread(thread_id)
+    if not may_touch(ws):
+        raise WorkspaceDenied(f"{thread_id}'s files are outside this request's workspaces")
+    return Path(root) / (ws or PLATFORM_FOLDER) / thread_id
+
+
+def check_file(root: Any, path: Any, thread_id: str) -> Any:
+    """`path`, once it is inside `thread_id`'s folder (or, written before folders were per
+    workspace, <root>/<thread>/) and the current scope may touch that thread's workspace."""
+    import os
+    from pathlib import Path
+
+    folder = os.path.realpath(thread_folder(root, thread_id))
+    legacy = os.path.realpath(Path(root) / thread_id)
+    full = os.path.realpath(path)
+    if not any(full.startswith(base + os.sep) for base in (folder, legacy)):
+        raise WorkspaceDenied(f"{path} isn't one of {thread_id}'s files")
+    return Path(full)

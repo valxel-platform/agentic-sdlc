@@ -10,6 +10,19 @@ DB = os.environ.get("VALXEL_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DB, reason="set VALXEL_TEST_DATABASE_URL to run Postgres tests")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_threads():
+    """Each test numbers threads from the start of a fresh index: drop earlier tests' and runs'
+    checkpoints, whose files are in their own temporary folders (a thread may read only its own)."""
+    import psycopg
+
+    with psycopg.connect(DB, autocommit=True) as conn:
+        for table in ("checkpoint_writes", "checkpoint_blobs", "checkpoints"):
+            conn.execute(f"DO $$ BEGIN IF to_regclass('{table}') IS NOT NULL THEN "  # noqa: S608 - fixed names
+                         f"DELETE FROM {table}; END IF; END $$")
+    yield
+
+
 def _engine(settings, pool):
     from langgraph.checkpoint.postgres import PostgresSaver
 

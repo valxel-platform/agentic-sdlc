@@ -104,9 +104,11 @@ class TranscriptStore:
         self.root = Path(root)
 
     def _dir(self, feature_id: str) -> Path:
+        from .tenancy import thread_folder
+
         if not _SAFE.match(feature_id):
             raise ValueError(f"Unsafe feature id {feature_id!r}")
-        return self.root / feature_id / "sessions"
+        return thread_folder(self.root, feature_id) / "sessions"
 
     def _path(self, feature_id: str, session_id: str) -> Path:
         if not _SAFE.match(session_id):
@@ -140,7 +142,7 @@ class TranscriptStore:
         """Delete transcripts older than a day; the watcher calls this. Returns how many went."""
         now = time.time() if now is None else now
         gone = 0
-        for path in self.root.glob("*/sessions/*.jsonl.gz"):
+        for path in [*self.root.glob("*/*/sessions/*.jsonl.gz"), *self.root.glob("*/sessions/*.jsonl.gz")]:
             if now - path.stat().st_mtime > max_age_s:
                 path.unlink(missing_ok=True)
                 gone += 1

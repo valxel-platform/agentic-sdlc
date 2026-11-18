@@ -342,9 +342,15 @@ would show one customer another's work. Postgres row-level security makes the da
   or a role with `BYPASSRLS`, so connect as an ordinary role that owns the tables. The policies are
   forced, so the owner is held to them too. With `VALXEL_TENANCY=rls`, startup checks the login and
   strict mode refuses one that bypasses it.
-- **What it doesn't cover:** documents, transcripts and screenshots on disk (`VALXEL_ARTIFACT_DIR`)
-  are kept per feature and served only through the API's checks; separate deployments per regulated
-  customer ("cells") are a separate decision.
+- **Files are held to the same scope.** A thread's documents, session transcripts and attachments
+  are kept in its workspace's folder, `VALXEL_ARTIFACT_DIR/<workspace>/<thread>/` (the platform's own
+  threads in `_platform/`). With `VALXEL_TENANCY=rls`, every read and write checks the current scope
+  as the policies do: a request or run touches only its own workspaces' folders, the platform all of
+  them, and no scope none; a stored reference that points outside its thread's folder is refused.
+  Shared storage (the tools cluster's EFS, which every API and worker pod mounts) holds every
+  workspace's files, so this check is what keeps them apart.
+- **What it doesn't cover:** separate deployments per regulated customer ("cells") are a separate
+  decision.
 
 ## Organizations and product governance
 

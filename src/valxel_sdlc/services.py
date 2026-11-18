@@ -247,6 +247,14 @@ def default_canary(settings: Settings, ledger: Ledger, env=None):
                       percent=percent, data_classes=classes, config_dir=str(path))
 
 
+def _artifact_store(settings):
+    """The artifact store, with threads' files kept per workspace (valxel_sdlc.tenancy: files)."""
+    from .tenancy import use_registry
+
+    use_registry(settings.registry)
+    return ArtifactStore(settings.artifact_dir)
+
+
 def build_services(
     settings: Settings | None = None,
     *,
@@ -269,7 +277,7 @@ def build_services(
         settings=settings,
         ledger=ledger,
         gateway=gateway,
-        artifacts=ArtifactStore(settings.artifact_dir),
+        artifacts=_artifact_store(settings),
         github=github,
         openchoreo=openchoreo,
         catalog=catalog or default_catalog(),

@@ -16,11 +16,20 @@ class ArtifactStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def _dir(self, feature_id: str) -> Path:
+        """The thread's folder in its workspace's (valxel_sdlc.tenancy: files)."""
+        from .tenancy import thread_folder
+
         if not _SAFE.match(feature_id):
             raise ValueError(f"Unsafe feature id {feature_id!r}")
-        d = self.root / feature_id
+        d = thread_folder(self.root, feature_id)
         d.mkdir(parents=True, exist_ok=True)
         return d
+
+    def path_of(self, ref: ArtifactRef | dict) -> Path:
+        """Where a stored version is, once this request's scope may read its thread's workspace."""
+        from .tenancy import check_file
+
+        return check_file(self.root, ref["uri"], str(ref["id"]).split(".", 1)[0])
 
     def save(
         self,
@@ -49,4 +58,4 @@ class ArtifactStore:
         )
 
     def load(self, ref: ArtifactRef | dict) -> str:
-        return Path(ref["uri"]).read_text(encoding="utf-8")
+        return self.path_of(ref).read_text(encoding="utf-8")

@@ -48,14 +48,14 @@ def _skim(text: str) -> list[str]:
     return [o for o in out if o][:MAX_LINES]
 
 
-def _path(ref: dict, suffix: str) -> Path:
-    p = Path(ref["uri"])
+def _path(services, ref: dict, suffix: str) -> Path:
+    p = services.artifacts.path_of(ref)  # once this request may read its workspace's files
     return p.with_name(p.name.replace(".md", f".{suffix}.json"))
 
 
 def summary(services, ref: dict, *, product_id: str = "", data_class: str = "phi") -> dict:
     """{'lines': [...], 'by': 'agent' | 'document'}, cached beside the document version."""
-    cache = _path(ref, "summary")
+    cache = _path(services, ref, "summary")
     if cache.exists():
         try:
             return json.loads(cache.read_text(encoding="utf-8"))
@@ -86,12 +86,12 @@ def summary(services, ref: dict, *, product_id: str = "", data_class: str = "phi
     return out
 
 
-def previous(ref: dict) -> tuple[int, str] | None:
+def previous(services, ref: dict) -> tuple[int, str] | None:
     """The version before this one, if there is one: (version, text)."""
     v = int(ref.get("version") or 0)
     if v < 2:
         return None
-    p = Path(ref["uri"])
+    p = services.artifacts.path_of(ref)
     prev = p.with_name(re.sub(r"\.v\d+\.md$", f".v{v - 1}.md", p.name))
     return (v - 1, prev.read_text(encoding="utf-8")) if prev.exists() else None
 
@@ -117,7 +117,7 @@ def brief(services, feature_id: str, ref: dict, *, history: list[dict] | None = 
           data_class: str = "phi") -> dict:
     """Everything the top of a gate shows: the summary, and what changed since the version sent back."""
     out = {"summary": summary(services, ref, product_id=product_id, data_class=data_class), "version": ref.get("version")}
-    prev = previous(ref)
+    prev = previous(services, ref)
     if prev:
         sent_back = [h for h in history or [] if h.get("decision") in ("revise", "takeover", "handback")]
         out["changed"] = {"from_version": prev[0], "lines": changes(prev[1], services.artifacts.load(ref)),
