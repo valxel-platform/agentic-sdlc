@@ -3,22 +3,36 @@ import { api } from "../api";
 import lockup from "../brand/valxel-lockup.png";
 
 export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
-  const [cfg, setCfg] = useState<{ mode: string; teams?: string[]; providers?: { id: string; label: string }[] } | null>(null);
+  const [cfg, setCfg] = useState<{
+    mode: string;
+    teams?: string[];
+    providers?: { id: string; label: string }[];
+  } | null>(null);
   const back = encodeURIComponent(location.pathname + location.search);
   const [login, setLogin] = useState("");
   const [email, setEmail] = useState("");
   const [teams, setTeams] = useState<string[]>([]);
-  const [err, setErr] = useState(new URLSearchParams(location.search).get("signin") === "failed"
-    ? "GitHub sign-in was cancelled or failed. Try again." : "");
+  const [err, setErr] = useState(
+    new URLSearchParams(location.search).get("signin") === "failed"
+      ? "GitHub sign-in was cancelled or failed. Try again."
+      : "",
+  );
 
-  useEffect(() => { api.authConfig().then(setCfg).catch((e) => setErr(e.message)); }, []);
+  useEffect(() => {
+    api
+      .authConfig()
+      .then(setCfg)
+      .catch((e) => setErr(e.message));
+  }, []);
 
   async function dev(e: FormEvent) {
     e.preventDefault();
     try {
       await api.devLogin(login.trim(), teams, [], email.trim());
       onSignedIn();
-    } catch (e2) { setErr((e2 as Error).message); }
+    } catch (e2) {
+      setErr((e2 as Error).message);
+    }
   }
 
   return (
@@ -26,49 +40,92 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
       <section className="signin-art" aria-label="About Valxel Agentic SDLC">
         <img className="signin-logo" src={lockup} alt="Valxel Agentic SDLC" width={300} height={253} />
         <Line />
-        <p>Agents carry each feature from intent to production. You clear the signals: every gate waits
-          for the people your GitHub teams name.</p>
+        <p>
+          Agents carry each feature from intent to production. You clear the signals: every gate waits for the
+          people your GitHub teams name.
+        </p>
       </section>
       <div className="card">
         <div>
-          <h1>Sign in</h1>
-          <p className="muted" style={{ marginTop: 8 }}>Your GitHub teams and your workspace groups decide which gates you can approve.
-            Admins and group approvers sign in with a passkey or GitHub to act.</p>
+          <h1>Welcome back to Valxel</h1>
+          <p className="muted" style={{ marginTop: 8 }}>
+            Ship software from idea to live — agents do the legwork, people make the calls.
+          </p>
+          <p className="muted" style={{ marginTop: 8 }}>
+            Your GitHub teams and your workspace groups decide which gates you can approve. Admins and group
+            approvers sign in with a passkey or GitHub to act.
+          </p>
         </div>
-        {err && <p className="error-note" role="alert">{err}</p>}
+        {err && (
+          <p className="error-note" role="alert">
+            {err}
+          </p>
+        )}
         {!cfg && !err && <p className="faint">Checking how to sign in…</p>}
         {cfg && cfg.mode !== "dev" && (
           <div className="stack">
             {(cfg.providers ?? []).map((p, i) => (
-              <a key={p.id} className={i === 0 ? "btn" : "btn secondary"} href={`/api/auth/login?provider=${p.id}&next=${back}`}>{p.label}</a>
+              <a
+                key={p.id}
+                className={i === 0 ? "btn" : "btn secondary"}
+                href={`/api/auth/login?provider=${p.id}&next=${back}`}
+              >
+                {p.label}
+              </a>
             ))}
             {(cfg.providers ?? []).some((p) => p.id === "email") && (
-              <a className="linkish" href={`/api/auth/login?provider=passkey&next=${back}`}>Use a passkey</a>
+              <a className="linkish" href={`/api/auth/login?provider=passkey&next=${back}`}>
+                Use a passkey
+              </a>
             )}
+            <p className="small faint">
+              Signing in takes you to Valxel&rsquo;s own sign-in for the method you pick. Valxel never sees
+              your password.
+            </p>
           </div>
         )}
         {cfg?.mode === "dev" && (
           <form onSubmit={dev} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <p className="note">Development sign-in: choose any identity. Not for production.</p>
-            <label className="field">GitHub login
-              <input value={login} onChange={(e) => setLogin(e.target.value)} required autoFocus placeholder="your-login" />
+            <label className="field">
+              GitHub login
+              <input
+                value={login}
+                onChange={(e) => setLogin(e.target.value)}
+                required
+                autoFocus
+                placeholder="your-login"
+              />
             </label>
-            <label className="field">Email <span className="small muted">optional: to accept an invitation sent to it</span>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+            <label className="field">
+              Email <span className="small muted">optional: to accept an invitation sent to it</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+              />
             </label>
             <fieldset className="field">
               <legend className="field">Teams to act as</legend>
               <div className="team-list">
                 {(cfg.teams ?? []).map((t) => (
                   <label key={t}>
-                    <input type="checkbox" checked={teams.includes(t)}
-                      onChange={(e) => setTeams(e.target.checked ? [...teams, t] : teams.filter((x) => x !== t))} />
+                    <input
+                      type="checkbox"
+                      checked={teams.includes(t)}
+                      onChange={(e) =>
+                        setTeams(e.target.checked ? [...teams, t] : teams.filter((x) => x !== t))
+                      }
+                    />
                     {t}
                   </label>
                 ))}
               </div>
             </fieldset>
-            <button className="btn" type="submit" disabled={!login.trim()}>Sign in</button>
+            <button className="btn" type="submit" disabled={!login.trim()}>
+              Sign in
+            </button>
           </form>
         )}
       </div>
@@ -94,7 +151,16 @@ function Line() {
             <rect x={x - 11} y="22" width="22" height="44" rx="11" fill="#0b0f18" stroke="#3a4660" />
             <circle cx={x} cy="35" r="6" fill={g < 2 ? lamp : "#263043"} />
             <circle cx={x} cy="53" r="6" fill={g === 2 ? lamp : "#263043"} />
-            <text x={x} y="132" textAnchor="middle" fill="#9aa6ba" fontFamily="IBM Plex Mono, monospace" fontSize="13">G{g + 1}</text>
+            <text
+              x={x}
+              y="132"
+              textAnchor="middle"
+              fill="#9aa6ba"
+              fontFamily="IBM Plex Mono, monospace"
+              fontSize="13"
+            >
+              G{g + 1}
+            </text>
           </g>
         );
       })}

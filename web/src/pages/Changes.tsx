@@ -10,8 +10,13 @@ const TYPE: Record<string, { label: string; chip: string; says: string }> = {
   automatic: { label: "Automatic", chip: "run", says: "The tool, under the remediation policy" },
 };
 const ACTION: Record<string, string> = {
-  deploy: "Released", flag_on: "Launched (flags on)", flag_off: "Flag turned off", rollback: "Rolled back",
-  rollout_step: "Widened", suspend_autonomy: "Suspended the tool's own action", applied_outside: "Changed outside the tool",
+  deploy: "Released",
+  flag_on: "Launched (flags on)",
+  flag_off: "Flag turned off",
+  rollback: "Rolled back",
+  rollout_step: "Widened",
+  suspend_autonomy: "Suspended the tool's own action",
+  applied_outside: "Changed outside the tool",
 };
 
 function pct(v: number | null): string {
@@ -39,7 +44,12 @@ export function ChangesPage({ me }: { me: Me }) {
   const load = useCallback(() => {
     if (!productId) return;
     Promise.all([api.changes(productId), api.lookback(productId, 6), api.verifyChanges()])
-      .then(([c, l, v]) => { setRows(c); setLb(l); setChain(v); setErr(""); })
+      .then(([c, l, v]) => {
+        setRows(c);
+        setLb(l);
+        setChain(v);
+        setErr("");
+      })
       .catch((e) => setErr(e.message));
   }, [productId]);
   useEffect(load, [load]);
@@ -56,56 +66,110 @@ export function ChangesPage({ me }: { me: Me }) {
         </div>
         <div className="head-actions">
           {me.lanes.length > 1 && (
-            <select aria-label="Product" value={productId} onChange={(e) => setParams({ product: e.target.value })}>
-              {me.lanes.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+            <select
+              aria-label="Product"
+              value={productId}
+              onChange={(e) => setParams({ product: e.target.value })}
+            >
+              {me.lanes.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
             </select>
           )}
-          <a className="btn secondary" href={`/api/changes/export.csv?product_id=${encodeURIComponent(productId)}`}>Download for audit (CSV)</a>
+          <a
+            className="btn secondary"
+            href={`/api/changes/export.csv?product_id=${encodeURIComponent(productId)}`}
+          >
+            Download for audit (CSV)
+          </a>
         </div>
       </div>
-      {err && <p className="error-note" role="alert">{err}</p>}
+      {err && (
+        <p className="error-note" role="alert">
+          {err}
+        </p>
+      )}
       {chain && !chain.ok && (
         <p className="error-note" role="alert">
-          The change log was altered: its records no longer chain together from {chain.broken_at}. Check the database's access log.
+          The change log was altered: its records no longer chain together from {chain.broken_at}. Check the
+          database's access log.
         </p>
       )}
 
       {lb && (
         <section className="panel" aria-labelledby="h-lookback">
-          <h2 id="h-lookback" className="section-title">The last six months</h2>
+          <h2 id="h-lookback" className="section-title">
+            The last six months
+          </h2>
           <div className="table-scroll">
-          <table className="quality">
-            <caption className="visually-hidden">Incidents and changes by month</caption>
-            <thead><tr>
-              <th scope="col">Month</th><th scope="col" className="num">Incidents</th>
-              <th scope="col" className="num">Fixed by the tool</th><th scope="col" className="num">Needed on-call</th>
-              <th scope="col" className="num">Time to recover (median)</th>
-              <th scope="col" className="num">Releases</th><th scope="col" className="num">Releases that caused one</th>
-            </tr></thead>
-            <tbody>
-              {lb.months.map((m) => (
-                <tr key={m.month}>
-                  <th scope="row">{m.month}</th>
-                  <td className="num">{m.incidents}{m.by_severity.sev1 ? <span className="small faint"> ({m.by_severity.sev1} SEV1)</span> : null}</td>
-                  <td className="num">{m.fixed_by_tool}</td>
-                  <td className="num">{m.escalated}</td>
-                  <td className="num">{minutes(m.recover_minutes_median)}</td>
-                  <td className="num">{m.releases}</td>
-                  <td className="num">{m.releases_causing_incidents} <span className="small faint">({pct(m.change_failure_rate)})</span></td>
+            <table className="quality">
+              <caption className="visually-hidden">Incidents and changes by month</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Month</th>
+                  <th scope="col" className="num">
+                    Incidents
+                  </th>
+                  <th scope="col" className="num">
+                    Fixed by the tool
+                  </th>
+                  <th scope="col" className="num">
+                    Needed on-call
+                  </th>
+                  <th scope="col" className="num">
+                    Time to recover (median)
+                  </th>
+                  <th scope="col" className="num">
+                    Releases
+                  </th>
+                  <th scope="col" className="num">
+                    Releases that caused one
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {lb.months.map((m) => (
+                  <tr key={m.month}>
+                    <th scope="row">{m.month}</th>
+                    <td className="num">
+                      {m.incidents}
+                      {m.by_severity.sev1 ? (
+                        <span className="small faint"> ({m.by_severity.sev1} SEV1)</span>
+                      ) : null}
+                    </td>
+                    <td className="num">{m.fixed_by_tool}</td>
+                    <td className="num">{m.escalated}</td>
+                    <td className="num">{minutes(m.recover_minutes_median)}</td>
+                    <td className="num">{m.releases}</td>
+                    <td className="num">
+                      {m.releases_causing_incidents}{" "}
+                      <span className="small faint">({pct(m.change_failure_rate)})</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
           {lb.causes.length > 0 && (
             <>
-              <h3 className="pad" style={{ paddingTop: 12 }}>Releases behind the most incidents</h3>
+              <h3 className="pad" style={{ paddingTop: 12 }}>
+                Releases behind the most incidents
+              </h3>
               <ul className="ext-list">
                 {lb.causes.map((c) => (
                   <li key={c.change_id}>
-                    <div className="work-line"><strong>{c.summary}</strong> <span className="small faint">{c.change_id}</span></div>
+                    <div className="work-line">
+                      <strong>{c.summary}</strong> <span className="small faint">{c.change_id}</span>
+                    </div>
                     <div className="small muted">
-                      {c.incidents.map((i, n) => <span key={i}>{n > 0 && ", "}<Link to={threadPath(i)}>{i}</Link></span>)}
+                      {c.incidents.map((i, n) => (
+                        <span key={i}>
+                          {n > 0 && ", "}
+                          <Link to={threadPath(i)}>{i}</Link>
+                        </span>
+                      ))}
                     </div>
                   </li>
                 ))}
@@ -117,23 +181,35 @@ export function ChangesPage({ me }: { me: Me }) {
 
       <section className="panel" aria-labelledby="h-log" style={{ marginTop: 20 }}>
         <div className="panel-head">
-          <h2 id="h-log" className="section-title">Change log</h2>
+          <h2 id="h-log" className="section-title">
+            Change log
+          </h2>
           {chain?.ok && <span className="small muted">{chain.records} records, chain intact</span>}
         </div>
         {rows && rows.length === 0 && <p className="small muted pad">No production changes yet.</p>}
         {rows && rows.length > 0 && (
           <div className="table-scroll">
-          <table className="quality">
-            <thead><tr>
-              <th scope="col">When</th><th scope="col">Change</th><th scope="col">Type</th>
-              <th scope="col">Approved by</th><th scope="col">Caused</th>
-            </tr></thead>
-            <tbody>
-              {rows.map((r) => (
-                <ChangeRow key={r.id} r={r} open={open === r.id} toggle={() => setOpen(open === r.id ? "" : r.id)} />
-              ))}
-            </tbody>
-          </table>
+            <table className="quality">
+              <thead>
+                <tr>
+                  <th scope="col">When</th>
+                  <th scope="col">Change</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Approved by</th>
+                  <th scope="col">Caused</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <ChangeRow
+                    key={r.id}
+                    r={r}
+                    open={open === r.id}
+                    toggle={() => setOpen(open === r.id ? "" : r.id)}
+                  />
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
@@ -153,15 +229,30 @@ function ChangeRow({ r, open, toggle }: { r: ChangeRecord; open: boolean; toggle
             {ACTION[r.action] ?? r.action}: {r.summary}
           </button>
           <div className="small faint">
-            {r.id}{r.receipt?.number ? `, ${r.receipt.number}` : ""}
-            {r.outcome === "failed" && <span className="chip stop" style={{ marginLeft: 6 }}>Failed</span>}
+            {r.id}
+            {r.receipt?.number ? `, ${r.receipt.number}` : ""}
+            {r.outcome === "failed" && (
+              <span className="chip stop" style={{ marginLeft: 6 }}>
+                Failed
+              </span>
+            )}
           </div>
         </td>
-        <td><span className={`chip ${t.chip}`} title={t.says}>{t.label}</span></td>
+        <td>
+          <span className={`chip ${t.chip}`} title={t.says}>
+            {t.label}
+          </span>
+        </td>
         <td className="small">{r.approved_by.join(", ") || "–"}</td>
         <td className="small">
-          {r.caused_incidents.length === 0 ? "–" : r.caused_incidents.map((i, n) => (
-            <span key={i}>{n > 0 && ", "}<Link to={threadPath(i)}>{i}</Link></span>))}
+          {r.caused_incidents.length === 0
+            ? "–"
+            : r.caused_incidents.map((i, n) => (
+                <span key={i}>
+                  {n > 0 && ", "}
+                  <Link to={threadPath(i)}>{i}</Link>
+                </span>
+              ))}
         </td>
       </tr>
       {open && (
@@ -169,32 +260,82 @@ function ChangeRow({ r, open, toggle }: { r: ChangeRecord; open: boolean; toggle
           <td colSpan={5}>
             <dl className="kv">
               <dt>What changed</dt>
-              <dd>{r.targets.map((x) => `${x.kind} ${x.name}${x.release ? ` (${x.release})` : ""}${x.on !== undefined ? (x.on ? " on" : " off") : ""}${x.percent !== undefined && x.percent < 100 ? ` for ${x.percent}% of users` : ""}`).join("; ") || "–"}</dd>
-              <dt>Asked for by</dt><dd>{r.requested_by || "–"}</dd>
+              <dd>
+                {r.targets
+                  .map(
+                    (x) =>
+                      `${x.kind} ${x.name}${x.release ? ` (${x.release})` : ""}${x.on !== undefined ? (x.on ? " on" : " off") : ""}${x.percent !== undefined && x.percent < 100 ? ` for ${x.percent}% of users` : ""}`,
+                  )
+                  .join("; ") || "–"}
+              </dd>
+              <dt>Asked for by</dt>
+              <dd>{r.requested_by || "–"}</dd>
               <dt>Approvals</dt>
-              <dd>{r.approvals.length ? r.approvals.map((a) => `${a.gate.toUpperCase()} ${a.approver}`).join(", ") : r.approved_by.join(", ")}</dd>
+              <dd>
+                {r.approvals.length
+                  ? r.approvals.map((a) => `${a.gate.toUpperCase()} ${a.approver}`).join(", ")
+                  : r.approved_by.join(", ")}
+              </dd>
               {(r.evidence.pull_requests?.length ?? 0) > 0 && (
                 <>
                   <dt>Pull requests</dt>
-                  <dd>{r.evidence.pull_requests!.map((u, n) => <span key={u}>{n > 0 && ", "}<a href={u} target="_blank" rel="noreferrer">{u.replace(/^https:\/\/github.com\//, "")}</a></span>)}</dd>
+                  <dd>
+                    {r.evidence.pull_requests!.map((u, n) => (
+                      <span key={u}>
+                        {n > 0 && ", "}
+                        <a href={u} target="_blank" rel="noreferrer">
+                          {u.replace(/^https:\/\/github.com\//, "")}
+                        </a>
+                      </span>
+                    ))}
+                  </dd>
                 </>
               )}
               {r.evidence.quality && Object.keys(r.evidence.quality).length > 0 && (
-                <><dt>Checks</dt><dd>{Object.keys(r.evidence.quality).join(", ")}</dd></>
+                <>
+                  <dt>Checks</dt>
+                  <dd>{Object.keys(r.evidence.quality).join(", ")}</dd>
+                </>
               )}
-              {r.evidence.triage && <><dt>Why</dt><dd>{r.evidence.triage}</dd></>}
-              {r.detail && <><dt>What went wrong</dt><dd>{r.detail}</dd></>}
-              {thread && <><dt>Record</dt><dd><Link to={threadPath(thread)}>{thread}</Link></dd></>}
+              {r.evidence.triage && (
+                <>
+                  <dt>Why</dt>
+                  <dd>{r.evidence.triage}</dd>
+                </>
+              )}
+              {r.detail && (
+                <>
+                  <dt>What went wrong</dt>
+                  <dd>{r.detail}</dd>
+                </>
+              )}
+              {thread && (
+                <>
+                  <dt>Record</dt>
+                  <dd>
+                    <Link to={threadPath(thread)}>{thread}</Link>
+                  </dd>
+                </>
+              )}
               {r.receipt && (
                 <>
                   <dt>ServiceNow</dt>
                   <dd>
-                    {r.receipt.number ? <>{r.receipt.number} ({r.receipt.status})</> : r.receipt.status.replace("_", " ")}
+                    {r.receipt.number ? (
+                      <>
+                        {r.receipt.number} ({r.receipt.status})
+                      </>
+                    ) : (
+                      r.receipt.status.replace("_", " ")
+                    )}
                     {r.receipt.detail ? `: ${r.receipt.detail}` : ""}
                   </dd>
                 </>
               )}
-              <dt>Hash</dt><dd className="mono small">{r.hash.slice(0, 16)}… (after {r.prev_hash.slice(0, 8)}…)</dd>
+              <dt>Hash</dt>
+              <dd className="mono small">
+                {r.hash.slice(0, 16)}… (after {r.prev_hash.slice(0, 8)}…)
+              </dd>
             </dl>
           </td>
         </tr>
