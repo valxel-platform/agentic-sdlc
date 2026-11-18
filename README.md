@@ -1667,8 +1667,15 @@ may use only the session's model and `VALXEL_LLM_GATEWAY_SESSION_MODELS` (defaul
 for Claude Code's housekeeping), carries the feature's labels, and is minted for the feature's data
 class, so a gateway set up for less refuses a PHI session. The tool revokes it when the session ends
 and logs what it spent. If the gateway can't mint one, the session doesn't start (the provider counts
-as unavailable, so the role's fallbacks apply). The tool's own key policy entry needs a `sessions`
-grant.
+as unavailable, so the role's fallbacks apply). The tool's own caller entry in the gateway's policy
+needs a `sessions` grant, and `data_classes` listing every class its products have.
+
+**The tool's own model calls go through the gateway too.** With the gateway set, the Anthropic
+provider calls it with the tool's gateway key: each call carries its labels and declares its data
+class (`x-valxel-data-class`), and the gateway applies that class's rule (providers, redaction) and
+audits it. The tool keeps its roles, fallbacks, budgets and ledger. The tool then needs no provider
+key, and strict mode flags one left in its environment. Codex's API can't go through the gateway yet,
+so with it on, Codex roles are skipped as they are in sandboxes.
 
 **Only images the platform's build signed run** (`platform/openchoreo/` in the platform governance
 repo). The pipeline builds only merge commits that passed the gates. The build scans the image
