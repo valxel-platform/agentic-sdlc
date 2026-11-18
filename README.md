@@ -1695,7 +1695,9 @@ audits it. The tool keeps its roles, fallbacks, budgets and ledger. The tool the
 key, and strict mode flags one left in its environment. Codex goes through the gateway too: its session gets a token capped at the role's budget, and calls
 the gateway's Responses API as its provider. The gateway refuses its next call once the cap is
 spent, which is the live dollar cap Codex has none of itself; the task then fails rather than
-handing a fresh budget to a fallback.
+handing a fresh budget to a fallback. Codex roles count as available behind the gateway once
+`VALXEL_LLM_GATEWAY_CODEX=on`, set when the gateway's policy has a provider and prices for Codex's
+models (the gateway refuses sessions on unpriced models).
 
 **Only images the platform's build signed run** (`platform/openchoreo/` in the platform governance
 repo). The pipeline builds only merge commits that passed the gates. The build scans the image

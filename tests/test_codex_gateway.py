@@ -81,4 +81,6 @@ def test_with_the_gateway_codex_roles_need_no_provider_key(tmp_path, monkeypatch
     assert not provider_ready(s, "openai", "codex")
     monkeypatch.setenv("VALXEL_LLM_GATEWAY_URL", "http://gw")
     monkeypatch.setenv("VALXEL_LLM_GATEWAY_API_KEY", "k")
+    assert not provider_ready(s, "openai", "codex")  # until the gateway serves and prices Codex's models
+    monkeypatch.setenv("VALXEL_LLM_GATEWAY_CODEX", "on")
     assert provider_ready(s, "openai", "codex") and provider_ready(s, "selfhosted", "codex")
