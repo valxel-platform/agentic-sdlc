@@ -30,7 +30,7 @@ ADD --checksum=sha256:9d64836106d5b374e90ee4454c7ebcde7ca7106558bd7e41a34b9f26eb
 RUN tar -xzf /tmp/codex.tar.gz -C /tmp && install -m 0755 /tmp/codex-x86_64-unknown-linux-musl /codex
 
 # Stage 4: the API, which also serves the built web interface.
-FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
