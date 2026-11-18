@@ -83,7 +83,11 @@ def allowed_agents(hld: str, repo: str) -> list[str]:
 def coder_instruction(hld: str, repo: str) -> str:
     agents = allowed_agents(hld, repo)
     who = ", ".join(agents) if agents else "none yet (refuse everyone)"
+    comp = _short(repo)
     return (f" SANDBOX_ALLOWED_CLIENTS in workload.yaml is exactly the agents the HLD's Endpoints say call this "
             f"sandbox: {who}. Keep run_code's limits or lower them; never give the runner network, mounts, "
             "secrets or a service account; audit sandbox.run with the code's SHA-256, never the code, input or "
-            "output (VX-15, VX-17).")
+            "output (VX-15, VX-17). Runs go to the platform's sandboxes (the code-runner resource the pipeline "
+            f"creates): set SANDBOX_EXECUTOR=kubernetes and bind the warm pool in workload.yaml, "
+            f"dependencies.resources: - ref: {comp}-runner, envBindings: pool: SANDBOX_SANDBOX_TEMPLATE. "
+            "Never define a SandboxTemplate, warm pool or network policy here: the platform owns what a sandbox is.")

@@ -127,13 +127,20 @@ def aws_summary(services, state: FeatureState, snap, ref) -> dict | None:
 
 
 def aws_plan(services, state: FeatureState, snap, ref) -> list[dict]:
+    """The approved design's Resources, and the platform's sandboxes for each code-sandbox component
+    (whether or not the product has an AWS catalog)."""
     from .. import resources
+    from ..sandboxes import ROLE as CODE_SANDBOX
 
-    if not ref or not snap.aws_catalog:
+    if not ref:
         return []
-    return resources.plan(services.artifacts.load(ref), snap.aws_catalog, _resource_owner(snap),
+    sandboxes = [r.name.split("/", 1)[-1] for lane in snap.lanes().values() for r in lane.repos
+                 if r.role == CODE_SANDBOX]
+    if not snap.aws_catalog and not sandboxes:
+        return []
+    return resources.plan(services.artifacts.load(ref), snap.aws_catalog or {}, _resource_owner(snap),
                           product_id=state["product_id"], feature_id=state["feature_id"],
-                          data_class=snap.product.data_class)
+                          data_class=snap.product.data_class, code_sandboxes=sandboxes)
 
 
 def bind_resource(services, state: FeatureState, res: dict, stage: str, *, actor: str, actor_type: str) -> dict:
@@ -148,7 +155,7 @@ def bind_resource(services, state: FeatureState, res: dict, stage: str, *, actor
                                                  project=spec["project"], namespace=spec.get("namespace"))
     t = (snap.aws_catalog.get("types") or {}).get(spec["type"]) or {}
     size = (size_for({"type": spec["type"], "sizes": spec.get("sizes") or {}}, env, snap.aws_catalog)
-            if t.get("sizes") else "small")
+            if t.get("sizes") else (spec.get("sizes") or {}).get(env) or "small")  # a platform type: its own sizes
     rec = services.openchoreo.bind_resource(name=spec["name"], env=env, size=size, actor=actor, actor_type=actor_type,
                                             project=spec["project"], namespace=spec.get("namespace"), pipeline=pipeline,
                                             # Stored data outlives its binding: OpenChoreo keeps it (VX-19).

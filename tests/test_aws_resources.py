@@ -343,3 +343,21 @@ def test_the_plan_gives_each_component_only_its_contracts_access_and_its_own_kaf
     text = resources.instruction({"hld_text": contract_hld(), "aws_catalog": CATALOG}, {"repo": "o/farm-worker"})
     assert "farm.readings.v1 (read)" in text and "starting with 'farm-worker'" in text and "AWS_MSK_IAM" in text
     assert "DynamoDB" not in text  # only Kafka here: no AWS SDK guidance
+
+
+def test_each_code_sandbox_gets_the_platforms_sandboxes():
+    plan = resources.plan("", {}, lambda c: ("farm", f"ns-{c}"), product_id="FARM", feature_id="FARM-1",
+                          data_class="general", code_sandboxes=["farm-calc", "farm-calc"])
+    assert plan == [{"name": "farm-calc-runner", "type": "code-runner", "project": "farm", "namespace": "ns-farm-calc",
+                     "owner": "farm-calc", "stateful": False,
+                     "parameters": {"component": "farm-calc", "tags": {"valxel:product": "FARM",
+                                                                       "valxel:data-class": "general"}},
+                     "sizes": {"production": "medium"}, "outputs": {"pool": "the warm pool its runs claim from"}}]
+
+
+def test_the_code_sandboxes_coder_binds_the_pool_and_defines_no_sandbox():
+    from valxel_sdlc.sandboxes import coder_instruction
+
+    text = coder_instruction("", "acme-farm/farm-calc")
+    assert "SANDBOX_EXECUTOR=kubernetes" in text and "ref: farm-calc-runner" in text
+    assert "pool: SANDBOX_SANDBOX_TEMPLATE" in text and "Never define a SandboxTemplate" in text

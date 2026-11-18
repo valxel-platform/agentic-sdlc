@@ -47,6 +47,9 @@ ACCESS_VERBS = {"reads": "read", "writes": "write", "deletes": "delete", "publis
 AWS_ROLES = ("provider", "event-worker", "agent", "mcp-server", "knowledge", "bff", "reporting", "job", "document-intake")
 IDENTITY_TYPE = "workload-identity"
 KAFKA_USER_TYPE = "kafka-user"
+# A code-sandbox component's sandboxes (platform-resources: code-runner): not a catalog type, never
+# picked by hand; one per code-sandbox component, its warm pool bound to SANDBOX_SANDBOX_TEMPLATE.
+CODE_RUNNER_TYPE = "code-runner"
 RETENTION_DAYS = {"d": 1, "m": 30, "y": 365}
 # Parameters whose change replaces the resource (and its data).
 REPLACING = {"dynamodb-table": ("partition_key", "sort_key"), "sqs-queue": ("fifo",), "sns-topic": ("fifo",),
@@ -339,10 +342,12 @@ def _entries(hld: str, catalog: dict) -> list[dict]:
     return parse_resources(hld) + contract_entries(hld, catalog)
 
 
-def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: str, data_class: str) -> list[dict]:
+def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: str, data_class: str,
+         code_sandboxes: list[str] | tuple = ()) -> list[dict]:
     """The OpenChoreo Resources to create: one per entry (and per data contract's topic), plus a
-    workload identity per component that needs IAM access and a Kafka identity per component a
-    contract names. `owner_target(component)` -> (project, namespace) of the component."""
+    workload identity per component that needs IAM access, a Kafka identity per component a
+    contract names, and the platform's sandboxes (code-runner) for each code-sandbox component.
+    `owner_target(component)` -> (project, namespace) of the component."""
     out: list[dict] = []
     identities: dict[str, dict] = {}
     kafka_users: set[str] = set()
@@ -386,6 +391,13 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
                     "parameters": {"component": comp, "tags": {"valxel:product": product_id,
                                                                "valxel:data-class": data_class}},
                     "sizes": {}, "outputs": dict(user_type.get("outputs") or {})})
+    for comp in sorted(set(code_sandboxes)):
+        project, namespace = owner_target(comp)
+        ids.append({"name": f"{comp}-runner", "type": CODE_RUNNER_TYPE, "project": project, "namespace": namespace,
+                    "owner": comp, "stateful": False,
+                    "parameters": {"component": comp, "tags": {"valxel:product": product_id,
+                                                               "valxel:data-class": data_class}},
+                    "sizes": {"production": "medium"}, "outputs": {"pool": "the warm pool its runs claim from"}})
     return ids + out
 
 
