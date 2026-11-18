@@ -205,8 +205,8 @@ def _files_dir(spec: dict) -> str:
         if "/" in name or name.startswith("."):
             raise ValueError(f"not a file name: {name!r}")
         Path(d, name).write_text(str(value), encoding="utf-8")
-        os.chmod(Path(d, name), 0o644)  # the image's own user reads them
-    os.chmod(d, 0o755)
+        os.chmod(Path(d, name), 0o640)  # the image's user reads them through this group (App adds it)
+    os.chmod(d, 0o750)
     return d
 
 
@@ -224,7 +224,7 @@ class App:
             args = ["docker", "run", "--name", self.name, "--network", "host", "--read-only",
                     "--tmpfs", "/tmp:rw,size=64m", "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
             if self.files:
-                args += ["-v", f"{self.files}:{FILES_MOUNT}:ro"]
+                args += ["-v", f"{self.files}:{FILES_MOUNT}:ro", "--group-add", str(os.getgid())]
             for k, v in self.env.items():
                 args += ["-e", f"{k}={v}"]
             args += [self.image, *self.spec.get("args", [])]
@@ -238,7 +238,7 @@ class App:
             args = ["docker", "run", "-d", "--name", self.name, "--network", "host", "--read-only",
                     "--tmpfs", "/tmp:rw,size=64m", "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
             if self.files:
-                args += ["-v", f"{self.files}:{FILES_MOUNT}:ro"]
+                args += ["-v", f"{self.files}:{FILES_MOUNT}:ro", "--group-add", str(os.getgid())]
             for k, v in self.env.items():
                 args += ["-e", f"{k}={v}"]
             args += [self.image, *self.spec.get("args", [])]
