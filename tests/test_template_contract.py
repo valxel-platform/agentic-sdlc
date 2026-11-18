@@ -110,3 +110,27 @@ def test_the_audit_sink_and_its_producers_name_the_same_type():
     assert "doesn't exist" in tc.audit_event_check(gh, sink)[0]["problem"]
     drift = capability_drift(gh, Target(gateway, "lane", "SS", {"role": "provider"}))
     assert [d.item for d in drift] == ["audit-event-type"] and drift[0].fix == "manual"
+
+
+def test_every_producer_keeps_the_sinks_schema_byte_for_byte():
+    c = tc.contract()
+    s = c["audit_event"]["schema"]
+    sink, agent = s["repo"], "valxel-platform/template-agent"
+    assert agent in c["audit_event"]["repos"] and "valxel-platform/template-service" in c["audit_event"]["repos"]
+    gh = StubGitHub()
+    gh.files[(agent, "main", "src/agent/audit.py")] = 'EVENT_TYPE = "valxel.audit.v1"\n'
+    canonical = '{"x-version": "1.0.0"}\n'
+    gh.files[(sink, "main", s["path"])] = canonical
+    assert tc.audit_event_check(gh, agent)[0]["problem"] == f"{s['copy']} doesn't exist"
+    gh.files[(agent, "main", s["copy"])] = '{"x-version": "1.0.0", "edited": true}\n'
+    [gap] = tc.audit_event_check(gh, agent)
+    assert gap["capability"] == "audit-event-schema" and "differs from" in gap["problem"]
+    gh.files[(agent, "main", s["copy"])] = canonical
+    assert tc.audit_event_check(gh, agent) == []
+    gh.files[(sink, "main", "src/audit_sink/records.py")] = 'EVENT_TYPE = "valxel.audit.v1"\n'
+    assert tc.audit_event_check(gh, sink) == []  # the owner keeps no copy of its own
+
+
+def test_the_schema_entry_needs_all_its_parts():
+    with pytest.raises(tc.ContractError, match="audit_event.schema"):
+        tc.parse("capabilities: {}\naudit_event: {type: valxel.audit.v1, schema: {repo: a/b}, repos: {a/b: f.py}}")

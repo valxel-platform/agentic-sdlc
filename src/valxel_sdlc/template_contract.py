@@ -52,8 +52,12 @@ def parse(text: str) -> dict:
         raise ContractError("audit_event: needs a type")
     if not isinstance(event.get("repos") or {}, dict):
         raise ContractError("audit_event.repos: a map of repo to the file that names the type")
+    schema = event.get("schema") or {}
+    if schema and not all(str(schema.get(k) or "").strip() for k in ("repo", "path", "copy")):
+        raise ContractError("audit_event.schema: needs repo, path and copy")
     audit_event = {"type": str(event.get("type") or ""),
-                   "repos": {str(k): str(v) for k, v in (event.get("repos") or {}).items()}}
+                   "repos": {str(k): str(v) for k, v in (event.get("repos") or {}).items()},
+                   "schema": {k: str(schema[k]) for k in ("repo", "path", "copy")} if schema else {}}
     if audit_event["type"] and "audit" in caps and not re.search(caps["audit"]["marker"], audit_event["type"]):
         raise ContractError(f"audit: marker doesn't match audit_event.type {audit_event['type']}")
     return {"capabilities": caps, "groups": groups, "audit_event": audit_event}
@@ -126,6 +130,28 @@ def audit_event_check(gh, repo: str, c: dict | None = None) -> list[dict]:
     if not re.search(rf"(?<![\w.]){re.escape(event['type'])}(?![\w.])", text):
         return [{"capability": "audit-event-type", "area": "audit", "says": says,
                  "problem": f"{path} doesn't name {event['type']}"}]
+    return audit_schema_check(gh, repo, c)
+
+
+def audit_schema_check(gh, repo: str, c: dict | None = None) -> list[dict]:
+    """A producer's copy of the audit event's JSON Schema must be the owner's, byte for byte: its own
+    tests check its events against that copy, so a stale or edited copy would pass events the
+    sink rejects."""
+    c = c or contract()
+    s = (c.get("audit_event") or {}).get("schema") or {}
+    if not s or repo == s["repo"] or repo not in (c["audit_event"].get("repos") or {}):
+        return []
+    says = f"checks its audit events against {s['repo']}'s schema ({s['copy']})"
+    want = gh.get_file(repo=s["repo"], path=s["path"], ref="")
+    if want is None:
+        return [{"capability": "audit-event-schema", "area": "audit", "says": says,
+                 "problem": f"{s['repo']} has no {s['path']} to compare with"}]
+    have = gh.get_file(repo=repo, path=s["copy"], ref="")
+    if have is None:
+        return [{"capability": "audit-event-schema", "area": "audit", "says": says, "problem": f"{s['copy']} doesn't exist"}]
+    if have != want:
+        return [{"capability": "audit-event-schema", "area": "audit", "says": says,
+                 "problem": f"{s['copy']} differs from {s['repo']}'s {s['path']}: copy it from there"}]
     return []
 
 

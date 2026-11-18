@@ -106,11 +106,27 @@ capabilities:
     says: "events published and received per data contract (valxel.datasets), for staging's reconciliation"
     marker: "valxel\\.datasets|DatasetCounts"
 
-# The audit trail's CloudEvents type, and the repos outside the templates that send or receive it:
-# the audit sink rejects any other type, so a producer on an old name loses its records. Each
-# listed file must name the type; `valxel repos check` reports one that doesn't.
+# The audit trail's CloudEvents type and its JSON Schema, and every repo that sends or receives it:
+# the audit sink rejects any other type, and any event that breaks the schema, so a producer that
+# drifts loses its records. Each listed file must name the type, and each repo other than the
+# schema's owner must keep a byte-identical copy of the schema at `copy` (its own tests check its
+# events against that copy); `valxel repos check` reports either drift.
 audit_event:
   type: valxel.audit.v1
+  schema:
+    repo: valxel-shared-services/ss-audit-sink
+    path: src/audit_sink/valxel.audit.v1.schema.json
+    copy: contracts/audit/valxel.audit.v1.schema.json
   repos:
     valxel-shared-services/ss-audit-sink: src/audit_sink/records.py
     valxel-shared-services/ss-llm-gateway: src/llm_gateway/audit.py
+    valxel-platform/template-agent: src/agent/audit.py
+    valxel-platform/template-bff: src/main/java/com/valxel/bff/SignInAudit.java
+    valxel-platform/template-channel: src/channel/audit.py
+    valxel-platform/template-code-sandbox: src/sandbox/audit.py
+    valxel-platform/template-document-intake: src/intake/audit.py
+    valxel-platform/template-integration: src/integration/audit.py
+    valxel-platform/template-job: src/job/audit.py
+    valxel-platform/template-knowledge: src/knowledge/audit.py
+    valxel-platform/template-mcp-server: src/mcp_server/audit.py
+    valxel-platform/template-service: src/main/java/com/valxel/service/audit/Auditor.java
