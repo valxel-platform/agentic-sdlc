@@ -257,7 +257,7 @@ def test_with_sandboxes_codex_never_runs_in_the_tools_container(services, monkey
     with pytest.raises(ProviderUnavailable, match="sandbox"):  # a fallback chain moves on to the next
         CodexRuntime(services.gateway).run(_task(str(tmp_path)))
     choice = second_opinion(services.settings, set(services.settings.roles), "reviewer", "general")
-    assert choice.role is None and "Codex can't run in a session sandbox yet" in choice.skipped
+    assert choice.role is None and "which Codex can't use yet" in choice.skipped
 
 
 def test_a_sandbox_not_yet_reachable_is_retried_before_the_session_is_sent():

@@ -38,10 +38,14 @@ class GatewayUnavailable(RuntimeError):
     """The gateway couldn't mint a token: the session doesn't start."""
 
 
-def _key(env: Any = None) -> str:
+def gateway_key(env: Any = None) -> str:
+    """The tool's own gateway key: a secret, never given to a session."""
     from .secret_ring import current
 
     return current(KEY_ENV, env)
+
+
+_key = gateway_key
 
 
 def configured(env: Any = None) -> bool:
@@ -50,8 +54,21 @@ def configured(env: Any = None) -> bool:
 
 
 def labels_for(tags: Any) -> dict[str, str]:
-    return {k: str(v) for k, v in (("product", tags.product_id), ("feature", tags.feature_id), ("phase", tags.phase),
-                                    ("agent", tags.role), ("workspace", tags.workspace)) if v}
+    from .gateway.gateway import labels_for as of
+
+    return of(tags)
+
+
+def codex_blocked() -> str:
+    """Why Codex can't run here, or "": its API (OpenAI Responses) can't go through the gateway, and
+    it can't run in a session sandbox, so with either on its roles are skipped, not run around them."""
+    from .sandbox import remote
+
+    if remote():
+        return "sessions run in sandboxes (VALXEL_SESSION_EXECUTOR=kubernetes), which Codex can't use yet"
+    if configured():
+        return "model calls go through the LLM gateway, which can't carry Codex's API yet"
+    return ""
 
 
 @contextmanager

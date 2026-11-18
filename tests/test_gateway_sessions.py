@@ -107,3 +107,85 @@ def test_strict_mode_wants_gateway_tokens_in_live_mode(services, monkeypatch):
     found = strict.stand_ins(services, auth_mode="github", env={"VALXEL_DELIVERY": "live",
                                                                  "VALXEL_LLM_GATEWAY_URL": "http://gw"})
     assert not any(f.startswith("VALXEL_LLM_GATEWAY_URL") for f in found)
+
+
+class FakeMessages:
+    def __init__(self):
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        from types import SimpleNamespace
+
+        self.kwargs = kwargs
+        usage = SimpleNamespace(input_tokens=10, output_tokens=5, cache_creation_input_tokens=0,
+                                cache_read_input_tokens=0, server_tool_use=None)
+        return SimpleNamespace(content=[SimpleNamespace(text="ok")], usage=usage, id="msg_1")
+
+
+def _request(**kw):
+    from valxel_sdlc.gateway import PromptLayers
+    from valxel_sdlc.gateway.providers import ModelRequest
+
+    layers = PromptLayers(tools="", skills="S", constitution="C", product_context="P", feature_context="F", tail="T")
+    return ModelRequest(model="anthropic/claude-sonnet-5-5", layers=layers, workspace="ws-1", **kw)
+
+
+def test_through_the_gateway_a_call_carries_its_labels_and_declares_its_data_class():
+    from types import SimpleNamespace
+
+    from valxel_sdlc.gateway.providers import AnthropicProvider
+
+    msgs = FakeMessages()
+    p = AnthropicProvider(client=SimpleNamespace(messages=msgs), routed=True)
+    p.complete(_request(labels={"feature": "F-1", "agent": "spec"}, data_class="phi"))
+    assert msgs.kwargs["extra_headers"] == {"x-valxel-feature": "F-1", "x-valxel-agent": "spec",
+                                            "x-valxel-data-class": "phi"}
+    direct = FakeMessages()
+    AnthropicProvider(client=SimpleNamespace(messages=direct), routed=False).complete(_request(data_class="phi"))
+    assert "extra_headers" not in direct.kwargs
+
+
+def test_the_client_points_at_the_gateway_with_the_tools_gateway_key(monkeypatch):
+    pytest.importorskip("anthropic")
+    from valxel_sdlc.gateway.providers import AnthropicProvider
+
+    monkeypatch.setenv("VALXEL_LLM_GATEWAY_URL", "http://gw:8080/")
+    monkeypatch.setenv("VALXEL_LLM_GATEWAY_API_KEY", "tool-key")
+    p = AnthropicProvider()
+    assert p.routed and str(p._client.base_url).rstrip("/") == "http://gw:8080" and p._client.api_key == "tool-key"
+
+
+def test_the_gateway_tags_every_call_the_tool_makes(services, monkeypatch):
+    from valxel_sdlc.gateway import PromptLayers
+
+    seen = []
+    stub = services.gateway.providers["stub"]
+
+    class Recorder:
+        name = "anthropic"
+
+        def complete(self, req):
+            seen.append(req)
+            return stub.complete(req)
+
+    monkeypatch.setitem(services.gateway.providers, "anthropic", Recorder())
+    monkeypatch.setattr(services.settings, "mode", "live")
+    layers = PromptLayers(tools="", skills="S", constitution="C", product_context="P", feature_context="F", tail="T")
+    services.gateway.complete(TAGS, layers, stub_text="ok")
+    assert seen[0].data_class == "phi"
+    assert seen[0].labels == {"product": "emr", "feature": "F-1", "phase": "build", "agent": "coder", "workspace": "ws-1"}
+
+
+def test_codex_doesnt_run_around_the_gateway(monkeypatch):
+    monkeypatch.setenv("VALXEL_LLM_GATEWAY_URL", "http://gw")
+    monkeypatch.setenv("VALXEL_LLM_GATEWAY_API_KEY", "k")
+    assert "gateway" in gateway_sessions.codex_blocked()
+    monkeypatch.delenv("VALXEL_LLM_GATEWAY_URL")
+    assert gateway_sessions.codex_blocked() == ""
+
+
+def test_strict_mode_flags_a_provider_key_left_with_the_tool(services):
+    from valxel_sdlc import strict
+
+    env = {"VALXEL_DELIVERY": "live", "VALXEL_LLM_GATEWAY_URL": "http://gw", "ANTHROPIC_API_KEY": "sk"}
+    assert any("belongs to the gateway alone" in f for f in strict.stand_ins(services, auth_mode="github", env=env))

@@ -199,8 +199,10 @@ def agent_stack(settings: Settings, ledger: Ledger):
 
         if any(settings.role(r).provider == "anthropic" for r in available):
             providers["anthropic"] = AnthropicProvider()
-        for name, pc in settings.providers.items():
-            if pc.configured():
+        from .gateway_sessions import configured as routed
+
+        for name, pc in settings.providers.items():  # through the LLM gateway, only what it can carry
+            if pc.configured() and not routed():
                 providers[name] = OpenAICompatibleProvider(name, pc.url(), pc.api_key())
     gateway = ModelGateway(settings, ledger, providers)
     generic = GatewayRuntime(gateway)

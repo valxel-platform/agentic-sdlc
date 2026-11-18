@@ -13,6 +13,7 @@ caller can hand the task to the role's fallback.
 from __future__ import annotations
 
 import threading
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -32,6 +33,10 @@ class ModelRequest:
     max_tokens: int = 4096
     stub_text: str | None = None  # used only by StubProvider
     web_searches: int = 0  # the Claude API's web search tool, at most this many uses (0: off)
+    # Through the LLM gateway (valxel_sdlc.gateway_sessions): what the call is for, and the data
+    # class whose rule the gateway holds it to.
+    labels: dict[str, str] = field(default_factory=dict)
+    data_class: str = ""
 
 
 @dataclass
@@ -113,18 +118,38 @@ class StubProvider:
 
 
 class AnthropicProvider:
-    """Claude API. Requires `pip install .[live]` and ANTHROPIC_API_KEY."""
+    """Claude API. Requires `pip install .[live]`, and the LLM gateway (VALXEL_LLM_GATEWAY_URL and
+    VALXEL_LLM_GATEWAY_API_KEY) or ANTHROPIC_API_KEY.
+
+    Through the gateway, each call carries its labels (product, feature, phase, agent, workspace) and
+    declares its data class, and the gateway applies that class's rule: providers, redaction, audit.
+    The tool's ledger, budgets and fallbacks are unchanged."""
 
     name = "anthropic"
 
-    def __init__(self, client=None) -> None:
+    def __init__(self, client=None, routed: bool | None = None) -> None:
+        from .. import gateway_sessions
+
+        self.routed = gateway_sessions.configured() if routed is None else routed
         if client is None:
             import anthropic  # lazy: only in live mode
 
             from ..secret_ring import get
 
-            client = anthropic.Anthropic(**({"api_key": get("ANTHROPIC_API_KEY")} if get("ANTHROPIC_API_KEY") else {}))
+            if self.routed:
+                client = anthropic.Anthropic(base_url=os.environ[gateway_sessions.URL_ENV].rstrip("/"),
+                                             api_key=gateway_sessions.gateway_key())
+            else:
+                client = anthropic.Anthropic(**({"api_key": get("ANTHROPIC_API_KEY")} if get("ANTHROPIC_API_KEY") else {}))
         self._client = client
+
+    def _headers(self, req: ModelRequest) -> dict:
+        if not self.routed:
+            return {}
+        headers = {f"x-valxel-{k}": v for k, v in req.labels.items() if v}
+        if req.data_class:
+            headers["x-valxel-data-class"] = req.data_class
+        return {"extra_headers": headers}
 
     def complete(self, req: ModelRequest) -> ModelResponse:
         lay = req.layers.layers()
@@ -143,6 +168,7 @@ class AnthropicProvider:
                 messages=[{"role": "user", "content": req.layers.tail}],
                 **({"tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": req.web_searches}]}
                    if req.web_searches else {}),
+                **self._headers(req),
             )
         except Exception as exc:
             # The SDK's rate-limit, overload, connection and 5xx errors all carry a status or say so.

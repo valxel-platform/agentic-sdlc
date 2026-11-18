@@ -108,8 +108,8 @@ def second_opinion(settings: Settings, available: set[str], role: str, data_clas
             why.append(f"{other}: same model as the review")
         elif other not in available:
             why.append(f"{other}: provider not configured")
-        elif settings.role(other).runtime == "codex" and _sandboxed():
-            why.append(f"{other}: Codex can't run in a session sandbox yet")
+        elif settings.role(other).runtime == "codex" and _codex_blocked():
+            why.append(f"{other}: {_codex_blocked()}")
         elif not _allowed(settings, settings.role(other).provider, data_class):
             why.append(f"{other}: {data_class} data may not reach {settings.role(other).provider}")
         else:
@@ -117,10 +117,10 @@ def second_opinion(settings: Settings, available: set[str], role: str, data_clas
     return Choice(None, "; ".join(why))
 
 
-def _sandboxed() -> bool:
-    from .sandbox import remote
+def _codex_blocked() -> str:
+    from .gateway_sessions import codex_blocked
 
-    return remote()
+    return codex_blocked()
 
 
 def _allowed(settings: Settings, provider: str, data_class: str) -> bool:

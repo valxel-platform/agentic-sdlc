@@ -47,6 +47,9 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
     if s.mode == "live" and env.get("VALXEL_SESSION_EXECUTOR", "local").lower() != "kubernetes":
         out.append("VALXEL_SESSION_EXECUTOR is not kubernetes: agent sessions run in the tool's own container, "
                    "beside its keys and every workspace's work (valxel_sdlc.session_runner)")
+    if env.get("VALXEL_LLM_GATEWAY_URL") and any(env.get(k) for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")):
+        out.append("The tool holds a model provider's key while its model calls go through the LLM gateway: "
+                   "the key belongs to the gateway alone")
     if s.mode == "live" and not env.get("VALXEL_LLM_GATEWAY_URL"):
         out.append("VALXEL_LLM_GATEWAY_URL is not set: agent sessions hold the tool's own model key rather than a "
                    "short-lived gateway token (valxel_sdlc.gateway_sessions)")

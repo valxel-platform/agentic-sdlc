@@ -41,6 +41,12 @@ class CallTags:
     prompt_version: str = "v1"
 
 
+def labels_for(tags: CallTags) -> dict[str, str]:
+    """What a model call is for, as the LLM gateway labels its spend and audit records."""
+    return {k: str(v) for k, v in (("product", tags.product_id), ("feature", tags.feature_id), ("phase", tags.phase),
+                                    ("agent", tags.role), ("workspace", tags.workspace)) if v}
+
+
 @dataclass
 class GatewayResult:
     text: str
@@ -98,6 +104,8 @@ class ModelGateway:
             max_tokens=max_tokens,
             stub_text=stub_text,
             web_searches=web_searches,
+            labels=labels_for(tags),
+            data_class=tags.data_class,
         )
         started = time.monotonic()
         resp = self._provider_for(role.provider).complete(req)
