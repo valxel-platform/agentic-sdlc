@@ -163,6 +163,9 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         services.remediation_record = self.remediation_record
         services.shadow_record = self.shadow_record
         services.feature_info = self.feature_info
+        # Asked once, across replicas and repeated steps (cluster.py): what a graph step asks another
+        # system to start, so a step run again after a crash doesn't ask twice.
+        services.ask_once, services.unask = self.cluster.claim, self.cluster.unclaim
         if getattr(services, "cohort_logs", None) is None:
             from .ops.cohorts import from_env as cohorts_from_env
 

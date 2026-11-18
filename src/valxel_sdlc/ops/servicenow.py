@@ -215,5 +215,22 @@ class WithReceipts:
                 log.error("ServiceNow receipt for %s not queued: %s", stored["id"], exc)
         return stored
 
+    def catch_up(self, days: int = 7, limit: int = 50) -> int:
+        """Send the receipts that never went: a record whose receipt was queued in a process that
+        then stopped. ServiceNow finds an earlier one by correlation id, so none is sent twice.
+        The watcher runs this hourly. Returns how many it queued."""
+        from datetime import datetime, timedelta, timezone
+
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        rows = [r for r in self._log.list(since=since) if self.receipts.wants(r["product_id"])]
+        have = self.receipts.store.get([r["id"] for r in rows]) if rows else {}
+        missing = [r for r in rows if r["id"] not in have][:limit]
+        for r in missing:
+            try:
+                self.receipts.send(r)
+            except Exception as exc:
+                log.error("ServiceNow receipt for %s not queued: %s", r["id"], exc)
+        return len(missing)
+
     def __getattr__(self, name):
         return getattr(self._log, name)

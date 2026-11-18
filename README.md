@@ -1656,6 +1656,22 @@ worker stops claiming, gives runs under way `VALXEL_WORKER_DRAIN_S` (25) to fini
 back, so a deploy doesn't count against them. A new feature's first state is its first checkpoint, so
 its page shows it while it waits. Rows carry their workspace, under row-level security.
 
+**Every step is safe to run twice.** A graph step is checkpointed when it ends, so a worker that
+dies mid-step leaves the thread at the step's start, and the next run repeats the whole step. What a
+step does elsewhere must therefore converge, or be asked once (`tests/test_repeat_safety.py`):
+
+| What a step does | Run twice |
+| --- | --- |
+| Files, PRs, merges, repos, rulesets, branch protection (GitHub) | Converge: an unchanged file isn't committed, an open PR for the branch is reused, a merged PR isn't merged again |
+| Deploy and promote (OpenChoreo) | Converge on "this environment runs this release" |
+| Flags (Flipt) | Set to a value (on, off, a percentage), never toggled; flags are created with `ensure` |
+| Workflows the tool starts (post-deploy, acceptance, screens, rollout checks, store releases) | Asked once per wait or attempt: a claim in `valxel_claims`, given back if the request fails |
+| Production change log | One record per key, keyed by what happened (`<feature>:g6:<n>`, a rollout step, the reading that found a regression) |
+| ServiceNow receipts | Found by correlation id before one is created; receipts lost with a stopped process are sent by the watcher's hourly catch-up |
+| Pages (PagerDuty) | Deduplicated by key, and remembered as sent |
+| Work tracker items (Jira, OpenProject) | Found by the feature's label or marker before one is created. A comment posted just before a crash may appear twice |
+| Email notices | Remembered as sent; one sent just before a crash may go twice |
+
 **In production, each session runs in a sandbox of its own** (`valxel_sdlc/session_runner.py`,
 `VALXEL_SESSION_EXECUTOR=kubernetes`; strict mode requires it in live mode). The tool claims a fresh
 sandbox from the platform's warm pool (Agent Sandbox 1.0: a `SandboxClaim` on the `agent-session`

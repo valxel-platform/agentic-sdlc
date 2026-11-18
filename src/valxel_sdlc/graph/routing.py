@@ -164,8 +164,19 @@ def bump_for(state: FeatureState, repo: str) -> str:
 
 
 def release_store_app(services, state: FeatureState, repo: str, sha: str, stage: str, *, actor: str) -> dict:
-    """Ask a store app's repo to release this commit for the stage (valxel_sdlc.store)."""
-    services.github.dispatch(repo=repo, event_type="valxel-release", payload={
-        "stage": stage, "sha": sha, "feature_id": state["feature_id"], "actor": actor})
+    """Ask a store app's repo to release this commit for the stage (valxel_sdlc.store), once per
+    attempt: a step run again from the same checkpoint (after a crash, or on another replica) doesn't
+    start a second release of the build, while a retry people or agents asked for does. The thread's
+    events mark the attempt: the same checkpoint has the same number of them, a retry more."""
+    key = f"store-release|{state['feature_id']}|{repo}|{sha}|{stage}|{len(state.get('events') or [])}"
+    once, unask = getattr(services, "ask_once", None), getattr(services, "unask", None)
+    if once is None or once(key):
+        try:
+            services.github.dispatch(repo=repo, event_type="valxel-release", payload={
+                "stage": stage, "sha": sha, "feature_id": state["feature_id"], "actor": actor})
+        except Exception:
+            if unask is not None:
+                unask(key)  # it didn't go: the next attempt may ask
+            raise
     return {"repo": repo, "kind": "store", "component": repo, "sha": sha, "env": stage,
             "pipeline": list(store.STAGES), "release": store.release_context(stage), "released_by": actor}

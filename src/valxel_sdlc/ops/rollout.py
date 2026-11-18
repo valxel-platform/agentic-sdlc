@@ -101,7 +101,10 @@ def on_regression(services, *, product_id: str, thread_id: str, title: str, flag
             if log is not None:
                 try:
                     stored = log.record(new_change(
-                        key=f"{thread_id}:regression:{key}:{_dt.now().strftime('%Y%m%d%H%M')}", product_id=product_id,
+                        # The reading that found the regression (it is in the checkpoint): a step run
+                        # again records the same change, not a second one.
+                        key=f"{thread_id}:regression:{key}:{res.get('at') or _dt.now().strftime('%Y%m%d%H%M')}",
+                        product_id=product_id,
                         kind="flag", type="automatic", action="flag_off",
                         summary=f"{title}: turned {key} off, its users fail more",
                         targets=[{"kind": "flag", "name": key, "on": False, "feature_id": fid}],

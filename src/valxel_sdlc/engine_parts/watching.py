@@ -86,6 +86,14 @@ class WatchingMixin:
             log.info("Deleted %d session transcripts older than a day", gone)
         return gone
 
+    def catch_up_receipts(self) -> int:
+        """ServiceNow receipts that never went (valxel_sdlc.ops.servicenow)."""
+        catch = getattr(getattr(self.services, "changes", None), "catch_up", None)
+        sent = catch() if catch is not None else 0
+        if sent:
+            log.info("Queued %d ServiceNow receipts that hadn't gone", sent)
+        return sent
+
     def start_watcher(self, interval_s: float = 30.0) -> None:
         """Poll features that wait on CI or OpenChoreo. Every replica starts it; only the one that
         holds the watcher's lock polls (cluster.py)."""
@@ -150,7 +158,8 @@ class WatchingMixin:
                     except Exception:
                         pass
             
-                    for job in (self.collect_costs, self.review_costs, self.expire_transcripts, self.check_connections):
+                    for job in (self.collect_costs, self.review_costs, self.expire_transcripts, self.check_connections,
+                                self.catch_up_receipts):
                         try:
                             job()
                         except Exception:
