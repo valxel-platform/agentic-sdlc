@@ -102,9 +102,16 @@ def test_without_sandboxes_the_gate_leaves_code_cases_alone(services, monkeypatc
 
 def test_the_runner_replays_under_each_config_with_the_tokens_it_was_sent(merged_repo, monkeypatch, tmp_path):  # noqa: F811
     _, sha = merged_repo
+    # run_spec changes this process's environment, as the sandbox's runner does: put it back after.
+    saved = dict(os.environ)
+
+    def restore_environment():
+        os.environ.clear()
+        os.environ.update(saved)
+
     for k in ("VALXEL_EVAL_RUNNER", "VALXEL_SESSION_EXECUTOR", "VALXEL_LLM_GATEWAY_URL", "VALXEL_LLM_GATEWAY_API_KEY",
               "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "VALXEL_DELIVERY"):
-        monkeypatch.delenv(k, raising=False)
+        os.environ.pop(k, None)
     monkeypatch.setenv("VALXEL_LLM_GATEWAY_API_KEY", "must-not-survive")
     seen = []
 
@@ -125,10 +132,14 @@ def test_the_runner_replays_under_each_config_with_the_tokens_it_was_sent(merged
                         "candidate": {"models.yaml": yaml.safe_dump({**models, "x-side": "cand"})}},
             "repo_tokens": {"acme-farm/farm-api": "read-tok"}, "env": {"ANTHROPIC_API_KEY": "gw-tok"},
             "budget_usd": 1.0, "timeout_s": 60}
-    out = session_runner.run_spec(spec, tmp_path)
+    try:
+        out = session_runner.run_spec(spec, tmp_path)
+        leaked = "VALXEL_LLM_GATEWAY_API_KEY" in os.environ
+    finally:
+        restore_environment()
     assert [s[3] for s in seen] == ["base", "cand"]
     assert all(s[:3] == ("1", "gw-tok", "read-tok") for s in seen)
-    assert "VALXEL_LLM_GATEWAY_API_KEY" not in os.environ
+    assert not leaked
     assert out["candidate"]["summary"]["all"]["cases"] == 1
 
 

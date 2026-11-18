@@ -38,7 +38,8 @@ def existing(gh: StubGitHub, repo: str, *, ghas: bool = True, files: bool = True
                            ".github/workflows/datasets.yml": "governance-datasets.yml",
                            ".github/scripts/datasets.py": "datasets.py",
                            ".github/scripts/odcs-json-schema-v3.2.0.json": "odcs-json-schema-v3.2.0.json",
-                           ".github/scripts/report.py": "report.py"}.items():
+                           ".github/scripts/report.py": "report.py",
+                           ".github/scripts/conformance.py": "conformance.py"}.items():
             gh.files[(repo, "main", path)] = rs.standard_file(name)
     gh.repos[repo] = {"state": {"visibility": "public", "allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True,
                                 "delete_branch_on_merge": False, "default_branch": "main", "has_wiki": True,
@@ -367,6 +368,7 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     gh.files[(lane, "main", ".github/workflows/security.yml")] = "name: security\njobs: {}\n"  # someone trimmed it
     rep = rs.reconcile(gh, target(svc, lane), apply=False)
     assert [(d.area, d.item, d.have, d.fix) for d in rep.drift if d.area == "workflows"] == [
+        ("workflows", ".github/scripts/conformance.py", "missing", "apply"),
         ("workflows", ".github/scripts/report.py", "missing", "apply"),
         ("workflows", ".github/workflows/security.yml", "differs", "apply")]
     # A governance repo has no code: the secrets scan and the data-contract check are managed there.
@@ -380,7 +382,7 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     after = rs.reconcile(gh, target(svc, lane), apply=True)
     assert "managed files" in after.applied and after.ok
     pending = [d for d in after.drift if d.area == "workflows"]
-    assert len(pending) == 2 and all(d.fix == "pending" and "pull request" in d.have for d in pending)
+    assert len(pending) == 3 and all(d.fix == "pending" and "pull request" in d.have for d in pending)
     pr = next(p for p in gh.prs.values() if p["repo"] == lane and p["branch"].startswith("valxel/managed-files-"))
     branch = pr["branch"]
     assert gh.files[(lane, branch, ".github/workflows/security.yml")] == rs.standard_file("security.yml")
@@ -390,6 +392,7 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     pr["state"] = "merged"
     gh.files[(lane, "main", ".github/workflows/security.yml")] = rs.standard_file("security.yml")
     gh.files[(lane, "main", ".github/scripts/report.py")] = rs.standard_file("report.py")
+    gh.files[(lane, "main", ".github/scripts/conformance.py")] = rs.standard_file("conformance.py")
     assert not [d for d in rs.reconcile(gh, target(svc, lane), apply=False).drift if d.area == "workflows"]
     # The platform's copy changes later: a new branch and pull request, never the merged one again.
     original = rs.standard_file

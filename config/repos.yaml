@@ -86,6 +86,7 @@ defaults:
   managed_files:
     .github/workflows/security.yml: security.yml
     .github/scripts/report.py: report.py     # test results and coverage of new code, as commit statuses
+    .github/scripts/conformance.py: conformance.py  # the template contract on the built image (conformance.yaml)
 
 # Repos that belong to no lane but follow the same standards (`valxel repos check`). Lane repos
 # come from each governance manifest, and each product's governance repo from registry.yaml.
