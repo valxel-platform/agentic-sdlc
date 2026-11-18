@@ -185,6 +185,30 @@ def get(name: str, default: str = "", env: Mapping[str, str] | None = None) -> s
     return current(name, env) or default
 
 
+_SETTING_NAME = re.compile(r"[A-Z][A-Z0-9_]*")
+
+
+def adopt_settings(env: dict | None = None) -> list[str]:
+    """With the files store, settings that aren't secrets but were kept with them (a secret
+    manager's JSON holding both, mounted as one folder) are put in the environment, where the tool
+    reads settings; nothing already set is overridden. Returns their names: move them out of the
+    secret and into the deployment's environment."""
+    env = env if env is not None else os.environ
+    if store_kind(env) != "files" or not env.get("VALXEL_SECRETS_DIR"):
+        return []
+    folder, out = Path(env["VALXEL_SECRETS_DIR"]), []
+    try:
+        files = sorted(p for p in folder.iterdir() if p.is_file())
+    except OSError:
+        return []
+    for p in files:
+        name = p.name
+        if _SETTING_NAME.fullmatch(name) and not is_secret(name) and not env.get(name):
+            env[name] = _read(p)
+            out.append(name)
+    return out
+
+
 def in_environment(env: Mapping[str, str]) -> list[str]:
     """Secret names set in the environment, which a secret store should hold instead."""
     return sorted(k for k, v in env.items() if v and (is_secret(k) or is_secret(k.removesuffix("_PREVIOUS"))))

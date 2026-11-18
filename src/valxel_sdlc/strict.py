@@ -58,7 +58,7 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("VALXEL_TENANCY is not rls: every workspace's rows are open to any query that forgets to "
                    "filter (valxel_sdlc.tenancy)")
     out += weak_secrets(env, database_url=s.database_url)
-    out += secrets_in_environment(env)
+    out += secrets_in_environment(env, live=s.mode == "live")
     out += provisioning_split(env)
     secret_env = _secret_env(env)
     modes = integration_modes(services)
@@ -89,9 +89,10 @@ def _secret_env(env):
     return environ(env)
 
 
-def secrets_in_environment(env) -> list[str]:
-    """With a secret store chosen, a secret left in the environment is readable by anything that
-    can read the process's environment: refuse it (valxel_sdlc.secret_ring)."""
+def secrets_in_environment(env, *, live: bool = False) -> list[str]:
+    """In live mode the secrets come from a store (aws or files), not the environment, which anything
+    that can read the process's environment can read; and none is left in the environment as well
+    (valxel_sdlc.secret_ring)."""
     from .secret_ring import in_environment, store_kind
 
     try:
@@ -99,7 +100,9 @@ def secrets_in_environment(env) -> list[str]:
     except ValueError as exc:
         return [str(exc)]
     if kind == "env":
-        return []
+        return ["VALXEL_SECRET_STORE is env: secrets come from environment variables, which anything that can "
+                "read the process's environment can read, and which pass to whatever it starts; use aws or "
+                "files"] if live else []
     names = in_environment(env)
     return [f"VALXEL_SECRET_STORE is {kind}, but these secrets are also in the environment: {', '.join(names)}; "
             "keep them only in the store"] if names else []
@@ -157,14 +160,6 @@ def env_value(name: str) -> str:
 def known_gaps(services) -> list[str]:
     """What runs, but can't be checked: strict mode warns about these and starts anyway."""
     out = []
-    from .secret_ring import store_kind
-
-    try:
-        if services.settings.mode == "live" and store_kind() == "env":
-            out.append("VALXEL_SECRET_STORE is not set: secrets come from environment variables, which anything that "
-                       "can read the process's environment can read; use aws or files")
-    except ValueError:
-        pass  # stand_ins reports a bad VALXEL_SECRET_STORE
     if not env_value("VALXEL_CONFIG_REPO"):
         out.append("VALXEL_CONFIG_REPO is not set: changes to models and settings aren't evaluated against past "
                    "work before they merge")

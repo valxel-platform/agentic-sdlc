@@ -2896,7 +2896,11 @@ effect once the other is also decided. An earlier approval of the other gate sti
   mode refuses to start while any of them would, and lists each one: `VALXEL_MODE`,
   `VALXEL_DELIVERY`, `VALXEL_AUTH` and `VALXEL_GOVERNANCE_SOURCE` not live, no database, and per
   product a diagram or tracker without credentials, Flipt without its token, or ServiceNow without
-  `VALXEL_SERVICENOW_AUTH_<ID>`. What runs but can't be checked (a shared library that declares no
+  `VALXEL_SERVICENOW_AUTH_<ID>`. In live mode it also refuses secrets from the environment:
+  `VALXEL_SECRET_STORE` must be `aws` or `files` (a secret manager's secrets mounted as one file
+  each in `VALXEL_SECRETS_DIR`), and no secret may be left in the environment as well. Settings that
+  aren't secrets but were kept in the same secret are read from the folder into the environment,
+  with a warning naming them. What runs but can't be checked (a shared library that declares no
   package) is logged as a warning. `/api/healthz` reports `strict` (`valxel_sdlc/strict.py`).
 
 ## Replacing the stubs

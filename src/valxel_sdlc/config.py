@@ -4,6 +4,7 @@ org's governance repo; see valxel_sdlc.governance."""
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -306,6 +307,13 @@ def load_settings(
     governance_source: str | None = None,
     governance_root: str | Path | None = None,
 ) -> Settings:
+    from .secret_ring import adopt_settings
+
+    moved = adopt_settings()
+    if moved:
+        logging.getLogger(__name__).warning(
+            "settings kept with the secrets, read from VALXEL_SECRETS_DIR: %s; set them in the environment instead",
+            ", ".join(moved))
     root = _repo_root()
     cfg_dir = Path(config_dir or os.environ.get("VALXEL_CONFIG_DIR") or root / "config")
     art_dir = Path(artifact_dir or os.environ.get("VALXEL_ARTIFACT_DIR") or root / ".artifacts")

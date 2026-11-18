@@ -1,6 +1,8 @@
 """Strict mode: in production, nothing quietly runs as an offline stand-in."""
 
+import tempfile
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,8 +12,12 @@ from valxel_sdlc.api.app import create_app
 from valxel_sdlc.integrations.worktracking import StubTracker
 from valxel_sdlc.web.auth import AuthConfig
 
-LIVE = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SERVICENOW_AUTH_CLN": "Basic x",
-        "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway"}
+# Secrets in a files store (as the deployment mounts them), never the environment.
+_SECRETS = tempfile.mkdtemp(prefix="strict-secrets-")
+Path(_SECRETS, "VALXEL_SERVICENOW_AUTH_CLN").write_text("Basic x")
+LIVE = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files",
+        "VALXEL_SECRETS_DIR": _SECRETS, "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes",
+        "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway"}
 
 
 class LiveTracker:
@@ -103,10 +109,21 @@ def test_one_missing_token_is_enough_to_refuse(services, monkeypatch):
 
     services.snapshot = with_servicenow
     with pytest.raises(strict.StrictModeError, match="VALXEL_SERVICENOW_AUTH_CLN is not set"):
-        strict.check(services, auth_mode="github", env={"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue",
-                                                        "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway"})
-    gaps = strict.check(services, auth_mode="github", env=LIVE)  # starts; only warns that secrets are env vars
-    assert [g.split(":")[0] for g in gaps] == ["VALXEL_SECRET_STORE is not set"]
+        strict.check(services, auth_mode="github", env={**LIVE, "VALXEL_SECRETS_DIR": tempfile.mkdtemp()})
+    assert strict.check(services, auth_mode="github", env=LIVE) == []
+
+
+def test_live_mode_needs_a_secret_store(services, monkeypatch):
+    monkeypatch.setenv("VALXEL_CONFIG_REPO", "valxel-platform/sdlc-config")
+    live_ish(services)
+    env = {k: v for k, v in LIVE.items() if not k.startswith("VALXEL_SECRET")}
+    with pytest.raises(strict.StrictModeError, match="VALXEL_SECRET_STORE is env"):
+        strict.check(services, auth_mode="github", env={**env, "VALXEL_SERVICENOW_AUTH_CLN": "Basic x"})
+    # A store, with a secret left in the environment as well: refused too.
+    with pytest.raises(strict.StrictModeError, match="also in the environment: ANTHROPIC_API_KEY"):
+        strict.check(services, auth_mode="github", env={**LIVE, "ANTHROPIC_API_KEY": "sk"})
+    # Off live mode (a laptop), environment variables are fine.
+    assert strict.secrets_in_environment({"ANTHROPIC_API_KEY": "sk"}) == []
 
 
 def test_the_server_refuses_to_start_in_strict_mode(monkeypatch, settings, services):

@@ -21,6 +21,12 @@ import tempfile
 from langgraph.checkpoint.memory import InMemorySaver
 
 from .config import load_settings
+from .secret_ring import get as _secret
+
+
+def _database_url() -> str:
+    """The tool's database, through the secret store (VALXEL_SECRET_STORE), like the server reads it."""
+    return _secret("DATABASE_URL")
 from .engine import FeatureEngine
 from .services import build_services
 
@@ -121,7 +127,7 @@ def _verify_changes(log=None) -> int:
     from .ops.changes import PostgresChangeLog, verify
 
     if log is None:
-        url = os.environ.get("DATABASE_URL")
+        url = _database_url()
         if not url:
             print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
             return 2
@@ -169,7 +175,7 @@ def _usage_context(args, engine=None) -> int:
     from .context import report, table
 
     if engine is None:
-        if not os.environ.get("DATABASE_URL"):
+        if not _database_url():
             print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
             return 2
         from .api.app import create_engine_from_env
@@ -185,7 +191,7 @@ def _scaffolding(args, engine=None) -> int:
     from .scaffolding import markdown, report
 
     if engine is None:
-        if not os.environ.get("DATABASE_URL"):
+        if not _database_url():
             print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
             return 2
         from .api.app import create_engine_from_env
@@ -200,7 +206,7 @@ def _pilot_report(args, engine=None) -> int:
     from .pilot import markdown, report
 
     if engine is None:
-        if not os.environ.get("DATABASE_URL"):
+        if not _database_url():
             print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
             return 2
         from .api.app import create_engine_from_env
@@ -226,12 +232,12 @@ def _eval(args: argparse.Namespace) -> int:
                  if (not phases or c.phase in phases) and c.data_class in classes and (not args.product or c.product_id == args.product)]
         cases = evals._select(cases, args.product, phases, classes, True, args.limit)
     else:
-        if not os.environ.get("DATABASE_URL"):
+        if not _database_url():
             raise SystemExit("valxel eval reads cases from the tool's database (DATABASE_URL), or give --cases FILE")
         from psycopg.rows import dict_row
         from .tenancy import make_pool
 
-        pool = make_pool(os.environ["DATABASE_URL"], max_size=2, kwargs={"autocommit": True, "row_factory": dict_row})
+        pool = make_pool(_database_url(), max_size=2, kwargs={"autocommit": True, "row_factory": dict_row})
         cases = evals.PostgresEvalStore(pool).cases(product_id=args.product, phases=phases, data_classes=classes,
                                                      limit_per_phase=args.limit)
     if args.action == "run" and not args.no_injection:
