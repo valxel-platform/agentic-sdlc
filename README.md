@@ -1671,10 +1671,9 @@ webhook secrets and other workspaces' files never reach it, and the tool no long
 code into its own container. The template, owned by the platform
 (`platform-foundation/gitops/apps/agent-sessions`), runs it under gVisor with no service account
 token, a read-only root, resource limits and a deadline, and network only to the package
-registries, GitHub, the model provider and the telemetry collector. Codex can't run there yet: with
-sandboxes on, its roles (the coder's fallbacks, the reviewer's second opinion) are skipped rather than
-run in the tool's container. `local` (the default) runs sessions in the tool's process, for
-development.
+registries, GitHub, the model provider and the telemetry collector. Codex runs there too, with a gateway session token as its only key (no provider key goes into a
+sandbox), so with sandboxes on it needs the gateway. `local` (the default) runs sessions in the
+tool's process, for development.
 
 **A session's model credential is a short-lived gateway token, not the tool's key**
 (`valxel_sdlc/gateway_sessions.py`; strict mode requires it in live mode). With
@@ -1693,8 +1692,10 @@ needs a `sessions` grant, and `data_classes` listing every class its products ha
 provider calls it with the tool's gateway key: each call carries its labels and declares its data
 class (`x-valxel-data-class`), and the gateway applies that class's rule (providers, redaction) and
 audits it. The tool keeps its roles, fallbacks, budgets and ledger. The tool then needs no provider
-key, and strict mode flags one left in its environment. Codex's API can't go through the gateway yet,
-so with it on, Codex roles are skipped as they are in sandboxes.
+key, and strict mode flags one left in its environment. Codex goes through the gateway too: its session gets a token capped at the role's budget, and calls
+the gateway's Responses API as its provider. The gateway refuses its next call once the cap is
+spent, which is the live dollar cap Codex has none of itself; the task then fails rather than
+handing a fresh budget to a fallback.
 
 **Only images the platform's build signed run** (`platform/openchoreo/` in the platform governance
 repo). The pipeline builds only merge commits that passed the gates. The build scans the image

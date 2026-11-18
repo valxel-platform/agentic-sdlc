@@ -60,14 +60,13 @@ def labels_for(tags: Any) -> dict[str, str]:
 
 
 def codex_blocked() -> str:
-    """Why Codex can't run here, or "": its API (OpenAI Responses) can't go through the gateway, and
-    it can't run in a session sandbox, so with either on its roles are skipped, not run around them."""
+    """Why Codex can't run here, or "". In a sandbox it needs the gateway: no provider key goes into
+    a sandbox, only a session token."""
     from .sandbox import remote
 
-    if remote():
-        return "sessions run in sandboxes (VALXEL_SESSION_EXECUTOR=kubernetes), which Codex can't use yet"
-    if configured():
-        return "model calls go through the LLM gateway, which can't carry Codex's API yet"
+    if remote() and not configured():
+        return ("sessions run in sandboxes (VALXEL_SESSION_EXECUTOR=kubernetes) and Codex would need a provider "
+                "key there: set the LLM gateway (VALXEL_LLM_GATEWAY_URL) so it gets a session token instead")
     return ""
 
 
@@ -77,12 +76,24 @@ def session_token(tags: Any, model: str, budget_usd: float, ttl_s: int, *,
     """The environment a Claude Code session uses instead of the tool's key, for as long as the
     `with` block lasts; the token is revoked when it ends, however it ends."""
     e = os.environ if env is None else env
+    extra = [m.strip() for m in str(e.get("VALXEL_LLM_GATEWAY_SESSION_MODELS", "claude-haiku-*")).split(",") if m.strip()]
+    with mint(tags, [model, *[m for m in extra if m != model]], budget_usd, ttl_s, http=http, env=env) as (url, token):
+        yield {"ANTHROPIC_BASE_URL": url, "ANTHROPIC_API_KEY": token, **dict.fromkeys(CLEARED, "")}
+
+
+@contextmanager
+def mint(tags: Any, models: list[str], budget_usd: float, ttl_s: int, *,
+         http: Any = None, env: Any = None) -> Iterator[tuple[str, str]]:
+    """(the gateway's URL, a session token) for as long as the `with` block lasts: the token may spend
+    `budget_usd` on `models`, in the session's data class and under its labels, and is revoked when
+    the block ends, however it ends. The gateway refuses the session's next call once the budget is
+    spent: a live dollar cap, whatever the agent (Codex has none of its own)."""
+    e = os.environ if env is None else env
     url = str(e.get(URL_ENV, "")).rstrip("/")
     headers = {"x-api-key": _key(env)}
-    extra = [m.strip() for m in str(e.get("VALXEL_LLM_GATEWAY_SESSION_MODELS", "claude-haiku-*")).split(",") if m.strip()]
     client = http or httpx.Client(timeout=30)
     body = {"budget_usd": round(max(float(budget_usd), 0.01), 4), "ttl_s": int(ttl_s), "data_class": tags.data_class,
-            "models": [model, *[m for m in extra if m != model]], "labels": labels_for(tags)}
+            "models": list(dict.fromkeys(models)), "labels": labels_for(tags)}
     try:
         res = client.post(f"{url}/v1/sessions", json=body, headers=headers)
     except httpx.HTTPError as exc:
@@ -95,7 +106,7 @@ def session_token(tags: Any, model: str, budget_usd: float, ttl_s: int, *,
         raise GatewayUnavailable(f"the LLM gateway didn't mint a session token: {why}")
     sess = res.json()
     try:
-        yield {"ANTHROPIC_BASE_URL": url, "ANTHROPIC_API_KEY": sess["token"], **dict.fromkeys(CLEARED, "")}
+        yield url, sess["token"]
     finally:
         try:
             done = client.delete(f"{url}/v1/sessions/{sess['id']}", headers=headers)

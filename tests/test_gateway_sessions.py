@@ -176,14 +176,6 @@ def test_the_gateway_tags_every_call_the_tool_makes(services, monkeypatch):
     assert seen[0].labels == {"product": "emr", "feature": "F-1", "phase": "build", "agent": "coder", "workspace": "ws-1"}
 
 
-def test_codex_doesnt_run_around_the_gateway(monkeypatch):
-    monkeypatch.setenv("VALXEL_LLM_GATEWAY_URL", "http://gw")
-    monkeypatch.setenv("VALXEL_LLM_GATEWAY_API_KEY", "k")
-    assert "gateway" in gateway_sessions.codex_blocked()
-    monkeypatch.delenv("VALXEL_LLM_GATEWAY_URL")
-    assert gateway_sessions.codex_blocked() == ""
-
-
 def test_strict_mode_flags_a_provider_key_left_with_the_tool(services):
     from valxel_sdlc import strict
 

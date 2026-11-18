@@ -48,6 +48,10 @@ def validate(settings: Settings) -> None:
 def provider_ready(settings: Settings, provider: str, runtime: str = "generic") -> bool:
     if provider in BUILT_IN_PROVIDERS:
         return True
+    from .gateway_sessions import configured as routed
+
+    if runtime == "codex" and routed():  # Codex reaches its model through the gateway, with a session token
+        return True
     pc = settings.providers.get(provider)
     if pc is not None:
         return pc.configured()

@@ -116,9 +116,11 @@ def run_spec(spec: dict, root: Path | None = None, *, query=None) -> dict:
     from .runtime.claude_code import plugin_dirs_from
     from .sandbox import NO_SCRIPTS, claude_settings, clone
 
-    if spec.get("version") != VERSION or spec.get("runtime") != "claude_code":
+    if spec.get("version") != VERSION or spec.get("runtime") not in ("claude_code", "codex"):
         raise ValueError("unknown session spec")
     root = Path(root or tempfile.mkdtemp(prefix="valxel-run-"))
+    if spec["runtime"] == "codex":
+        return run_codex_spec(spec, root, runner=query)
     home = root / "home"
     (home / "tmp").mkdir(parents=True, exist_ok=True)
     for rel, text in (spec.get("files") or {}).items():
@@ -159,6 +161,25 @@ def run_spec(spec: dict, root: Path | None = None, *, query=None) -> dict:
         found = sessions.find_transcript(str(home), out["session_id"])
         transcript = found.read_text(encoding="utf-8") if found else ""
     return {**out, "resumed": resumed, "session_mode": mode, "transcript": transcript}
+
+
+def run_codex_spec(spec: dict, root: Path, *, runner=None) -> dict:
+    """A Codex session in this sandbox (runtime/codex.py: execute): its checkout cloned here, its key
+    a gateway session token. `runner` stands in for `codex exec` in tests."""
+    from .runtime.codex import execute, run_codex
+    from .sandbox import clone
+
+    co = spec.get("checkout") or {}
+    if co:
+        cwd = clone(_repo(co["repo"]), co["branch"], co["token"], root)
+    else:
+        cwd = str(root / "work")
+        Path(cwd).mkdir(parents=True, exist_ok=True)
+        for rc in spec.get("read_checkouts") or []:
+            read_clone(rc["repo"], rc["sha"], rc["token"], root)
+    scratch = root / "codex"
+    scratch.mkdir(parents=True, exist_ok=True)
+    return execute(spec, cwd, scratch, runner=runner or run_codex, home_template=os.environ.get("VALXEL_CODEX_HOME", ""))
 
 
 def read_clone(repo: str, sha: str, token: str, root: Path) -> str:

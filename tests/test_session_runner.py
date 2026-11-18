@@ -248,16 +248,21 @@ def test_an_architects_checkouts_are_made_in_its_sandbox(services, monkeypatch):
     assert workspace.session_box({"root": "/x", "repos": {}}) is None
 
 
-def test_with_sandboxes_codex_never_runs_in_the_tools_container(services, monkeypatch, tmp_path):
+def test_in_sandboxes_codex_runs_only_with_the_gateway(services, monkeypatch, tmp_path):
+    from valxel_sdlc import gateway_sessions
     from valxel_sdlc.gateway import ProviderUnavailable
     from valxel_sdlc.models import second_opinion
     from valxel_sdlc.runtime.codex import CodexRuntime
 
     monkeypatch.setenv("VALXEL_SESSION_EXECUTOR", "kubernetes")
-    with pytest.raises(ProviderUnavailable, match="sandbox"):  # a fallback chain moves on to the next
+    monkeypatch.delenv("VALXEL_LLM_GATEWAY_URL", raising=False)
+    with pytest.raises(ProviderUnavailable, match="provider key there"):  # a fallback chain moves on
         CodexRuntime(services.gateway).run(_task(str(tmp_path)))
     choice = second_opinion(services.settings, set(services.settings.roles), "reviewer", "general")
-    assert choice.role is None and "which Codex can't use yet" in choice.skipped
+    assert choice.role is None and "provider key there" in choice.skipped
+    monkeypatch.setenv("VALXEL_LLM_GATEWAY_URL", "http://gw")
+    monkeypatch.setenv("VALXEL_LLM_GATEWAY_API_KEY", "k")
+    assert gateway_sessions.codex_blocked() == ""
 
 
 def test_a_sandbox_not_yet_reachable_is_retried_before_the_session_is_sent():

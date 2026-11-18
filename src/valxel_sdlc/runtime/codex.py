@@ -13,9 +13,15 @@ skills, the constitution, the product, the feature) go first in the prompt, then
 providers that cache prompt prefixes reuse them. The prompt goes through stdin, so its size is
 not limited by the process-argument cap.
 
-Codex has no turn or dollar cap of its own. A session gets the role's `max_minutes`, its usage is
-recorded from the `turn.completed` events, and a session that spent more than its cap is logged so
-the budget check that follows sees it.
+Codex has no turn or dollar cap of its own. A session gets the role's `max_minutes` and, through
+the LLM gateway (VALXEL_LLM_GATEWAY_URL), a session token with the role's cap as its budget: the
+gateway refuses its next call once it has spent it, a live cap (valxel_sdlc.gateway_sessions).
+Codex then calls the gateway's Responses API as a provider of its own, with the token as its key;
+no provider key reaches it. Its usage is recorded from the `turn.completed` events either way.
+
+In a session sandbox (VALXEL_SESSION_EXECUTOR=kubernetes) the session runs there
+(valxel_sdlc.session_runner, `execute` below on both sides), and only with the gateway: a sandbox
+gets a session token, never a provider key.
 
 A provider that answers 429 or 5xx makes Codex fail the turn after its retries, which reads as
 unavailable. One that can't be reached at all makes Codex wait for the network indefinitely, so
@@ -104,10 +110,14 @@ def codex_prompt(task: AgentTask) -> str:
     return f"{context}\n\n---\n\n# Task\n\n{task.layers.tail}\n" if context else task.layers.tail
 
 
+GATEWAY_PROVIDER, GATEWAY_TOKEN_ENV = "valxel_gateway", "VALXEL_GATEWAY_SESSION_TOKEN"
+
+
 def codex_command(model: str, *, cwd: str | None, schema_path: str | None, last_path: str,
-                  provider: tuple[str, str, str] | None) -> list[str]:
+                  provider: tuple[str, str, str] | None, wire_api: str = "") -> list[str]:
     """`codex exec` for one session. provider: (id, base_url, api_key_env) for a model that is not
-    OpenAI's; None uses OpenAI with CODEX_API_KEY."""
+    OpenAI's; None uses OpenAI with CODEX_API_KEY. wire_api: the provider's API (the gateway's is
+    "responses")."""
     cmd = ["codex", "exec", "--json", "--ephemeral", "--skip-git-repo-check",
            "--sandbox", "workspace-write", "-c", "approval_policy=never",
            "-c", f"model={json.dumps(model.split('/', 1)[-1])}", "-o", last_path]
@@ -118,6 +128,8 @@ def codex_command(model: str, *, cwd: str | None, schema_path: str | None, last_
                 "-c", f"model_providers.{pid}.base_url={json.dumps(url)}"]
         if key_env:
             cmd += ["-c", f"model_providers.{pid}.env_key={json.dumps(key_env)}"]
+        if wire_api:
+            cmd += ["-c", f"model_providers.{pid}.wire_api={json.dumps(wire_api)}"]
         # Give up on a busy provider quickly: the role's fallback is the better retry.
         cmd += ["-c", f"model_providers.{pid}.request_max_retries=2",
                 "-c", f"model_providers.{pid}.stream_max_retries=2"]
@@ -203,6 +215,40 @@ def add_otel(home: Path, section: str) -> None:
 PLUGIN_NAMES = {*plugins.UPSTREAM, "valxel"}
 
 
+def execute(spec: dict, cwd: str | None, tmp: Path, *, runner: Runner = run_codex, home_template: str = "") -> dict:
+    """Run one `codex exec` session from its spec, here or in a session sandbox: {returncode, stdout,
+    stderr, text}. The spec holds the model, the provider and its key (a gateway session token, or
+    a provider key here), the prompt, the reply's schema, the time limit, whether the plugins load,
+    and the telemetry export."""
+    from ..sandbox import clean_env
+
+    # Only the allowlisted environment and the model's key: none of the tool's secrets
+    # (valxel_sdlc.sandbox). Codex's workspace-write sandbox confines the commands it runs.
+    (tmp / "user" / "tmp").mkdir(parents=True, exist_ok=True)
+    # Its key is the spec's alone (a session token, or the provider key the tool chose): none of the
+    # model keys the tool's own process may hold pass through.
+    env = clean_env("codex-session", str(tmp / "user"), dict(spec.get("keys") or {}))
+    env["CODEX_HOME"] = session_home(home_template, tmp / "home", with_plugins=bool(spec.get("plugins")))
+    add_otel(Path(env["CODEX_HOME"]), str(spec.get("otel") or ""))
+    env.update(spec.get("telemetry_env") or {})
+    schema_path = None
+    if spec.get("schema"):
+        schema_path = str(tmp / "schema.json")
+        Path(schema_path).write_text(json.dumps(spec["schema"]))
+    last_path = str(tmp / "last.txt")
+    provider = tuple(spec["provider"]) if spec.get("provider") else None
+    cmd = codex_command(spec["model"], cwd=cwd, schema_path=schema_path, last_path=last_path,
+                        provider=provider, wire_api=str(spec.get("wire_api") or ""))
+    try:
+        proc = runner(cmd, input=spec["prompt"], capture_output=True, text=True, timeout=float(spec["timeout_s"]),
+                      env=env)
+    except subprocess.TimeoutExpired:
+        return {"returncode": -1, "stdout": "", "stderr": "", "text": "", "timed_out": True}
+    last = Path(last_path)
+    return {"returncode": proc.returncode, "stdout": proc.stdout or "", "stderr": proc.stderr or "",
+            "text": last.read_text() if last.exists() else ""}
+
+
 class CodexRuntime:
     name = "codex"
     capabilities = frozenset({"text", "code_execution"})
@@ -215,60 +261,60 @@ class CodexRuntime:
         self.home_template = home_template if home_template is not None else os.environ.get("VALXEL_CODEX_HOME", "")
 
     def run(self, task: AgentTask) -> AgentResult:
-        from ..gateway_sessions import codex_blocked
+        import contextlib
 
-        blocked = codex_blocked()  # never around the sandboxes or the gateway
+        from .. import gateway_sessions
+        from ..sandbox import remote
+
+        blocked = gateway_sessions.codex_blocked()  # never a provider key in a sandbox
         if blocked:
             raise ProviderUnavailable(f"codex: {blocked}")
         settings = self.gateway.settings
         role = settings.role(task.role)
         if not self.gateway.allowed(role.provider, task.tags.data_class):
             raise PolicyViolation(f"{task.tags.data_class} data may not reach {role.provider!r}")
-        from ..sandbox import clean_env
-
-        provider = None
-        extra_keys = {}
-        if role.provider == "openai":
-            from ..secret_ring import get
-
-            extra_keys["CODEX_API_KEY"] = get("CODEX_API_KEY") or get("OPENAI_API_KEY")
-        else:
-            pc = settings.providers.get(role.provider)
-            if pc is None:
-                raise RuntimeError(f"No provider {role.provider!r} in models.yaml for role {task.role}")
-            provider = (role.provider, pc.url(), pc.api_key_env)
-            if pc.api_key_env:
-                extra_keys[pc.api_key_env] = os.environ.get(pc.api_key_env, "")
+        spec = {"model": role.model, "prompt": codex_prompt(task), "schema": task.schema or None,
+                "timeout_s": role.max_minutes * 60, "plugins": self.on_demand(task.role),
+                "otel": (task.telemetry or {}).get("codex_config", ""),
+                "telemetry_env": dict((task.telemetry or {}).get("env") or {})}
         started = time.monotonic()
-        with tempfile.TemporaryDirectory(prefix="valxel-codex-") as tmp:
-            # Only the allowlisted environment and the model's key: none of the tool's secrets
-            # (valxel_sdlc.sandbox). Codex's workspace-write sandbox confines the commands it runs.
-            (Path(tmp) / "user" / "tmp").mkdir(parents=True)
-            env = clean_env("codex", str(Path(tmp) / "user"), extra_keys)
-            env["CODEX_HOME"] = session_home(self.home_template, Path(tmp) / "home",
-                                             with_plugins=self.on_demand(task.role))
-            add_otel(Path(env["CODEX_HOME"]), (task.telemetry or {}).get("codex_config", ""))
-            env.update((task.telemetry or {}).get("env") or {})
-            schema_path = None
-            if task.schema:
-                schema_path = str(Path(tmp) / "schema.json")
-                Path(schema_path).write_text(json.dumps(task.schema))
-            last_path = str(Path(tmp) / "last.txt")
-            cmd = codex_command(role.model, cwd=task.cwd or self.cwd, schema_path=schema_path, last_path=last_path,
-                                provider=provider)
-            try:
-                proc = self.runner(cmd, input=codex_prompt(task), capture_output=True, text=True,
-                                   timeout=role.max_minutes * 60, env=env)
-            except subprocess.TimeoutExpired as exc:
-                raise RuntimeError(f"codex: {task.phase}/{task.role} ran past {role.max_minutes} minutes") from exc
-            events = proc.stdout or ""
-            if proc.returncode != 0:
-                why = failure_from(events) or (proc.stderr or "").strip()[-500:]
-                if is_transient(why):
-                    raise ProviderUnavailable(f"codex: {why}")
-                raise RuntimeError(f"codex exited {proc.returncode}: {why}")
-            last = Path(last_path)
-            text = last.read_text() if last.exists() else ""
+        with contextlib.ExitStack() as stack:
+            if gateway_sessions.configured():  # a session token, capped at the role's budget, as its key
+                try:
+                    url, token = stack.enter_context(gateway_sessions.mint(
+                        task.tags, [role.model_name], session_cap(task, role), spec["timeout_s"] + 600))
+                except gateway_sessions.GatewayUnavailable as exc:
+                    raise ProviderUnavailable(f"codex: {exc}") from exc
+                spec.update(provider=[GATEWAY_PROVIDER, f"{url}/v1", GATEWAY_TOKEN_ENV], wire_api="responses",
+                            keys={GATEWAY_TOKEN_ENV: token})
+            elif role.provider == "openai":
+                from ..secret_ring import get
+
+                spec.update(provider=None, keys={"CODEX_API_KEY": get("CODEX_API_KEY") or get("OPENAI_API_KEY")})
+            else:
+                pc = settings.providers.get(role.provider)
+                if pc is None:
+                    raise RuntimeError(f"No provider {role.provider!r} in models.yaml for role {task.role}")
+                from ..secret_ring import get
+
+                spec.update(provider=[role.provider, pc.url(), pc.api_key_env],
+                            keys={pc.api_key_env: get(pc.api_key_env)} if pc.api_key_env else {})
+            if remote():
+                out = self._run_remote(task, spec)
+            else:
+                with tempfile.TemporaryDirectory(prefix="valxel-codex-") as tmp:
+                    out = execute(spec, task.cwd or self.cwd, Path(tmp), runner=self.runner,
+                                  home_template=self.home_template)
+        if out.get("timed_out"):
+            raise RuntimeError(f"codex: {task.phase}/{task.role} ran past {role.max_minutes} minutes")
+        events, text = out.get("stdout") or "", out.get("text") or ""
+        if out.get("returncode") != 0:
+            why = failure_from(events) or (out.get("stderr") or "").strip()[-500:]
+            if "used its budget" in why:  # the gateway stopped it at its cap: the task failed, no fallback
+                raise RuntimeError(f"codex: {task.phase}/{task.role} reached its ${session_cap(task, role):.2f} cap")
+            if is_transient(why):
+                raise ProviderUnavailable(f"codex: {why}")
+            raise RuntimeError(f"codex exited {out.get('returncode')}: {why}")
         u = usage_from(events)
         thread, peak = session_from(events)
         resp = ModelResponse(
@@ -292,6 +338,22 @@ class CodexRuntime:
         return AgentResult(text=text, tokens=rec.total_tokens, cost_usd=rec.cost_usd, request_ids=[resp.request_id],
                            extra_skills=extra, session_id=resp.session_id, context_fill=rec.record.context_fill,
                            model=role.model, runtime=self.name)
+
+    def _run_remote(self, task: AgentTask, spec: dict) -> dict:
+        """The session in its own sandbox: the spec and the checkout go, the outcome comes back."""
+        import uuid
+
+        from .. import session_runner
+
+        box = task.sandbox or {}
+        out = session_runner.executor().run({
+            "version": session_runner.VERSION, "runtime": "codex", "id": uuid.uuid4().hex[:16], **spec,
+            "checkout": box.get("checkout") or None, "read_checkouts": list(box.get("read_checkouts") or [])})
+        if not out.get("ok"):
+            if out.get("transient"):
+                raise ProviderUnavailable(f"codex: the session's provider was unavailable ({out.get('error')})")
+            raise RuntimeError(f"the codex session failed in its sandbox: {out.get('error')}")
+        return out
 
     def on_demand(self, role: str) -> bool:
         """Whether the session gets the template's plugins: the role may load skills by itself, and
