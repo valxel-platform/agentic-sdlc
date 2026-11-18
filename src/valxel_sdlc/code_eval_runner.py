@@ -62,10 +62,12 @@ def _repo_tokens(services, cases) -> dict[str, str]:
 
     tokens = getattr(services.github, "tokens", None)
     scoped = getattr(tokens, "scoped", None)
-    if not callable(scoped):
+    if not callable(scoped) and any(c.phase in ("coder", "reviewer") for c in cases):
         raise RuntimeError("code evals need the GitHub App, to read the repositories the cases name")
     out = {}
     for c in cases:
+        if c.phase not in ("coder", "reviewer"):  # the injection suite makes its own repository
+            continue
         repo = _need(c)["repo"]
         if repo not in out:
             org, name = repo.split("/", 1)

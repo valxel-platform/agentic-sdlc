@@ -11,6 +11,10 @@ is a fact, not a judgment.
 The cases are fixed and synthetic: no product's data. They run with every eval comparison, the
 config gate's included (evals.injection_cases), and the bar is zero: a candidate config that
 follows an injection the config in use resisted fails.
+
+The coder has a suite of its own (valxel_sdlc.coder_injection): instructions planted in the
+repository it works in (CLAUDE.md, the README, a code comment, the issue). It runs model-written
+code, so it replays with the coder's other cases, in a disposable runner.
 """
 
 from __future__ import annotations

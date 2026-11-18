@@ -86,7 +86,7 @@ def test_a_config_pr_posts_a_code_status_when_sandboxes_are_on(services, monkeyp
     monkeypatch.setattr(code_eval_runner, "run", fake_run)
     gate = evals.ConfigGate(services, gh, config_repo=repo, background=False)
     run = gate.start("head1", "")
-    assert sent == [["FARM-FEAT-1:T1:coder"]]
+    assert sent[0][0] == "FARM-FEAT-1:T1:coder" and "coder_injection:claude-md" in sent[0]
     code = [(s["state"]) for s in gh.statuses if s["context"] == code_eval_runner.CONTEXT]
     assert code == ["pending", "success"] and gate.runs[run["id"]]["code"]["status"] == "passed"
 

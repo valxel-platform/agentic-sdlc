@@ -71,7 +71,8 @@ from typing import Protocol
 log = logging.getLogger(__name__)
 
 DOC_PHASES = ("discovery", "spec", "design", "architecture", "plan")
-CODE_PHASES = ("coder", "reviewer")  # replayed only in a disposable runner (valxel_sdlc.code_evals)
+# Replayed only in a disposable runner: model-written code runs (valxel_sdlc.code_evals, coder_injection).
+CODE_PHASES = ("coder", "reviewer", "coder_injection")
 # What a replay doesn't need from the phase's context, or must not inherit from the run it came from.
 _DROP = ("feedback", "prior_findings", "simulate_faults", "budget_remaining_usd", "pilot", "deployments", "quality")
 
@@ -324,6 +325,10 @@ def replay(services, case: EvalCase, *, pairwise: bool = False) -> dict:
         from .injection import replay as replay_injection
 
         return _replay_with(services, case, lambda s, c: {k: v for k, v in replay_injection(s, c).items() if k != "cost_usd"})
+    if case.phase == "coder_injection":
+        from . import coder_injection
+
+        return coder_injection.replay(services, case)
     if case.phase in CODE_PHASES:
         from . import code_evals
 
@@ -699,7 +704,7 @@ class ConfigGate:
         cases = _code_cases(self.services, self.data_classes, self.limit_per_phase)
         ctx = code_eval_runner.CONTEXT
         if not cases:
-            self._status(run["ref"], "success", "No merged coder or reviewer cases yet: nothing to compare", run["id"], ctx)
+            self._status(run["ref"], "success", "No coder or reviewer cases: nothing to compare", run["id"], ctx)
             return
         self._status(run["ref"], "pending", "Replaying merged changes in a sandbox under this config", run["id"], ctx)
         try:
@@ -720,6 +725,10 @@ run_cases = run  # the gate's name for `run`, which its own method shadows
 
 
 def _code_cases(services, data_classes, limit_per_phase) -> list:
-    """Coder and reviewer cases labeled with a merged change: what a code replay is checked against."""
-    out = services.evals.cases(phases=CODE_PHASES, data_classes=data_classes, limit_per_phase=limit_per_phase)
-    return [c for c in out if (c.label or {}).get("decision") == "merged" and (c.label or {}).get("merge_sha")]
+    """Coder and reviewer cases labeled with a merged change (what a code replay is checked against),
+    and the coder's prompt-injection suite (valxel_sdlc.coder_injection), which every run includes."""
+    from . import coder_injection
+
+    out = services.evals.cases(phases=("coder", "reviewer"), data_classes=data_classes, limit_per_phase=limit_per_phase)
+    merged = [c for c in out if (c.label or {}).get("decision") == "merged" and (c.label or {}).get("merge_sha")]
+    return merged + coder_injection.cases()
