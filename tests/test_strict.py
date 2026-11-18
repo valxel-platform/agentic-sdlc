@@ -11,7 +11,7 @@ from valxel_sdlc.integrations.worktracking import StubTracker
 from valxel_sdlc.web.auth import AuthConfig
 
 LIVE = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SERVICENOW_AUTH_CLN": "Basic x",
-        "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes"}
+        "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway"}
 
 
 class LiveTracker:
@@ -60,7 +60,7 @@ def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services, mon
     monkeypatch.setenv("VALXEL_SECRETS_DIR", str(tmp_path))
     (tmp_path / "VALXEL_SERVICENOW_AUTH_CLN").write_text("Basic x")
     live_ish(services)
-    env = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files", "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes",
+    env = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files", "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway",
            "VALXEL_SECRETS_DIR": str(tmp_path)}
     gaps = strict.check(services, auth_mode="github", env=env)
     assert gaps == []
@@ -104,7 +104,7 @@ def test_one_missing_token_is_enough_to_refuse(services, monkeypatch):
     services.snapshot = with_servicenow
     with pytest.raises(strict.StrictModeError, match="VALXEL_SERVICENOW_AUTH_CLN is not set"):
         strict.check(services, auth_mode="github", env={"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue",
-                                                        "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes"})
+                                                        "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway"})
     gaps = strict.check(services, auth_mode="github", env=LIVE)  # starts; only warns that secrets are env vars
     assert [g.split(":")[0] for g in gaps] == ["VALXEL_SECRET_STORE is not set"]
 

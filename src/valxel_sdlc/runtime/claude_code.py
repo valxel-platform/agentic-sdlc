@@ -23,6 +23,7 @@ comes from the Usage and Cost API. Not exercised by the offline test suite.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import json
 import logging
@@ -30,7 +31,7 @@ import os
 import time
 from pathlib import Path
 
-from .. import plugins, sessions
+from .. import gateway_sessions, plugins, sessions
 from ..gateway import ModelGateway, ModelResponse, PolicyViolation, ProviderUnavailable, is_transient
 from ..sandbox import claude_sandbox, claude_settings, session_env
 from .base import AgentResult, AgentTask
@@ -121,8 +122,6 @@ class ClaudeCodeRuntime:
             raise
 
     async def _run(self, task: AgentTask, model: str) -> AgentResult:
-        from claude_agent_sdk import ClaudeAgentOptions  # lazy import
-
         role = self.gateway.settings.role(task.role)
         import tempfile
 
@@ -132,33 +131,47 @@ class ClaudeCodeRuntime:
             home = (task.sandbox or {}).get("home") or tmp_home
             kwargs = session_options(task, role, model, cwd=self.cwd, plugin_dirs=self.plugins_for(task.role), home=home)
             store = sessions.TranscriptStore(self.gateway.settings.artifact_dir)
-            fid = task.tags.feature_id
-            from ..sandbox import remote
+            with contextlib.ExitStack() as stack:
+                if gateway_sessions.configured():  # a short-lived gateway token instead of the tool's key
+                    try:
+                        token_env = stack.enter_context(gateway_sessions.session_token(
+                            task.tags, model, kwargs.get("max_budget_usd") or session_cap(task, role),
+                            int(os.environ.get("VALXEL_SESSION_TIMEOUT_S", "3600")) + 600))
+                    except gateway_sessions.GatewayUnavailable as exc:
+                        raise ProviderUnavailable(f"claude_code: {exc}") from exc
+                    kwargs["env"] = {**kwargs["env"], **token_env}
+                return await self._session(task, model, kwargs, home, tmp_home, store)
 
-            if remote():  # in a sandbox of its own (valxel_sdlc.session_runner)
-                return self._run_remote(task, model, kwargs, store, tmp_home)
-            if task.resume:
-                try:  # the kept transcript where Claude Code looks for this working directory's sessions
-                    store.restore(fid, task.resume, sessions.claude_project_dir(home, kwargs["cwd"] or os.getcwd())
-                                  / f"{task.resume}.jsonl")
-                    res = await self._query(task, model, ClaudeAgentOptions(**kwargs, resume=task.resume),
-                                            session_mode="resumed")
-                    res.resumed = True
-                except ProviderUnavailable:
-                    raise
-                except Exception as exc:  # gone, or Claude Code can't find it: start fresh, from the handoff
-                    log.warning("%s %s/%s: couldn't resume session %s (%s); starting fresh", fid, task.phase,
-                                task.role, task.resume, exc)
-                    fresh = dataclasses.replace(task, resume="", session_mode="handoff" if task.fresh_tail else "fresh",
-                                                layers=dataclasses.replace(task.layers, tail=task.fresh_tail or task.layers.tail))
-                    res = await self._query(fresh, model, ClaudeAgentOptions(**kwargs), session_mode=fresh.session_mode)
-            else:
-                res = await self._query(task, model, ClaudeAgentOptions(**kwargs), session_mode=task.session_mode)
-            if task.keep_transcript and res.session_id:
-                found = sessions.find_transcript(home, res.session_id)
-                if not (found and store.keep(fid, res.session_id, found)):
-                    log.info("%s %s/%s: no transcript to keep for session %s", fid, task.phase, task.role, res.session_id)
-            return res
+    async def _session(self, task: AgentTask, model: str, kwargs: dict, home: str, tmp_home: str, store) -> AgentResult:
+        from claude_agent_sdk import ClaudeAgentOptions  # lazy import
+
+        fid = task.tags.feature_id
+        from ..sandbox import remote
+
+        if remote():  # in a sandbox of its own (valxel_sdlc.session_runner)
+            return self._run_remote(task, model, kwargs, store, tmp_home)
+        if task.resume:
+            try:  # the kept transcript where Claude Code looks for this working directory's sessions
+                store.restore(fid, task.resume, sessions.claude_project_dir(home, kwargs["cwd"] or os.getcwd())
+                              / f"{task.resume}.jsonl")
+                res = await self._query(task, model, ClaudeAgentOptions(**kwargs, resume=task.resume),
+                                        session_mode="resumed")
+                res.resumed = True
+            except ProviderUnavailable:
+                raise
+            except Exception as exc:  # gone, or Claude Code can't find it: start fresh, from the handoff
+                log.warning("%s %s/%s: couldn't resume session %s (%s); starting fresh", fid, task.phase,
+                            task.role, task.resume, exc)
+                fresh = dataclasses.replace(task, resume="", session_mode="handoff" if task.fresh_tail else "fresh",
+                                            layers=dataclasses.replace(task.layers, tail=task.fresh_tail or task.layers.tail))
+                res = await self._query(fresh, model, ClaudeAgentOptions(**kwargs), session_mode=fresh.session_mode)
+        else:
+            res = await self._query(task, model, ClaudeAgentOptions(**kwargs), session_mode=task.session_mode)
+        if task.keep_transcript and res.session_id:
+            found = sessions.find_transcript(home, res.session_id)
+            if not (found and store.keep(fid, res.session_id, found)):
+                log.info("%s %s/%s: no transcript to keep for session %s", fid, task.phase, task.role, res.session_id)
+        return res
 
     def _run_remote(self, task: AgentTask, model: str, kwargs: dict, store, scratch: str) -> AgentResult:
         """The session in its own sandbox: hand over the spec, account for the outcome here."""

@@ -1657,6 +1657,19 @@ sandboxes on, its roles (the coder's fallbacks, the reviewer's second opinion) a
 run in the tool's container. `local` (the default) runs sessions in the tool's process, for
 development.
 
+**A session's model credential is a short-lived gateway token, not the tool's key**
+(`valxel_sdlc/gateway_sessions.py`; strict mode requires it in live mode). With
+`VALXEL_LLM_GATEWAY_URL` and `VALXEL_LLM_GATEWAY_API_KEY` (a secret, through the secret store) set,
+the tool mints a token from the LLM gateway (ss-llm-gateway, `POST /v1/sessions`) for each Claude Code
+session and gives the session the gateway's address and the token instead of `ANTHROPIC_API_KEY`.
+The token expires shortly after the session's own deadline, may spend no more than the session's cap,
+may use only the session's model and `VALXEL_LLM_GATEWAY_SESSION_MODELS` (default `claude-haiku-*`,
+for Claude Code's housekeeping), carries the feature's labels, and is minted for the feature's data
+class, so a gateway set up for less refuses a PHI session. The tool revokes it when the session ends
+and logs what it spent. If the gateway can't mint one, the session doesn't start (the provider counts
+as unavailable, so the role's fallbacks apply). The tool's own key policy entry needs a `sessions`
+grant.
+
 **Only images the platform's build signed run** (`platform/openchoreo/` in the platform governance
 repo). The pipeline builds only merge commits that passed the gates. The build scans the image
 (high and critical CVEs fail it), writes a CycloneDX SBOM, signs the image with a KMS key only the
