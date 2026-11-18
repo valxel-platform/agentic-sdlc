@@ -54,6 +54,7 @@ class GateDecision(TypedDict, total=False):
     waited_minutes: float  # how long the question waited for this decision
     shadow_auto: dict  # pilot: whether the trial rule would have approved it without a person
     changed: bool  # an escalation resolved with the person's own version of the document
+    via: str  # how the person decided when not in the web app: mcp (their assistant, api/mcp.py)
 
 
 class FeatureState(TypedDict, total=False):

@@ -118,6 +118,16 @@ GitHub stays on its own OAuth app, since GitHub isn't a standard OpenID provider
 3. Choose `VALXEL_AUTH=github` (GitHub, plus Cognito when it's set) or `VALXEL_AUTH=cognito` (Cognito
    only, plus GitHub when its OAuth app is set).
 
+**People's assistants over MCP.** With `VALXEL_MCP_CLIENT_IDS` set to the stack's `McpClientId`
+output, the tool serves MCP at `<VALXEL_PUBLIC_URL>/mcp` (`src/valxel_sdlc/api/mcp.py`). An assistant
+signs its person in through the same user pool (the client id is entered in the assistant), then
+reads their inbox, features, documents and traces, starts intents, and decides gates, as them:
+each tool calls the API in-process with that person's rights. Only a person's token gets in: one
+issued to the MCP client, with a username and the openid scope. A client-credentials token is
+refused for everything. A decision records the person, with `via: mcp`. An access token carries no
+proof of a passkey, so approving through a workspace group is done in the web app; batch approval
+isn't offered.
+
 How it works:
 - **Flow and checks.** Sign-in is OIDC's code flow with PKCE, a state and a nonce. The ID token's
   signature is checked against the pool's published keys, along with its issuer, audience, expiry

@@ -46,7 +46,7 @@ class User:
     orgs: list[str] = field(default_factory=list)
     teams: list[str] = field(default_factory=list)  # "org/team-slug"
     email: str = ""  # verified, when the sign-in provides one
-    idp: str = "github"  # how they signed in: github, cognito or dev
+    idp: str = "github"  # how they signed in: github, cognito or dev; mcp for a call from api/mcp.py
     # Two factors at sign-in: GitHub (which requires two-factor sign-in of everyone who contributes
     # code) and dev sign-in count; through Cognito, only a passkey (web/identity.py). A workspace's
     # admins and group approvers need it to act (api/app.py).

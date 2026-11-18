@@ -18,6 +18,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import FileResponse
@@ -174,11 +175,16 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             # run queue, API processes leave that to the workers (valxel worker): they run no agents.
             if os.environ.get("VALXEL_PROCESS", "").lower() != "api":
                 state["engine"].start_watcher(float(os.environ.get("VALXEL_WATCH_INTERVAL_S", "30")))
-        yield
+        if mcp_server is not None:  # the MCP sessions live as long as the app
+            async with mcp_server.session_manager.run():
+                yield
+        else:
+            yield
         state["engine"].stop_watcher()
         if state["pool"] is not None:
             state["pool"].close()
 
+    mcp_server = None
     app = FastAPI(title="Valxel SDLC", version="0.2.0", lifespan=lifespan)
 
     @app.middleware("http")
@@ -198,6 +204,21 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     for group in (auth_routes, signals, evals, features, findings, workspaces, reports, threads, intake, events):
         api.include_router(group.build(ctx))
     app.include_router(api)
+
+    # --- MCP (api/mcp.py): a person's assistant, acting as them through the API above ---
+    from . import mcp as mcp_api
+
+    mcp_settings = mcp_api.settings_from_env(auth)
+    if mcp_settings is not None:
+        from starlette.routing import Route
+
+        verifier = mcp_api.PersonVerifier(mcp_settings["issuer"], mcp_settings["domain"], mcp_settings["client_ids"])
+        mcp_server = mcp_api.build(app, ctx.signer, verifier, mcp_settings["resource"])
+        mcp_app = mcp_server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, json_response=True,
+                                                 host=urlparse(auth.public_url).hostname or "127.0.0.1")
+        # Its own routes (with its bearer-token middleware), ahead of the web app's catch-all.
+        app.router.routes[:0] = [Route("/mcp", endpoint=mcp_app),
+                                 Route("/.well-known/oauth-protected-resource/mcp", endpoint=mcp_app)]
 
     # --- web app ---
     if web_dist and (web_dist / "index.html").is_file():

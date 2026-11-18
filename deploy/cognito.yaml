@@ -40,6 +40,13 @@ Parameters:
     Default: ""
     Description: The From address for sign-in codes, an address of the SES identity, e.g. Valxel <no-reply@valxel.dev>
 
+  McpCallbackUrls:
+    Type: CommaDelimitedList
+    Default: "https://claude.ai/api/mcp/auth_callback"
+    Description: >-
+      Where MCP clients (people's assistants) return after sign-in, for the MCP client below.
+      Its id is VALXEL_MCP_CLIENT_IDS; empty that variable to leave /mcp off.
+
 Conditions:
   WithGoogle: !Not [!Equals [!Ref GoogleClientId, ""]]
   WithSes: !Not [!Equals [!Ref SesIdentityArn, ""]]
@@ -154,6 +161,35 @@ Resources:
         RefreshToken: days
     DependsOn: [Domain]
 
+  # People's assistants reach Valxel at <PublicUrl>/mcp as the person who signed in (api/mcp.py).
+  # A public client: PKCE instead of a secret, and the code flow only, so every token it gets
+  # belongs to a person. No client-credentials flow: an agent with no person behind it never gets in.
+  McpClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: valxel-sdlc-mcp
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile]
+      CallbackURLs: !Ref McpCallbackUrls
+      SupportedIdentityProviders: !If
+        - WithGoogle
+        - [COGNITO, Google]
+        - [COGNITO]
+      ExplicitAuthFlows: [ALLOW_USER_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 1
+      TokenValidityUnits:
+        IdToken: hours
+        AccessToken: hours
+        RefreshToken: days
+    DependsOn: [Domain]
+
   Branding:
     Type: AWS::Cognito::ManagedLoginBranding
     Properties:
@@ -178,6 +214,9 @@ Outputs:
   CognitoIssuer:
     Description: VALXEL_COGNITO_ISSUER
     Value: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}"
+  McpClientId:
+    Description: VALXEL_MCP_CLIENT_IDS
+    Value: !Ref McpClient
   ClientSecretArn:
     Description: Where VALXEL_COGNITO_CLIENT_SECRET is kept
     Value: !Ref ClientSecret

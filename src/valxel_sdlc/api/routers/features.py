@@ -267,6 +267,8 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                 raise HTTPException(403, f"Only {', '.join(who) or 'the traceability approvers'} can release "
                                     "with traceability gaps")
         decision = body.model_dump(exclude_none=True) | {"approver": user.login}
+        if user.idp == "mcp":  # through the person's assistant (api/mcp.py), as its signed session says
+            decision["via"] = "mcp"
         if decision.get("comments"):  # line comments go to the agents as part of the feedback
             from ...decisions import with_comments
 

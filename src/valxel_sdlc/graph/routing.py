@@ -46,6 +46,8 @@ def _record(gate: str, phase: str, d: dict, lane: str = "") -> GateDecision:
         rec["reason"] = str(d["reason"])
     if d.get("waited_minutes") is not None:
         rec["waited_minutes"] = round(float(d["waited_minutes"]), 2)
+    if d.get("via"):
+        rec["via"] = str(d["via"])
     return rec
 
 
