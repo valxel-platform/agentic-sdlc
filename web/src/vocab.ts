@@ -1,53 +1,99 @@
 // Names people see. Keep them identical everywhere: a gate is always called by these words.
 export const PHASES: Record<string, string> = {
-  discovery: "Discovery", spec: "Spec", design: "Design", architecture: "Architecture",
-  plan: "Plan", build: "Build", release: "Release", operate: "Operate", delivery: "Delivery", security: "Security", provisioning: "Repository setup",
+  discovery: "Discovery",
+  spec: "Spec",
+  design: "Design",
+  architecture: "Architecture",
+  plan: "Plan",
+  build: "Build",
+  release: "Release",
+  operate: "Operate",
+  delivery: "Delivery",
+  security: "Security",
+  provisioning: "Repository setup",
   fit: "Design and architecture fit",
-  brief: "Product brief", product_plan: "Architecture and roadmap", setup: "Setup",
+  brief: "Product brief",
+  product_plan: "Architecture and roadmap",
+  setup: "Setup",
 };
 
 const FAILED: Record<string, string> = {
-  build: "OpenChoreo build", change_set: "Change set's own environment", dev: "Dev deploy", staging: "Staging deploy", production: "Production deploy",
+  build: "OpenChoreo build",
+  change_set: "Change set's own environment",
+  dev: "Dev deploy",
+  staging: "Staging deploy",
+  production: "Production deploy",
   rollout: "Store rollout health check",
 };
 
 export const WAITS: Record<string, string> = {
-  release_ready: "Waiting for its features", release_train: "Waiting for its release train",
+  release_ready: "Waiting for its features",
+  release_train: "Waiting for its release train",
   incident_recovery: "Waiting for alerts to resolve",
-  ci: "Waiting for CI", build: "Building in OpenChoreo", change_set: "Testing the change set together before merging",
+  ci: "Waiting for CI",
+  build: "Building in OpenChoreo",
+  change_set: "Testing the change set together before merging",
   dev: "Deploying to dev",
-  staging: "Deploying to staging", production: "Deploying to production",
+  staging: "Deploying to staging",
+  production: "Deploying to production",
   rollout: "Rolling out in the stores",
 };
 
 export const GATES: Record<string, { name: string; question: string; approve: string }> = {
   g0: { name: "Initiative approval", question: "Commit to this initiative?", approve: "Approve initiative" },
   brief: { name: "Brief", question: "Is this the product we want?", approve: "Approve brief" },
-  product: { name: "Product", question: "Approve the architecture and roadmap?", approve: "Approve and set up" },
+  product: {
+    name: "Product",
+    question: "Approve the architecture and roadmap?",
+    approve: "Approve and set up",
+  },
   release: { name: "Release", question: "Approve this release?", approve: "Approve release" },
-  incident: { name: "Incident", question: "What should we do about this incident?", approve: "Approve actions" },
-  postmortem: { name: "Postmortem", question: "Close the incident with this postmortem?", approve: "Close incident" },
+  incident: {
+    name: "Incident",
+    question: "What should we do about this incident?",
+    approve: "Approve actions",
+  },
+  postmortem: {
+    name: "Postmortem",
+    question: "Close the incident with this postmortem?",
+    approve: "Close incident",
+  },
   g1: { name: "Idea approval", question: "Is this worth building?", approve: "Approve the idea" },
   g2: { name: "Scope approval", question: "Is the scope right?", approve: "Approve the scope" },
   g3: { name: "Design approval", question: "Is the experience right?", approve: "Approve the design" },
-  g4: { name: "Architecture approval", question: "Approve the architecture?", approve: "Approve the architecture" },
+  g4: {
+    name: "Architecture approval",
+    question: "Approve the architecture?",
+    approve: "Approve the architecture",
+  },
   g5: { name: "Code approval", question: "Merge these changes?", approve: "Approve the code" },
   g6: { name: "Release approval", question: "Release to production?", approve: "Release to everyone" },
 };
 
 export const ARTIFACTS: Record<string, string> = {
-  OPP: "Opportunity brief", PRD: "Product spec", UX: "Design spec", HLD: "Architecture",
-  PLAN: "Plan", BUILD: "Build", REL: "Release", OPS: "Operating report",
+  OPP: "Opportunity brief",
+  PRD: "Product spec",
+  UX: "Design spec",
+  HLD: "Architecture",
+  PLAN: "Plan",
+  BUILD: "Build",
+  REL: "Release",
+  OPS: "Operating report",
 };
 
 export const RISK: Record<string, string> = {
-  low: "Low risk", high: "High risk", regulated: "Regulated",
+  low: "Low risk",
+  high: "High risk",
+  regulated: "Regulated",
 };
 
 export const SEVERITY: Record<string, string> = { sev1: "SEV1", sev2: "SEV2", sev3: "SEV3", sev4: "SEV4" };
 export const ACTION_LABEL: Record<string, string> = {
-  flag_off: "Turn the feature's flag off", rollback: "Roll back to the previous release", hotfix: "Start a hotfix",
-  intent_change: "Change the intent", monitor: "Keep watching",
+  flag_off: "Turn the feature's flag off",
+  rollback: "Roll back to the previous release",
+  hotfix: "Start a hotfix",
+  intent_change: "Change the intent",
+  monitor: "Keep watching",
 };
 
 export const HORIZONS: Record<string, string> = { now: "Now", next: "Next", later: "Later" };
@@ -56,9 +102,17 @@ export const MODELS: Record<string, string> = { launch: "Launch group", train: "
 /** Where a thread lives in the app: features, initiatives and releases share ids like CLN-INI-1. */
 export function threadPath(id: string): string {
   const kind = id.split("-")[1];
-  return kind === "INI" ? `/initiatives/${id}` : kind === "REL" ? `/releases/${id}` : kind === "PRD" ? `/products/${id}`
-    : kind === "REV" ? `/reviews/${id}`
-    : kind === "INC" ? `/incidents/${id}` : `/features/${id}`;
+  return kind === "INI"
+    ? `/initiatives/${id}`
+    : kind === "REL"
+      ? `/releases/${id}`
+      : kind === "PRD"
+        ? `/products/${id}`
+        : kind === "REV"
+          ? `/reviews/${id}`
+          : kind === "INC"
+            ? `/incidents/${id}`
+            : `/features/${id}`;
 }
 
 export function gateLabel(gate?: string): string {
@@ -74,11 +128,16 @@ export function gateLabel(gate?: string): string {
   return g ? `${g.name} (${gate.toUpperCase()})` : gate.toUpperCase();
 }
 
-export function waitingLabel(item: { type: string; gate?: string; phase?: string; lane?: string; wait?: string }, ownLane?: string): string {
+export function waitingLabel(
+  item: { type: string; gate?: string; phase?: string; lane?: string; wait?: string },
+  ownLane?: string,
+): string {
   if (item.type === "external") return WAITS[item.wait ?? ""] ?? "Waiting on delivery";
   if (item.type === "escalation" && item.phase === "security") return "Security findings: needs a person";
-  if (item.type === "escalation" && item.phase === "provisioning") return "Repository setup failed: needs a person";
-  if (item.type === "escalation" && item.phase === "delivery") return `${FAILED[item.wait ?? ""] ?? "Delivery"} failed: needs a person`;
+  if (item.type === "escalation" && item.phase === "provisioning")
+    return "Repository setup failed: needs a person";
+  if (item.type === "escalation" && item.phase === "delivery")
+    return `${FAILED[item.wait ?? ""] ?? "Delivery"} failed: needs a person`;
   if (item.type === "escalation") return `${PHASES[item.phase ?? ""] ?? item.phase} needs a person`;
   if (item.type === "handback") return `${gateLabel(item.gate)}: taken over, waiting for hand-back`;
   const lane = item.lane && ownLane && item.lane !== ownLane ? ` (${item.lane})` : "";
