@@ -17,14 +17,20 @@ what it was asked to:
 
 Around it: an OTLP collector, an OFREP flag service, an OpenID provider whose tokens the app accepts
 ({token: {claims}} on a step), and an Anthropic-compatible model API answering every call with
-`model_reply`. `ready` and `metrics` (a path, or a whole URL for a management port) say where the
+`model_reply`. An app that serves no HTTP names a line its output prints once it's up instead
+(`ready_log`). A step may send a record to Kafka instead of a request (`produce: {topic, key,
+value}`; needs confluent-kafka). A job says `once: true`: it runs to the end (exit 0) instead of serving, and
+`events_from: logs` looks for its valxel.events summary line instead of /metrics. `ready` and `metrics` (a path, or a whole URL for a management port) say where the
 app answers when it's up and where its metrics are. In conformance.yaml, env values may name them: {otlp}, {ofrep}, {issuer}, {jwks},
-{model}, {audience}, and in later steps any value an earlier step saved (save: {name: "header:<name>"
+{model}, {audience}, {files} (a folder holding conformance.yaml's `files`, one file each: synthetic
+values the app reads from a folder, as it reads its mounted secrets when deployed), and in later steps any value an earlier step saved (save: {name: "header:<name>"
 | "json:<field>"}).
 
-A repo whose app needs a database or Kafka to start says so (`postgres: <image>`, `kafka: <image>`):
-with `image` they run as containers too, and {postgres} and {kafka} name them; with `local`, set
-CONFORMANCE_POSTGRES and CONFORMANCE_KAFKA instead.
+A repo whose app needs a database, Redis or Kafka says so (`postgres: <image>`, `redis: <image>`,
+`kafka: <image>`):
+with `image` they run as containers too, and {postgres} (and {postgres_jdbc} with {postgres_password} for a JVM), {redis} and {kafka} name them
+(the database's credentials only fill env, never a step); with
+`local`, set CONFORMANCE_POSTGRES, CONFORMANCE_REDIS and CONFORMANCE_KAFKA instead.
 
 Needs pyyaml, jsonschema and pyjwt[crypto]; exits 1 naming every check that failed.
 """
@@ -188,17 +194,51 @@ def _fill(value: Any, names: dict[str, str]) -> Any:
     return value
 
 
+FILES_MOUNT = "/run/conformance-files"
+
+
+def _files_dir(spec: dict) -> str:
+    """conformance.yaml's `files`, one file each: synthetic values the app reads from a folder, as it
+    reads its mounted secrets when deployed."""
+    d = tempfile.mkdtemp(prefix="conformance-files-")
+    for name, value in (spec.get("files") or {}).items():
+        if "/" in name or name.startswith("."):
+            raise ValueError(f"not a file name: {name!r}")
+        Path(d, name).write_text(str(value), encoding="utf-8")
+        os.chmod(Path(d, name), 0o644)  # the image's own user reads them
+    os.chmod(d, 0o755)
+    return d
+
+
 class App:
-    def __init__(self, spec: dict, env: dict[str, str], *, image: str = "", cmd: str = "") -> None:
-        self.spec, self.env, self.image, self.cmd = spec, env, image, cmd
+    def __init__(self, spec: dict, env: dict[str, str], *, image: str = "", cmd: str = "",
+                 files: str = "") -> None:
+        self.spec, self.env, self.image, self.cmd, self.files = spec, env, image, cmd, files
         self.log = Path(tempfile.mkstemp(prefix="conformance-", suffix=".log")[1])
         self.name = f"conformance-{uuid.uuid4().hex[:8]}"
         self.proc: subprocess.Popen | None = None
+
+    def run_once(self, timeout: float) -> int:
+        """A job: run to the end and return its exit code."""
+        if self.image:
+            args = ["docker", "run", "--name", self.name, "--network", "host", "--read-only",
+                    "--tmpfs", "/tmp:rw,size=64m", "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
+            if self.files:
+                args += ["-v", f"{self.files}:{FILES_MOUNT}:ro"]
+            for k, v in self.env.items():
+                args += ["-e", f"{k}={v}"]
+            args += [self.image, *self.spec.get("args", [])]
+            return subprocess.run(args, capture_output=True, timeout=timeout, check=False).returncode
+        with self.log.open("wb") as out:
+            return subprocess.run(shlex.split(self.cmd), env={**os.environ, **self.env}, stdout=out,
+                                  stderr=subprocess.STDOUT, timeout=timeout, check=False).returncode
 
     def start(self) -> None:
         if self.image:
             args = ["docker", "run", "-d", "--name", self.name, "--network", "host", "--read-only",
                     "--tmpfs", "/tmp:rw,size=64m", "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
+            if self.files:
+                args += ["-v", f"{self.files}:{FILES_MOUNT}:ro"]
             for k, v in self.env.items():
                 args += ["-e", f"{k}={v}"]
             args += [self.image, *self.spec.get("args", [])]
@@ -232,16 +272,21 @@ class App:
 
 
 def _http(method: str, url: str, body: Any = None, headers: dict[str, str] | None = None,
-          ) -> tuple[int, str, dict[str, str]]:
-    """A request to the app under test: http to this machine only."""
+          form: dict[str, str] | None = None) -> tuple[int, str, dict[str, str]]:
+    """A request to the app under test: http to this machine only. JSON, or a form when `form`."""
+    from urllib.parse import urlencode
+
     u = urlsplit(url)
     if u.scheme != "http" or u.hostname not in ("127.0.0.1", "localhost"):
         return 0, f"the suite only calls the app on this machine, not {u.scheme}://{u.hostname}", {}
-    data = json.dumps(body).encode() if body is not None else None
+    if form is not None:
+        data, ctype = urlencode(form).encode(), "application/x-www-form-urlencoded"
+    else:
+        data, ctype = (json.dumps(body).encode() if body is not None else None), "application/json"
     conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=30)
     try:
         conn.request(method, (u.path or "/") + (f"?{u.query}" if u.query else ""), body=data, headers={
-            **({"content-type": "application/json"} if data else {}), **(headers or {})})
+            **({"content-type": ctype} if data else {}), **(headers or {})})
         resp = conn.getresponse()
         return resp.status, resp.read().decode("utf-8", "replace"), {k.lower(): v for k, v in resp.getheaders()}
     except (OSError, http.client.HTTPException) as exc:
@@ -268,6 +313,19 @@ def _saved(how: str, text: str, headers: dict[str, str]) -> str:
 
 
 # --------------------------------------------------------------------------- checks
+
+def _produce(bootstrap: str, topic: str, key: str, value: Any) -> None:
+    """One record to Kafka, acknowledged (needs confluent-kafka beside the suite)."""
+    from confluent_kafka import Producer
+
+    producer = Producer({"bootstrap.servers": bootstrap, "acks": "all"})
+    errors: list[Any] = []
+    payload = value if isinstance(value, str) else json.dumps(value)
+    producer.produce(topic, key=key.encode() or None, value=payload.encode(),
+                     on_delivery=lambda err, _msg: errors.append(err) if err else None)
+    if producer.flush(30) or errors:
+        raise RuntimeError(f"not acknowledged: {errors[0] if errors else 'timeout'}")
+
 
 def audit_records(logs: str) -> list[dict]:
     """Every valxel.audit.v1 event in the logs: a JSON line, or a JSON log line whose message is one."""
@@ -311,6 +369,12 @@ def check(name: str, svc: Services, app: App, base: str, problems: list[str]) ->
         if not n:
             problems.append("tracing: no spans reached the collector")
         return f"{n} exports"
+    if name == "events" and app.spec.get("events_from") == "logs":
+        lines = [ln for ln in app.logs().splitlines() if "valxel.events {" in ln]
+        if not lines:
+            problems.append("events: no valxel.events summary line in the app's output")
+            return "missing"
+        return f"{len(lines)} summary lines"
     if name == "events":
         url = app.spec.get("metrics", "/metrics")
         status, text, _ = _http("GET", url if url.startswith("http") else base + url)
@@ -327,26 +391,38 @@ def check(name: str, svc: Services, app: App, base: str, problems: list[str]) ->
     return "unknown"
 
 
-PG_PORT, KAFKA_PORT = 55432, 59092
+PG_PORT, KAFKA_PORT, REDIS_PORT = 55432, 59092, 56379
 
 
-def _backing(spec: dict, *, image: str, postgres: str, kafka: str) -> tuple[dict[str, str], list[str]]:
-    """{postgres} and {kafka}: what --cmd was given, or containers next to the image's."""
-    names, started = {}, []
+def _backing(spec: dict, *, image: str, postgres: str,
+             kafka: str) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    """{postgres}, {redis} and {kafka}: what --cmd was given, or containers next to the image's. The
+    database's credentials come back apart: they fill the app's environment, never a step."""
+    names, creds, started = {}, {}, []
     if spec.get("postgres"):
         if postgres:
-            names["postgres"] = postgres
+            creds["postgres"] = postgres
         elif image:
             name = f"conformance-pg-{uuid.uuid4().hex[:6]}"
             password = secrets.token_hex(16)  # this run's only, for a database that lives as long as it
             subprocess.run(["docker", "run", "-d", "--name", name, "--network", "host", "-e", f"POSTGRES_PASSWORD={password}",
                             "-e", f"PGPORT={PG_PORT}", spec["postgres"]], check=True, capture_output=True)
             started.append(name)
-            names["postgres"] = f"postgresql://postgres:{password}@127.0.0.1:{PG_PORT}/postgres"
+            creds["postgres"] = f"postgresql://postgres:{password}@127.0.0.1:{PG_PORT}/postgres"
+            # The same database for a JVM: a JDBC URL, with the user and password apart.
+            names["postgres_jdbc"] = f"jdbc:postgresql://127.0.0.1:{PG_PORT}/postgres"
+            creds["postgres_password"] = password
             for _ in range(60):
                 if subprocess.run(["docker", "exec", name, "pg_isready", "-p", str(PG_PORT)], capture_output=True, check=False).returncode == 0:
                     break
                 time.sleep(1)
+    if spec.get("redis"):
+        if image:
+            name = f"conformance-redis-{uuid.uuid4().hex[:6]}"
+            subprocess.run(["docker", "run", "-d", "--name", name, "--network", "host", spec["redis"],
+                            "redis-server", "--port", str(REDIS_PORT)], check=True, capture_output=True)
+            started.append(name)
+        names["redis"] = os.environ.get("CONFORMANCE_REDIS", "") if not image else f"redis://127.0.0.1:{REDIS_PORT}"
     if spec.get("kafka"):
         if kafka:
             names["kafka"] = kafka
@@ -363,42 +439,79 @@ def _backing(spec: dict, *, image: str, postgres: str, kafka: str) -> tuple[dict
             started.append(name)
             names["kafka"] = f"127.0.0.1:{KAFKA_PORT}"
             time.sleep(10)
-    return names, started
+    return names, creds, started
 
 
 def run(spec: dict, *, image: str = "", cmd: str = "", postgres: str = "", kafka: str = "") -> list[str]:
     svc = Services(spec.get("model_reply", "Done."), spec.get("audience", AUDIENCE))
-    backing, containers = _backing(spec, image=image, postgres=postgres, kafka=kafka)
-    names = {**svc.names(), **backing}
+    backing, creds, containers = _backing(spec, image=image, postgres=postgres, kafka=kafka)
+    files = _files_dir(spec) if spec.get("files") else ""
+    names = {**svc.names(), **backing, "files": (FILES_MOUNT if image else files) if files else ""}
     env = {"OTEL_EXPORTER_OTLP_ENDPOINT": svc.otlp_url, "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
            "OTEL_TRACES_SAMPLER": "always_on", "OTEL_BSP_SCHEDULE_DELAY": "200",
-           **{k: str(v) for k, v in _fill(spec.get("env") or {}, names).items()}}
+           **{k: str(v) for k, v in _fill(spec.get("env") or {}, {**names, **creds}).items()}}
     base = f"http://127.0.0.1:{spec.get('port', 8080)}"
-    app = App(spec, env, image=image, cmd=cmd)
+    app = App(spec, env, image=image, cmd=cmd, files=files)
     problems: list[str] = []
+    if spec.get("once"):  # a job: it runs, exits, and what it left behind is checked
+        try:
+            code = app.run_once(float(spec.get("start_s", 120)))
+            print(f"run: exit {code}")
+            if code != 0:
+                problems.append(f"the job exited {code}")
+            time.sleep(float(spec.get("settle_s", 1)))
+            for name in spec.get("checks") or []:
+                print(f"{name}: {check(name, svc, app, base, problems)}")
+        finally:
+            logs = app.logs()
+            app.stop()
+            svc.stop()
+            for name in containers:
+                subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False)
+        if problems:
+            print("\n--- the job's output (last 80 lines) ---\n" + "\n".join(logs.splitlines()[-80:]))
+        return problems
     app.start()
     try:
         ready = spec.get("ready", "/healthz")
         ready_url = ready if ready.startswith("http") else base + ready
+        last: tuple = (0, "", {})
         for _ in range(int(spec.get("start_s", 90))):
-            if _http("GET", ready_url)[0] == 200:
-                break
+            if spec.get("ready_log"):  # an app that serves nothing: ready when it says so
+                if spec["ready_log"] in app.logs():
+                    last = (200, "", {})
+                    break
+            else:
+                last = _http("GET", ready_url)
+                if last[0] == 200:
+                    break
             if not app.running():
+                problems.append("the app stopped before it was ready")
                 break
             time.sleep(1)
         else:
-            problems.append(f"the app didn't answer {ready}")
+            problems.append(f"the app didn't answer {ready} with 200 (last: {last[0]} {last[1][:200]})")
         if not problems:
             saved: dict[str, str] = {}
             for i, raw_step in enumerate(spec.get("steps") or []):
                 step = _fill(_fill(raw_step, names), saved)
+                if "produce" in step:  # a record on a topic the app reads, as another component would send it
+                    p = step["produce"]
+                    try:
+                        _produce(names["kafka"], p["topic"], str(p.get("key", "")), p["value"])
+                        print(f"step {i + 1}: produced to {p['topic']}")
+                    except Exception as exc:  # noqa: BLE001 - reported as the step's problem
+                        problems.append(f"step {i + 1} (produce to {p['topic']}): {type(exc).__name__}: {exc}")
+                    time.sleep(float(step.get("wait_s", 5)))
+                    continue
                 headers = dict(step.get("headers") or {})
                 if "token" in step:
                     headers["authorization"] = "Bearer " + svc.token(step["token"] or {})
                 expect = step.get("expect", [200, 201, 202, 204])
                 deadline = time.time() + float(step.get("within_s", 0))
                 while True:
-                    status, text, got = _http(step.get("method", "GET"), base + step["path"], step.get("json"), headers)
+                    status, text, got = _http(step.get("method", "GET"), base + step["path"], step.get("json"), headers,
+                                              form=step.get("form"))
                     ok = status in (expect if isinstance(expect, list) else [expect]) and \
                         all(s in text for s in step.get("contains") or [])
                     if ok or time.time() >= deadline:

@@ -79,7 +79,8 @@ capabilities:
   # --- audit trail
   conformance:
     area: observability
-    roles: deployed
+    # A web app is static files served to a browser: its behaviour is its e2e suite's (post-deploy).
+    roles: [provider, event-worker, knowledge, reporting, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, bff]
     says: "the built image, run as the platform runs it, emits a valid audit record, sends spans, counts product events and reads flags (conformance.yaml; CI's Conformance step)"
     marker: "conformance\\.py image"
   audit:
@@ -134,4 +135,5 @@ audit_event:
     valxel-platform/template-job: src/job/audit.py
     valxel-platform/template-knowledge: src/knowledge/audit.py
     valxel-platform/template-mcp-server: src/mcp_server/audit.py
+    valxel-platform/template-reporting: src/reporting/audit.py
     valxel-platform/template-service: src/main/java/com/valxel/service/audit/Auditor.java

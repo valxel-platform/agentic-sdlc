@@ -75,3 +75,29 @@ def test_audit_records_are_found_in_json_log_lines():
     line = json.dumps({"message": json.dumps({"type": "valxel.audit.v1", "id": "1"})})
     assert conformance.audit_records("noise\n" + line + "\n{\"type\": \"valxel.audit.v1\"}") == [
         {"type": "valxel.audit.v1", "id": "1"}, {"type": "valxel.audit.v1"}]
+
+
+JOB = r'''
+import json, os, sys, urllib.request
+secret = open(os.path.join(os.environ["FILES_DIR"], "signing")).read()
+event = {"type": "valxel.audit.v1", "data": {"actor": {"type": "service"}}}
+print(json.dumps({"message": json.dumps(event)}), flush=True)
+urllib.request.urlopen(urllib.request.Request(os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] + "/v1/traces",
+                       data=b"\x00", method="POST"), timeout=5).read()
+sys.exit(0 if secret == "s3" else 3)
+'''
+
+
+def test_a_job_runs_once_with_its_files_mounted(repo):
+    (repo / "job.py").write_text(JOB)
+    spec = {"once": True, "files": {"signing": "s3"}, "env": {"FILES_DIR": "{files}"}, "checks": ["audit", "tracing"]}
+    assert conformance.run(spec, cmd=f"{sys.executable} job.py") == []
+    bad = {**spec, "files": {"signing": "wrong"}}
+    assert conformance.run(bad, cmd=f"{sys.executable} job.py") == ["the job exited 3"]
+    with pytest.raises(ValueError, match="not a file name"):
+        conformance.run({**spec, "files": {"../x": "y"}}, cmd=f"{sys.executable} job.py")
+
+
+def test_requests_only_go_to_this_machine():
+    status, text, _ = conformance._http("GET", "http://example.com/")
+    assert status == 0 and "only calls the app on this machine" in text
