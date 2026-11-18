@@ -245,6 +245,9 @@ def _architecture(text: str, ctx: dict) -> list[str]:
 
     out += channels_design(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}],
                            ctx.get("data_class") or "general")
+    from ..agent_tools import design_findings as agent_tools_design
+
+    out += agent_tools_design(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
     from ..documents import design_findings as documents_design
 
     out += documents_design(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])

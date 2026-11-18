@@ -61,9 +61,10 @@ def _apply_capacity(services, snap, target: dict, env: str, *, repo: str = "", r
     """The environment's replicas, CPU, memory and autoscaling from the product's approved capacity
     plan (runtime/capacity.yaml); for a job, its schedule, time zone and time limit from job.yaml at
     the commit being deployed (jobs.py); for a connector, the webhook paths its route exposes and the
-    hosts its egress allows, from integration.yaml at that commit (connectors.py). The last
+    hosts its egress allows, from integration.yaml at that commit (connectors.py); for an agent, the
+    tools it may call and those it calls without a person, from agent.yaml (agent_tools.py). The last
     environment in the pipeline is production."""
-    from .. import channels, connectors, jobs
+    from .. import agent_tools, channels, connectors, jobs
     from ..environments import apply_capacity
 
     pipeline = list(target.get("pipeline") or [])
@@ -75,6 +76,8 @@ def _apply_capacity(services, snap, target: dict, env: str, *, repo: str = "", r
         extra = connectors.read_configs(services.github, repo, ref)
     elif repo and role == channels.ROLE:
         extra = channels.read_configs(services.github, repo, ref)
+    elif repo and role == agent_tools.ROLE:
+        extra = agent_tools.read_configs(services.github, repo, ref)
     try:
         return apply_capacity(services, snap, target, name, extra=extra)
     except Exception:

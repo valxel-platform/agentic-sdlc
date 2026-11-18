@@ -758,6 +758,24 @@ def channels_findings(services, ctx: dict, results: dict) -> list[str]:
     return build_findings(services.github, ctx.get("hld_text") or "", results, ctx.get("data_class") or "general")
 
 
+def agent_tools_instruction(ctx: dict, task: dict) -> str:
+    """An agent repo's agent.yaml from the approved HLD (agent_tools.py)."""
+    if task.get("role") != "agent":
+        return ""
+    from ..agent_tools import coder_instruction
+
+    return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
+
+
+def agent_tools_findings(services, ctx: dict, results: dict) -> list[str]:
+    """Deterministic: an agent repo's agent.yaml on its branch allows no more than its HLD line."""
+    if not any(r.get("role") == "agent" for r in results.values()):
+        return []
+    from ..agent_tools import build_findings
+
+    return build_findings(services.github, ctx.get("hld_text") or "", results)
+
+
 def documents_instruction(ctx: dict, task: dict) -> str:
     """A document intake's intake.yaml from the approved HLD (documents.py)."""
     if task.get("role") != "document-intake":
@@ -913,7 +931,7 @@ def coder_tail(ctx: dict, task: dict, fix: list[str], mine: list[dict], live: bo
           + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
           + contracts_instruction(ctx, task) + schedule_instruction(ctx, task)
           + integration_instruction(ctx, task) + sandbox_instruction(ctx, task)
-          + documents_instruction(ctx, task) + channels_instruction(ctx, task)
+          + documents_instruction(ctx, task) + channels_instruction(ctx, task) + agent_tools_instruction(ctx, task)
           + " The summary is the PR description: what changed, and every flag, audit record and event"
             " type the change uses. " + diary.CODER + " " + sessions_instruction()
           + "\n\n" + structured.instruction(structured.CoderReply))
@@ -1180,6 +1198,7 @@ def build_build_subgraph(services):
         findings += integration_findings(services, s["ctx"], results)
         findings += documents_findings(services, s["ctx"], results)
         findings += channels_findings(services, s["ctx"], results)
+        findings += agent_tools_findings(services, s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]
         lines += [f"- {rv['pr']['repo']}#{rv['pr']['number']} ({tid}) review {rv['score']:.2f}" + second_line(rv)
                   for tid, rv in sorted(reviews.items())]

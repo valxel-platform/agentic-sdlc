@@ -113,6 +113,11 @@ sequenceDiagram
                                (full sends the text; notice sends a sign-in notice. In a PHI product, full needs
                                 baa: a BAA with that provider. A channel repo is external in Endpoints: providers
                                 call its /channels/<kind> routes.)
+## Agent tools                 (only with an agent repo: the MCP tools it may call; approved at G4)
+- <org>/<repo>: read <server>__<tool>, ...|none; propose <server>__<tool>|<server>__*, ...|none
+                               (read tools run at once; proposed ones wait for a person to approve each
+                                call. Read tools are named exactly, never a wildcard, and only tools
+                                that change nothing.)
 ## Documents                   (only with a document-intake repo: what people upload and what's read from it; approved at G4)
 - <org>/<repo>: <type>; formats <pdf, png, jpeg, tiff>; max <N> MB; keep <N> days; dataset <name>; fields <name>*, <name>
                                (* marks a required field. The repo also needs two s3-buckets in Resources it reads,

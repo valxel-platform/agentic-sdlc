@@ -268,6 +268,10 @@ def architecture(ctx: dict, defective: bool) -> str:
     if chans:
         full = "slack full baa" if ctx.get("data_class") == "phi" else "slack full"
         lines += ["", "## Channels"] + [f"- {r['name']}: {full}; sms notice" for r in chans]
+    agents = [r for r in repos if r["role"] == "agent"]
+    if agents:
+        lines += ["", "## Agent tools"] + [f"- {r['name']}: read care__find_patient; propose care__create_task"
+                                           for r in agents]
     intakes = [r for r in repos if r["role"] == "document-intake"]
     if intakes:
         lines += ["", "## Documents"] + [

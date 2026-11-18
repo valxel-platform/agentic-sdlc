@@ -111,6 +111,11 @@ spec:
               type: object
               properties:
                 memory: { type: string, default: "512Mi" }
+        # The MCP tools the agent may call and those it calls without a person, as JSON lists: set
+        # by the Valxel SDLC on every deploy from the repo's agent.yaml (valxel_sdlc.agent_tools).
+        # Unset: none at all.
+        allowedTools: { type: string, default: "[]" }
+        readOnlyTools: { type: string, default: "[]" }
         # The database and event brokers outside the cluster (the data plane's private subnets),
         # set by the platform per environment.
         egressCIDRs: { type: array, items: { type: string }, default: [] }
@@ -148,6 +153,9 @@ spec:
               containers:
                 - name: main
                   image: ${workload.containers.main.image}
+                  env:
+                    - { name: AGENT_ALLOWED_TOOLS, value: '${environmentConfigs.allowedTools}' }
+                    - { name: AGENT_READ_ONLY_TOOLS, value: '${environmentConfigs.readOnlyTools}' }
                   resources: ${environmentConfigs.resources}
                   securityContext:
                     readOnlyRootFilesystem: true
