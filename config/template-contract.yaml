@@ -81,7 +81,7 @@ capabilities:
     area: observability
     roles: deployed
     says: "the built image, run as the platform runs it, emits a valid audit record, sends spans, counts product events and reads flags (conformance.yaml; CI's Conformance step)"
-    marker: "conformance\\.py --image"
+    marker: "conformance\\.py image"
   audit:
     area: audit
     roles: [provider, knowledge, reporting, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, bff]
