@@ -17,7 +17,7 @@ _SECRETS = tempfile.mkdtemp(prefix="strict-secrets-")
 Path(_SECRETS, "VALXEL_SERVICENOW_AUTH_CLN").write_text("Basic x")
 LIVE = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files",
         "VALXEL_SECRETS_DIR": _SECRETS, "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes",
-        "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_RUN_QUEUE": "postgres"}
+        "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app"}
 
 
 class LiveTracker:
@@ -66,7 +66,7 @@ def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services, mon
     monkeypatch.setenv("VALXEL_SECRETS_DIR", str(tmp_path))
     (tmp_path / "VALXEL_SERVICENOW_AUTH_CLN").write_text("Basic x")
     live_ish(services)
-    env = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files", "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_RUN_QUEUE": "postgres",
+    env = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files", "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app",
            "VALXEL_SECRETS_DIR": str(tmp_path)}
     gaps = strict.check(services, auth_mode="github", env=env)
     assert gaps == []
@@ -141,3 +141,17 @@ def test_the_server_refuses_to_start_in_strict_mode(monkeypatch, settings, servi
     monkeypatch.setenv("VALXEL_STRICT", "0")
     with TestClient(create_app(auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None)) as c:
         assert c.get("/api/healthz").json()["strict"] is False
+
+
+def test_live_delivery_needs_the_app_key_in_kms_and_nowhere_else(tmp_path):
+    key = tmp_path / "app.pem"
+    key.write_text("-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----\n")
+    live = {"VALXEL_DELIVERY": "live"}
+    assert strict.app_key_in_kms({**live, "VALXEL_GITHUB_APP_PRIVATE_KEY_FILE": str(key)}) == [(
+        "VALXEL_GITHUB_APP_KMS_KEY_ID is not set: the GitHub App's private key is held by this process "
+        "(VALXEL_GITHUB_APP_PRIVATE_KEY_FILE); import it into KMS as a sign-only key and set the key's id "
+        "(docs: GitHub App key in KMS)")]
+    both = strict.app_key_in_kms({**live, "VALXEL_GITHUB_APP_KMS_KEY_ID": "k", "VALXEL_GITHUB_APP_PRIVATE_KEY_FILE": str(key)})
+    assert both and "still held here too" in both[0]
+    assert strict.app_key_in_kms({**live, "VALXEL_GITHUB_APP_KMS_KEY_ID": "k"}) == []
+    assert strict.app_key_in_kms({"VALXEL_GITHUB_APP_PRIVATE_KEY_FILE": str(key)}) == []  # stub delivery: a laptop

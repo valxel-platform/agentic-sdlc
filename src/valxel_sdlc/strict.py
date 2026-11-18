@@ -63,6 +63,7 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
                    "`valxel worker` (valxel_sdlc.run_queue)")
     out += weak_secrets(env, database_url=s.database_url)
     out += secrets_in_environment(env, live=s.mode == "live")
+    out += app_key_in_kms(env)
     out += provisioning_split(env)
     secret_env = _secret_env(env)
     modes = integration_modes(services)
@@ -110,6 +111,31 @@ def secrets_in_environment(env, *, live: bool = False) -> list[str]:
     names = in_environment(env)
     return [f"VALXEL_SECRET_STORE is {kind}, but these secrets are also in the environment: {', '.join(names)}; "
             "keep them only in the store"] if names else []
+
+
+def app_key_in_kms(env) -> list[str]:
+    """The delivery GitHub App's private key acts for the tool in every product org: in live delivery it
+    is a sign-only KMS key the process can ask to sign, never key material it holds (a file or a secret
+    it could read, copy or leak), and none is left beside the KMS key (valxel_sdlc.signing)."""
+    from .secret_ring import current
+    from .signing import _names
+
+    if env.get("VALXEL_DELIVERY", "stub").lower() != "live":
+        return []
+    n = _names("delivery")
+    held = [n["file"]] if env.get(n["file"]) else []
+    try:
+        if current(n["pem"], env):
+            held.append(n["pem"])
+    except ValueError:
+        held.append(n["pem"] + " (unreadable)")
+    if not env.get(n["kms"]):
+        where = f" ({', '.join(held)})" if held else ""
+        return [(f"{n['kms']} is not set: the GitHub App's private key is held by this process{where}; "
+                 "import it into KMS as a sign-only key and set the key's id (docs: GitHub App key in KMS)")]
+    if held:
+        return [f"{n['kms']} is set, but the key is still held here too ({', '.join(held)}): remove it"]
+    return []
 
 
 def provisioning_split(env) -> list[str]:
