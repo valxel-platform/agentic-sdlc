@@ -37,6 +37,24 @@ def gate_notes(state: FeatureState, gate: str, phase: str) -> list[dict]:
     return sorted(notes, key=lambda n: ORDER.index(n["kind"]))
 
 
+def record_documents(services, state: dict, gate: str, approvers: str) -> dict:
+    """What the gate approved, into the product's governance repo (valxel_sdlc.records)."""
+    from .. import records
+
+    if not records.enabled():
+        return event(gate, "documents_not_recorded", "VALXEL_RECORD_DOCUMENTS is off")
+    try:
+        r = records.record(services, state, gate, approvers)
+    except Exception as exc:  # noqa: BLE001 — the record never holds a feature up
+        return event(gate, "documents_not_recorded", str(exc)[:500])
+    if r["status"] == "nothing":
+        return event(gate, "documents_recorded", "Nothing to record")
+    said = (f"{r['files']} files to {r['repo']}" + (f"; {r['left_out']} attachments listed, not committed"
+                                                     if r["left_out"] else "")
+            + ("" if r["status"] == "merged" else f"; the pull request waits for a merge ({r.get('why', '')})"))
+    return event(gate, "documents_recorded", said, url=r["url"], merged=r["status"] == "merged")
+
+
 def make_gate(gate: str, services):
     phase = GATE_PHASE[gate]
     kind = PHASE_SPECS[phase].kind
@@ -314,6 +332,7 @@ def make_gate(gate: str, services):
             update["events"].append(event(gate, "taken_over", f"{kind} written by {approvers}", approver=approvers,
                                           artifact=ref["id"]))
         update["events"] += learned
+        update["events"].append(record_documents(services, {**state, **human_update}, gate, approvers))
         if gate == "g4" and review is not None:
             # Approved designs are visible to every other feature of the product while in flight.
             design = {k: review[k] for k in ("builds_on", "supersedes", "contracts", "record")}

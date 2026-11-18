@@ -115,6 +115,7 @@ class GitHub(Protocol):
     # sha: the head the gates approved; GitHub refuses the merge if the branch has moved since.
     def merge(self, *, repo: str, number: int, actor: str, sha: str = "") -> dict: ...
     def put_file(self, *, repo: str, branch: str, path: str, content: str, message: str) -> dict: ...
+    def put_bytes(self, *, repo: str, branch: str, path: str, content: bytes, message: str) -> dict: ...  # a binary file
     def delete_file(self, *, repo: str, branch: str, path: str, message: str) -> bool: ...  # False: it wasn't there
     def checks(self, *, repo: str, sha: str) -> dict: ...  # {"state": pending|success|failure, "checks": [...]}
     def set_status(self, *, repo: str, sha: str, context: str, state: str, description: str,
@@ -206,6 +207,12 @@ class StubGitHub:
             self.files[(repo, branch, path)] = content
         return {"repo": repo, "branch": branch, "path": path, "message": message,
                 "sha": hashlib.sha1(content.encode()).hexdigest()}
+
+    def put_bytes(self, *, repo, branch, path, content, message) -> dict:
+        with self._lock:
+            self.files[(repo, branch, path)] = content
+        return {"repo": repo, "branch": branch, "path": path, "message": message,
+                "sha": hashlib.sha1(content).hexdigest()}
 
     def delete_file(self, *, repo, branch, path, message) -> bool:
         with self._lock:
@@ -432,15 +439,16 @@ class GitHubRest:
 
     # -- interface
     def put_file(self, *, repo, branch, path, content, message) -> dict:
+        return self.put_bytes(repo=repo, branch=branch, path=path, content=content.encode("utf-8"), message=message)
+
+    def put_bytes(self, *, repo, branch, path, content, message) -> dict:
         self.ensure_branch(repo, branch)
         qpath = quote(path)
         current = self._call("GET", repo, f"/contents/{qpath}?ref={quote(branch, safe='')}", ok404=True)
-        if current and isinstance(current, dict):
-            existing = base64.b64decode(current.get("content", "")).decode("utf-8", "replace")
-            if existing == content:
+        if current and isinstance(current, dict) and current.get("content") is not None:
+            if base64.b64decode(current.get("content", "")) == content:
                 return {"repo": repo, "branch": branch, "path": path, "sha": current["sha"], "unchanged": True}
-        body = {"message": message, "branch": branch,
-                "content": base64.b64encode(content.encode("utf-8")).decode()}
+        body = {"message": message, "branch": branch, "content": base64.b64encode(content).decode()}
         if current:
             body["sha"] = current["sha"]
         res = self._call("PUT", repo, f"/contents/{qpath}", body)

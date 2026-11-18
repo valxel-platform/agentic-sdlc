@@ -35,6 +35,6 @@ def test_the_gates_show_the_phase_notes_and_prs_carry_the_coders(engine, service
     assert state["diaries"]["spec"][0]["kind"] == "assumed" and state["diaries"]["plan"]
     build = state["diaries"]["build"]
     assert build and all(n["task"].startswith("TASK-") and n["repo"] for n in build)
-    bodies = [pr["body"] for pr in services.github.prs.values() if "body" in pr]
+    bodies = [pr["body"] for pr in services.github.prs.values() if "body" in pr and "records" not in (pr.get("labels") or [])]
     assert bodies and all("## Agent notes\n- Assumed:" in b for b in bodies)
     assert any(e["kind"] == "agent_notes" for e in engine.view(fid)["events"])
