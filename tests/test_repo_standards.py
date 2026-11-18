@@ -39,7 +39,10 @@ def existing(gh: StubGitHub, repo: str, *, ghas: bool = True, files: bool = True
                            ".github/scripts/datasets.py": "datasets.py",
                            ".github/scripts/odcs-json-schema-v3.2.0.json": "odcs-json-schema-v3.2.0.json",
                            ".github/scripts/report.py": "report.py",
-                           ".github/scripts/conformance.py": "conformance.py"}.items():
+                           ".github/scripts/conformance.py": "conformance.py",
+                           "contracts/events/valxel.events.v1.schema.json": "contracts/valxel.events.v1.schema.json",
+                           "contracts/events/valxel.flag_cohorts.v1.schema.json":
+                               "contracts/valxel.flag_cohorts.v1.schema.json"}.items():
             gh.files[(repo, "main", path)] = rs.standard_file(name)
     gh.repos[repo] = {"state": {"visibility": "public", "allow_squash_merge": True, "allow_merge_commit": True, "allow_rebase_merge": True,
                                 "delete_branch_on_merge": False, "default_branch": "main", "has_wiki": True,
@@ -370,7 +373,9 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     assert [(d.area, d.item, d.have, d.fix) for d in rep.drift if d.area == "workflows"] == [
         ("workflows", ".github/scripts/conformance.py", "missing", "apply"),
         ("workflows", ".github/scripts/report.py", "missing", "apply"),
-        ("workflows", ".github/workflows/security.yml", "differs", "apply")]
+        ("workflows", ".github/workflows/security.yml", "differs", "apply"),
+        ("workflows", "contracts/events/valxel.events.v1.schema.json", "missing", "apply"),
+        ("workflows", "contracts/events/valxel.flag_cohorts.v1.schema.json", "missing", "apply")]
     # A governance repo has no code: the secrets scan and the data-contract check are managed there.
     grep = rs.reconcile(gh, target(svc, gov), apply=False)
     assert [(d.item, d.have) for d in grep.drift if d.area == "workflows"] == [
@@ -382,7 +387,7 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     after = rs.reconcile(gh, target(svc, lane), apply=True)
     assert "managed files" in after.applied and after.ok
     pending = [d for d in after.drift if d.area == "workflows"]
-    assert len(pending) == 3 and all(d.fix == "pending" and "pull request" in d.have for d in pending)
+    assert len(pending) == 5 and all(d.fix == "pending" and "pull request" in d.have for d in pending)
     pr = next(p for p in gh.prs.values() if p["repo"] == lane and p["branch"].startswith("valxel/managed-files-"))
     branch = pr["branch"]
     assert gh.files[(lane, branch, ".github/workflows/security.yml")] == rs.standard_file("security.yml")
@@ -393,6 +398,8 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     gh.files[(lane, "main", ".github/workflows/security.yml")] = rs.standard_file("security.yml")
     gh.files[(lane, "main", ".github/scripts/report.py")] = rs.standard_file("report.py")
     gh.files[(lane, "main", ".github/scripts/conformance.py")] = rs.standard_file("conformance.py")
+    for name in ("valxel.events.v1", "valxel.flag_cohorts.v1"):
+        gh.files[(lane, "main", f"contracts/events/{name}.schema.json")] = rs.standard_file(f"contracts/{name}.schema.json")
     assert not [d for d in rs.reconcile(gh, target(svc, lane), apply=False).drift if d.area == "workflows"]
     # The platform's copy changes later: a new branch and pull request, never the merged one again.
     original = rs.standard_file
@@ -650,3 +657,21 @@ def test_a_deployment_config_keeps_only_what_it_changes(tmp_path):
     assert config_file(tmp_path, "repos.yaml") == _repo_root() / "config" / "repos.yaml"
     assert config_file(tmp_path, "registry.yaml") == tmp_path / "registry.yaml"
     assert "channel" in settings.repos.roles and settings.config_dir == tmp_path
+
+
+def test_a_contract_another_repo_owns_is_kept_in_step_with_that_repo(svc):
+    gh = StubGitHub()
+    lane, sink = "acme-clinic/cln-intake-api", "valxel-shared-services/ss-audit-sink"
+    existing(gh, lane)
+    owner_path = "src/audit_sink/valxel.audit.v1.schema.json"
+    t = target(svc, lane)
+    # Unreadable owner (not there yet): nothing reported, nothing touched.
+    assert not [d for d in rs.managed_drift(gh, t) if "audit" in d.item]
+    gh.files[(sink, "main", owner_path)] = '{"x-version": "1.0.0"}\n'
+    [d] = [d for d in rs.managed_drift(gh, t) if "audit" in d.item]
+    assert d.item == "contracts/audit/valxel.audit.v1.schema.json" and d.have == "missing"
+    rs.reconcile(gh, t, apply=True)
+    pr = next(p for p in gh.prs.values() if p["repo"] == lane and p["branch"].startswith("valxel/managed-files-"))
+    assert gh.files[(lane, pr["branch"], "contracts/audit/valxel.audit.v1.schema.json")] == '{"x-version": "1.0.0"}\n'
+    # The owner keeps its own file and gets no copy of it.
+    assert rs.remote_source("github:valxel-shared-services/ss-audit-sink/" + owner_path) == (sink, owner_path)

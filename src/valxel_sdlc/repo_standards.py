@@ -282,12 +282,40 @@ def standard_file(name: str) -> str:
     return (files("valxel_sdlc") / "standard_files" / name).read_text()
 
 
+REMOTE = "github:"  # a managed file whose owner is another repo: github:<owner>/<repo>/<path>
+
+
+def remote_source(name: str) -> tuple[str, str] | None:
+    """(repo, path) for a managed file another repo owns (the audit schema is ss-audit-sink's)."""
+    if not name.startswith(REMOTE):
+        return None
+    owner, repo, path = name[len(REMOTE):].split("/", 2)
+    return f"{owner}/{repo}", path
+
+
+def managed_content(gh, name: str) -> str | None:
+    """The copy every repo must carry: the platform's, or the owning repo's default branch (None if
+    it can't be read now: no drift is reported for it then)."""
+    src = remote_source(name)
+    if src is None:
+        return standard_file(name)
+    try:
+        return gh.get_file(repo=src[0], path=src[1], ref="")
+    except Exception:  # noqa: BLE001 - checked again next time
+        return None
+
+
 def managed_drift(gh, t: Target) -> list[Drift]:
     """Managed workflow files whose copy differs from the platform's, or that are missing. A
     template is checked too: new repos start from it."""
     out = []
     for path, name in sorted((t.plan.get("managed_files") or {}).items()):
-        want = standard_file(name)
+        src = remote_source(name)
+        if src is not None and src[0] == t.repo:  # the owner keeps its own file
+            continue
+        want = managed_content(gh, name)
+        if want is None:
+            continue
         have = gh.get_file(repo=t.repo, path=path, ref="")
         if have != want:
             out.append(Drift("workflows", path, "the platform's copy", "missing" if have is None else "differs"))
@@ -372,7 +400,7 @@ def reconcile(gh, t: Target, *, apply: bool) -> Report:
         def open_pr():
             nonlocal pr_url
             names = t.plan.get("managed_files") or {}
-            contents = {d.item: standard_file(names[d.item]) for d in workflows}
+            contents = {d.item: managed_content(gh, names[d.item]) for d in workflows}
             # A branch per content: once a pull request for one version merges, the next version of
             # the platform's files gets a new branch and pull request (a fixed branch name would keep
             # finding the merged one and never bring the files up to date again).
@@ -385,7 +413,8 @@ def reconcile(gh, t: Target, *, apply: bool) -> Report:
                             body="The Valxel SDLC manages these files (config/repos.yaml `managed_files`); this "
                                  "brings them back to the platform's copy:\n\n"
                                  + "\n".join(f"- `{d.item}` ({d.have})" for d in workflows)
-                                 + "\n\nChange them in agentic-sdlc, not here: the next check would undo it.",
+                                 + "\n\nChange them where they're owned (agentic-sdlc, or the repo a contract names), "
+                                   "not here: the next check would undo it.",
                             files=[d.item for d in workflows], labels=["valxel"])
             pr_url = pr.get("url", "")
 
