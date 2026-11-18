@@ -72,6 +72,8 @@ def test_two_gates_then_setup_opens_the_pull_requests(client, engine, services, 
     files = {path for (repo, branch, path) in gh.files if repo == "acme-water/aw-governance"}
     assert {"product.yaml", "constitution.md", "roadmap/goals.yaml", "roadmap/initiatives/AW-INI-1.md",
             "architecture/product-architecture.md", "runtime/capacity.yaml"} <= files
+    # Its own contracts, starting from the platform's: the product changes them from here on.
+    assert {"contracts/events/valxel.events.v1.schema.json", "contracts/events/valxel.flag_cohorts.v1.schema.json"} <= files
     registry = gh.files[("valxel-platform/sdlc-config", "valxel/register-aw", "config/registry.yaml")]
     assert "AW: { kind: product, org: acme-water, repo: aw-governance" in registry
     assert [st["step"] for st in s["steps"]] == ["governance_repo", "governance_pr", "registry_pr", "clusters_pr",

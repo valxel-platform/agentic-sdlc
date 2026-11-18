@@ -159,6 +159,23 @@ def governance_files(vision: Vision, brief: str, architecture: str, roadmap: str
     return files
 
 
+def starter_contracts(services) -> dict[str, str]:
+    """A new product's contracts (audit records, product-event and flag-cohort lines), copied from
+    the platform's as a starting point. From then on they're the product's: it changes them in its
+    governance repo, and its components are held to its copy, never the platform's."""
+    from ..repo_standards import contracts_for, managed_content
+
+    out = {}
+    for path, source in contracts_for(services.settings.repos, None).items():
+        try:
+            text = managed_content(services.github, source)
+        except Exception:  # noqa: BLE001 - the product can add it later
+            text = None
+        if text:
+            out[path] = text
+    return out
+
+
 def registry_line(brief: str, workspace: str = "") -> str:
     """The product's registry entry: in the workspace that started it (sign-up), or a workspace of its own."""
     i = ids(brief)
@@ -198,6 +215,8 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
     except Exception:
         plat = {}
     files = governance_files(vision, brief, architecture, roadmap, approved_by, research, plat)
+    if not vision.existing:
+        files.update(starter_contracts(services))
     from .diagrams import drawio_files
 
     files.update(drawio_files(services, vision, architecture))

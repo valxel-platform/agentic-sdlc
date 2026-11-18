@@ -49,12 +49,13 @@ def test_a_cohort_line_that_drifts_is_caught():
                                "user": "u-1"}))  # never a person
 
 
-def test_every_repo_carries_the_contracts():
+def test_the_platform_names_its_own_contracts_and_where_they_come_from():
     from pathlib import Path
 
     import yaml
 
     cfg = yaml.safe_load((Path(rs.__file__).resolve().parents[2] / "config" / "repos.yaml").read_text())
-    managed = next(v["managed_files"] for v in cfg.values() if isinstance(v, dict) and "managed_files" in v)
-    assert managed["contracts/events/valxel.events.v1.schema.json"] == "contracts/valxel.events.v1.schema.json"
-    assert managed["contracts/audit/valxel.audit.v1.schema.json"].startswith("github:valxel-shared-services/ss-audit-sink/")
+    contracts = cfg["defaults"]["contracts"]
+    assert contracts["contracts/events/valxel.events.v1.schema.json"] == "contracts/valxel.events.v1.schema.json"
+    assert contracts["contracts/audit/valxel.audit.v1.schema.json"].startswith("github:valxel-shared-services/ss-audit-sink/")
+    assert not [k for k in cfg["defaults"]["managed_files"] if k.startswith("contracts/")]  # never for every repo

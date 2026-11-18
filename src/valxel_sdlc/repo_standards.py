@@ -101,12 +101,16 @@ def targets(services, only: list[str] | None = None) -> list[Target]:
         if lane is None:
             continue
         standards = lane.repo_standards or effective_standards(std, lane.data_class, {})
+        contracts = contracts_for(std, gov if getattr(entry, "kind", "product") == "product" else None)
         for r in lane.repos:
             p = plan(lane, {"name": r.name, "role": r.role, "purpose": ""}, standards)
+            p["managed_files"] = {**p.get("managed_files", {}), **contracts}
             out[r.name] = Target(r.name, "lane", pid, p)
     for repo, spec in (std.platform_repos or {}).items():
-        out[repo] = Target(repo, spec.get("kind", "tool"), spec.get("product", "platform"),
-                           _platform_plan(std, repo, spec))
+        p = _platform_plan(std, repo, spec)
+        if spec.get("kind", "tool") != "governance":
+            p["managed_files"] = {**p.get("managed_files", {}), **contracts_for(std, None)}
+        out[repo] = Target(repo, spec.get("kind", "tool"), spec.get("product", "platform"), p)
     # The platform's GitHub App merges for the merge train once the pipeline's gates pass, so it
     # may bypass the review rules (pull requests only) wherever the pipeline merges: lane repos.
     import os
@@ -117,6 +121,16 @@ def targets(services, only: list[str] | None = None) -> list[Target]:
             t.plan["ruleset"]["bypass_app_id"] = app_id
     wanted = set(only or [])
     return [t for name, t in sorted(out.items()) if not wanted or name in wanted]
+
+
+def contracts_for(std, governance: str | None) -> dict:
+    """The contract files a repo keeps, and whose copy each must match: the platform's for the
+    platform's repos (governance None), the product's governance repo's for a product's lanes. A
+    product's contracts are its own: the platform never holds or compares against them."""
+    paths = dict((std.defaults or {}).get("contracts") or {})
+    if governance is None:
+        return paths
+    return {path: f"{REMOTE}{governance}/{path}" for path in paths}
 
 
 def _base(std, repo: str, product: str, data_class: str, approvers: dict, role: str) -> dict:
@@ -294,8 +308,9 @@ def remote_source(name: str) -> tuple[str, str] | None:
 
 
 def managed_content(gh, name: str) -> str | None:
-    """The copy every repo must carry: the platform's, or the owning repo's default branch (None if
-    it can't be read now: no drift is reported for it then)."""
+    """The copy a repo must carry: the platform's, or the owning repo's default branch (a product's
+    governance repo for its contracts). None if there's none to compare with (the product keeps no
+    such contract, or it can't be read now): no drift is reported for it then."""
     src = remote_source(name)
     if src is None:
         return standard_file(name)

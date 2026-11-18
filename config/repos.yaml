@@ -87,8 +87,15 @@ defaults:
     .github/workflows/security.yml: security.yml
     .github/scripts/report.py: report.py     # test results and coverage of new code, as commit statuses
     .github/scripts/conformance.py: conformance.py  # the template contract on the built image (conformance.yaml)
-    # Shared contracts, pinned by content: each producer tests what it emits against its copy, and
-    # a new version reaches every repo as one of these pull requests (T-15).
+  # Contracts a repo's code emits by (audit records, product-event and flag-cohort lines), pinned by
+  # content: each repo tests what it emits against its copy, and a new version arrives as a
+  # managed-files pull request. Whose copy depends on who owns the repo:
+  #   the platform's repos (platform_repos, and the lanes of shared registry entries) keep the
+  #     platform's contracts: the sources below;
+  #   a product's lanes keep their product's: the same path in the product's governance repo, which
+  #     the product owns and changes (no file there: nothing checked). The platform never compares a
+  #     product's contract with its own, nor keeps a copy of one.
+  contracts:
     contracts/audit/valxel.audit.v1.schema.json: github:valxel-shared-services/ss-audit-sink/src/audit_sink/valxel.audit.v1.schema.json
     contracts/events/valxel.events.v1.schema.json: contracts/valxel.events.v1.schema.json
     contracts/events/valxel.flag_cohorts.v1.schema.json: contracts/valxel.flag_cohorts.v1.schema.json

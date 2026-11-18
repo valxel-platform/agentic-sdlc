@@ -373,9 +373,7 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     assert [(d.area, d.item, d.have, d.fix) for d in rep.drift if d.area == "workflows"] == [
         ("workflows", ".github/scripts/conformance.py", "missing", "apply"),
         ("workflows", ".github/scripts/report.py", "missing", "apply"),
-        ("workflows", ".github/workflows/security.yml", "differs", "apply"),
-        ("workflows", "contracts/events/valxel.events.v1.schema.json", "missing", "apply"),
-        ("workflows", "contracts/events/valxel.flag_cohorts.v1.schema.json", "missing", "apply")]
+        ("workflows", ".github/workflows/security.yml", "differs", "apply")]
     # A governance repo has no code: the secrets scan and the data-contract check are managed there.
     grep = rs.reconcile(gh, target(svc, gov), apply=False)
     assert [(d.item, d.have) for d in grep.drift if d.area == "workflows"] == [
@@ -387,7 +385,7 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
     after = rs.reconcile(gh, target(svc, lane), apply=True)
     assert "managed files" in after.applied and after.ok
     pending = [d for d in after.drift if d.area == "workflows"]
-    assert len(pending) == 5 and all(d.fix == "pending" and "pull request" in d.have for d in pending)
+    assert len(pending) == 3 and all(d.fix == "pending" and "pull request" in d.have for d in pending)
     pr = next(p for p in gh.prs.values() if p["repo"] == lane and p["branch"].startswith("valxel/managed-files-"))
     branch = pr["branch"]
     assert gh.files[(lane, branch, ".github/workflows/security.yml")] == rs.standard_file("security.yml")
@@ -659,19 +657,37 @@ def test_a_deployment_config_keeps_only_what_it_changes(tmp_path):
     assert "channel" in settings.repos.roles and settings.config_dir == tmp_path
 
 
-def test_a_contract_another_repo_owns_is_kept_in_step_with_that_repo(svc):
+def test_a_products_lanes_keep_its_contracts_and_the_platforms_repos_keep_the_platforms(svc):
     gh = StubGitHub()
-    lane, sink = "acme-clinic/cln-intake-api", "valxel-shared-services/ss-audit-sink"
+    lane, gov = "acme-clinic/cln-intake-api", "acme-clinic/cln-governance"
+    sink = "valxel-shared-services/ss-audit-sink"
     existing(gh, lane)
+    path = "contracts/audit/valxel.audit.v1.schema.json"
+    # The platform's audit schema changes: a product's lane isn't asked to follow it.
+    gh.files[(sink, "main", "src/audit_sink/valxel.audit.v1.schema.json")] = '{"x-version": "2.0.0"}\n'
+    t = rs.targets(svc, [lane])[0]
+    assert t.plan["managed_files"][path] == f"github:{gov}/{path}"
+    assert not [d for d in rs.managed_drift(gh, t) if d.item.startswith("contracts/")]  # the product keeps none yet
+    # The product keeps its own: its lanes follow its governance repo, not the platform.
+    gh.files[(gov, "main", path)] = '{"x-version": "1.1.0", "title": "cln audit"}\n'
+    gh.files[(lane, "main", path)] = '{"x-version": "1.0.0"}\n'
+    [d] = [d for d in rs.managed_drift(gh, t) if d.item.startswith("contracts/")]
+    assert d.item == path and d.have == "differs"
+    rs.reconcile(gh, t, apply=True)
+    pr = next(p for p in gh.prs.values() if p["repo"] == lane and p["branch"].startswith("valxel/managed-files-"))
+    assert gh.files[(lane, pr["branch"], path)] == '{"x-version": "1.1.0", "title": "cln audit"}\n'
+    # Its governance repo isn't held to the platform's contracts either.
+    assert not [k for k in rs.targets(svc, [gov])[0].plan["managed_files"] if k.startswith("contracts/")]
+
+
+def test_the_platforms_repos_follow_the_platforms_contracts(svc):
+    gh = StubGitHub()
+    template, sink = "valxel-platform/template-agent", "valxel-shared-services/ss-audit-sink"
+    existing(gh, template)
     owner_path = "src/audit_sink/valxel.audit.v1.schema.json"
-    t = target(svc, lane)
-    # Unreadable owner (not there yet): nothing reported, nothing touched.
-    assert not [d for d in rs.managed_drift(gh, t) if "audit" in d.item]
+    t = rs.targets(svc, [template])[0]
+    assert not [d for d in rs.managed_drift(gh, t) if "audit" in d.item]  # owner unreadable: nothing reported
     gh.files[(sink, "main", owner_path)] = '{"x-version": "1.0.0"}\n'
     [d] = [d for d in rs.managed_drift(gh, t) if "audit" in d.item]
     assert d.item == "contracts/audit/valxel.audit.v1.schema.json" and d.have == "missing"
-    rs.reconcile(gh, t, apply=True)
-    pr = next(p for p in gh.prs.values() if p["repo"] == lane and p["branch"].startswith("valxel/managed-files-"))
-    assert gh.files[(lane, pr["branch"], "contracts/audit/valxel.audit.v1.schema.json")] == '{"x-version": "1.0.0"}\n'
-    # The owner keeps its own file and gets no copy of it.
-    assert rs.remote_source("github:valxel-shared-services/ss-audit-sink/" + owner_path) == (sink, owner_path)
+    assert rs.remote_source("github:" + sink + "/" + owner_path) == (sink, owner_path)
