@@ -1,0 +1,357 @@
+{
+ "_meta": {
+  "test": "tests/smoke/test_live_clients.py::test_github_a_change_goes_from_a_branch_to_a_merged_pull_request",
+  "recorded": false,
+  "seeded": "from the services' documented responses (tests/smoke/fakes.py); re-record against the dev services"
+ },
+ "exchanges": [
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/git/ref/heads/valxel%2Fsmoke",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 404,
+    "body": {
+     "message": "Not Found"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "full_name": "valxel-platform/sdlc-smoke",
+     "default_branch": "main"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/git/ref/heads/main",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "ref": "refs/heads/main",
+     "object": {
+      "sha": "1111111111111111111111111111111111111111"
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/git/refs",
+    "body": {
+     "ref": "refs/heads/valxel/smoke",
+     "sha": "1111111111111111111111111111111111111111"
+    },
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 201,
+    "body": {
+     "ref": "refs/heads/valxel/smoke",
+     "object": {
+      "sha": "1111111111111111111111111111111111111111"
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/contents/smoke/hello.md?ref=valxel%2Fsmoke",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 404,
+    "body": {
+     "message": "Not Found"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "PUT",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/contents/smoke/hello.md",
+    "body": {
+     "message": "smoke: hello",
+     "branch": "valxel/smoke",
+     "content": "SGVsbG8gZnJvbSB0aGUgdG9vbCdzIGxpdmUgc21va2UgdGVzdC4K"
+    },
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 201,
+    "body": {
+     "content": {
+      "path": "smoke/hello.md",
+      "sha": "4444444444444444444444444444444444444444"
+     },
+     "commit": {
+      "sha": "2222222222222222222222222222222222222222"
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/pulls?state=all&head=valxel-platform:valxel%2Fsmoke",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": []
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "full_name": "valxel-platform/sdlc-smoke",
+     "default_branch": "main"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/pulls",
+    "body": {
+     "title": "Smoke: hello",
+     "head": "valxel/smoke",
+     "body": "The tool's live smoke test.",
+     "base": "main"
+    },
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 201,
+    "body": {
+     "number": 7,
+     "state": "open",
+     "title": "Smoke: hello",
+     "body": "The tool's live smoke test.",
+     "html_url": "https://github.com/valxel-platform/sdlc-smoke/pull/7",
+     "merged": false,
+     "merged_at": null,
+     "merge_commit_sha": null,
+     "head": {
+      "ref": "valxel/smoke",
+      "sha": "2222222222222222222222222222222222222222"
+     },
+     "base": {
+      "ref": "main"
+     },
+     "labels": [],
+     "user": {
+      "login": "valxel[bot]"
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "POST",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/issues/7/labels",
+    "body": {
+     "labels": [
+      "valxel"
+     ]
+    },
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": [
+     {
+      "name": "valxel"
+     }
+    ]
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/commits/2222222222222222222222222222222222222222/check-runs?per_page=100",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "total_count": 1,
+     "check_runs": [
+      {
+       "name": "ci",
+       "status": "completed",
+       "conclusion": "success",
+       "html_url": "https://github.com/valxel-platform/sdlc-smoke/actions/runs/1"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/commits/2222222222222222222222222222222222222222/status",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "state": "success",
+     "statuses": []
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/pulls/7",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "number": 7,
+     "state": "open",
+     "title": "Smoke: hello",
+     "body": "The tool's live smoke test.",
+     "html_url": "https://github.com/valxel-platform/sdlc-smoke/pull/7",
+     "merged": false,
+     "merged_at": null,
+     "merge_commit_sha": null,
+     "head": {
+      "ref": "valxel/smoke",
+      "sha": "2222222222222222222222222222222222222222"
+     },
+     "base": {
+      "ref": "main"
+     },
+     "labels": [
+      {
+       "name": "valxel"
+      }
+     ],
+     "user": {
+      "login": "valxel[bot]"
+     }
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "PUT",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/pulls/7/merge",
+    "body": {
+     "merge_method": "squash",
+     "sha": "2222222222222222222222222222222222222222",
+     "commit_title": "Smoke: hello (#7)",
+     "commit_message": "Merged by the Valxel merge train. Approved by smoke."
+    },
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "sha": "3333333333333333333333333333333333333333",
+     "merged": true,
+     "message": "Pull Request successfully merged"
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "GET",
+    "url": "api.github.com/repos/valxel-platform/sdlc-smoke/pulls/7",
+    "body": null,
+    "headers": {
+     "x-github-api-version": "2022-11-28"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "number": 7,
+     "state": "closed",
+     "title": "Smoke: hello",
+     "body": "The tool's live smoke test.",
+     "html_url": "https://github.com/valxel-platform/sdlc-smoke/pull/7",
+     "merged": true,
+     "merged_at": "2026-11-18T17:00:00Z",
+     "merge_commit_sha": "3333333333333333333333333333333333333333",
+     "head": {
+      "ref": "valxel/smoke",
+      "sha": "2222222222222222222222222222222222222222"
+     },
+     "base": {
+      "ref": "main"
+     },
+     "labels": [
+      {
+       "name": "valxel"
+      }
+     ],
+     "user": {
+      "login": "valxel[bot]"
+     }
+    }
+   }
+  }
+ ]
+}

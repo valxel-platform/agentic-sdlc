@@ -87,6 +87,23 @@ jobs:
       - if: matrix.shard == 1
         run: valxel demo --product CLN --fault spec=1 --revise
 
+  # The live clients (GitHub, the LLM gateway, the model API) as the image ships them, against
+  # recorded exchanges (tests/smoke, valxel_sdlc.cassettes): a client that now sends a different
+  # request fails here, not in a deployment.
+  smoke:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.lock && pip install -e ".[dev]"
+      - run: pytest tests/smoke -v
+
   test:
     needs: [changes, test-shard]
     # Runs whenever the shares ran, so a failed share fails this check; skipped with them otherwise.

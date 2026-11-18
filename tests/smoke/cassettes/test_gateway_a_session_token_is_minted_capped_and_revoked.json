@@ -1,0 +1,58 @@
+{
+ "_meta": {
+  "test": "tests/smoke/test_live_clients.py::test_gateway_a_session_token_is_minted_capped_and_revoked",
+  "recorded": false,
+  "seeded": "from the services' documented responses (tests/smoke/fakes.py); re-record against the dev services"
+ },
+ "exchanges": [
+  {
+   "request": {
+    "method": "POST",
+    "url": "llm-gateway.valxel-llm-gateway.svc.cluster.local:8080/v1/sessions",
+    "body": {
+     "budget_usd": 0.5,
+     "ttl_s": 600,
+     "data_class": "general",
+     "models": [
+      "claude-sonnet-5-5"
+     ],
+     "labels": {
+      "product": "valxel",
+      "feature": "SMOKE-1",
+      "phase": "build",
+      "agent": "coder"
+     }
+    },
+    "headers": {}
+   },
+   "response": {
+    "status": 201,
+    "body": {
+     "id": "gs_smoke1",
+     "token": "<masked>",
+     "expires_at": "2026-11-18T18:00:00Z",
+     "budget_usd": 0.5,
+     "models": [
+      "claude-sonnet-5-5"
+     ]
+    }
+   }
+  },
+  {
+   "request": {
+    "method": "DELETE",
+    "url": "llm-gateway.valxel-llm-gateway.svc.cluster.local:8080/v1/sessions/gs_smoke1",
+    "body": null,
+    "headers": {}
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "id": "gs_smoke1",
+     "spent_usd": 0.0123,
+     "calls": 1
+    }
+   }
+  }
+ ]
+}

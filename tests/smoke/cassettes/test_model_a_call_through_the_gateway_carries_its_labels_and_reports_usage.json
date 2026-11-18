@@ -1,0 +1,81 @@
+{
+ "_meta": {
+  "test": "tests/smoke/test_live_clients.py::test_model_a_call_through_the_gateway_carries_its_labels_and_reports_usage",
+  "recorded": false,
+  "seeded": "from the services' documented responses (tests/smoke/fakes.py); re-record against the dev services"
+ },
+ "exchanges": [
+  {
+   "request": {
+    "method": "POST",
+    "url": "llm-gateway.valxel-llm-gateway.svc.cluster.local:8080/v1/messages",
+    "body": {
+     "max_tokens": 256,
+     "messages": [
+      {
+       "role": "user",
+       "content": "Write the PRD for a harvest export: a CSV of each field's yield by season."
+      }
+     ],
+     "model": "claude-sonnet-5-5",
+     "system": [
+      {
+       "type": "text",
+       "text": "\n\nWrite PRDs.",
+       "cache_control": {
+        "type": "ephemeral",
+        "ttl": "1h"
+       }
+      },
+      {
+       "type": "text",
+       "text": "Ids, never field values.\n\nFARM: a farm-management product.",
+       "cache_control": {
+        "type": "ephemeral",
+        "ttl": "1h"
+       }
+      },
+      {
+       "type": "text",
+       "text": "(no feature context yet)",
+       "cache_control": {
+        "type": "ephemeral",
+        "ttl": "1h"
+       }
+      }
+     ]
+    },
+    "headers": {
+     "x-valxel-product": "FARM",
+     "x-valxel-feature": "SMOKE-1",
+     "x-valxel-phase": "spec",
+     "x-valxel-agent": "spec",
+     "x-valxel-data-class": "general"
+    }
+   },
+   "response": {
+    "status": 200,
+    "body": {
+     "id": "msg_smoke1",
+     "type": "message",
+     "role": "assistant",
+     "model": "claude-sonnet-5-5",
+     "content": [
+      {
+       "type": "text",
+       "text": "# PRD: Harvest export\n\n## Problem\nGrowers copy yields by hand."
+      }
+     ],
+     "stop_reason": "end_turn",
+     "stop_sequence": null,
+     "usage": {
+      "input_tokens": 1830,
+      "output_tokens": 42,
+      "cache_creation_input_tokens": 1500,
+      "cache_read_input_tokens": 0
+     }
+    }
+   }
+  }
+ ]
+}
