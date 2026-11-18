@@ -4,7 +4,11 @@ import remarkGfm from "remark-gfm";
 
 /** Agent-written Markdown. Raw HTML is never rendered; ```mermaid blocks are drawn as diagrams. */
 export function Md({ children }: { children: string }) {
-  return <Markdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>{children}</Markdown>;
+  return (
+    <Markdown remarkPlugins={[remarkGfm]} components={COMPONENTS}>
+      {children}
+    </Markdown>
+  );
 }
 
 const COMPONENTS: Components = {
@@ -33,8 +37,12 @@ function dark(): boolean {
 async function draw(id: string, source: string): Promise<string> {
   const { default: mermaid } = await import("mermaid");
   // strict: no scripts or click handlers, labels sanitized; the source is agent-written.
-  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark() ? "dark" : "neutral",
-                       fontFamily: "IBM Plex Sans, sans-serif" });
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: dark() ? "dark" : "neutral",
+    fontFamily: "IBM Plex Sans, sans-serif",
+  });
   const { svg } = await mermaid.render(id, source);
   return svg;
 }
@@ -49,23 +57,35 @@ export function MermaidDiagram({ source }: { source: string }) {
     setErr("");
     const job = queue.then(() => draw(id, source));
     queue = job.catch(() => undefined);
-    job.then((s) => live && setSvg(s)).catch((e) => live && setErr(e instanceof Error ? e.message : String(e)));
-    return () => { live = false; };
+    job
+      .then((s) => live && setSvg(s))
+      .catch((e) => live && setErr(e instanceof Error ? e.message : String(e)));
+    return () => {
+      live = false;
+    };
   }, [id, source]);
   if (err) {
     return (
       <figure className="diagram">
         <p className="faint small">This diagram didn't draw ({err.split("\n")[0]}). Its source:</p>
-        <pre><code>{source}</code></pre>
+        <pre>
+          <code>{source}</code>
+        </pre>
       </figure>
     );
   }
   return (
     <figure className="diagram">
-      {svg ? <div className="diagram-svg" dangerouslySetInnerHTML={{ __html: svg }} /> : <p className="faint small">Drawing the diagram…</p>}
+      {svg ? (
+        <div className="diagram-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : (
+        <p className="faint small">Drawing the diagram…</p>
+      )}
       <details>
         <summary className="small muted">Source</summary>
-        <pre><code>{source}</code></pre>
+        <pre>
+          <code>{source}</code>
+        </pre>
       </details>
     </figure>
   );

@@ -5,7 +5,15 @@ import { threadPath } from "../vocab";
 
 /** While a feature waits at G1, or an initiative at G0, it can change size: what was written carries
  * over and this one stops, saying where it went. */
-export function Resize({ id, kind, pending }: { id: string; kind: "feature" | "initiative"; pending: PendingItem[] }) {
+export function Resize({
+  id,
+  kind,
+  pending,
+}: {
+  id: string;
+  kind: "feature" | "initiative";
+  pending: PendingItem[];
+}) {
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");

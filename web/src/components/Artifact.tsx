@@ -10,10 +10,19 @@ export function ArtifactBody({ featureId, kind }: { featureId: string; kind: str
     let live = true;
     setText(null);
     setErr("");
-    api.artifact(featureId, kind).then((a) => live && setText(a.content)).catch((e) => live && setErr(e.message));
-    return () => { live = false; };
+    api
+      .artifact(featureId, kind)
+      .then((a) => live && setText(a.content))
+      .catch((e) => live && setErr(e.message));
+    return () => {
+      live = false;
+    };
   }, [featureId, kind]);
   if (err) return <p className="error-note">{err}</p>;
   if (text === null) return <p className="faint small">Loading…</p>;
-  return <div className="md"><Md>{text}</Md></div>;
+  return (
+    <div className="md">
+      <Md>{text}</Md>
+    </div>
+  );
 }
