@@ -199,15 +199,43 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write # the unit / report and code-quality / new code statuses
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the base branch, for coverage of new code
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npx tsc --noEmit
       - run: npm run build
+      - run: npm run test:coverage
+      - name: Report results
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPORT_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 ../.github/scripts/report.py --context "unit / report" --junit reports/junit.xml --istanbul coverage/coverage-summary.json
+      # The lines this pull request changes that no test runs (diff-cover), posted as the
+      # code-quality / new code status the quality gate reads. The status is the gate, not this job.
+      - name: Coverage on new code
+        if: github.event_name == 'pull_request' && !cancelled()
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPORT_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          pipx run diff-cover==11.0.2 coverage/lcov.info --compare-branch="origin/$BASE_REF" \
+            --format json:new-code.json
+          python3 ../.github/scripts/report.py --context "code-quality / new code" --new-code new-code.json

@@ -1,0 +1,140 @@
+# Runs after the Valxel SDLC deploys a commit: integration in dev, end-to-end in staging, smoke in
+# production. Results are posted on the deployed commit as "integration / report", "e2e / report"
+# and "smoke / report", which the pipeline's quality gates read (config/quality.yaml: integration
+# at dev, e2e at staging, smoke at production, all required). In staging, when the change needs
+# it (performance: full), Lighthouse too: "performance / report".
+#
+# Adapted from valxel-platform/template-web's post-deploy.yml. Differences from the template:
+# - The web app lives in web/, not the repo root: npm and Playwright steps run there (the verify
+#   job defaults run steps to working-directory web; setup-node's cache-dependency-path points at
+#   web/package-lock.json). The report step runs from the repo root, where
+#   .github/scripts/report.py lives, and reads the JUnit file at web/reports/e2e-junit.xml.
+# - No .nvmrc exists in this repo, so Node is pinned to "22" to match
+#   .github/workflows/ci.yml's web job, instead of the template's node-version-file: .nvmrc.
+# - No deploy target exists in this repo yet: BASE_URL comes only from the dispatch payload (or
+#   the workflow_dispatch input). There is no environment URL to fill in; when a deploy target
+#   lands, its URL must be supplied by the dispatch sender (or a GitHub environment added here) —
+#   do not hardcode one.
+# - Playwright now exists in this repo: web/playwright.config.ts (testDir e2e, JUnit reporter
+#   writing reports/e2e-junit.xml, baseURL from $BASE_URL, as in the template), @playwright/test
+#   in web/package.json, and an `e2e` npm script. Production runs --grep @smoke, so smoke specs
+#   need the @smoke tag. web/e2e/ specs are still to land; until they do, `playwright test`
+#   passes with zero tests.
+# - TODO(perf): the performance job below is carried over from the template for parity, but
+#   perf/summarize.mjs and perf/compare.py do not exist in this repo yet (no perf/ directory),
+#   and there is no perf-baselines branch. The job only runs when the dispatch payload says
+#   performance: full, so it stays dormant until the perf tooling lands; if the SDLC ever sends
+#   that flag first, the job will fail on the missing scripts.
+name: post-deploy
+
+on:
+  repository_dispatch:
+    types: [valxel-deployed]
+  workflow_dispatch:
+    inputs:
+      stage:
+        {
+          description: "dev, staging or production",
+          required: true,
+          type: choice,
+          options: [dev, staging, production],
+        }
+      base_url: { description: "URL of the deployed app", required: true }
+      sha: { description: "Deployed commit", required: true }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-deploy-${{ github.event.client_payload.stage || inputs.stage }}-${{ github.event.client_payload.sha || inputs.sha }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify ${{ github.event.client_payload.stage || inputs.stage }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      statuses: write
+    defaults:
+      run:
+        working-directory: web
+    env:
+      STAGE: ${{ github.event.client_payload.stage || inputs.stage }}
+      BASE_URL: ${{ github.event.client_payload.base_url || inputs.base_url }}
+      REPORT_SHA: ${{ github.event.client_payload.sha || inputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REPORT_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # Playwright is installed (web/package.json) and configured (web/playwright.config.ts);
+      # web/e2e/ specs are still to land — until then `playwright test` passes with zero tests.
+      - run: npx playwright install --with-deps chromium
+      - name: Run the stage's suite
+        id: run
+        run: |
+          case "$STAGE" in
+            dev)        echo "suite=integration" >> "$GITHUB_OUTPUT"; npx playwright test ;;
+            staging)    echo "suite=e2e" >> "$GITHUB_OUTPUT"; npx playwright test ;;
+            production) echo "suite=smoke" >> "$GITHUB_OUTPUT"; npx playwright test --grep @smoke ;;
+            *) echo "Unknown stage $STAGE" >&2; exit 2 ;;
+          esac
+      - name: Report results
+        if: ${{ !cancelled() }}
+        working-directory: ${{ github.workspace }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/report.py --context "${{ steps.run.outputs.suite }} / report" --junit web/reports/e2e-junit.xml
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ failure() }}
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 14
+
+  # Staging page performance, when the Valxel SDLC says the change needs it: Lighthouse three times
+  # against the deployed app (through the BFF), median LCP, TBT and CLS and the JavaScript actually
+  # transferred, judged against the budget and the last passing run (the perf-baselines branch).
+  # TODO(perf): dormant until perf/summarize.mjs and perf/compare.py exist (see the header).
+  performance:
+    name: performance
+    if: (github.event.client_payload.stage || inputs.stage) == 'staging' && github.event.client_payload.performance == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write # the perf-baselines branch
+      statuses: write
+    env:
+      BASE_URL: ${{ github.event.client_payload.base_url }}
+      REPORT_SHA: ${{ github.event.client_payload.sha }}
+      SETTINGS: ${{ toJSON(github.event.client_payload.perf_settings) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REPORT_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Measure the deployed app
+        run: |
+          mkdir -p out/lhci
+          (cd out/lhci && npx --yes @lhci/cli@0.16.0 collect --url="$BASE_URL" --numberOfRuns=3 --settings.preset=desktop)
+          node perf/summarize.mjs out/lhci/.lighthouseci out/staging.json
+      - name: Judge and report
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          budget=$(python3 -c 'import json,os; s=json.loads(os.environ["SETTINGS"] or "{}") or {}; print(json.dumps((s.get("budgets") or {}).get("web") or {}))')
+          pct=$(python3 -c 'import json,os; s=json.loads(os.environ["SETTINGS"] or "{}") or {}; print(s.get("regression_pct") or 10)')
+          python3 perf/compare.py --kind web --run out/staging.json --budget "$budget" --regression "$pct" \
+            --baseline staging.json --save-baseline staging.json --context "performance / report"
