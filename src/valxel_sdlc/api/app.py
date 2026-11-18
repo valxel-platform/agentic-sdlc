@@ -115,13 +115,43 @@ def _create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..cluster import PostgresCluster
         from ..events import PostgresBus
 
+        from ..run_queue import PostgresRunQueue, mode
+
+        # VALXEL_RUN_QUEUE=postgres: work is queued for `valxel worker` processes (run_queue.py).
+        queue = PostgresRunQueue(pool) if mode() == "postgres" else None
         return FeatureEngine(services, saver, PostgresIndex(pool), work=work,
                              bus=PostgresBus(pool, settings.database_url),
-                             cluster=PostgresCluster(pool, settings.database_url)), pool
+                             cluster=PostgresCluster(pool, settings.database_url), queue=queue), pool
     from langgraph.checkpoint.memory import InMemorySaver
 
     services = build_services(settings, ledger=InMemoryLedger())
     return FeatureEngine(services, InMemorySaver(), InMemoryIndex()), None
+
+
+def prepare(engine: FeatureEngine, pool: Any, *, auth_mode: str) -> None:
+    """What a server or a worker checks and sets up before it takes any work: strict mode's checks,
+    and row-level security on every table (VALXEL_TENANCY)."""
+    from .. import strict, tenancy
+
+    if strict.enabled():  # refuse to serve while anything would quietly run as a stand-in
+        strict.check(engine.services, auth_mode=auth_mode)
+    if pool is None:
+        return
+    with tenancy.bound(tenancy.PLATFORM):
+        from ..intake import PostgresIntakeStore
+
+        PostgresIntakeStore(pool)  # its table, so the policies below cover it
+        # Every table exists now: turn row-level security on (VALXEL_TENANCY=rls) or off.
+        tenancy.apply(pool, engine.services.settings.registry)
+        if tenancy.enforced():
+            with pool.connection() as conn:
+                why = tenancy.bypasses(conn)
+            if why:  # Postgres never holds such a login to row-level security
+                msg = (f"VALXEL_TENANCY is rls, but the database login is {why}: row-level security "
+                       "doesn't apply to it. Connect as a role without SUPERUSER and BYPASSRLS.")
+                if strict.enabled():
+                    raise strict.StrictModeError(msg)
+                log.warning(msg)
 
 
 def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = None,
@@ -133,29 +163,17 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     async def lifespan(_app: FastAPI):
         if state["engine"] is None:
             state["engine"], state["pool"] = create_engine_from_env()
-            from .. import strict
-
-            if strict.enabled():  # refuse to serve while anything would quietly run as a stand-in
-                strict.check(state["engine"].services, auth_mode=auth.mode)
+            prepare(state["engine"], state["pool"], auth_mode=auth.mode)
             if state["pool"] is not None:
-                from .. import tenancy
                 from ..intake import PostgresIntakeStore
+                from ..tenancy import PLATFORM, bound
 
-                with tenancy.bound(tenancy.PLATFORM):
+                with bound(PLATFORM):
                     stores["intakes"] = PostgresIntakeStore(state["pool"])
-                    # Every table exists now: turn row-level security on (VALXEL_TENANCY=rls) or off.
-                    tenancy.apply(state["pool"], state["engine"].services.settings.registry)
-                    if tenancy.enforced():
-                        with state["pool"].connection() as conn:
-                            why = tenancy.bypasses(conn)
-                        if why:  # Postgres never holds such a login to row-level security
-                            msg = (f"VALXEL_TENANCY is rls, but the database login is {why}: row-level security "
-                                   "doesn't apply to it. Connect as a role without SUPERUSER and BYPASSRLS.")
-                            if strict.enabled():
-                                raise strict.StrictModeError(msg)
-                            log.warning(msg)
-            # Polls CI and OpenChoreo for features waiting on them; webhooks make it immediate.
-            state["engine"].start_watcher(float(os.environ.get("VALXEL_WATCH_INTERVAL_S", "30")))
+            # Polls CI and OpenChoreo for features waiting on them; webhooks make it immediate. With a
+            # run queue, API processes leave that to the workers (valxel worker): they run no agents.
+            if os.environ.get("VALXEL_PROCESS", "").lower() != "api":
+                state["engine"].start_watcher(float(os.environ.get("VALXEL_WATCH_INTERVAL_S", "30")))
         yield
         state["engine"].stop_watcher()
         if state["pool"] is not None:

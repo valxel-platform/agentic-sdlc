@@ -382,6 +382,38 @@ def _outcomes(args, services=None) -> int:
     return 0 if reading.status in ("ok", "suppressed", "no_data") else 1
 
 
+def _worker(args) -> int:
+    """`valxel worker`: claim queued runs and run them; the watcher runs here too. On SIGTERM it
+    stops claiming, lets runs under way finish for VALXEL_WORKER_DRAIN_S (25) and hands back the
+    rest, which another worker carries on from their last checkpoints."""
+    import signal
+
+    from .api.app import create_engine_from_env, prepare
+    from .run_queue import Worker, serve_health
+
+    engine, pool = create_engine_from_env()
+    if engine.queue is None:
+        print("valxel worker needs a database (DATABASE_URL) and VALXEL_RUN_QUEUE=postgres.", file=sys.stderr)
+        return 2
+    prepare(engine, pool, auth_mode=(os.environ.get("VALXEL_AUTH") or "github").lower())
+    engine.start_watcher(float(os.environ.get("VALXEL_WATCH_INTERVAL_S", "30")))
+    worker = Worker(engine, engine.queue, concurrency=args.concurrency)
+    health = serve_health(worker, args.port)
+    signal.signal(signal.SIGTERM, lambda *_: worker.stop.set())
+    signal.signal(signal.SIGINT, lambda *_: worker.stop.set())
+    worker.serve()
+    left = worker.drain(float(os.environ.get("VALXEL_WORKER_DRAIN_S", "25")))
+    engine.stop_watcher()
+    health.shutdown()
+    if left:  # runs still under way were handed back: don't wait for their threads
+        print(f"handed back {len(left)} run(s) to the queue", file=sys.stderr)
+        sys.stderr.flush()
+        os._exit(0)
+    if pool is not None:
+        pool.close()
+    return 0
+
+
 def main(argv: list[str] | None = None, *, github=None) -> int:
     """The command line does the platform's own work, across workspaces (valxel_sdlc.tenancy)."""
     from .tenancy import PLATFORM, bound
@@ -404,6 +436,11 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     sr = sub.add_parser("session-runner", help="Run one agent session in this sandbox (valxel_sdlc.session_runner): "
                                                "the image's command in an agent-session sandbox")
     sr.add_argument("--port", type=int, default=int(os.environ.get("VALXEL_SESSION_RUNNER_PORT", "8081")))
+    wr = sub.add_parser("worker", help="Run queued work (VALXEL_RUN_QUEUE=postgres): features, gate decisions and "
+                                       "resumes the API queued, and the watcher (valxel_sdlc.run_queue)")
+    wr.add_argument("--concurrency", type=int, default=int(os.environ.get("VALXEL_WORKER_CONCURRENCY", "4")))
+    wr.add_argument("--port", type=int, default=int(os.environ.get("VALXEL_WORKER_PORT", "8082")),
+                    help="Port for /healthz")
     pv = sub.add_parser("provisioner", help="Run the provisioning worker: create the repos the queue asks for, with "
                                              "the Provisioning GitHub App, after checking each against governance")
     pv.add_argument("--once", action="store_true", help="Run what's queued now, then stop")
@@ -565,6 +602,8 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
         for repo, sha in out["read"].items():
             print(f"  read {repo} @ {sha[:7]}")
         return 0
+    if args.cmd == "worker":
+        return _worker(args)
     if args.cmd == "session-runner":
         from .session_runner import serve
 

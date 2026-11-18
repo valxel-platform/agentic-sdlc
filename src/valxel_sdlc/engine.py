@@ -44,8 +44,10 @@ log = logging.getLogger(__name__)
 class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, RecoveryMixin):
     def __init__(self, services: Services, checkpointer, index: FeatureIndex | None = None,
                  bus: EventBus | None = None, workers: int = 4, work: WorkSync | None = None,
-                 cluster: Cluster | None = None) -> None:
+                 cluster: Cluster | None = None, queue=None) -> None:
         self.services = services
+        # With a run queue (run_queue.py), work is queued here and run by `valxel worker`.
+        self.queue = queue
         # Several replicas: thread locks, the watcher's leadership and shared notes (cluster.py).
         self.cluster: Cluster = cluster or MemoryCluster()
         from .ops.incident import build_incident_graph
@@ -193,8 +195,24 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         return {"configurable": {"thread_id": feature_id}, "recursion_limit": 200}
 
     def is_running(self, thread_id: str) -> bool:
-        """Running (or queued) here, or running on another replica."""
-        return thread_id in self.running or self.cluster.busy(thread_id)
+        """Running (or queued) here, queued for a worker, or running on another replica."""
+        return (thread_id in self.running or self.cluster.busy(thread_id)
+                or (self.queue is not None and bool(self.queue.queued_among([thread_id]))))
+
+    def busy_among(self, threads: list[str]) -> set[str]:
+        out = (self.running & set(threads)) | self.cluster.busy_among(threads)
+        return out | (self.queue.queued_among(threads) if self.queue is not None else set())
+
+    def run_job(self, thread_id: str, payload) -> None:
+        """A worker's run of a queued job (run_queue.Worker)."""
+        self._execute(thread_id, payload)
+
+    def _run(self, thread_id: str, payload) -> None:
+        """Run it now, here, or with a run queue, queue it for a worker: an API process runs no agents."""
+        if self.queue is not None:
+            self._submit(thread_id, payload)
+        else:
+            self._execute(thread_id, payload)
 
     def _execute(self, feature_id: str, payload) -> None:
         """Run the thread until it finishes or waits on a human, publishing each node as it ends.
@@ -288,11 +306,21 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             return {"error": self.sync_errors[feature_id]}
 
     def _submit(self, feature_id: str, payload) -> None:
+        from .cluster import stamp
+
+        if self.queue is not None:  # a worker runs it; the queue's row says it's running meanwhile
+            if isinstance(payload, dict) and not self._g(feature_id).get_state(self._config(feature_id)).values:
+                # A new thread: its first state is its first checkpoint, so its page shows it while it
+                # waits, and the worker carries on from there.
+                self._g(feature_id).update_state(self._config(feature_id), payload, as_node="__start__")
+                payload = None
+            self.queue.enqueue(feature_id, payload, workspace=self.workspace_of(feature_id) or "")
+            self.queued[feature_id] = stamp()
+            self.bus.publish({"type": "feature.running", "feature_id": feature_id})
+            return
         # Running from the moment the work is queued, not when a worker picks it up: otherwise a
         # caller (or a second decision) can see the old state between the two.
         self.running.add(feature_id)
-        from .cluster import stamp
-
         self.queued[feature_id] = stamp()  # other replicas see it's queued (engine_parts/recovery.py)
 
         def run():
@@ -308,7 +336,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         so it survives restarts."""
         out = []
         rows = [r for r in self.index.all() if r["product_id"] == product_id and r.get("kind", "feature") == "feature"]
-        busy = self.running | self.cluster.busy_among([r["feature_id"] for r in rows])
+        busy = self.busy_among([r["feature_id"] for r in rows])
         for row in rows:
             snap = self.graph.get_state(self._config(row["feature_id"]))
             s = snap.values or {}
@@ -413,7 +441,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         if background:
             self._submit(feature_id, inp)
         else:
-            self._execute(feature_id, inp)
+            self._run(feature_id, inp)
         return feature_id
 
     def path(self, product_id: str, stations: list[dict]) -> dict:
@@ -520,7 +548,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         if background:
             self._submit(feature_id, cmd)
             return {"feature_id": feature_id, "accepted": True}
-        self._execute(feature_id, cmd)
+        self._run(feature_id, cmd)
         return self.view(feature_id)
 
     def view(self, feature_id: str) -> dict:

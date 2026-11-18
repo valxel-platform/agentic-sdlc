@@ -15,7 +15,7 @@ def _common(engine, thread_id: str, s: dict, kind: str) -> dict:
     snap = engine._g(thread_id).get_state(engine._config(thread_id))
     return {
         "feature_id": thread_id, "kind": kind, "product_id": s.get("product_id"), "title": s.get("title"),
-        "created_by": s.get("created_by", ""), "status": s.get("status"), "running": thread_id in engine.running,
+        "created_by": s.get("created_by", ""), "status": s.get("status"), "running": engine.is_running(thread_id),
         "error": engine.errors.get(thread_id), "pending": [{"interrupt_id": i.id, **i.value} for i in snap.interrupts],
         "gate_decisions": s.get("gate_decisions", []), "events": s.get("events", []),
         "cost_usd": round(float(s.get("cost_usd", 0.0)), 4), "record_pr": s.get("record_pr") or {},

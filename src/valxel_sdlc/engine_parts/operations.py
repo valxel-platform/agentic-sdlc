@@ -187,7 +187,7 @@ class OperationsMixin:
             ended = True
         elif wait and not self.is_running(incident_id):  # the tool was watching it recover
             self.services.close_incident(incident_id)
-            self._execute(incident_id, Command(resume={wait["interrupt_id"]: {"status": "merged", "into": into}}))
+            self._run(incident_id, Command(resume={wait["interrupt_id"]: {"status": "merged", "into": into}}))
             ended = True
         else:  # busy: it ends at its next step (ops/incident.py merged)
             self.services.close_incident(incident_id)

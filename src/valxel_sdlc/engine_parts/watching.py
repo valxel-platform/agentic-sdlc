@@ -34,7 +34,7 @@ class WatchingMixin:
                 continue
             if cmd is not None:
                 try:
-                    self._execute(other, cmd)
+                    self._run(other, cmd)
                 except Exception:
                     pass  # recorded in self.errors
 
@@ -198,7 +198,7 @@ class WatchingMixin:
             return
         if cmd is not None:
             try:
-                self._execute(thread_id, cmd)
+                self._run(thread_id, cmd)
             except Exception:
                 pass
 

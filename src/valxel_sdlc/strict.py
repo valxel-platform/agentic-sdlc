@@ -57,6 +57,10 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
     if s.database_url and not enforced(env):
         out.append("VALXEL_TENANCY is not rls: every workspace's rows are open to any query that forgets to "
                    "filter (valxel_sdlc.tenancy)")
+    if s.mode == "live" and s.database_url and str(env.get("VALXEL_RUN_QUEUE", "")).lower() != "postgres":
+        out.append("VALXEL_RUN_QUEUE is not postgres: agents run inside the process that serves the API, so a "
+                   "deploy or a crash of it stops them and they share its memory and keys; queue the work and run "
+                   "`valxel worker` (valxel_sdlc.run_queue)")
     out += weak_secrets(env, database_url=s.database_url)
     out += secrets_in_environment(env, live=s.mode == "live")
     out += provisioning_split(env)

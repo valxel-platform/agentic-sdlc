@@ -1637,6 +1637,19 @@ repository. Its folder is deleted when the session ends. `VALXEL_AGENT_ENV_PASS`
 variable a deployment's sessions need (e.g. `AWS_REGION` for Bedrock); `VALXEL_AGENT_SANDBOX_WEAKER=1`
 uses Claude Code's weaker sandbox in containers that can't create user namespaces.
 
+**In production, the API queues work and workers run it** (`valxel_sdlc/run_queue.py`,
+`VALXEL_RUN_QUEUE=postgres`; strict mode requires it in live mode). Starting a feature, a gate
+decision, a resume or a wait that ended is a row in `valxel_run_queue`; the API answers at once and
+the page shows the thread running. `valxel worker` processes (`--concurrency`, default 4; `/healthz` on
+`VALXEL_WORKER_PORT`, 8082) claim rows with `for update skip locked`, never a thread's later row
+before its earlier one, and run each under the thread's advisory lock as before; the watcher runs in
+them too, and API processes set `VALXEL_PROCESS=api` to run none. A worker renews its claims while it
+runs; one that dies stops, and its rows are claimed again when the claim runs out
+(`VALXEL_RUN_QUEUE_LEASE_S`, 120), at most `VALXEL_RUN_QUEUE_MAX_ATTEMPTS` (3) times. On SIGTERM a
+worker stops claiming, gives runs under way `VALXEL_WORKER_DRAIN_S` (25) to finish and hands the rest
+back, so a deploy doesn't count against them. A new feature's first state is its first checkpoint, so
+its page shows it while it waits. Rows carry their workspace, under row-level security.
+
 **In production, each session runs in a sandbox of its own** (`valxel_sdlc/session_runner.py`,
 `VALXEL_SESSION_EXECUTOR=kubernetes`; strict mode requires it in live mode). The tool claims a fresh
 sandbox from the platform's warm pool (Agent Sandbox 1.0: a `SandboxClaim` on the `agent-session`

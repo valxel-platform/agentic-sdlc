@@ -148,7 +148,7 @@ BY_PRODUCT = ("valxel_usage", "valxel_costs", "valxel_cost_reviews", "valxel_cha
 BY_THREAD = {"checkpoints": "thread_id", "checkpoint_blobs": "thread_id", "checkpoint_writes": "thread_id",
              "valxel_work_items": "feature_id", "valxel_release_joins": "feature_id",
              "valxel_notes": "split_part(key, ':', 2)"}
-BY_WORKSPACE = ("valxel_features", "valxel_workspace_rows", "valxel_workspace_audit")
+BY_WORKSPACE = ("valxel_features", "valxel_workspace_rows", "valxel_workspace_audit", "valxel_run_queue")
 PLATFORM_ONLY = ("valxel_unmatched_signals",)
 POLICY = "valxel_tenant"
 
