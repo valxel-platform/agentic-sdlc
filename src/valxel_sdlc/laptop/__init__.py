@@ -6,6 +6,8 @@
 - `doctor` checks what `up` needs: Docker and Compose, the socket's group, the keys, free ports.
 - `up` / `down` / `logs` run Docker Compose on the bundle.
 - `urls` lists what this machine serves: the tool, and each product environment's external endpoints.
+- `cluster up|down|status|check` runs products through OpenChoreo in a local k3d cluster instead of
+  plain Docker (laptop/cluster.py).
 
 Model keys stay in the gateway: the tool's containers get only the gateway URL and its own key.
 """
@@ -26,6 +28,10 @@ from pathlib import Path
 BUNDLE_FILES = ("compose.yaml", "worker.Dockerfile", "gateway-policy.yaml", ".env.example", "initdb/10-audit.sql")
 ENV_KEYS = ("ANTHROPIC_API_KEY", "VALXEL_GATEWAY_KEY", "VALXEL_GITHUB_TOKEN", "VALXEL_GOVERNANCE_SOURCE", "DOCKER_GID")
 TOOL_PORT = 8080
+
+
+def tool_port(target: Path | None = None) -> int:
+    return int(read_env((target or home()) / ".env").get("VALXEL_PORT") or TOOL_PORT)
 
 
 def home() -> Path:
@@ -137,9 +143,13 @@ def doctor(target: Path | None = None, *, run=_run, port_free=_port_free) -> lis
                    ("valxel dev init --github-token-stdin (fine-grained: Administration, Contents, Pull "
                     "requests, Workflows)")))
     checks.append(("Gateway policy", (target / "gateway-policy.local.yaml").exists(), "Run: valxel dev init"))
+    port = tool_port(target)
     running = have_docker and run(["docker", "compose", "-p", "valxel", "ps", "-q", "api"]).stdout.strip()
-    checks.append((f"Port {TOOL_PORT} free", bool(running) or port_free(TOOL_PORT),
-                   f"Stop what listens on 127.0.0.1:{TOOL_PORT}"))
+    checks.append((f"Port {port} free", bool(running) or port_free(port),
+                   f"Stop what listens on 127.0.0.1:{port}"))
+    if env.get("VALXEL_LOCAL_RUNTIME") == "openchoreo":
+        ctx = have_docker and run(["kubectl", "config", "get-contexts", "-o", "name"]).stdout.split()
+        checks.append(("Local OpenChoreo cluster", bool(ctx) and "k3d-valxel" in ctx, "valxel dev cluster up"))
     return checks
 
 
@@ -148,9 +158,9 @@ def compose(target: Path, *args: str) -> list[str]:
             "--env-file", str(target / ".env"), *args]
 
 
-def urls(*, run=_run) -> dict[str, str]:
+def urls(*, run=_run, port: int = TOOL_PORT) -> dict[str, str]:
     """The tool, and every product endpoint published on this machine (lite/local.py)."""
-    out = {"valxel": f"http://localhost:{TOOL_PORT}"}
+    out = {"valxel": f"http://localhost:{port}"}
     ps = run(["docker", "ps", "--filter", "label=dev.valxel.component", "--format", "{{json .Labels}}\t{{.Names}}"])
     for line in ps.stdout.splitlines():
         raw, _, name = line.partition("\t")
@@ -163,6 +173,9 @@ def urls(*, run=_run) -> dict[str, str]:
 
 def main(args) -> int:
     target = Path(args.home) if getattr(args, "home", None) else home()
+    if args.action == "cluster":
+        from .cluster import main as cluster_main
+        return cluster_main(args)
     if args.action == "init":
         # Keys come on stdin (a pipe or a paste), never as arguments, so they stay out of shell history.
         key = sys.stdin.readline().strip() if args.anthropic_key_stdin else ""
@@ -182,14 +195,14 @@ def main(args) -> int:
             return 1
         rc = subprocess.call(compose(target, "up", "-d", "--build", "--wait"))
         if rc == 0:
-            print(f"Valxel is up: http://localhost:{TOOL_PORT}")
+            print(f"Valxel is up: http://localhost:{tool_port(target)}")
         return rc
     if args.action == "down":
         return subprocess.call(compose(target, "down", *(["--volumes"] if args.wipe else [])))
     if args.action == "logs":
         return subprocess.call(compose(target, "logs", "-f", "--tail", "200", *args.services))
     if args.action == "urls":
-        for k, v in urls().items():
+        for k, v in urls(port=tool_port(target)).items():
             print(f"{k}\t{v}")
         return 0
     return 2
@@ -197,9 +210,10 @@ def main(args) -> int:
 
 def add_parser(sub) -> None:
     dv = sub.add_parser("dev", help="The laptop tier: the tool end to end on this machine (init, doctor, up, "
-                                    "down, logs, urls)")
-    dv.add_argument("action", choices=["init", "doctor", "up", "down", "logs", "urls"])
-    dv.add_argument("services", nargs="*", help="With logs: only these services")
+                                    "down, logs, urls; cluster up|down|status|check for a local OpenChoreo)")
+    dv.add_argument("action", choices=["init", "doctor", "up", "down", "logs", "urls", "cluster"])
+    dv.add_argument("services", nargs="*", help="With logs: only these services. With cluster: up, down, status "
+                                                "or check")
     dv.add_argument("--home", help="Where the bundle lives (default ~/.valxel/laptop)")
     dv.add_argument("--anthropic-key-stdin", action="store_true", help="init: read the model key from stdin")
     dv.add_argument("--github-token-stdin", action="store_true", help="init: read the GitHub token from stdin "

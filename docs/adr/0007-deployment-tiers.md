@@ -61,3 +61,11 @@ continues as tracked.
 
 `valxel dev init`, `valxel dev doctor`, `valxel dev up` (valxel_sdlc.laptop). The bundle and its
 guide are in `src/valxel_sdlc/laptop/bundle/` (README.md there).
+
+The laptop has two runtimes (`VALXEL_LOCAL_RUNTIME`):
+
+- `docker`, the default: products are built and run on this machine's Docker through the lite runtime.
+- `openchoreo`: OpenChoreo itself runs in a local k3d cluster (`valxel dev cluster up`), at the
+  version the platform installs, so the tool's calls to OpenChoreo can be tested before they reach the
+  shared platform. `valxel dev cluster check` lists what the tool needs that the installed OpenChoreo
+  lacks.

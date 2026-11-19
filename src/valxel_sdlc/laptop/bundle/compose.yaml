@@ -13,6 +13,16 @@ x-tool: &tool
     VALXEL_GITHUB_TOKEN: ${VALXEL_GITHUB_TOKEN:-}
     VALXEL_GITHUB_APP_ID: ${VALXEL_GITHUB_APP_ID:-}
     VALXEL_GITHUB_APP_PRIVATE_KEY: ${VALXEL_GITHUB_APP_PRIVATE_KEY:-}
+    # Where products build and deploy: docker (this machine's Docker), or openchoreo (a local
+    # OpenChoreo, `valxel dev cluster up`, which sets the rest of these).
+    VALXEL_LOCAL_RUNTIME: ${VALXEL_LOCAL_RUNTIME:-docker}
+    VALXEL_OPENCHOREO_MCP_URL: ${VALXEL_OPENCHOREO_MCP_URL:-}
+    VALXEL_OPENCHOREO_TOKEN_URL: ${VALXEL_OPENCHOREO_TOKEN_URL:-}
+    VALXEL_OPENCHOREO_CLIENT_ID: ${VALXEL_OPENCHOREO_CLIENT_ID:-}
+    VALXEL_OPENCHOREO_CLIENT_SECRET: ${VALXEL_OPENCHOREO_CLIENT_SECRET:-}
+    VALXEL_OPENCHOREO_RESOURCE: ${VALXEL_OPENCHOREO_RESOURCE:-}
+    VALXEL_OPENCHOREO_CONSOLE_URL: ${VALXEL_OPENCHOREO_CONSOLE_URL:-}
+    VALXEL_OPENCHOREO_GIT_SECRET_REF: ${VALXEL_OPENCHOREO_GIT_SECRET_REF:-}
     VALXEL_TIER: laptop
     VALXEL_MODE: live
     VALXEL_DELIVERY: local
@@ -20,12 +30,17 @@ x-tool: &tool
     VALXEL_RUN_QUEUE: postgres
     DATABASE_URL: postgresql://valxel:valxel@postgres:5432/valxel
     VALXEL_ARTIFACT_DIR: /data/artifacts
-    VALXEL_PUBLIC_URL: http://localhost:8080
+    VALXEL_PUBLIC_URL: http://localhost:${VALXEL_PORT:-8080}
     VALXEL_GOVERNANCE_SOURCE: ${VALXEL_GOVERNANCE_SOURCE:-local}
     # Model calls go through the gateway below; the tool and its sessions never hold the model key.
     VALXEL_LLM_GATEWAY_URL: http://llm-gateway:8080
     VALXEL_LLM_GATEWAY_API_KEY: ${VALXEL_GATEWAY_KEY:?run valxel dev init}
   volumes: [artifacts:/data/artifacts]
+  # OpenChoreo's local hostnames lead to its gateway on this machine (unused in docker mode).
+  extra_hosts:
+    - "api.openchoreo.localhost:host-gateway"
+    - "thunder.openchoreo.localhost:host-gateway"
+    - "openchoreo.localhost:host-gateway"
   depends_on:
     postgres: {condition: service_healthy}
     llm-gateway: {condition: service_healthy}
@@ -37,7 +52,7 @@ services:
     environment:
       <<: *tool-env
       VALXEL_PROCESS: api
-    ports: ["127.0.0.1:8080:8080"]
+    ports: ["127.0.0.1:${VALXEL_PORT:-8080}:8080"]   # 8090 with a local OpenChoreo, which takes 8080
 
   # Runs the work: agents, builds and deploys. It alone reaches Docker, to build products' images
   # and run their environments here.

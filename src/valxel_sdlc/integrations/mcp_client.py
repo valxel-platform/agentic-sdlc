@@ -166,12 +166,13 @@ class ClientCredentials:
     control plane issues these for its confidential service client."""
 
     def __init__(self, token_url: str, client_id: str, client_secret: str, scope: str = "",
-                 opener=None, clock=None) -> None:
+                 opener=None, clock=None, resource: str = "") -> None:
         import threading
         import time
         from urllib.request import build_opener
 
         self.token_url, self.client_id, self.client_secret, self.scope = token_url, client_id, client_secret, scope
+        self.resource = resource  # RFC 8707: the API the token is for (OpenChoreo: <api>/mcp)
         self.opener = opener or build_opener()
         self.clock = clock or time.time
         self._token: tuple[str, float] | None = None
@@ -191,6 +192,8 @@ class ClientCredentials:
                     "client_secret": self.client_secret}
             if self.scope:
                 form["scope"] = self.scope
+            if self.resource:
+                form["resource"] = self.resource
             req = Request(self.token_url, data=urlencode(form).encode(), method="POST",
                           headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"})
             try:

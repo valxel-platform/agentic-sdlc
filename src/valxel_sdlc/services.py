@@ -304,7 +304,7 @@ def build_services(
 
     from .environments import default_mode
 
-    if _os.environ.get("VALXEL_DELIVERY", "").lower() == "local":
+    if _os.environ.get("VALXEL_DELIVERY", "").lower() == "local" and local_runtime() != "openchoreo":
         from .lite.local import LocalRouter
 
         svc.openchoreo = LocalRouter(openchoreo, svc, tokens=local_tokens(settings),
@@ -481,34 +481,60 @@ def default_delivery(settings: Settings) -> tuple[GitHub, OpenChoreo]:
     if delivery == "local":  # the laptop tier (ADR 0007): GitHub for real, builds and deploys here
         from .integrations.github import DELIVERY_PERMISSIONS, GitHubRest
 
-        return GitHubRest(local_tokens(settings, DELIVERY_PERMISSIONS), api=settings.github_api), StubOpenChoreo()
+        github = GitHubRest(local_tokens(settings, DELIVERY_PERMISSIONS), api=settings.github_api)
+        if local_runtime() == "openchoreo":  # OpenChoreo on this machine (`valxel dev cluster up`)
+            return github, openchoreo_client(settings, needs="VALXEL_LOCAL_RUNTIME=openchoreo")
+        return github, StubOpenChoreo()
     if delivery != "live":
         return StubGitHub(), StubOpenChoreo()
     from .integrations.github import DELIVERY_PERMISSIONS, GitHubRest
-    from .integrations.openchoreo import OpenChoreoMcp
 
     from .signing import github_app_configured, github_app_tokens
 
     missing = [] if github_app_configured() else [
         "VALXEL_GITHUB_APP_ID and a key (VALXEL_GITHUB_APP_KMS_KEY_ID, VALXEL_GITHUB_APP_PRIVATE_KEY or "
         "VALXEL_GITHUB_APP_PRIVATE_KEY_FILE)"]
+    missing += openchoreo_missing(settings)
+    if missing:
+        raise DeliveryConfigError(f"VALXEL_DELIVERY=live needs {', '.join(missing)}")
+    tokens = github_app_tokens(api=settings.github_api, permissions=DELIVERY_PERMISSIONS)
+    return GitHubRest(tokens, api=settings.github_api), openchoreo_client(settings)
+
+
+def local_runtime() -> str:
+    """Where a laptop's products build and deploy: docker (the lite runtime on this Docker, the
+    default) or openchoreo (OpenChoreo in a local k3d cluster, the cluster tier's path)."""
+    import os
+
+    return (os.environ.get("VALXEL_LOCAL_RUNTIME") or "docker").lower()
+
+
+def openchoreo_missing(settings: Settings) -> list[str]:
     oc = settings.tools.servers.get("openchoreo")
-    secret = oc.setting("client_secret") if oc else ""
+    missing = []
     if not oc or not oc.url:
         missing.append("VALXEL_OPENCHOREO_MCP_URL")
     if not oc or not oc.setting("token_url"):
         missing.append("VALXEL_OPENCHOREO_TOKEN_URL")
-    if not secret:
+    if not oc or not oc.setting("client_secret"):
         missing.append("VALXEL_OPENCHOREO_CLIENT_SECRET")
+    return missing
+
+
+def openchoreo_client(settings: Settings, *, needs: str = "VALXEL_DELIVERY=live"):
+    """OpenChoreo's MCP server with the tool's service client (client-credentials grant)."""
+    from .integrations.openchoreo import OpenChoreoMcp
+
+    missing = openchoreo_missing(settings)
     if missing:
-        raise DeliveryConfigError(f"VALXEL_DELIVERY=live needs {', '.join(missing)}")
-    tokens = github_app_tokens(api=settings.github_api, permissions=DELIVERY_PERMISSIONS)
-    creds = ClientCredentials(oc.setting("token_url"), oc.setting("client_id") or "service_mcp_client", secret,
-                              scope=oc.setting("scope"))
+        raise DeliveryConfigError(f"{needs} needs {', '.join(missing)}")
+    oc = settings.tools.servers["openchoreo"]
+    creds = ClientCredentials(oc.setting("token_url"), oc.setting("client_id") or "service_mcp_client",
+                              oc.setting("client_secret"), scope=oc.setting("scope"),
+                              resource=oc.setting("resource"))
     server = McpHttp("openchoreo", oc.url, auth=creds)
-    return (GitHubRest(tokens, api=settings.github_api),
-            OpenChoreoMcp(server, default_namespace=oc.setting("namespace") or "default",
-                          console_url=oc.setting("console_url")))
+    return OpenChoreoMcp(server, default_namespace=oc.setting("namespace") or "default",
+                         console_url=oc.setting("console_url"), git_secret_ref=oc.setting("git_secret_ref"))
 
 
 def local_tokens(settings: Settings, permissions=None):

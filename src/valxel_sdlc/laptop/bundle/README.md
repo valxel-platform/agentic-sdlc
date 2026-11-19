@@ -35,6 +35,35 @@ Products are built with `docker build` from their repos at the merged commit, an
 (development, staging, production) runs as its own Compose project. External endpoints are published
 on 127.0.0.1 at a port that stays the same across deploys. `valxel dev urls` lists them.
 
+## With OpenChoreo instead of plain Docker
+
+To test the cluster tier's path on your machine (components, workflow runs, releases and release
+bindings through OpenChoreo's API), run OpenChoreo itself in a local k3d cluster:
+
+```sh
+valxel dev cluster up      # OpenChoreo 1.3.3 (the platform's version) with its build plane; needs k3d, kubectl, helm
+valxel dev up              # the tool, now on http://localhost:8090 (OpenChoreo's gateway takes 8080)
+valxel dev cluster check   # what the tool calls and names that this OpenChoreo doesn't have
+```
+
+`cluster up` does the following:
+
+- It runs OpenChoreo's own k3d installer at the pinned release. The script's hash is checked first,
+  and it isn't run if the hash changed.
+- It stores your GitHub token in the cluster's OpenBao, so builds can clone private repos. The token
+  is passed on stdin, never as an argument.
+- It adds two names the tool's repo standards use. `docker` is OpenChoreo's `dockerfile-builder`
+  workflow under another name, and `web-app` is its `web-application` component type. These names
+  exist only on the laptop: the platform's own `docker` workflow signs images with a cloud KMS key,
+  which a laptop doesn't have.
+- It switches `.env` to `VALXEL_LOCAL_RUNTIME=openchoreo`.
+
+The OpenChoreo console is at http://openchoreo.localhost:8080 (admin@openchoreo.dev / Admin@123).
+The tool signs in with the installer's development client, whose credentials are public. That's
+fine for a cluster that only this machine can reach.
+
+`valxel dev cluster down` deletes the cluster and switches back to plain Docker.
+
 ## Limits
 
 - Not for anything shared. Dev sign-in lets anyone who reaches port 8080 in, and the worker controls

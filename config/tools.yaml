@@ -34,6 +34,8 @@ servers:
       client_id_env: VALXEL_OPENCHOREO_CLIENT_ID       # default service_mcp_client
       client_secret_env: VALXEL_OPENCHOREO_CLIENT_SECRET
       scope_env: VALXEL_OPENCHOREO_SCOPE               # optional
+      resource_env: VALXEL_OPENCHOREO_RESOURCE         # optional, the token's audience (RFC 8707)
+      git_secret_ref_env: VALXEL_OPENCHOREO_GIT_SECRET_REF  # optional, SecretReference for private repos
       console_url_env: VALXEL_OPENCHOREO_CONSOLE_URL   # optional, links runs to the console
       namespace: default                               # products may set runtime.namespace
 

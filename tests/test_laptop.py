@@ -31,7 +31,7 @@ def test_only_the_worker_reaches_docker_and_only_the_api_is_published():
     sock = [n for n, s in services.items() if any("docker.sock" in str(v) for v in s.get("volumes") or [])]
     assert sock == ["worker"]
     published = {n: s["ports"] for n, s in services.items() if s.get("ports")}
-    assert published == {"api": ["127.0.0.1:8080:8080"]}
+    assert published == {"api": ["127.0.0.1:${VALXEL_PORT:-8080}:8080"]}  # 8090 beside a local OpenChoreo
 
 
 def test_init_writes_owner_only_env_and_a_policy_with_only_the_hash(tmp_path, monkeypatch):

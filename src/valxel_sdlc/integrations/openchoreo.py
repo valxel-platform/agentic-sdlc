@@ -395,11 +395,32 @@ def _condition(obj: dict, ctype: str) -> str | None:
     return None
 
 
+def tools_used() -> list[tuple[str, ...]]:
+    """Every tool this client calls, as the alternative names it accepts for each (first that the
+    server offers wins). Read from this module's own calls, so it can't drift from them; `valxel dev
+    cluster check` compares it with what an OpenChoreo server actually offers."""
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).read_text()
+    found = []
+    for m in re.finditer(r'(?:_call|pick_tool)\((?:self\.server, )?\(?((?:"[a-z_]+",?\s*)+)\)?', src):
+        names = tuple(re.findall(r'"([a-z_]+)"', m.group(1)))
+        if names and names not in found:
+            found.append(names)
+    # Looked up with a get tool or, failing that, found in a list (_get_or_find).
+    return found + [("get_project", "list_projects"), ("get_environment", "list_environments")]
+
+
 class OpenChoreoMcp:
-    def __init__(self, server: McpTools, *, default_namespace: str = "default", console_url: str = "") -> None:
+    def __init__(self, server: McpTools, *, default_namespace: str = "default", console_url: str = "",
+                 git_secret_ref: str = "") -> None:
         self.server = server
         self.default_namespace = default_namespace
         self.console_url = console_url.rstrip("/")
+        # The SecretReference that holds GitHub credentials for builds of private repos (OpenChoreo
+        # 1.3: a workflow's repository.secretRef); empty for public repos.
+        self.git_secret_ref = git_secret_ref
         self._requested: dict[str, str] = {}
         self._lock = threading.Lock()
 
@@ -427,16 +448,29 @@ class OpenChoreoMcp:
                 return "exists"
         except McpError:
             pass  # not found
-        self._call(("create_component",), {
-            **scope,
+        tool = pick_tool(self.server, "create_component")
+        wf = (self.server.tool_schema(tool).get("properties") or {}).get("workflow") or {}
+        if wf.get("type") == "object":
+            # OpenChoreo 1.3+: the workflow is {name, kind, parameters}, and the repository lives in its
+            # parameters (the workflow's schema marks which: repository.url, revision.branch, secretRef).
+            repo = {"url": repo_url, "revision": {"branch": branch}}
+            if self.git_secret_ref:
+                repo["secretRef"] = self.git_secret_ref
+            built = {("workflow",): {"name": workflow, "kind": "ClusterWorkflow",
+                                     "parameters": {"repository": repo}} if workflow else None}
+        else:  # earlier releases: flat arguments
+            built = {("workflow", "workflow_name", "build_workflow"): workflow,
+                     ("repository_url", "repo_url", "git_repository", "repository"): repo_url,
+                     ("branch", "git_branch"): branch}
+        self.server.call(tool, fit_args(self.server, tool, {
+            _NS: scope[_NS], _PROJECT: scope[_PROJECT],
+            (*_COMPONENT, "name"): scope[_COMPONENT],  # 1.3 names the new component `name`
             ("component_type", "componentType", "type"): component_type,
-            ("workflow", "workflow_name", "build_workflow"): workflow,
-            ("repository_url", "repo_url", "git_repository", "repository"): repo_url,
-            ("branch", "git_branch"): branch,
+            **built,
             ("auto_deploy", "autoDeploy"): False,
             ("auto_build", "autoBuild"): False,
             **({("parameters", "component_parameters", "componentParameters"): dict(parameters)} if parameters else {}),
-        })
+        }))
         return "created"
 
     # -- builds
@@ -573,11 +607,8 @@ class OpenChoreoMcp:
 
     def ensure_project(self, *, project, pipeline, namespace=None) -> str:
         scope = {**self._ns(namespace), _PROJECT: project}
-        try:
-            if self._call(("get_project",), scope):
-                return "exists"
-        except McpError:
-            pass
+        if self._get_or_find(("get_project",), "list_projects", scope, project, namespace):
+            return "exists"
         self._call(("create_project",), {**scope, ("deployment_pipeline", "deploymentPipeline", "pipeline"): pipeline})
         return "created"
 
@@ -634,10 +665,23 @@ class OpenChoreoMcp:
         return {"name": name, "created": ""}
 
     def _env(self, name, namespace) -> dict | None:
+        return self._get_or_find(("get_environment",), "list_environments", {**self._ns(namespace), _ENV: name},
+                                 name, namespace)
+
+    def _get_or_find(self, get: tuple[str, ...], lister: str, args: dict, name: str, namespace) -> dict | None:
+        """One object by name: with its get tool when the server has one, else found in its list
+        (OpenChoreo 1.3 has list_projects and list_environments but no get for either). Not found,
+        or the server refusing the lookup: None."""
+        names = set(self.server.tool_names())
         try:
-            return self._call(("get_environment",), {**self._ns(namespace), _ENV: name}) or None
+            if names & set(get):
+                return self._call(get, args) or None
+            if lister in names:
+                return next((x for x in _list(self._call((lister,), self._ns(namespace)))
+                             if _get(x, "name", "metadata.name") == name), None)
         except McpError:
             return None
+        return None
 
     def delete_environment(self, *, name, project=None, namespace=None) -> None:
         self._call(("delete_environment",), {**self._ns(namespace), _ENV: name})
