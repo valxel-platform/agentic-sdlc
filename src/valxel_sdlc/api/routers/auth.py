@@ -170,4 +170,11 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         return {"ok": True, "mode": eng().services.settings.mode, "auth": auth.mode,
                 "delivery": os.environ.get("VALXEL_DELIVERY", "stub"), "strict": strict.enabled()}
 
+    @api.get("/healthz/watcher")
+    def watcher_health() -> dict:
+        """The watcher's housekeeping jobs that haven't succeeded for 26 hours (watcher_jobs.py), for
+        monitoring: names, hours and error types only. Not for probes: it reads the shared notes."""
+        stale = eng().jobs.stale(eng().watcher_jobs())
+        return {"ok": not stale, "stale": stale}
+
     return api

@@ -333,6 +333,14 @@ Run as many replicas as you like behind one load balancer, all on the same Postg
 - **One watcher.** Every replica starts the watcher; only the one holding its lock polls CI and
   OpenChoreo and runs the daily inventory and hourly cost review. If it goes, another takes over on
   its next tick.
+- **The watcher's jobs tell you when they stop working** (`src/valxel_sdlc/watcher_jobs.py`). Each
+  housekeeping job (inventories, outcomes, upkeep, costs, receipts, connections, transcripts, change-set
+  environments, crash recovery) logs its failures with their traceback, counts them per job in the
+  shared notes (`watcher-job:<name>`: last success and failure, failures in a row and in all, the
+  error's type), and a failed daily job is retried hourly. A job without a success for 26 hours logs
+  `watcher job <name> stale` at error level and posts to `VALXEL_NOTIFY_WEBHOOK`, then again daily
+  while it stays stale, and once more when it recovers. `GET /api/healthz/watcher` lists stale jobs
+  for monitoring (not for probes: it reads the shared notes).
 - **Asked once.** Post-deploy, acceptance and rollout runs the tool asks GitHub for are claimed in
   a table first, so two replicas never both ask.
 - **Shared.** Live updates go through Postgres NOTIFY to every replica's browsers; intake chats,

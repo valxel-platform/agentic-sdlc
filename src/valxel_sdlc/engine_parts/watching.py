@@ -107,66 +107,34 @@ class WatchingMixin:
                 watch()
 
         def watch():
-            import time
-
             while not self._stop.wait(interval_s):
                 if not self.cluster.leader("watcher"):
                     continue  # another replica watches; this one takes over if that one goes
                 for fid in self.waiting_on_external():
                     self.poke(fid)
-                if time.time() - self._recovered > 60:  # threads a replica dropped (engine_parts/recovery.py)
-                    self._recovered = time.time()
-                    try:
-                        self.recover_stranded()
-                    except Exception:
-                        log.exception("crash recovery sweep failed")
-                today = time.strftime("%Y-%m-%d", time.gmtime())
-                if today != self._inventory_day:  # one inventory snapshot a day, for the trend
-                    self._inventory_day = today
-                    try:
-                        self.snapshot_inventories()
-                    except Exception:
-                        pass
-                if today != self._outcomes_day:  # readouts and goal trends move daily at most
-                    self._outcomes_day = today
-                    try:
-                        self.collect_outcomes()
-                    except Exception:
-                        pass
-                if time.time() - self._envs_swept > 900:  # change-set environments left behind
-                    self._envs_swept = time.time()
-                    try:
-                        self.sweep_change_set_envs()
-                    except Exception:
-                        pass
-                if today != self._upkeep_swept_day:  # every repo's alerts once a day, for missed webhooks
-                    self._upkeep_swept_day = today
-                    try:
-                        self.upkeep.sweep()
-                    except Exception:
-                        pass
-                if time.time() - self._upkeep_ticked > 900:  # deadlines, fixes, Dependabot updates
-                    self._upkeep_ticked = time.time()
-                    try:
-                        self.upkeep.tick()
-                    except Exception:
-                        pass
-                if time.time() - self._cost_checked > 3600:  # cost data moves daily; hourly is plenty
-                    self._cost_checked = time.time()
-                    try:
-                        self.cluster.prune(30)
-                    except Exception:
-                        pass
-            
-                    for job in (self.collect_costs, self.review_costs, self.expire_transcripts, self.check_connections,
-                                self.catch_up_receipts):
-                        try:
-                            job()
-                        except Exception:
-                            pass
+                self.jobs.tick(self.watcher_jobs())
 
         self._watcher = threading.Thread(target=loop, name="valxel-watcher", daemon=True)
         self._watcher.start()
+
+    def watcher_jobs(self) -> list:
+        """The watcher's housekeeping, and how often each runs (watcher_jobs.py records how it goes)."""
+        from ..watcher_jobs import DAILY, Job
+
+        return [
+            Job("recover_stranded", self.recover_stranded, 60),  # threads a replica dropped (recovery.py)
+            Job("snapshot_inventories", self.snapshot_inventories, DAILY),  # one inventory snapshot a day
+            Job("collect_outcomes", self.collect_outcomes, DAILY),  # readouts and goal trends move daily
+            Job("sweep_change_set_envs", self.sweep_change_set_envs, 900),  # environments left behind
+            Job("upkeep_sweep", self.upkeep.sweep, DAILY),  # every repo's alerts, for missed webhooks
+            Job("upkeep_tick", self.upkeep.tick, 900),  # deadlines, fixes, Dependabot updates
+            Job("prune_cluster_notes", lambda: self.cluster.prune(30), 3600),
+            Job("collect_costs", self.collect_costs, 3600),  # cost data moves daily; hourly is plenty
+            Job("review_costs", self.review_costs, 3600),
+            Job("expire_transcripts", self.expire_transcripts, 3600),
+            Job("check_connections", self.check_connections, 3600),
+            Job("catch_up_receipts", self.catch_up_receipts, 3600),
+        ]
 
     def sweep_change_set_envs(self) -> list[str]:
         """Delete change-set environments whose feature stopped, finished or outlived the product's

@@ -106,7 +106,6 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         self.cost_review_days = tuple(float(d) for d in (os.environ.get("VALXEL_COST_REVIEW_DAYS") or "7,30").split(",")
                                       if d.strip())
         self.cost_tolerance = float(os.environ.get("VALXEL_COST_TOLERANCE") or 0.2)
-        self._cost_checked = 0.0
         self.index = index or InMemoryIndex()
         self._create_lock = threading.Lock()
         services.features = self.feature_summaries  # what the product has built, for agents and G4
@@ -146,16 +145,10 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             from .ops.inventory import aws_tags_from_env
 
             services.aws_tags = aws_tags_from_env()
-        self._inventory_day = ""
-        self._outcomes_day = ""
-        self._envs_swept = 0.0
-        self._recovered = 0.0
         # Scan upkeep: security findings on products' default branches (valxel_sdlc.upkeep).
         from .upkeep.service import Upkeep
 
         self.upkeep = Upkeep(self)
-        self._upkeep_ticked = 0.0
-        self._upkeep_swept_day = ""
         if getattr(services, "agents", None) is None:
             from .integrations.openchoreo_agents import from_env as agents_from_env
 
@@ -178,6 +171,9 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="feature")
         self.running: set[str] = set()  # queued or running on this replica
         self.errors = Notes(self.cluster, "error")  # a thread's last error, whichever replica ran it
+        from .watcher_jobs import Jobs
+
+        self.jobs = Jobs(self.cluster)  # the watcher's housekeeping and its health (watcher_jobs.py)
         # Crash recovery (engine_parts/recovery.py): work queued on some replica and not yet started,
         # and how often the reaper has restarted a thread from the same checkpoint.
         self.queued = Notes(self.cluster, "queued")
