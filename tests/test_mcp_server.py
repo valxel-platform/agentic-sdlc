@@ -113,11 +113,12 @@ def test_tools_act_as_the_person(client, pool):
     assert {t["name"] for t in rpc(client, "tools/list", tok=token()).json()["result"]["tools"]} >= {
         "inbox", "features", "feature", "artifact", "decision_brief", "decide", "trace", "start_intent",
         "continue_intent", "submit_intent", "intents", "whoami"}
-    tok = token()
+    tok = token(jti="whoami")  # its own token, whatever second the one above was made in
+    before = pool.userinfo_calls
     err, me = tool(client, "whoami", tok)
     assert not err and me["login"] == "ana@example.com" and me["idp"] == "mcp" and me["strong"] is False
     tool(client, "whoami", tok)
-    assert pool.userinfo_calls == 1  # the person is looked up once per token, not per call
+    assert pool.userinfo_calls == before + 1  # the person is looked up once per token, not per call
 
 
 def test_a_gate_is_decided_by_its_approver_as_themselves(client, engine, monkeypatch):
