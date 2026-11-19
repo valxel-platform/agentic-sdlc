@@ -48,3 +48,61 @@ def test_a_gate_waits_and_is_decided_after_pruning(pg_engine):
     for gate in ("g1", "g2", "g3", "g4", "g5"):
         approve(engine, fid, gate)  # each run ends in a pruned checkpoint waiting on the next gate
     assert approve(engine, fid, "g6")["status"] == "done"
+
+
+class FakeS3:
+    def __init__(self, fail=False):
+        self.objects, self.fail = {}, fail
+
+    def put_object(self, **kw):
+        if self.fail:
+            raise ConnectionError("s3 unreachable")
+        self.objects[kw["Key"]] = kw
+
+
+def counts(pool, fid):
+    with pool.connection() as conn:
+        return conn.execute("select count(*) as n from checkpoints where thread_id = %s", (fid,)).fetchone()["n"]
+
+
+def test_a_regulated_lanes_history_is_archived_before_it_is_pruned(pg_engine):
+    from conftest import pending_of
+
+    from valxel_sdlc.checkpoint_archive import Archive, read
+
+    engine, pool = pg_engine
+    s3 = FakeS3()
+    engine.checkpoint_archive = Archive("valxel-checkpoints", 2190, s3=s3)
+    fid = engine.start(product_id="CLN", title="Consent check on intake")["feature_id"]  # PHI
+    [key] = s3.objects
+    obj = s3.objects[key]
+    assert key.startswith(f"checkpoints/CLN/{fid}/") and obj["ObjectLockMode"] == "COMPLIANCE"
+    assert obj["ServerSideEncryption"] == "aws:kms" and obj["Metadata"]["sha256"][:16] in key
+    records = read(obj["Body"], engine.checkpointer.serde)
+    assert len(records) == int(obj["Metadata"]["checkpoints"]) > 1  # every step's state, not only the last
+    assert any(r["checkpoint"]["channel_values"].get("title") == "Consent check on intake" for r in records)
+    assert counts(pool, fid) <= len({r["checkpoint_ns"] for r in records})  # then pruned to the latest
+    assert pending_of(engine, fid, "g1")
+
+
+def test_without_an_archive_a_regulated_lane_keeps_its_history(pg_engine):
+    from valxel_sdlc.checkpoint_archive import Archive
+
+    engine, pool = pg_engine
+    engine.checkpoint_archive = None
+    fid = engine.start(product_id="CLN", title="Allergy list")["feature_id"]
+    kept = counts(pool, fid)
+    assert kept > 2  # not pruned: nowhere to archive it
+    engine.checkpoint_archive = Archive("valxel-checkpoints", s3=FakeS3(fail=True))
+    engine._prune(fid)
+    assert counts(pool, fid) == kept  # the upload failed: still not pruned
+
+
+def test_other_lanes_prune_without_an_archive(pg_engine):
+    from valxel_sdlc.checkpoint_archive import Archive
+
+    engine, pool = pg_engine
+    s3 = FakeS3()
+    engine.checkpoint_archive = Archive("valxel-checkpoints", s3=s3)
+    fid = engine.start(product_id="FARM", title="Yield chart")["feature_id"]  # general
+    assert s3.objects == {} and counts(pool, fid) <= 3

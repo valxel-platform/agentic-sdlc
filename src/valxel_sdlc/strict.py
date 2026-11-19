@@ -61,6 +61,11 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("VALXEL_RUN_QUEUE is not postgres: agents run inside the process that serves the API, so a "
                    "deploy or a crash of it stops them and they share its memory and keys; queue the work and run "
                    "`valxel worker` (valxel_sdlc.run_queue)")
+    if s.database_url and not env.get("VALXEL_CHECKPOINT_ARCHIVE_BUCKET"):
+        regulated = [pid for pid in s.registry if _data_class(services, pid) in ("phi", "payments")]
+        if regulated:
+            out.append(f"VALXEL_CHECKPOINT_ARCHIVE_BUCKET is not set: {', '.join(regulated)} are regulated, so their "
+                       "checkpoint history is never pruned rather than archived (valxel_sdlc.checkpoint_archive)")
     out += weak_secrets(env, database_url=s.database_url)
     out += secrets_in_environment(env, live=s.mode == "live")
     out += app_key_in_kms(env)
@@ -86,6 +91,13 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         if cm.get("provider") == "servicenow" and not secret_env.get(f"VALXEL_SERVICENOW_AUTH_{pid.upper()}"):
             out.append(f"{pid}: tools.change_management names ServiceNow, but VALXEL_SERVICENOW_AUTH_{pid.upper()} is not set")
     return out
+
+
+def _data_class(services, pid: str) -> str:
+    try:
+        return services.snapshot(pid).product.data_class
+    except Exception:  # noqa: BLE001 - unreadable governance counts as regulated
+        return "phi"
 
 
 def _secret_env(env):

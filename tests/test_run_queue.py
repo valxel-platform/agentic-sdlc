@@ -129,7 +129,7 @@ def test_strict_mode_wants_the_queue_in_live_mode(services, monkeypatch):
     monkeypatch.setattr(services.settings, "database_url", "postgresql://x/y")
     found = strict.stand_ins(services, auth_mode="github", env={"VALXEL_DELIVERY": "live"})
     assert any(f.startswith("VALXEL_RUN_QUEUE is not postgres") for f in found)
-    found = strict.stand_ins(services, auth_mode="github", env={"VALXEL_DELIVERY": "live", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app"})
+    found = strict.stand_ins(services, auth_mode="github", env={"VALXEL_DELIVERY": "live", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_CHECKPOINT_ARCHIVE_BUCKET": "valxel-checkpoints", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app"})
     assert not any(f.startswith("VALXEL_RUN_QUEUE") for f in found)
 
 

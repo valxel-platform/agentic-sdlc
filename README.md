@@ -2888,7 +2888,7 @@ decision takes `remember: true` and `lesson`, and a hand-back takes `artifact_co
 | Multi-repo change set | `graph/merge_train.py`, `graph/delivery.py` | One branch name across repos; the merge train runs libraries, then providers, then consumers |
 | CI/CD | `integrations/openchoreo.py` | Agents promote to staging only; production promotion at G6 is human (VX-3). A production rollback is a person's, or the tool's under the remediation policy |
 | Knowledge write-back | `graph/phase.py` | After Operate, the capability is registered in the catalog |
-| Durability | `api/app.py` | `PostgresSaver` checkpointer; threads survive restarts and wait at gates for days; after each run a thread keeps only its latest checkpoint (`engine.py` `_prune`) |
+| Durability | `api/app.py` | `PostgresSaver` checkpointer; threads survive restarts and wait at gates for days; after each run a thread keeps only its latest checkpoint (`engine.py` `_prune`). A regulated lane's (PHI, payments) history is archived first to `VALXEL_CHECKPOINT_ARCHIVE_BUCKET` (KMS, Object Lock compliance mode for `VALXEL_CHECKPOINT_ARCHIVE_RETENTION_DAYS`, default 2190), or kept unpruned when it can't be (`checkpoint_archive.py`) |
 | Replicas | `cluster.py`, `events.py`, `intake.py` | Advisory lock per thread, the elected watcher, claims for GitHub requests, shared notes; live updates over NOTIFY; intake chats in Postgres |
 
 ## Decisions

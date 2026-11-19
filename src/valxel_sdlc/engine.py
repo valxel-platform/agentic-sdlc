@@ -174,6 +174,10 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         from .watcher_jobs import Jobs
 
         self.jobs = Jobs(self.cluster)  # the watcher's housekeeping and its health (watcher_jobs.py)
+        from .checkpoint_archive import Archive
+
+        # Regulated lanes' checkpoint history, archived before it's pruned (checkpoint_archive.py).
+        self.checkpoint_archive = Archive.from_env()
         # Crash recovery (engine_parts/recovery.py): work queued on some replica and not yet started,
         # and how often the reaper has restarted a thread from the same checkpoint.
         self.queued = Notes(self.cluster, "queued")
@@ -267,8 +271,12 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         without this every step's copy of the state stays in Postgres: about 95% of what a finished
         feature stored. Runs while this replica holds the thread's lock, so no run of it is under
         way; a run that ended in an error keeps its history until the next one succeeds."""
+        from langgraph.checkpoint.memory import InMemorySaver
+
         prune = getattr(self.checkpointer, "prune", None)
-        if prune is None:
+        if prune is None or isinstance(self.checkpointer, InMemorySaver):
+            return  # in memory: nothing piles up past the process
+        if not self._archive_before_prune(thread_id):
             return
         try:
             prune([thread_id], strategy="keep_latest")
@@ -276,6 +284,28 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             return
         except Exception as exc:  # noqa: BLE001 - pruning is housekeeping: the next run tries again
             log.warning("could not prune %s's checkpoints: %s", thread_id, exc)
+
+    def _archive_before_prune(self, thread_id: str) -> bool:
+        """A regulated lane's history goes to the archive before it's pruned, or isn't pruned
+        (checkpoint_archive.py). Other lanes prune without one."""
+        from . import checkpoint_archive
+
+        try:
+            product_id = self._state(thread_id).get("product_id") or thread_id.split("-", 1)[0]
+        except Exception:  # noqa: BLE001 - no state to read: treat as regulated below
+            product_id = thread_id.split("-", 1)[0]
+        if not checkpoint_archive.regulated(self.services, product_id):
+            return True
+        if self.checkpoint_archive is None:
+            log.warning("%s is regulated and VALXEL_CHECKPOINT_ARCHIVE_BUCKET isn't set: its checkpoints "
+                        "are kept, not pruned", thread_id)
+            return False
+        try:
+            self.checkpoint_archive.put(self.checkpointer, product_id, thread_id)
+            return True
+        except checkpoint_archive.NotArchived as exc:
+            log.error("%s's checkpoints not archived, so not pruned: %s", thread_id, exc)
+            return False
 
     def _flag_on(self, s: dict) -> bool | None:
         """Whether the feature is visible to users: its flag as the flag service has it now."""
