@@ -76,8 +76,16 @@ def test_a_regulated_lanes_history_is_archived_before_it_is_pruned(pg_engine):
     fid = engine.start(product_id="CLN", title="Consent check on intake")["feature_id"]  # PHI
     [key] = s3.objects
     obj = s3.objects[key]
-    assert key.startswith(f"checkpoints/CLN/{fid}/") and obj["ObjectLockMode"] == "COMPLIANCE"
+    ws = engine.services.settings.registry["CLN"].workspace
+    assert key.startswith(f"checkpoints/{ws}/CLN/{fid}/") and obj["ObjectLockMode"] == "COMPLIANCE"
     assert obj["ServerSideEncryption"] == "aws:kms" and obj["Metadata"]["sha256"][:16] in key
+    # Its workspace and product: as tags (the bucket's read rule) and in the data key's context.
+    assert obj["Tagging"] == f"workspace={ws}&product=CLN" and obj["BucketKeyEnabled"] is False
+    import base64
+    import json
+
+    assert json.loads(base64.b64decode(obj["SSEKMSEncryptionContext"])) == {
+        "valxel:workspace": ws, "valxel:product": "CLN"}
     records = read(obj["Body"], engine.checkpointer.serde)
     assert len(records) == int(obj["Metadata"]["checkpoints"]) > 1  # every step's state, not only the last
     assert any(r["checkpoint"]["channel_values"].get("title") == "Consent check on intake" for r in records)
@@ -106,3 +114,16 @@ def test_other_lanes_prune_without_an_archive(pg_engine):
     engine.checkpoint_archive = Archive("valxel-checkpoints", s3=s3)
     fid = engine.start(product_id="FARM", title="Yield chart")["feature_id"]  # general
     assert s3.objects == {} and counts(pool, fid) <= 3
+
+
+def test_a_name_that_could_escape_its_folder_is_refused():
+    import pytest as _pytest
+
+    from valxel_sdlc.checkpoint_archive import Archive, NotArchived
+
+    class Saver:
+        def list(self, _):
+            return iter(())
+
+    with _pytest.raises(NotArchived):
+        Archive("b", s3=FakeS3()).put(Saver(), "../CLN", "t", workspace="clinic")

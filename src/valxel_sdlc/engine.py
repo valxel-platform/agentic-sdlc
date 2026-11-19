@@ -301,7 +301,9 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
                         "are kept, not pruned", thread_id)
             return False
         try:
-            self.checkpoint_archive.put(self.checkpointer, product_id, thread_id)
+            entry = self.services.settings.registry.get(product_id)
+            self.checkpoint_archive.put(self.checkpointer, product_id, thread_id,
+                                        workspace=getattr(entry, "workspace", "") or "")
             return True
         except checkpoint_archive.NotArchived as exc:
             log.error("%s's checkpoints not archived, so not pruned: %s", thread_id, exc)

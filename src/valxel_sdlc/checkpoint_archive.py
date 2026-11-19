@@ -6,7 +6,13 @@ data class is regulated (phi, payments), that history is the forensic record, so
 first: every checkpoint the thread holds, in every namespace, with its metadata and pending writes,
 serialized exactly as the checkpointer stores them, as one gzipped JSON Lines file:
 
-    s3://<VALXEL_CHECKPOINT_ARCHIVE_BUCKET>/checkpoints/<product>/<thread>/<UTC time>-<sha256 prefix>.jsonl.gz
+    s3://<VALXEL_CHECKPOINT_ARCHIVE_BUCKET>/checkpoints/<workspace>/<product>/<thread>/<UTC time>-<sha256 prefix>.jsonl.gz
+
+Each file belongs to its workspace and product, three ways: its path; its tags (`workspace`,
+`product`), which the bucket's policy matches against a reader's own `valxel-workspace` tag, so a
+reader opens only their workspace's files; and its KMS encryption context (`valxel:workspace`,
+`valxel:product`, without the bucket key, so every file's data key carries it), so decrypting a
+file needs a grant for that workspace too.
 
 The bucket encrypts with the platform's KMS key and holds each file under S3 Object Lock
 (compliance mode) for VALXEL_CHECKPOINT_ARCHIVE_RETENTION_DAYS (2190 by default, six years): no
@@ -99,9 +105,16 @@ class Archive:
             self._s3 = boto3.client("s3")
         return self._s3
 
-    def put(self, saver: Any, product_id: str, thread_id: str) -> str:
-        """Archive the thread's checkpoints; the object's key. Raises NotArchived."""
+    def put(self, saver: Any, product_id: str, thread_id: str, workspace: str = "") -> str:
+        """Archive the thread's checkpoints under its workspace and product; the object's key.
+        Raises NotArchived."""
         from datetime import UTC, datetime, timedelta
+        from urllib.parse import urlencode
+
+        workspace = workspace or "unassigned"
+        for part in (workspace, product_id):
+            if not part or "/" in part or part.startswith("."):
+                raise NotArchived(f"not a workspace or product name: {part!r}")
 
         try:
             data, n = bundle(saver, thread_id)
@@ -111,16 +124,22 @@ class Archive:
             return ""
         digest = hashlib.sha256(data).hexdigest()
         now = datetime.fromtimestamp(self.clock(), UTC)
-        key = f"checkpoints/{product_id}/{thread_id}/{now.strftime('%Y%m%dT%H%M%SZ')}-{digest[:16]}.jsonl.gz"
+        key = (f"checkpoints/{workspace}/{product_id}/{thread_id}/"
+               f"{now.strftime('%Y%m%dT%H%M%SZ')}-{digest[:16]}.jsonl.gz")
+        context = {"valxel:workspace": workspace, "valxel:product": product_id}
         try:
             self.s3.put_object(
                 Bucket=self.bucket, Key=key, Body=data, ContentType="application/x-ndjson",
                 ContentEncoding="gzip", ChecksumAlgorithm="SHA256",
                 ServerSideEncryption="aws:kms",
+                # The data key carries the workspace and product: no bucket key, which would drop it.
+                SSEKMSEncryptionContext=base64.b64encode(json.dumps(context).encode()).decode(),
+                BucketKeyEnabled=False,
+                Tagging=urlencode({"workspace": workspace, "product": product_id}),
                 ObjectLockMode="COMPLIANCE",
                 ObjectLockRetainUntilDate=now + timedelta(days=self.retention_days),
                 Metadata={"sha256": digest, "checkpoints": str(n), "format": FORMAT,
-                          "product": product_id, "thread": thread_id})
+                          "workspace": workspace, "product": product_id, "thread": thread_id})
         except Exception as exc:
             raise NotArchived(f"upload to {self.bucket} failed: {type(exc).__name__}") from exc
         log.info("archived %d checkpoints of %s to s3://%s/%s", n, thread_id, self.bucket, key)
