@@ -11,14 +11,7 @@ from typing import Protocol
 
 
 
-KINDS = {"FEAT": "feature", "INI": "initiative", "REL": "release", "INC": "incident", "PRD": "inception",
-         "REV": "review"}
-
-
-def kind_of(thread_id: str) -> str:
-    """CLN-FEAT-3 -> feature, CLN-INI-1 -> initiative, CLN-REL-2 -> release."""
-    parts = thread_id.split("-")
-    return KINDS.get(parts[1], "feature") if len(parts) >= 3 else "feature"
+from ..thread_kinds import KINDS, kind_of  # noqa: F401 - imported from here as before
 
 
 class FeatureIndex(Protocol):

@@ -23,7 +23,7 @@ def _common(engine, thread_id: str, s: dict, kind: str) -> dict:
 
 
 def thread_view(engine, thread_id: str) -> dict:
-    from ..engine import kind_of
+    from ..thread_kinds import kind_of
 
     kind = kind_of(thread_id)
     s = engine._state(thread_id)

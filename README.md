@@ -20,6 +20,10 @@ discovery ─G1─ spec ─G2─┬─ design ───────G3─┬─ j
 any phase ── 3 failed evaluator loops or budget spent ──> escalation (human takeover)
 ```
 
+
+Why it's built this way: [architecture decision records](docs/adr/README.md). Its parts (intake, the
+roadmap, delivery, operations) are seams in one codebase, kept apart by `config/seams.yaml` and
+`tests/test_seams.py` (ADR 0005).
 ## Quick start
 
 ### Docker compose (Postgres-backed, durable threads)
