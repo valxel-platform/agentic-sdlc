@@ -22,6 +22,10 @@ def pg_engine(tmp_path):
                                                "row_factory": dict_row}) as pool:
         saver = PostgresSaver(pool)
         saver.setup()
+        # Each test starts with no threads: feature ids (CLN-FEAT-1, ...) repeat from test to test, and
+        # one test's checkpoints in this worker's database would otherwise become the next one's.
+        with pool.connection() as conn:
+            conn.execute("truncate checkpoints, checkpoint_writes, checkpoint_blobs")
         settings = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local")
         yield FeatureEngine(build_services(settings), saver), pool
 

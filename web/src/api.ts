@@ -91,6 +91,10 @@ export interface PendingItem {
   initiative_id?: string;
   low_risk?: boolean;
   low_risk_why?: string;
+  // Seconds this person has had it open and in view; whether it may join a batch (read, or express).
+  read_s?: number;
+  batch_ready?: boolean;
+  batch_why?: string;
   // G2: whether UX design runs. The fit check: what doesn't fit, and which document should change.
   ux_design?: { runs: boolean; why: string } | null;
   mockups?: MockupSet | null;
@@ -1552,6 +1556,12 @@ export const api = {
       "POST",
       "/inbox/approve",
       { items, active_minutes },
+    ),
+  reading: (featureId: string, interruptId: string, seconds: number) =>
+    request<{ seconds: number }>(
+      "POST",
+      `/features/${encodeURIComponent(featureId)}/decisions/${interruptId}/reading`,
+      { seconds },
     ),
   decisionBrief: (featureId: string, interruptId: string) =>
     request<DecisionBriefData>(

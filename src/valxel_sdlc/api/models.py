@@ -90,6 +90,11 @@ class ItemRef(BaseModel):
     interrupt_id: str
 
 
+class ReadTimeIn(BaseModel):
+    seconds: float = Field(gt=0, le=60, description="Seconds the decision's page was open and in view since the "
+                           "last report")
+
+
 class BatchIn(BaseModel):
     items: list[ItemRef] = Field(min_length=1, max_length=50)
     active_minutes: float = Field(0.0, ge=0)

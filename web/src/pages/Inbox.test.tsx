@@ -162,7 +162,7 @@ describe("Inbox grouping and selection", () => {
   });
 
   it("shows a Low risk chip on low-risk items the person can decide", async () => {
-    apiMock.inbox.mockResolvedValue([item({ low_risk: true })]);
+    apiMock.inbox.mockResolvedValue([item({ low_risk: true, batch_ready: true })]);
     renderInbox();
     expect(await screen.findByText("Low risk")).toBeInTheDocument();
   });
@@ -195,17 +195,35 @@ describe("Inbox grouping and selection", () => {
 
 describe("low-risk batch approval", () => {
   const easy = [
-    item({ interrupt_id: "int-1", low_risk: true, feature_id: "CLN-1" }),
-    item({ interrupt_id: "int-2", low_risk: true, feature_id: "CLN-2", title: "Second" }),
+    item({ interrupt_id: "int-1", low_risk: true, batch_ready: true, feature_id: "CLN-1" }),
+    item({ interrupt_id: "int-2", low_risk: true, batch_ready: true, feature_id: "CLN-2", title: "Second" }),
     item({ interrupt_id: "int-3", low_risk: false, feature_id: "CLN-3", title: "Third" }),
   ];
 
   it("offers batch approval only when more than one low-risk item waits", async () => {
     apiMock.inbox.mockResolvedValue(easy);
     renderInbox();
-    expect(await screen.findByText(/2 are low risk:/)).toBeInTheDocument();
+    expect(await screen.findByText(/2 are low risk and read:/)).toBeInTheDocument();
     expect(screen.getByText(/CLN-1, CLN-2/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve these 2" })).toBeInTheDocument();
+  });
+
+  it("leaves out low-risk items not yet opened, and says so", async () => {
+    apiMock.inbox.mockResolvedValue([
+      ...easy,
+      item({
+        interrupt_id: "int-4",
+        low_risk: true,
+        batch_ready: false,
+        batch_why: "open it first",
+        feature_id: "CLN-4",
+        title: "Fourth",
+      }),
+    ]);
+    renderInbox();
+    expect(await screen.findByText(/2 are low risk and read:/)).toBeInTheDocument();
+    expect(screen.getByText(/Open 1 more to add it/)).toBeInTheDocument();
+    expect(screen.getByText("Low risk: open it")).toHaveAttribute("title", "open it first");
   });
 
   it("does not offer batch approval for a single low-risk item", async () => {

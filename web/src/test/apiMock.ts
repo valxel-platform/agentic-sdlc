@@ -102,6 +102,7 @@ function applyDefaults() {
   apiMock.changeRequest.mockResolvedValue({ feature_id: "", sent_back: "", note: "" });
   apiMock.approveBatch.mockResolvedValue({ approved: [], skipped: [] });
   apiMock.decisionBrief.mockResolvedValue(null);
+  apiMock.reading.mockResolvedValue({ seconds: 0 });
   apiMock.decide.mockResolvedValue({ accepted: true });
   apiMock.intakeStart.mockResolvedValue(undefined);
   apiMock.intakeList.mockResolvedValue([]);
@@ -184,6 +185,7 @@ export const apiMock = {
   changeRequest: vi.fn(),
   approveBatch: vi.fn(),
   decisionBrief: vi.fn(),
+  reading: vi.fn(),
   decide: vi.fn(),
   intakeStart: vi.fn(),
   intakeList: vi.fn(),

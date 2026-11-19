@@ -2906,6 +2906,15 @@ Any of them can carry `reason`, and `remember: true` or `lesson` to propose a le
 Record `active_minutes` on each decision. The feature view sums them to track the human share of
 effort against the 15% target.
 
+**Approving several at once** (`POST /api/inbox/approve`) takes only low-risk gates (G1, G2, G3 or
+G5; general data; critic passed; nothing new created; never sent back) that the approver has read:
+the web app reports the time a decision is open and in view (`POST .../decisions/{id}/reading`,
+counted per person and never faster than time passes), and a gate joins a batch after
+`VALXEL_BATCH_MIN_READ_S` (20) seconds of it, or at once when the feature runs the express profile.
+Every gate decision records `viewed_s`, the approver's reading time, and `batch` when approved with
+others; the pilot report's `approvals_read` counts approvals and those under the minimum, so
+rubber-stamping shows against the 85/15 goal.
+
 **G3 and G4 are decided as a pair.** They wait in the same graph step, so a `revise` at one takes
 effect once the other is also decided. An earlier approval of the other gate still counts.
 

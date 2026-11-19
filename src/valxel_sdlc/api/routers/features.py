@@ -21,7 +21,7 @@ from ...web.auth import (
     can_decide,
     needs_passkey,
 )
-from ..models import FeatureIn, ProblemIn, BatchIn, DecisionIn
+from ..models import FeatureIn, ProblemIn, BatchIn, DecisionIn, ReadTimeIn
 
 
 log = logging.getLogger(__name__)
@@ -189,9 +189,32 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     def usage(feature_id: str, user: User = Depends(current_user)) -> list[dict]:
         return [asdict(r) for r in eng().services.ledger.records(feature_id)]
 
+    def read_s(interrupt_id: str, login: str) -> float:
+        """How long this person has had the decision open and in view (seconds)."""
+        return float((eng().cluster.get(f"read:{interrupt_id}:{login.lower()}") or {}).get("seconds") or 0)
+
+    @api.post("/features/{feature_id}/decisions/{interrupt_id}/reading")
+    def reading(feature_id: str, interrupt_id: str, body: ReadTimeIn, user: User = Depends(current_user)) -> dict:
+        """The web app's report of time spent with a decision open and in view. Counted per person,
+        never more than the time since their last report (or 60 s), so it can't be claimed faster
+        than it passes."""
+        import time
+
+        try:
+            eng().item(feature_id, interrupt_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        key = f"read:{interrupt_id}:{user.login.lower()}"
+        now = time.time()
+        r = eng().cluster.get(key) or {"opened_at": now, "at": now - min(body.seconds, 15), "seconds": 0.0}
+        r["seconds"] = round(float(r["seconds"]) + min(body.seconds, max(0.0, now - float(r["at"])) + 0.5), 1)
+        r["at"] = now
+        eng().cluster.put(key, r)
+        return {"seconds": r["seconds"]}
+
     @api.get("/inbox")
     def inbox(user: User = Depends(current_user), mine: bool = False, product_id: str | None = None) -> list[dict]:
-        from ...decisions import low_risk
+        from ...decisions import batch_ready, low_risk
 
         items, products = [], {}
         for p in eng().inbox(product_id):
@@ -211,14 +234,18 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                 except Exception:
                     item["initiative_id"] = ""
                 item["low_risk"], item["low_risk_why"] = low_risk(item, dc)
+                item["read_s"] = read_s(item["interrupt_id"], user.login)
+                item["batch_ready"], item["batch_why"] = (batch_ready(item, item["read_s"]) if item["low_risk"]
+                                                          else (False, item["low_risk_why"]))
                 items.append(item)
         return items
 
     @api.post("/inbox/approve")
     def approve_batch(body: BatchIn, user: User = Depends(current_user)) -> dict:
         """Approve several low-risk decisions at once. Each is checked again here; any that isn't low risk
-        (any more), or isn't this person's, is left for one-at-a-time."""
-        from ...decisions import low_risk
+        (any more), isn't this person's, or that they haven't read (decisions.batch_ready: open for
+        MIN_READ_S, unless the feature is express), is left for one-at-a-time."""
+        from ...decisions import batch_ready, low_risk
 
         approved, skipped = [], []
         for ref in body.items:
@@ -228,11 +255,15 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                 ok, why = low_risk(item, eng().services.snapshot(pid).product.data_class)
                 if ok and not can_decide(user, {"approvers": item_approvers(ref.feature_id, {**item, "product_id": pid})}):
                     ok, why = False, "not yours to decide"
+                seconds = read_s(ref.interrupt_id, user.login)
+                if ok:
+                    ok, why = batch_ready(item, seconds)
                 if not ok:
                     skipped.append({"feature_id": ref.feature_id, "why": why})
                     continue
                 eng().decide(ref.feature_id, ref.interrupt_id,
                              {"decision": "approve", "approver": user.login, "active_minutes": body.active_minutes / max(1, len(body.items)),
+                              "viewed_s": seconds, "batch": True,
                               "feedback": f"Approved with {len(body.items)} low-risk decisions"}, background=True)
                 approved.append(ref.feature_id)
             except (KeyError, RuntimeError, InvalidDecision) as exc:
@@ -266,7 +297,8 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             if not can_decide(user, {"approvers": who}):
                 raise HTTPException(403, f"Only {', '.join(who) or 'the traceability approvers'} can release "
                                     "with traceability gaps")
-        decision = body.model_dump(exclude_none=True) | {"approver": user.login}
+        decision = body.model_dump(exclude_none=True) | {"approver": user.login,
+                                                          "viewed_s": read_s(interrupt_id, user.login)}
         if user.idp == "mcp":  # through the person's assistant (api/mcp.py), as its signed session says
             decision["via"] = "mcp"
         if decision.get("comments"):  # line comments go to the agents as part of the feedback

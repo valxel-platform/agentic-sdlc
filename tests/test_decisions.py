@@ -109,11 +109,56 @@ def test_the_inbox_groups_and_batch_approves_only_low_risk(client, engine):
     items = client.get("/api/inbox?mine=true").json()
     mine = [i for i in items if i["feature_id"] in farm]
     assert mine and all(i["product_name"] and i["low_risk"] for i in mine), mine
-    r = client.post("/api/inbox/approve", json={"items": [{"feature_id": i["feature_id"], "interrupt_id": i["interrupt_id"]}
-                                                          for i in mine] + [{"feature_id": "FARM-FEAT-99", "interrupt_id": "x"}]})
-    out = r.json()
-    assert sorted(out["approved"]) == sorted(farm) and out["skipped"][0]["feature_id"] == "FARM-FEAT-99"
-    assert out["skipped"][0]["why"] in ("no longer waiting for a decision", "not yours to decide")
+    refs = [{"feature_id": i["feature_id"], "interrupt_id": i["interrupt_id"]} for i in mine]
+    # Low risk isn't enough: nobody has opened them yet, so none joins a batch.
+    assert all(not i["batch_ready"] and i["batch_why"] == "open it first" for i in mine)
+    out = client.post("/api/inbox/approve", json={"items": refs}).json()
+    assert out["approved"] == [] and {s["why"] for s in out["skipped"]} == {"open it first"}
+    # Priya reads the first for 25 s (the web app reports it as she reads), the second for 5 s.
+    read_for(engine, client, mine[0], 25)
+    read_for(engine, client, mine[1], 5)
+    seen = {i["feature_id"]: i for i in client.get("/api/inbox?mine=true").json()}
+    assert seen[farm[0]]["batch_ready"] and seen[farm[0]]["read_s"] >= 20
+    assert not seen[farm[1]]["batch_ready"] and "a little longer" in seen[farm[1]]["batch_why"]
+    out = client.post("/api/inbox/approve", json={"items": refs + [{"feature_id": "FARM-FEAT-99", "interrupt_id": "x"}]}).json()
+    assert out["approved"] == [farm[0]]
+    assert {s["feature_id"] for s in out["skipped"]} == {farm[1], "FARM-FEAT-99"}
+    wait_idle(engine, farm[0])
+    [d] = [d for d in engine._state(farm[0])["gate_decisions"] if d["gate"] == "g1"]
+    assert d["batch"] is True and d["viewed_s"] >= 20  # how long she read it, with the decision
+
+
+def read_for(engine, client, item, seconds):
+    """Report reading time as the web app does, every 15 s, with the clock moving as it would."""
+    import time as _time
+
+    from unittest import mock
+
+    t0 = _time.time()
+    for i, chunk in enumerate([15.0] * int(seconds // 15) + ([seconds % 15] if seconds % 15 else [])):
+        with mock.patch("time.time", return_value=t0 + 15 * (i + 1)):
+            r = client.post(f"/api/features/{item['feature_id']}/decisions/{item['interrupt_id']}/reading",
+                            json={"seconds": chunk})
+        assert r.status_code == 200, r.text
+
+
+def test_reading_time_cant_be_claimed_faster_than_it_passes(client, engine):
+    sign_in(client, "priya", teams=["acme-farm/product-owners"], orgs=["acme-farm"])
+    fid = client.post("/api/features", json={"product_id": "FARM", "title": "Field notes", "description": "x"}).json()["feature_id"]
+    wait_idle(engine, fid)
+    [i] = [i for i in client.get("/api/inbox?mine=true").json() if i["feature_id"] == fid]
+    url = f"/api/features/{fid}/decisions/{i['interrupt_id']}/reading"
+    for _ in range(5):  # five reports of a minute each, sent at once
+        client.post(url, json={"seconds": 60})
+    assert client.get("/api/inbox?mine=true").json()[0]["read_s"] < 20
+    assert client.post(url, json={"seconds": 61}).status_code == 422
+    assert client.post(f"/api/features/{fid}/decisions/nope/reading", json={"seconds": 5}).status_code == 404
+
+
+def test_an_express_feature_joins_a_batch_unread():
+    assert decisions.batch_ready({"profile": "express"}, 0) == (True, "express")
+    assert decisions.batch_ready({"profile": "feature"}, 0) == (False, "open it first")
+    assert decisions.batch_ready({"profile": "feature"}, 30)[0] is True
 
 
 def test_a_request_changes_before_the_build_and_the_waiting_gate_goes_back(engine):

@@ -205,6 +205,16 @@ def outcomes(engine, feature_id: str, state: dict) -> dict:
     }
 
 
+def _read(gates: list[dict]) -> dict:
+    from .decisions import MIN_READ_S
+
+    approved = [d for d in gates if d["decision"] == "approve" and d.get("viewed_s") is not None]
+    secs = sorted(float(d["viewed_s"]) for d in approved)
+    return {"approvals": len(approved), "batch": sum(1 for d in approved if d.get("batch")),
+            "under_min_read": sum(1 for s in secs if s < MIN_READ_S),
+            "median_s": secs[len(secs) // 2] if secs else None}
+
+
 def main_config(records) -> str:
     """The config version most of the feature's model calls ran under."""
     c = Counter(getattr(r, "config_version", "") for r in records if not r.role.endswith("_shadow"))
@@ -256,6 +266,8 @@ def feature_report(engine, feature_id: str) -> dict:
         "escalations": sum(1 for d in decisions if d["gate"].startswith("escalation")),
         "decisions": len(decisions),
         "first_time_approvals": sum(1 for g in first.values() if g == "approve"),
+        # Approvals and how long their approver had the decision open (rubber-stamping shows here).
+        "approvals_read": _read(gates),
         "gates": len(first),
         "revise_reasons": dict(Counter(d.get("reason") or "unspecified" for d in decisions if d["decision"] in ("revise", "abort", "retry"))),
         "pr_reviews": sum(1 for e in effort if e["kind"] == "pr_review"),

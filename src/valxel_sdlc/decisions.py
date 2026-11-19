@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import re
 from pathlib import Path
 
@@ -144,6 +145,18 @@ def with_comments(feedback: str, comments: list[dict] | None) -> str:
 # Gates a person may approve several of at once, when each is low risk. The initiative, release,
 # production (G6) and product decisions are always made one at a time.
 BATCH_GATES = ("g1", "g2", "g3", "g5")
+# A low-risk gate joins a batch only once its approver has read it this long (the web app reports
+# the time the decision's page is open and in view), unless the feature runs the express profile.
+MIN_READ_S = float(os.environ.get("VALXEL_BATCH_MIN_READ_S") or 20)
+
+
+def batch_ready(item: dict, read_s: float) -> tuple[bool, str]:
+    """Whether a low-risk gate may be approved in a batch by someone who read it for read_s seconds."""
+    if item.get("profile") == "express":
+        return True, "express"
+    if read_s >= MIN_READ_S:
+        return True, f"read for {int(read_s)}s"
+    return False, "open it first" if not read_s else f"read for {int(read_s)}s; open it a little longer"
 MIN_SCORE = 0.8
 
 

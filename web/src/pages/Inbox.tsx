@@ -68,7 +68,9 @@ export function Inbox() {
   useLive(load, (e) => e.type === "feature.updated");
 
   const current = items?.find((i) => i.interrupt_id === selected);
-  const easy = (items ?? []).filter((i) => i.low_risk && i.can_decide);
+  // Low risk and read (or express): may be approved together. Low risk but unread: open it first.
+  const easy = (items ?? []).filter((i) => i.low_risk && i.can_decide && i.batch_ready);
+  const unread = (items ?? []).filter((i) => i.low_risk && i.can_decide && !i.batch_ready);
 
   async function approveEasy() {
     setBusy(true);
@@ -115,8 +117,16 @@ export function Inbox() {
       {easy.length > 1 && (
         <div className="batch-bar" role="region" aria-label="Low-risk decisions">
           <span>
-            <strong>{easy.length} are low risk:</strong> the critic passed, no PHI or payments data, and
-            nothing new is created. <span className="faint">{easy.map((i) => i.feature_id).join(", ")}</span>
+            <strong>{easy.length} are low risk and read:</strong> the critic passed, no PHI or payments data,
+            nothing new is created, and you've opened each one.{" "}
+            <span className="faint">{easy.map((i) => i.feature_id).join(", ")}</span>
+            {unread.length > 0 && (
+              <span className="faint">
+                {" "}
+                Open {unread.length === 1 ? "1 more" : `${unread.length} more`} to add{" "}
+                {unread.length === 1 ? "it" : "them"}.
+              </span>
+            )}
           </span>
           <button className="btn go" disabled={busy} onClick={approveEasy}>
             Approve these {easy.length}
@@ -167,7 +177,11 @@ export function Inbox() {
                         <span className="t">{i.title ?? i.feature_id}</span>
                         <span className="small muted">
                           {waitingLabel(i, i.product_id)}
-                          {i.low_risk && i.can_decide ? <span className="chip go low">Low risk</span> : null}
+                          {i.low_risk && i.can_decide ? (
+                            <span className="chip go low" title={i.batch_why}>
+                              {i.batch_ready ? "Low risk" : "Low risk: open it"}
+                            </span>
+                          ) : null}
                         </span>
                         <span className="small faint">
                           {i.feature_id}

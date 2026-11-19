@@ -2270,3 +2270,41 @@ describe("defensive fallbacks for missing or malformed fields", () => {
     expect(body.artifact_content).toBe("# Plan\n\nMy plan.");
   });
 });
+
+describe("reading time", () => {
+  it("reports time with a gate open every 15 seconds, and once more when it closes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { unmount } = render(
+        <MemoryRouter>
+          <DecisionPanel item={gateItem()} featureId="CLN-1" onDone={vi.fn()} />
+        </MemoryRouter>,
+      );
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(apiMock.reading).toHaveBeenCalledWith("CLN-1", "int-1", expect.any(Number));
+      const [, , first] = apiMock.reading.mock.calls[0];
+      expect(first).toBeGreaterThanOrEqual(14);
+      expect(first).toBeLessThanOrEqual(60);
+      await vi.advanceTimersByTimeAsync(4000); // read on, then close it
+      unmount();
+      expect(apiMock.reading).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't report for someone who can't decide it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(
+        <MemoryRouter>
+          <DecisionPanel item={gateItem({ can_decide: false })} featureId="CLN-1" onDone={vi.fn()} />
+        </MemoryRouter>,
+      );
+      await vi.advanceTimersByTimeAsync(16000);
+      expect(apiMock.reading).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

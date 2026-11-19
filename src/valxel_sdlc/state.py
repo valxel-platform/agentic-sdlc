@@ -55,6 +55,8 @@ class GateDecision(TypedDict, total=False):
     shadow_auto: dict  # pilot: whether the trial rule would have approved it without a person
     changed: bool  # an escalation resolved with the person's own version of the document
     via: str  # how the person decided when not in the web app: mcp (their assistant, api/mcp.py)
+    viewed_s: float  # how long the approver had the decision open and in view, as the web app reported
+    batch: bool  # approved with other low-risk decisions at once
 
 
 class FeatureState(TypedDict, total=False):

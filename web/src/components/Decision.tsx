@@ -316,6 +316,31 @@ export function DecisionPanel({
     setUx(null);
   }, [item.interrupt_id, item.content, item.next_review]);
 
+  // Time with this decision open and in view, reported every 15 s (the server keeps it per person and
+  // never counts faster than time passes). Batch approval needs it, unless the feature is express.
+  useEffect(() => {
+    if (!item.can_decide || item.type !== "gate") return;
+    let last = Date.now();
+    const tick = () => {
+      const now = Date.now();
+      const seconds = Math.min(60, (now - last) / 1000);
+      last = now;
+      if (document.visibilityState === "visible" && seconds > 0)
+        api.reading(featureId, item.interrupt_id, seconds).catch(() => {});
+    };
+    const timer = window.setInterval(tick, 15000);
+    const onHide = () => {
+      if (document.visibilityState === "hidden") tick();
+      else last = Date.now(); // time away doesn't count
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onHide);
+      tick();
+    };
+  }, [featureId, item.interrupt_id, item.can_decide, item.type]);
+
   async function send(decision: string, extra: Record<string, unknown> = {}) {
     setBusy(true);
     setErr("");
