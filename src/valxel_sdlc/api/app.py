@@ -220,6 +220,14 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         app.router.routes[:0] = [Route("/mcp", endpoint=mcp_app),
                                  Route("/.well-known/oauth-protected-resource/mcp", endpoint=mcp_app)]
 
+    # --- A2A (api/a2a.py): the intake and incident agents, for other agents acting for a person ---
+    a2a_settings = mcp_api.settings_from_env(auth, "VALXEL_A2A_CLIENT_IDS", "/a2a")
+    if a2a_settings is not None:
+        from . import a2a
+
+        a2a_verifier = mcp_api.PersonVerifier(a2a_settings["issuer"], a2a_settings["domain"], a2a_settings["client_ids"])
+        app.router.routes[:0] = a2a.build(app, ctx.signer, a2a_verifier, auth.public_url, app.version)
+
     # --- web app ---
     if web_dist and (web_dist / "index.html").is_file():
         app.mount("/assets", StaticFiles(directory=web_dist / "assets"), name="assets")

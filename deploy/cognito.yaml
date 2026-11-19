@@ -45,7 +45,8 @@ Parameters:
     Default: "https://claude.ai/api/mcp/auth_callback"
     Description: >-
       Where MCP clients (people's assistants) return after sign-in, for the MCP client below.
-      Its id is VALXEL_MCP_CLIENT_IDS; empty that variable to leave /mcp off.
+      Its id is VALXEL_MCP_CLIENT_IDS (and VALXEL_A2A_CLIENT_IDS for agents acting for a person over
+      A2A); empty either to leave /mcp or /a2a off.
 
 Conditions:
   WithGoogle: !Not [!Equals [!Ref GoogleClientId, ""]]

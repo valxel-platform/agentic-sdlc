@@ -128,6 +128,13 @@ refused for everything. A decision records the person, with `via: mcp`. An acces
 proof of a passkey, so approving through a workspace group is done in the web app; batch approval
 isn't offered.
 
+**Other agents over A2A.** With `VALXEL_A2A_CLIENT_IDS` set (Cognito app clients like the MCP one,
+for agents that act for a person), the intake and incident agents are published in an A2A v1.0 card
+at `/.well-known/agent-card.json` and answer JSON-RPC at `/a2a` (`src/valxel_sdlc/api/a2a.py`): the
+`intent` skill is the intake conversation (submit with a data part `{"submit": true}`), and
+`report-incident` opens or joins an incident. The same rule applies as for MCP: only a person's
+token, and the API's own checks on what they may do.
+
 How it works:
 - **Flow and checks.** Sign-in is OIDC's code flow with PKCE, a state and a nonce. The ID token's
   signature is checked against the pool's published keys, along with its issuer, audience, expiry

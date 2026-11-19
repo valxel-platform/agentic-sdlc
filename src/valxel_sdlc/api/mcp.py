@@ -119,21 +119,45 @@ class PersonVerifier:
         return person
 
 
-def settings_from_env(auth: AuthConfig) -> dict | None:
-    """What /mcp needs, or None when it is off."""
-    ids = frozenset(c.strip() for c in os.environ.get("VALXEL_MCP_CLIENT_IDS", "").split(",") if c.strip())
+def settings_from_env(auth: AuthConfig, var: str = "VALXEL_MCP_CLIENT_IDS", path: str = "/mcp") -> dict | None:
+    """What /mcp (or /a2a, with its own clients) needs, or None when it is off."""
+    ids = frozenset(c.strip() for c in os.environ.get(var, "").split(",") if c.strip())
     if not ids:
         return None
     if not (auth.cognito_issuer and auth.cognito_domain):
-        raise RuntimeError("VALXEL_MCP_CLIENT_IDS needs the Cognito user pool: set VALXEL_COGNITO_ISSUER and "
-                           "VALXEL_COGNITO_DOMAIN")
+        raise RuntimeError(f"{var} needs the Cognito user pool: set VALXEL_COGNITO_ISSUER and VALXEL_COGNITO_DOMAIN")
     return {"issuer": auth.cognito_issuer, "domain": auth.cognito_domain, "client_ids": ids,
-            "resource": f"{auth.public_url}/mcp"}
+            "resource": f"{auth.public_url}{path}"}
+
+
+class ApiError(Exception):
+    def __init__(self, status: int, detail: Any) -> None:
+        super().__init__(f"{status}: {detail}")
+        self.status, self.detail = status, detail
+
+
+async def call_api(app: Any, signer: SessionSigner, person: dict, method: str, path: str, body: dict | None = None,
+                   params: dict | None = None) -> Any:
+    """`app`'s API as `person`, in-process: its own rules decide what they may see and do."""
+    import httpx
+
+    # A session for this one call, never sent anywhere. idp mcp marks what it decides (api/routers/features.py).
+    cookie = signer.dumps({**person, "orgs": [], "teams": [], "avatar_url": "", "idp": "mcp",
+                           "exp": int(time.time()) + 60})
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://valxel.internal",
+                                 cookies={SESSION_COOKIE: cookie}, timeout=60) as client:
+        r = await client.request(method, "/api" + path, json=body, params=params)
+    if r.status_code >= 400:
+        try:
+            detail = r.json().get("detail")
+        except ValueError:
+            detail = r.text[:300]
+        raise ApiError(r.status_code, detail)
+    return r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text
 
 
 def build(app: Any, signer: SessionSigner, verifier: PersonVerifier, resource: str) -> Any:
     """The MCP server, its tools calling `app` (the API) as the token's person."""
-    import httpx
     from mcp.server.auth.middleware.auth_context import get_access_token
     from mcp.server.auth.provider import AccessToken
     from mcp.server.auth.settings import AuthSettings
@@ -171,19 +195,10 @@ def build(app: Any, signer: SessionSigner, verifier: PersonVerifier, resource: s
         person = ((token.claims or {}).get("person") if token else None)
         if not person:
             raise ToolError("Sign in first")
-        now = int(time.time())
-        # A session for this one call, never sent anywhere: the API then applies its own rules.
-        cookie = signer.dumps({**person, "orgs": [], "teams": [], "avatar_url": "", "idp": "mcp", "exp": now + 60})
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://valxel.internal",
-                                     cookies={SESSION_COOKIE: cookie}, timeout=60) as client:
-            r = await client.request(method, "/api" + path, json=body, params=params)
-        if r.status_code >= 400:
-            try:
-                detail = r.json().get("detail")
-            except ValueError:
-                detail = r.text[:300]
-            raise ToolError(f"{r.status_code}: {detail}")
-        return r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text
+        try:
+            return await call_api(app, signer, person, method, path, body, params)
+        except ApiError as exc:
+            raise ToolError(str(exc)) from exc
 
     @server.tool()
     async def whoami() -> dict:
