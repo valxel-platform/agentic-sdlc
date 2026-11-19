@@ -304,7 +304,14 @@ def build_services(
 
     from .environments import default_mode
 
-    if default_mode() == "lite" or _os.environ.get("VALXEL_LITE_ROUTING", "").lower() in ("1", "true", "on"):
+    if _os.environ.get("VALXEL_DELIVERY", "").lower() == "local":
+        from .lite.local import LocalRouter
+
+        svc.openchoreo = LocalRouter(openchoreo, svc, tokens=local_tokens(settings),
+                                     host=_os.environ.get("VALXEL_LOCAL_DOCKER", ""))
+        if getattr(svc.provisioner, "openchoreo", None) is openchoreo:
+            svc.provisioner.openchoreo = svc.openchoreo  # new components register with the local runtime
+    elif default_mode() == "lite" or _os.environ.get("VALXEL_LITE_ROUTING", "").lower() in ("1", "true", "on"):
         from .lite.wiring import RuntimeRouter
 
         svc.openchoreo = RuntimeRouter(openchoreo, svc)
@@ -470,7 +477,12 @@ def default_delivery(settings: Settings) -> tuple[GitHub, OpenChoreo]:
     anything else keeps both in memory. Live mode needs the GitHub App and OpenChoreo settings."""
     import os
 
-    if os.environ.get("VALXEL_DELIVERY", "stub").lower() != "live":
+    delivery = os.environ.get("VALXEL_DELIVERY", "stub").lower()
+    if delivery == "local":  # the laptop tier (ADR 0007): GitHub for real, builds and deploys here
+        from .integrations.github import DELIVERY_PERMISSIONS, GitHubRest
+
+        return GitHubRest(local_tokens(settings, DELIVERY_PERMISSIONS), api=settings.github_api), StubOpenChoreo()
+    if delivery != "live":
         return StubGitHub(), StubOpenChoreo()
     from .integrations.github import DELIVERY_PERMISSIONS, GitHubRest
     from .integrations.openchoreo import OpenChoreoMcp
@@ -497,6 +509,17 @@ def default_delivery(settings: Settings) -> tuple[GitHub, OpenChoreo]:
     return (GitHubRest(tokens, api=settings.github_api),
             OpenChoreoMcp(server, default_namespace=oc.setting("namespace") or "default",
                           console_url=oc.setting("console_url")))
+
+
+def local_tokens(settings: Settings, permissions=None):
+    """GitHub tokens on a laptop: the delivery App's when it's set up, else VALXEL_GITHUB_TOKEN (a
+    personal token, per org with VALXEL_GITHUB_TOKEN__<ORG>)."""
+    from .governance.sources import EnvTokenProvider
+    from .signing import github_app_configured, github_app_tokens
+
+    if github_app_configured():
+        return github_app_tokens(api=settings.github_api, permissions=permissions)
+    return EnvTokenProvider()
 
 
 def make_connections(svc):

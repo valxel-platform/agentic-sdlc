@@ -1,0 +1,28 @@
+# The laptop's LLM gateway (ss-llm-gateway): a template. `valxel dev init` writes
+# gateway-policy.local.yaml from it with the SHA-256 of VALXEL_GATEWAY_KEY; the model key is
+# ANTHROPIC_API_KEY in .env, which only the gateway receives.
+product: valxel-laptop
+data_class: general
+providers:
+  anthropic:
+    type: anthropic
+    base_url: https://api.anthropic.com
+    api_key_env: ANTHROPIC_API_KEY
+    baa: false            # never PHI on a laptop: real patient data doesn't belong here
+    models: ["claude-*"]
+data_classes:
+  phi:      { require_baa: true, redaction: "off" }
+  payments: { require_baa: false, redaction: redact, detectors: [card_number, secret, us_ssn] }
+  general:  { require_baa: false, redaction: redact, detectors: [secret, card_number, us_ssn] }
+callers:
+  sdlc-tool:
+    key_sha256: "{tool_key_sha256}"
+    budget_usd_per_day: 20
+    models: ["claude-*"]
+    max_tokens: 128000
+    data_classes: [general, payments]
+    sessions: { max_budget_usd: 5, max_ttl_s: 7800, max_open: 10 }
+pricing:
+  "claude-opus-*":   { input: 4.0, output: 20.0, cache_read: 0.2 }
+  "claude-sonnet-*": { input: 2.0, output: 10.0, cache_read: 0.1 }
+  "claude-haiku-*":  { input: 0.1, output: 0.5, cache_read: 0.01 }

@@ -468,6 +468,8 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     st.add_argument("name", help="The product id or the 12-digit AWS account")
     c = sub.add_parser("changes", help="Check the production change log's hash chain (DATABASE_URL)")
     c.add_argument("action", choices=["verify"])
+    from .laptop import add_parser as _add_dev
+    _add_dev(sub)
     wk = sub.add_parser("workspaces", help="Give a workspace its first owner (an existing deployment's), or list them "
                                            "(DATABASE_URL)")
     wk.add_argument("action", choices=["owner", "list"])
@@ -557,6 +559,9 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     oc.add_argument("--dry-run", action="store_true", help="read: don't record the reading")
     oc.add_argument("--json", action="store_true")
     args = p.parse_args(argv)
+    if args.cmd == "dev":
+        from .laptop import main as dev_main
+        return dev_main(args)
     if args.cmd == "outcomes":
         return _outcomes(args)
     if args.cmd == "inception":

@@ -72,6 +72,9 @@ class ComposeRuntime:
         self.secrets = secrets or DictSecrets()
         self.state = state or MemoryState()
         self._lock = threading.RLock()
+        # Laptop tier only (lite/local.py): publish external endpoints on this machine's loopback,
+        # where there is no proxy. Off on a VM, where the proxy is the only way in.
+        self.publish_local = False
 
     # ------------------------------------------------------------------ helpers
 
@@ -123,6 +126,9 @@ class ComposeRuntime:
                 secrets=lambda name, key: self.secrets.get(namespace=namespace, env=env, name=name, key=key),
                 capacity=b.get("capacity"), release=r["name"])
         spec = compose_file(services, project=cp)
+        if self.publish_local:
+            from .local import publish_on_loopback
+            publish_on_loopback(spec, project=cp)
         edge = (edge_network(cp),) if EDGE_NETWORK in spec["networks"] else ()
         host.up(cp, spec, networks=edge)
 

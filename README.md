@@ -26,6 +26,17 @@ roadmap, delivery, operations) are seams in one codebase, kept apart by `config/
 `tests/test_seams.py` (ADR 0005).
 ## Quick start
 
+### The whole thing on a laptop (live models, real GitHub, products on local Docker)
+
+```bash
+printf '%s\n%s\n' "$ANTHROPIC_KEY" "$GITHUB_TOKEN" | valxel dev init --anthropic-key-stdin --github-token-stdin
+valxel dev doctor && valxel dev up
+```
+
+The model key stays in the LLM gateway; products are built and deployed on this machine's Docker
+(ADR 0007, [the laptop guide](src/valxel_sdlc/laptop/bundle/README.md)). The compose file below is the
+offline demo: canned agents, nothing leaves the machine.
+
 ### Docker compose (Postgres-backed, durable threads)
 
 ```bash

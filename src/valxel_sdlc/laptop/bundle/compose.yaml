@@ -1,0 +1,128 @@
+# The laptop tier (ADR 0007): the tool, end to end, on one machine. Real models (through the LLM
+# gateway, which alone holds the model key), real GitHub, and products built and deployed on this
+# machine's Docker. `valxel dev init` copies this folder to ~/.valxel/laptop and writes its .env and
+# gateway policy; `valxel dev up` starts it. See README.md beside this file.
+#
+# Not for anything shared: dev sign-in lets anyone in, and the worker drives this machine's Docker.
+
+name: valxel
+
+x-tool: &tool
+  image: ghcr.io/valxel-platform/agentic-sdlc:${VALXEL_VERSION:-main}
+  environment: &tool-env
+    VALXEL_GITHUB_TOKEN: ${VALXEL_GITHUB_TOKEN:-}
+    VALXEL_GITHUB_APP_ID: ${VALXEL_GITHUB_APP_ID:-}
+    VALXEL_GITHUB_APP_PRIVATE_KEY: ${VALXEL_GITHUB_APP_PRIVATE_KEY:-}
+    VALXEL_TIER: laptop
+    VALXEL_MODE: live
+    VALXEL_DELIVERY: local
+    VALXEL_AUTH: dev
+    VALXEL_RUN_QUEUE: postgres
+    DATABASE_URL: postgresql://valxel:valxel@postgres:5432/valxel
+    VALXEL_ARTIFACT_DIR: /data/artifacts
+    VALXEL_PUBLIC_URL: http://localhost:8080
+    VALXEL_GOVERNANCE_SOURCE: ${VALXEL_GOVERNANCE_SOURCE:-local}
+    # Model calls go through the gateway below; the tool and its sessions never hold the model key.
+    VALXEL_LLM_GATEWAY_URL: http://llm-gateway:8080
+    VALXEL_LLM_GATEWAY_API_KEY: ${VALXEL_GATEWAY_KEY:?run valxel dev init}
+  volumes: [artifacts:/data/artifacts]
+  depends_on:
+    postgres: {condition: service_healthy}
+    llm-gateway: {condition: service_healthy}
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *tool
+    environment:
+      <<: *tool-env
+      VALXEL_PROCESS: api
+    ports: ["127.0.0.1:8080:8080"]
+
+  # Runs the work: agents, builds and deploys. It alone reaches Docker, to build products' images
+  # and run their environments here.
+  worker:
+    <<: *tool
+    build:
+      context: .
+      dockerfile: worker.Dockerfile
+      args: {VALXEL_VERSION: "${VALXEL_VERSION:-main}"}
+    image: valxel-laptop-worker:${VALXEL_VERSION:-main}
+    command: ["valxel", "worker"]
+    group_add: ["${DOCKER_GID:-0}"]   # the group that owns the Docker socket (valxel dev init finds it)
+    volumes:
+      - artifacts:/data/artifacts
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: valxel
+      POSTGRES_PASSWORD: valxel
+      POSTGRES_DB: valxel
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U valxel -d valxel"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # The LLM gateway: the model key, the data-class rules, metering and audit (ss-llm-gateway).
+  llm-gateway:
+    image: ghcr.io/valxel-shared-services/ss-llm-gateway:${GATEWAY_VERSION:-main}
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+      GATEWAY_POLICY: /etc/llm-gateway/policy.yaml
+      GATEWAY_ENVIRONMENT: laptop
+      GATEWAY_AUDIT_SINK: kafka
+      GATEWAY_AUDIT_KAFKA_BOOTSTRAP: kafka:9092
+      GATEWAY_AUDIT_TOPIC: audit.v1
+    volumes: [./gateway-policy.local.yaml:/etc/llm-gateway/policy.yaml:ro]   # written by valxel dev init
+    depends_on:
+      kafka: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # The audit trail: the gateway's records, through Kafka, into the audit database (ss-audit-sink).
+  kafka:
+    image: apache/kafka:4.1.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes: [kafka:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+    restart: unless-stopped
+
+  audit-sink:
+    image: ghcr.io/valxel-shared-services/ss-audit-sink:${AUDIT_SINK_VERSION:-main}
+    environment:
+      AUDIT_SINK_KAFKA_BOOTSTRAP: kafka:9092
+      AUDIT_SINK_DATABASE_URL: postgresql://valxel:valxel@postgres:5432/audit
+      AUDIT_SINK_DESTINATIONS: '["postgres"]'   # no archive bucket on a laptop
+    depends_on:
+      postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  artifacts:
+  kafka:

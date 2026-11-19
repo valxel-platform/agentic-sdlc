@@ -56,3 +56,8 @@ continues as tracked.
 - The laptop tier mounts the Docker socket into the tool (to build and run products and sessions):
   acceptable on a developer's own machine, never in the VM or cluster tiers, which strict mode enforces.
 - Local builds are unsigned and unscanned; the VM and cluster tiers don't accept them.
+
+## Running the laptop tier
+
+`valxel dev init`, `valxel dev doctor`, `valxel dev up` (valxel_sdlc.laptop). The bundle and its
+guide are in `src/valxel_sdlc/laptop/bundle/` (README.md there).
