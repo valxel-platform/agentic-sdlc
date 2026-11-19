@@ -66,6 +66,11 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         if regulated:
             out.append(f"VALXEL_CHECKPOINT_ARCHIVE_BUCKET is not set: {', '.join(regulated)} are regulated, so their "
                        "checkpoint history is never pruned rather than archived (valxel_sdlc.checkpoint_archive)")
+    from .ops.signal_tokens import scoped_only
+
+    if not scoped_only(env):
+        out.append("VALXEL_SIGNALS_TOKENS is not scoped: the platform's signals token is accepted for every "
+                   "product's alerts; give each sender its own (`valxel signals-token`) and set it to scoped")
     out += weak_secrets(env, database_url=s.database_url)
     out += secrets_in_environment(env, live=s.mode == "live")
     out += app_key_in_kms(env)

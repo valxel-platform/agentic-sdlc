@@ -20,6 +20,11 @@ turn it off in product.yaml (`runtime.remediation`), never widen it:
       fix_agent: false       # OpenChoreo's own fix agent (REMED_AGENT): must stay off
     require_agreement: true  # act alone only when triage's suspect and a high-confidence root
                              # cause from OpenChoreo point at the same component and change
+    min_sources: 2           # and only when that many independent senders report the incident
+                             # (Prometheus, CloudWatch, OpenChoreo, error tracking, a ticket...):
+                             # one sender, or one stolen token, can't make the tool act alone
+    corroboration_minutes: {sev1: 5, sev2: 10, sev3: 15, sev4: 15}   # how long it waits for the
+                             # second sender before paging on-call instead (0: don't wait)
     without_analysis: page   # no analysis for this product: page (default) or act on suspects alone
     calibration: {window_days: 90, min_samples: 5, suspend_below: 0.6}
     shadow: {min_samples: 10, agree_at_least: 0.8, window_days: 90}
@@ -59,6 +64,7 @@ import yaml
 ACTIONS = ("flag_off", "rollback")
 QUIET_MINUTES = {"sev1": 10, "sev2": 15, "sev3": 30, "sev4": 60}
 ANALYSIS_WAIT = {"sev1": 5, "sev2": 8, "sev3": 10, "sev4": 10}
+CORROBORATION_WAIT = {"sev1": 5, "sev2": 10, "sev3": 15, "sev4": 15}
 RISK_TIERS = ("low", "high", "regulated")
 AGENT = "agent:remediate"
 ROLLOUT_AGENT = "agent:rollout"
@@ -121,6 +127,8 @@ def load_policy(text: str) -> dict:
             "start_hotfix": doc.get("start_hotfix", True) is True, "attempts": attempts,
             "quiet_minutes": quiet, "page": {"heads_up": heads_up}, "analysis": parsed_analysis,
             "require_agreement": doc.get("require_agreement", True) is not False, "without_analysis": without,
+            "min_sources": _min_sources(doc.get("min_sources", 2)),
+            "corroboration_minutes": _corroboration(doc.get("corroboration_minutes")),
             "calibration": {"window_days": cal["window_days"], "min_samples": cal["min_samples"],
                             "suspend_below": float(cal["suspend_below"])},
             "gradual_release": _gradual(gradual) if gradual else None}
@@ -157,6 +165,20 @@ def _shadow(raw) -> dict | None:
     return {"min_samples": s["min_samples"], "agree_at_least": float(s["agree_at_least"]), "window_days": s["window_days"]}
 
 
+def _corroboration(raw) -> dict:
+    out = {**CORROBORATION_WAIT, **(raw or {})}
+    if set(out) - set(CORROBORATION_WAIT) or not all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 60
+                                                     for v in out.values()):
+        raise PolicyError("remediation corroboration_minutes are 0 to 60 per sev1..sev4")
+    return out
+
+
+def _min_sources(raw) -> int:
+    if not isinstance(raw, int) or isinstance(raw, bool) or not 1 <= raw <= 3:
+        raise PolicyError("remediation min_sources is 1 to 3 (independent senders before the tool acts alone)")
+    return raw
+
+
 def for_product(policy: dict, runtime: dict | None, data_class: str = "", data_classes: dict | None = None) -> dict:
     """The platform's policy as it applies to one product: `runtime.remediation.autonomous` false
     turns autonomy off, a list keeps only those actions; `gradual_release: false` releases at once,
@@ -164,7 +186,8 @@ def for_product(policy: dict, runtime: dict | None, data_class: str = "", data_c
     says whether it may run here (`allowed`) and why not."""
     if not policy:
         return {"autonomous": {}, "start_hotfix": False, "attempts": 0, "quiet_minutes": dict(QUIET_MINUTES),
-                "page": {"heads_up": ["sev1"]}, "analysis": {}, "require_agreement": True,
+                "page": {"heads_up": ["sev1"]}, "analysis": {}, "require_agreement": True, "min_sources": 2,
+                "corroboration_minutes": dict(CORROBORATION_WAIT),
                 "without_analysis": "page", "calibration": {"window_days": 90, "min_samples": 5, "suspend_below": 0.6},
                 "gradual_release": None, "shadow": None}
     own = (runtime or {}).get("remediation") or {}
@@ -191,7 +214,9 @@ def for_product(policy: dict, runtime: dict | None, data_class: str = "", data_c
     elif gradual and isinstance(own.get("gradual_release"), dict) and own["gradual_release"].get("steps"):
         gradual = {**gradual, "steps": _gradual({**gradual, "compare": gradual.get("compare"),
                                                  **own["gradual_release"]})["steps"]}
-    return {**policy, "autonomous": auto, "analysis": analysis, "gradual_release": gradual}
+    # A product may ask for more corroboration, never less.
+    sources = max(int(policy.get("min_sources", 2)), int(own.get("min_sources") or 0))
+    return {**policy, "autonomous": auto, "analysis": analysis, "gradual_release": gradual, "min_sources": min(sources, 3)}
 
 
 def provider_allowed(provider: str, data_class: str, data_classes: dict | None) -> bool:
@@ -428,3 +453,8 @@ def shadow_open(record: dict, shadow: dict | None) -> tuple[bool, str]:
     if rate < shadow["agree_at_least"]:
         return False, f"{said}, below {int(shadow['agree_at_least'] * 100)}%"
     return True, said
+
+
+def sources(signals: list[dict]) -> list[str]:
+    """The independent senders behind an incident's signals: each source counts once."""
+    return sorted({str(s.get("source") or "") for s in signals} - {""})

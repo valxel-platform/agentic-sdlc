@@ -27,9 +27,11 @@ API = "acme-clinic/cln-intake-api"
 
 @pytest.fixture
 def gov_root(tmp_path):
+    from conftest import one_sender_is_enough
+
     root = tmp_path / "governance"
     shutil.copytree(ROOT / "examples" / "governance", root)
-    return root
+    return one_sender_is_enough(root)
 
 
 def make(tmp_path, gov_root):

@@ -126,9 +126,11 @@ def test_quiet_means_no_new_alerts_and_errors_back_down(monkeypatch):
 
 @pytest.fixture
 def root(tmp_path):
+    from conftest import one_sender_is_enough
+
     r = tmp_path / "governance"
     shutil.copytree(EXAMPLES, r)
-    return r
+    return one_sender_is_enough(r)
 
 
 def make(tmp_path, root):
@@ -238,3 +240,72 @@ def test_governance_refuses_a_bad_remediation_setting(tmp_path, root):
     eng, _ = make(tmp_path, root)
     with pytest.raises(GovernanceError, match="runtime.remediation.autonomous"):
         eng.services.snapshot("CLN")
+
+
+def test_one_sender_isnt_enough_for_the_tool_to_act_alone(tmp_path):
+    """The platform's policy (min_sources: 2): one alert source can't make the tool act by itself,
+    whoever holds its token. A second, independent sender can."""
+    root = tmp_path / "governance"
+    shutil.copytree(EXAMPLES, root)  # the platform's own policy, unchanged
+    eng, svc = make(tmp_path, root)
+    fid = eng.create(product_id="CLN", title="Consent capture at intake")
+    eng.auto_drive(fid)
+    key = eng.view(fid)["release"]["flag"]
+    [iid] = eng.ingest(alert())
+    v = eng.view(iid)
+    # It waits a few minutes for a second sender, rather than acting on one.
+    assert v["taken"] == [] and svc.flags.get("CLN", key) is True
+    assert [p.get("wait") for p in eng.pending(iid)] == ["corroboration"]
+    assert any(e["kind"] == "corroborating" for e in v["events"])
+    # The watcher ends the wait once its minutes pass with no second sender.
+    [p] = eng.pending(iid)
+    assert eng._release_waits(p) is None
+    old = {**p, "since": "2026-01-01T00:00:00+00:00"}
+    assert eng._release_waits(old) == {"status": "failure", "sources": ["prometheus"]}
+
+
+def test_without_a_second_sender_on_call_decides(tmp_path):
+    root = tmp_path / "governance"
+    shutil.copytree(EXAMPLES, root)
+    pol = root / "valxel-platform" / "sdlc-governance" / "platform" / "remediation.yaml"
+    pol.write_text(pol.read_text().replace("min_sources: 2", "min_sources: 2\ncorroboration_minutes: "
+                                                               "{sev1: 0, sev2: 0, sev3: 0, sev4: 0}", 1))
+    eng, svc = make(tmp_path, root)
+    fid = eng.create(product_id="CLN", title="Consent capture at intake")
+    eng.auto_drive(fid)
+    key = eng.view(fid)["release"]["flag"]
+    [iid] = eng.ingest(alert())
+    v = eng.view(iid)
+    assert v["taken"] == [] and svc.flags.get("CLN", key) is True
+    assert any("only prometheus reported it" in (e.get("detail") or "") for e in v["events"]), v["events"]
+    assert gate(eng, iid)  # on-call decides
+
+
+def test_two_senders_let_the_tool_act_alone(tmp_path):
+    from valxel_sdlc.ops.signals import from_ticket
+
+    root = tmp_path / "governance"
+    shutil.copytree(EXAMPLES, root)
+    eng, svc = make(tmp_path, root)
+    fid = eng.create(product_id="CLN", title="Consent capture at intake")
+    eng.auto_drive(fid)
+    key = eng.view(fid)["release"]["flag"]
+    ticket = from_ticket({"product_id": "CLN", "component": "cln-intake-api", "severity": "critical",
+                          "title": "Intake fails for every patient", "id": "T-1"})
+    [iid] = eng.ingest(alert() + ticket)  # the ticket arrives while it waits for corroboration
+    v = eng.view(iid)
+    assert [t["type"] for t in v["taken"]][:1] == ["flag_off"] and svc.flags.get("CLN", key) is False
+    assert any(e["kind"] == "corroborated" and "prometheus, ticket" in e["detail"] for e in v["events"])
+
+
+def test_min_sources_in_the_policy():
+    import pytest as _pytest
+
+    from valxel_sdlc.ops.remediation import PolicyError, for_product, load_policy
+
+    pol = load_policy(POLICY.read_text())
+    assert pol["min_sources"] == 2
+    assert for_product(pol, {"remediation": {"min_sources": 3}})["min_sources"] == 3  # stricter: yes
+    assert for_product(pol, {"remediation": {"min_sources": 1}})["min_sources"] == 2  # looser: no
+    with _pytest.raises(PolicyError, match="min_sources"):
+        load_policy(POLICY.read_text().replace("min_sources: 2", "min_sources: 0"))

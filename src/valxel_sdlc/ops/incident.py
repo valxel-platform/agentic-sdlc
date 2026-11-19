@@ -49,6 +49,7 @@ def oncall_approvers(lane) -> list[str]:
 
 
 class IncidentState(TypedDict, total=False):
+    corroboration: dict  # waiting for a second sender: since, minutes, need; then waited and sources
     incident_id: str
     product_id: str
     title: str
@@ -254,6 +255,21 @@ def build_incident_graph(services, checkpointer=None):
         return Command(goto="triage", update={"analysis": found,
                                               "events": [event("analyze", found["status"], summary[:300])]})
 
+    def corroborate(state: IncidentState) -> Command:
+        """Wait for another independent sender (policy min_sources), then decide again; on time out
+        auto finds too few and pages on-call."""
+        c = state.get("corroboration") or {}
+        res = interrupt({"type": "external", "wait": "corroboration", "feature_id": state["incident_id"],
+                         "product_id": state["product_id"], "label": "Waiting for a second alert source",
+                         "since": c.get("since") or now(), "minutes": c.get("minutes", 10), "need": c.get("need", 2)})
+        if (done := merged(state)) is not None:
+            return done
+        got = res.get("sources") or []
+        return Command(goto="auto", update={"corroboration": {**c, "waited": True, "sources": got},
+                                            "events": [event("auto", "corroborated" if res.get("status") == "success"
+                                                             else "uncorroborated",
+                                                             f"senders: {', '.join(got) or 'none'}")]})
+
     def analysis_lines(a: dict) -> list[str]:
         body = remediation.report_body(a)
         if not body:
@@ -383,6 +399,15 @@ def build_incident_graph(services, checkpointer=None):
             if off:
                 why = "; ".join(off.values()) + f" ({why})"
             return Command(goto="escalate", update={"feedback": why, "events": events})
+        need = int(pol.get("min_sources", 2))
+        seen = remediation.sources(services.incident_signals(state["incident_id"]))
+        wait = int((pol.get("corroboration_minutes") or remediation.CORROBORATION_WAIT).get(state["severity"], 10))
+        if len(seen) < need and wait and not (state.get("corroboration") or {}).get("waited"):
+            # One sender so far: give a second one a few minutes before deciding (corroborate).
+            return Command(goto="corroborate", update={"corroboration": {"since": now(), "minutes": wait, "need": need},
+                                                       "events": events + [event("auto", "corroborating", (
+                f"only {', '.join(seen) or 'no sender'} reported it so far: waiting up to {wait} minutes for "
+                f"{need - len(seen)} more independent sender(s) before acting alone"))]})
         ok, why = confident(state, pol, chosen[0])
         events.append(event("auto", "agreed" if ok else "not_confident", why))
         if not ok:
@@ -407,7 +432,13 @@ def build_incident_graph(services, checkpointer=None):
                 approver=remediation.AGENT)]})
 
     def confident(state: IncidentState, pol: dict, action: dict) -> tuple[bool, str]:
-        """Two independent sources before the tool acts alone (policy `require_agreement`)."""
+        """Two independent views before the tool acts alone: senders (policy `min_sources`), and
+        triage with OpenChoreo's root cause (`require_agreement`)."""
+        need = int(pol.get("min_sources", 2))
+        seen = remediation.sources(services.incident_signals(state["incident_id"]) if state.get("incident_id") else [])
+        if len(seen) < need:
+            return False, (f"only {', '.join(seen) or 'no sender'} reported it: the tool acts alone only when "
+                           f"{need} independent senders do (policy min_sources)")
         if not pol.get("require_agreement", True):
             return True, "the policy lets the tool act on the release suspect alone"
         a = state.get("analysis") or {}
@@ -691,7 +722,8 @@ def build_incident_graph(services, checkpointer=None):
     g.add_node("analyze", analyze)
     g.add_node("analysis_wait", analysis_wait, destinations=("triage", END))
     g.add_node("triage", triage)
-    g.add_node("auto", auto, destinations=("act", "escalate", "decide", END))
+    g.add_node("auto", auto, destinations=("act", "escalate", "decide", "corroborate", END))
+    g.add_node("corroborate", corroborate, destinations=("auto", END))
     g.add_node("escalate", escalate, destinations=("decide",))
     g.add_node("decide", decide, destinations=("triage", "act", "postmortem"))
     g.add_node("act", act, destinations=("monitor", "escalate"))

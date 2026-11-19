@@ -24,6 +24,8 @@ attempts: 1
 # (logs, metrics, traces) and the tool acts only when a high-confidence root cause from it points
 # at the same component and a change to it. With no analysis for a product, a person is paged.
 require_agreement: true
+min_sources: 2            # independent senders (Prometheus, CloudWatch, OpenChoreo, error tracking,
+                          # a ticket) before the tool acts alone; a product may ask for more
 without_analysis: page    # or: suspects (act on the release suspect alone)
 
 # OpenChoreo's agents send the product's telemetry to an AI provider: the one the observability

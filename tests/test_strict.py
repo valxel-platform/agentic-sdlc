@@ -17,7 +17,7 @@ _SECRETS = tempfile.mkdtemp(prefix="strict-secrets-")
 Path(_SECRETS, "VALXEL_SERVICENOW_AUTH_CLN").write_text("Basic x")
 LIVE = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files",
         "VALXEL_SECRETS_DIR": _SECRETS, "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes",
-        "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_CHECKPOINT_ARCHIVE_BUCKET": "valxel-checkpoints", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app"}
+        "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_CHECKPOINT_ARCHIVE_BUCKET": "valxel-checkpoints", "VALXEL_SIGNALS_TOKENS": "scoped", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app"}
 
 
 class LiveTracker:
@@ -66,7 +66,7 @@ def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services, mon
     monkeypatch.setenv("VALXEL_SECRETS_DIR", str(tmp_path))
     (tmp_path / "VALXEL_SERVICENOW_AUTH_CLN").write_text("Basic x")
     live_ish(services)
-    env = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files", "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_CHECKPOINT_ARCHIVE_BUCKET": "valxel-checkpoints", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app",
+    env = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files", "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_CHECKPOINT_ARCHIVE_BUCKET": "valxel-checkpoints", "VALXEL_SIGNALS_TOKENS": "scoped", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app",
            "VALXEL_SECRETS_DIR": str(tmp_path)}
     gaps = strict.check(services, auth_mode="github", env=env)
     assert gaps == []

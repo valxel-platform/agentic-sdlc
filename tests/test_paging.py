@@ -37,8 +37,11 @@ def alert(status="firing", fingerprint="fp1", component="cln-intake-api", severi
 
 @pytest.fixture
 def eng(tmp_path):
+    from conftest import one_sender_is_enough
+
     root = tmp_path / "governance"
     shutil.copytree(EXAMPLES, root)
+    one_sender_is_enough(root)
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",
                       governance_root=root)
     svc = build_services(s)

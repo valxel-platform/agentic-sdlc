@@ -48,14 +48,6 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     member_of = ctx.member_of
 
     # --- production signals ---
-    def bearer_ok(request: Request) -> None:
-
-        from ...secret_ring import bearer_ok as ring_bearer_ok, values
-
-        if not values("VALXEL_SIGNALS_TOKEN"):
-            raise HTTPException(404, "Signal webhooks are not configured")
-        if not ring_bearer_ok("VALXEL_SIGNALS_TOKEN", request.headers.get("authorization", "")):
-            raise HTTPException(401, "Bad token")
 
     # Webhooks answer within seconds (EventBridge gives up after 5): the signal is recorded and
     # on-call paged before the response, off the event loop; triage runs in the background.
@@ -66,17 +58,51 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     async def alarm_changes(signals: list[dict]) -> dict:
         return await run_in_threadpool(lambda: eng().alarm_changes(signals, background=True))
 
+    def sender(request: Request, *kinds: str):
+        """Who sent this (ops/signal_tokens.py): the platform's token, or a product's or an
+        account's. An account token is only a candidate until the event's account is known."""
+        from ...ops.signal_tokens import scope_of
+        from ...secret_ring import values
+
+        if not values("VALXEL_SIGNALS_TOKEN"):
+            raise HTTPException(404, "Signal webhooks are not configured")
+        scope = scope_of(request.headers.get("authorization", ""), kinds, list(eng().services.settings.registry))
+        if scope is None:
+            raise HTTPException(401, "Bad token")
+        return scope
+
+    async def within(scope, signals: list[dict]) -> list[dict]:
+        """The signals, if every one is the sender's to raise; 403 otherwise."""
+        from ...ops.signals import resolve_product
+
+        if scope.kind == "platform":
+            return signals
+
+        def product_of(sig: dict) -> str:
+            return sig.get("product_id") or resolve_product(eng().services, sig)[0]
+
+        if scope.kind == "product":
+            pids = await run_in_threadpool(lambda: [product_of(s) for s in signals])
+            out = [{**s, "product_id": p} for s, p in zip(signals, pids, strict=True) if p == scope.name]
+        else:
+            out = [s for s in signals if scope.allows(s)]
+        if len(out) != len(signals):
+            raise HTTPException(403, f"This token is for {scope.kind} {scope.name}: "
+                                     f"{len(signals) - len(out)} of these signals are for another")
+        return out
+
     @api.post("/signals/alertmanager", status_code=202)
     async def alertmanager(request: Request) -> dict:
-        """Alertmanager webhook receiver (http_config.authorization: Bearer VALXEL_SIGNALS_TOKEN)."""
+        """Alertmanager webhook receiver (http_config.authorization: Bearer <the product's signals
+        token>, `valxel signals-token product <id>`)."""
         from ...ops.signals import from_alertmanager
 
-        bearer_ok(request)
+        scope = sender(request, "product")
         try:
             payload = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return await ingest(from_alertmanager(payload))
+        return await ingest(await within(scope, from_alertmanager(payload)))
 
     @api.post("/signals/sentry", status_code=202)
     async def sentry(request: Request) -> dict:
@@ -106,12 +132,12 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         """A support tool's webhook: {product_id, title, description, component?, severity?, url?, id?}."""
         from ...ops.signals import from_ticket
 
-        bearer_ok(request)
+        scope = sender(request, "product")
         try:
             payload = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return await ingest(from_ticket(payload))
+        return await ingest(await within(scope, from_ticket(payload)))
 
     def oncall(user: User, product_id: str) -> None:
         """Only the product's on-call (who decide incidents) may merge or split them."""
@@ -158,17 +184,17 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     @api.post("/signals/openchoreo", status_code=202)
     async def openchoreo_alert(request: Request) -> dict:
         """An OpenChoreo notification channel (type webhook, no payloadTemplate, header
-        Authorization: Bearer VALXEL_SIGNALS_TOKEN). Budget alerts from the FinOps module arrive
-        as cost signals; log and metric alerts as ordinary ones."""
+        Authorization: Bearer <the product's signals token>). Budget alerts from the FinOps module
+        arrive as cost signals; log and metric alerts as ordinary ones."""
         from ...ops.signals import from_openchoreo
 
-        bearer_ok(request)
+        scope = sender(request, "product")
         try:
             payload = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
         # Production alerts open incidents; the rest are kept for G6, like CloudWatch alarms.
-        return await alarm_changes(from_openchoreo(payload))
+        return await alarm_changes(await within(scope, from_openchoreo(payload)))
 
     @api.post("/signals/glitchtip/{product_id}", status_code=202)
     async def glitchtip_alert(product_id: str, request: Request) -> dict:
@@ -205,29 +231,41 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     async def cloudwatch_alarm(request: Request) -> dict:
         """CloudWatch alarm state changes from each data plane's AlarmRouting (an EventBridge API
         destination sending Authorization: Bearer VALXEL_SIGNALS_TOKEN). Production alarms open and
-        resolve incidents; every alarm's state is kept for G6."""
+        resolve incidents; every alarm's state is kept for G6. The connection's token is the data
+        plane account's (`valxel signals-token account <id>`): it sends that account's events only."""
         from ...ops.signals import from_cloudwatch
 
-        bearer_ok(request)
+        scope = sender(request, "account")
         try:
             event = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return await alarm_changes(from_cloudwatch(event))
+        scope = for_account(scope, event)
+        return await alarm_changes(await within(scope, from_cloudwatch(event)))
 
     @api.post("/signals/inspector", status_code=202)
     async def inspector_finding(request: Request) -> dict:
         """Amazon Inspector findings on running images (ECR enhanced scanning, continuous), from an
         EventBridge rule on 'Inspector2 Finding' through an API destination sending Authorization:
-        Bearer VALXEL_SIGNALS_TOKEN. High and critical vulnerabilities open incidents for the component."""
+        Bearer <the account's signals token>. High and critical vulnerabilities open incidents for the
+        component."""
         from ...ops.signals import from_inspector
 
-        bearer_ok(request)
+        scope = sender(request, "account")
         try:
             event = json.loads(await request.body() or b"{}")
         except ValueError as exc:
             raise HTTPException(400, "Body is not JSON") from exc
-        return await ingest(from_inspector(event))
+        scope = for_account(scope, event)
+        return await ingest(await within(scope, from_inspector(event)))
+
+    def for_account(scope, event: dict):
+        from ...ops.signal_tokens import account_scope
+
+        checked = account_scope(scope, str(event.get("account") or ""))
+        if checked is None:
+            raise HTTPException(401, "Bad token for this account")
+        return checked
 
     @api.post("/signals/aws-budgets", status_code=202)
     async def aws_budgets(request: Request) -> JSONResponse:

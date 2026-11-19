@@ -18,6 +18,8 @@ from valxel_sdlc.ops import paging, remediation
 from valxel_sdlc.ops.signals import from_alertmanager, from_openchoreo
 from valxel_sdlc.services import build_services
 
+from conftest import one_sender_is_enough
+
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 POLICY = EXAMPLES / "valxel-platform" / "sdlc-governance" / "platform" / "remediation.yaml"
 
@@ -26,6 +28,7 @@ POLICY = EXAMPLES / "valxel-platform" / "sdlc-governance" / "platform" / "remedi
 def root(tmp_path):
     r = tmp_path / "governance"
     shutil.copytree(EXAMPLES, r)
+    one_sender_is_enough(r)  # these tests are about other things; two senders: test_remediation
     return r
 
 

@@ -16,6 +16,8 @@ from valxel_sdlc.integrations.flags import FliptError, FliptFlags, NoFlags, Prod
 from valxel_sdlc.ops.signals import from_alertmanager
 from valxel_sdlc.services import build_services
 
+from conftest import one_sender_is_enough
+
 ROOT = Path(__file__).resolve().parents[1]
 FARM_FLAGS = """
   flags:
@@ -75,6 +77,7 @@ class FakeFlipt:
 def gov_root(tmp_path):
     root = tmp_path / "governance"
     shutil.copytree(ROOT / "examples" / "governance", root)
+    one_sender_is_enough(root)  # these tests are about other things; two senders: test_remediation
     return root
 
 
@@ -182,12 +185,14 @@ def test_product_yaml_validates_the_flag_service(tmp_path, gov_root):
 
     shutil.rmtree(gov_root)
     shutil.copytree(ROOT / "examples" / "governance", gov_root)
+    one_sender_is_enough(gov_root)  # these tests are about other things; two senders: test_remediation
     with_flipt(gov_root, "\n  flags:\n    provider: launchdarkly\n")
     with pytest.raises(GovernanceError, match="must be one of"):
         make(tmp_path, gov_root)[1].snapshot("FARM")
 
     shutil.rmtree(gov_root)
     shutil.copytree(ROOT / "examples" / "governance", gov_root)
+    one_sender_is_enough(gov_root)  # these tests are about other things; two senders: test_remediation
     with_flipt(gov_root)
     spec = make(tmp_path, gov_root)[1].snapshot("FARM").product.tools["flags"]
     assert spec == {"provider": "flipt", "url": "https://flipt.farm.example.com", "namespace": "farm",

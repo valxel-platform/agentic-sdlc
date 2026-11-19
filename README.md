@@ -1174,19 +1174,32 @@ change behind the failure, checks that the failure stopped, starts the fix and d
 postmortem. On-call is paged only when the tool can't fix it (and told, at low urgency, as a SEV1
 opens). The tool's own production actions are the platform's one exception to VX-3, set in
 sdlc-governance's `platform/remediation.yaml`: turn off a recent feature's flag, roll back a recent
-release. Everything else is a person's decision.
+release. Everything else is a person's decision. It acts alone only on two independent views: at least `min_sources`
+(2) different senders report the incident, so one alert source, or one leaked token, can't make it
+act (it waits `corroboration_minutes` for the second, then pages on-call), and OpenChoreo's
+root-cause analysis agrees with triage's suspect (`require_agreement`).
 
 **Signals in.**
 
 | Source | Endpoint | Auth |
 | --- | --- | --- |
-| Prometheus (Alertmanager webhook; SLO burn-rate and error alerts) | `POST /api/signals/alertmanager` | `Authorization: Bearer $VALXEL_SIGNALS_TOKEN` |
+| Prometheus (Alertmanager webhook; SLO burn-rate and error alerts) | `POST /api/signals/alertmanager` | `Authorization: Bearer <the product's token>` |
 | Sentry (internal integration: issues created or regressed, alert rules) | `POST /api/signals/sentry` | `Sentry-Hook-Signature`, HMAC with `VALXEL_SENTRY_CLIENT_SECRET` |
-| Support tickets (any tool that can post JSON) | `POST /api/signals/ticket` | `Authorization: Bearer $VALXEL_SIGNALS_TOKEN` |
-| OpenChoreo alert rules (log, metric and FinOps budget rules; webhook channel without `payloadTemplate`) | `POST /api/signals/openchoreo` | channel header `Authorization: Bearer $VALXEL_SIGNALS_TOKEN` |
-| CloudWatch alarms on AWS resources (each data plane's `AlarmRouting`: an EventBridge API destination) | `POST /api/signals/cloudwatch` | connection header `Authorization: Bearer $VALXEL_SIGNALS_TOKEN` |
+| Support tickets (any tool that can post JSON) | `POST /api/signals/ticket` | `Authorization: Bearer <the product's token>` |
+| OpenChoreo alert rules (log, metric and FinOps budget rules; webhook channel without `payloadTemplate`) | `POST /api/signals/openchoreo` | channel header `Authorization: Bearer <the product's token>` |
+| CloudWatch alarms on AWS resources (each data plane's `AlarmRouting`: an EventBridge API destination) | `POST /api/signals/cloudwatch` | connection header `Authorization: Bearer <the data plane account's token>` |
 | AWS Budgets (through an SNS topic) | `POST /api/signals/aws-budgets` | HTTPS subscription `https://valxel:$VALXEL_SIGNALS_TOKEN@<host>/api/signals/aws-budgets`; topic listed in `VALXEL_AWS_BUDGET_TOPICS` |
 | People in the web app | "Report a problem" on the Incidents page | signed-in member of the product's org |
+
+**Each sender has its own token** (`src/valxel_sdlc/ops/signal_tokens.py`), derived from
+`VALXEL_SIGNALS_TOKEN`: `valxel signals-token product <id>` for a product's Alertmanager, OpenChoreo
+channel and support tool, which then raise that product's signals only (a signal for another
+product is refused with 403); `valxel signals-token account <12 digits>` for a data plane account's
+CloudWatch and Inspector destinations, which then send that account's events only. A leaked token
+reaches one product or one account. The platform-wide token keeps working on these endpoints
+until `VALXEL_SIGNALS_TOKENS=scoped` (strict mode asks for it); AWS Budgets keep it, as their topic
+is the platform's own. Rotating `VALXEL_SIGNALS_TOKEN` rotates every derived token, and the previous
+value's tokens work until the rotation ends.
 
 Each signal is tied to a product (a `valxel_product` label or tag, else its `component` matched to
 the product's repos and OpenChoreo components) and a severity (SEV1 to SEV4 from `severity` or the
@@ -1770,7 +1783,7 @@ checks the Codex download's checksum, and is scanned with an SBOM in CI.
 
 **What already runs is rescanned.** ECR's enhanced scanning (Amazon Inspector, continuous) rescans
 images whenever a CVE is published; an EventBridge rule on `Inspector2 Finding` sends findings to
-`POST /api/signals/inspector` (Bearer `VALXEL_SIGNALS_TOKEN`). High and critical vulnerabilities in
+`POST /api/signals/inspector` (Bearer the account's token, `valxel signals-token account <id>`). High and critical vulnerabilities in
 running images open incidents for the component (critical with a fix: sev2), and a closed finding
 resolves its signal.
 
@@ -1851,7 +1864,8 @@ never changes or removes a trait someone tuned.
 
 OpenChoreo evaluates the rules per environment and notifies the environment's default notification
 channel. Point that channel (a webhook, no `payloadTemplate`, header `Authorization: Bearer
-$VALXEL_SIGNALS_TOKEN`) at `/api/signals/openchoreo` in every environment:
+<the product's token>`, `valxel signals-token product <id>`) at `/api/signals/openchoreo` in every
+environment:
 
 | Environment | What happens |
 | --- | --- |

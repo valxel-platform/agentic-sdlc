@@ -16,6 +16,8 @@ from valxel_sdlc.ops import rollout
 from valxel_sdlc.ops.signals import from_alertmanager
 from valxel_sdlc.services import build_services
 
+from conftest import one_sender_is_enough
+
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 
 
@@ -32,6 +34,7 @@ def real_time(monkeypatch):
 def eng(tmp_path):
     root = tmp_path / "governance"
     shutil.copytree(EXAMPLES, root)
+    one_sender_is_enough(root)  # these tests are about other things; two senders: test_remediation
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",
                       governance_root=root)
     return FeatureEngine(build_services(s), InMemorySaver())
@@ -109,6 +112,7 @@ def test_the_check():
 def test_a_product_can_release_at_once_or_choose_its_steps(tmp_path):
     root = tmp_path / "g"
     shutil.copytree(EXAMPLES, root)
+    one_sender_is_enough(root)  # these tests are about other things; two senders: test_remediation
     gov = root / "acme-clinic" / "cln-governance" / "product.yaml"
     gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {gradual_release: false}\n", 1))
     farm = root / "acme-farm" / "farm-governance" / "product.yaml"
@@ -247,6 +251,7 @@ def test_users_with_it_on_failing_more_stops_it_and_the_tool_turns_it_off(watche
 def test_without_flag_off_autonomy_it_pages_instead(tmp_path, real_time):
     root = tmp_path / "g"
     shutil.copytree(EXAMPLES, root)
+    one_sender_is_enough(root)  # these tests are about other things; two senders: test_remediation
     gov = root / "acme-clinic" / "cln-governance" / "product.yaml"
     gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {autonomous: [rollback]}\n", 1))
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local", governance_root=root)

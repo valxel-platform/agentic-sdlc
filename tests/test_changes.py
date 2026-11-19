@@ -19,6 +19,8 @@ from valxel_sdlc.ops.signals import from_alertmanager
 from valxel_sdlc.services import build_services
 from valxel_sdlc.web.auth import AuthConfig
 
+from conftest import one_sender_is_enough
+
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
 
 
@@ -54,6 +56,7 @@ def test_the_cli_says_whether_the_log_is_intact(capsys):
 def eng(tmp_path):
     root = tmp_path / "governance"
     shutil.copytree(EXAMPLES, root)
+    one_sender_is_enough(root)  # these tests are about other things; two senders: test_remediation
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",
                       governance_root=root)
     return FeatureEngine(build_services(s), InMemorySaver())
@@ -109,6 +112,7 @@ def test_the_tools_fix_is_automatic_and_names_the_release_behind_the_incident(en
 def test_on_calls_rollback_is_an_emergency_change_and_a_hotfix_release_too(tmp_path):
     root = tmp_path / "gov"
     shutil.copytree(EXAMPLES, root)
+    one_sender_is_enough(root)  # these tests are about other things; two senders: test_remediation
     gov = root / "acme-clinic" / "cln-governance" / "product.yaml"
     gov.write_text(gov.read_text().replace("runtime:\n", "runtime:\n  remediation: {autonomous: false}\n", 1))
     s = load_settings(mode="stub", database_url="", artifact_dir=tmp_path / "a", governance_source="local",

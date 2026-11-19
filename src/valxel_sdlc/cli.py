@@ -462,6 +462,10 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     a.add_argument("--json", action="store_true")
     g = sub.add_parser("glitchtip-token", help="The token for a product's GlitchTip webhook URL")
     g.add_argument("product")
+    st = sub.add_parser("signals-token", help="A sender's signals token: a product's (Alertmanager, OpenChoreo, "
+                                              "tickets) or a data plane account's (CloudWatch, Inspector)")
+    st.add_argument("kind", choices=["product", "account"])
+    st.add_argument("name", help="The product id or the 12-digit AWS account")
     c = sub.add_parser("changes", help="Check the production change log's hash chain (DATABASE_URL)")
     c.add_argument("action", choices=["verify"])
     wk = sub.add_parser("workspaces", help="Give a workspace its first owner (an existing deployment's), or list them "
@@ -629,6 +633,19 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
             print("Set VALXEL_SIGNALS_TOKEN first (the tool's signals token).", file=sys.stderr)
             return 2
         print(f"/api/signals/glitchtip/{args.product}?token={token}")
+        return 0
+    if args.cmd == "signals-token":
+        from .ops.signal_tokens import token_for
+
+        try:
+            token = token_for(args.kind, args.name)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        if not token:
+            print("Set VALXEL_SIGNALS_TOKEN first (the tool's signals token).", file=sys.stderr)
+            return 2
+        print(f"Authorization: Bearer {token}")
         return 0
     if args.cmd == "repos":
         return _repos(args, github)

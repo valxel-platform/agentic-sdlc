@@ -67,3 +67,11 @@ def pending_of(engine, feature_id, kind=None):
 def approve(engine, feature_id, gate, **extra):
     [p] = [p for p in engine.pending(feature_id) if p.get("gate") == gate]
     return engine.decide(feature_id, p["interrupt_id"], {"decision": "approve", "approver": f"{gate}-owner", **extra})
+
+
+def one_sender_is_enough(root):
+    """For tests about what the tool does once it may act alone: their alerts come from one sender,
+    and the platform asks for two (remediation.yaml min_sources). test_remediation covers that rule."""
+    p = root / "valxel-platform" / "sdlc-governance" / "platform" / "remediation.yaml"
+    p.write_text(p.read_text().replace("min_sources: 2", "min_sources: 1", 1))
+    return root

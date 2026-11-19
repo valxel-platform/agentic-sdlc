@@ -225,6 +225,16 @@ class WatchingMixin:
                 return {"status": "failure", "report_status": "timed_out",
                         "reason": f"no report after {packet.get('minutes')} minutes"}
             return None
+        if packet["wait"] == "corroboration":  # a second independent sender (ops/remediation.py min_sources)
+            from ..ops.remediation import sources
+
+            seen = sources(self.services.incident_signals(packet["feature_id"]))
+            if len(seen) >= int(packet.get("need") or 2):
+                return {"status": "success", "sources": seen}
+            started = datetime.fromisoformat(str(packet["since"]).replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) - started > timedelta(minutes=float(packet.get("minutes") or 10)):
+                return {"status": "failure", "sources": seen}
+            return None
         if packet["wait"] == "incident_recovery":
             from ..ops.incident import recovery
 
