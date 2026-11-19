@@ -108,6 +108,8 @@ def github_app_signer(env: Mapping[str, str] | None = None, *, app: str = "deliv
         pem = Path(env[n["file"]]).read_text()
     if not pem:
         raise RuntimeError(f"The {app} GitHub App needs {n['kms']}, {n['pem']} in the secret store, or {n['file']}")
+    if "\n" not in pem and "\\n" in pem:  # one line in an env file (valxel dev github-apps)
+        pem = pem.replace("\\n", "\n")
     return RsaKeySigner(pem)
 
 

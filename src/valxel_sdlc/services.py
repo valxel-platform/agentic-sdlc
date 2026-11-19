@@ -389,6 +389,14 @@ def default_provisioner(settings: Settings, github, openchoreo):
         app = "provisioner" if github_app_configured(app="provisioner") else "delivery"
         tokens = github_app_tokens(api=settings.github_api, permissions=PROVISIONING_PERMISSIONS, app=app)
         return RepoProvisioner(GitHubRest(tokens, api=settings.github_api), openchoreo)
+    if os.environ.get("VALXEL_DELIVERY", "").lower() == "local":
+        from .signing import github_app_configured, github_app_tokens
+
+        if github_app_configured(app="provisioner"):  # a laptop with its own Apps (valxel dev github-apps)
+            from .integrations.github import PROVISIONING_PERMISSIONS, GitHubRest
+
+            tokens = github_app_tokens(api=settings.github_api, permissions=PROVISIONING_PERMISSIONS, app="provisioner")
+            return RepoProvisioner(GitHubRest(tokens, api=settings.github_api), openchoreo)
     return RepoProvisioner(github, openchoreo)
 
 

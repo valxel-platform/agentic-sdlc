@@ -6,6 +6,8 @@
 - `doctor` checks what `up` needs: Docker and Compose, the socket's group, the keys, free ports.
 - `up` / `down` / `logs` run Docker Compose on the bundle.
 - `urls` lists what this machine serves: the tool, and each product environment's external endpoints.
+- `github-apps` registers this laptop's own Delivery and Provisioning GitHub Apps, so the sign-up
+  wizard's GitHub step runs for real (laptop/github_apps.py).
 - `cluster up|down|status|check` runs products through OpenChoreo in a local k3d cluster instead of
   plain Docker (laptop/cluster.py).
 
@@ -173,6 +175,9 @@ def urls(*, run=_run, port: int = TOOL_PORT) -> dict[str, str]:
 
 def main(args) -> int:
     target = Path(args.home) if getattr(args, "home", None) else home()
+    if args.action == "github-apps":
+        from .github_apps import main as apps_main
+        return apps_main(args)
     if args.action == "cluster":
         from .cluster import main as cluster_main
         return cluster_main(args)
@@ -187,6 +192,14 @@ def main(args) -> int:
         checks = doctor(target)
         for what, ok, fix in checks:
             print(f"{'ok ' if ok else 'NO '} {what}" + ("" if ok else f"  -> {fix}"))
+        from .github_apps import installed_on
+
+        for app, where in installed_on(read_env(target / ".env")).items():
+            # Information, not a blocker: the sign-up wizard is where the Apps get installed.
+            if isinstance(where, str):
+                print(f"NO  {app} GitHub App: {where}  -> valxel dev github-apps")
+            else:
+                print(f"--  {app} GitHub App installed on: {', '.join(where) or 'nothing yet (the wizard installs it)'}")
         return 0 if all(ok for _, ok, _ in checks) else 1
     if args.action == "up":
         bad = [c for c in doctor(target) if not c[1]]
@@ -210,8 +223,8 @@ def main(args) -> int:
 
 def add_parser(sub) -> None:
     dv = sub.add_parser("dev", help="The laptop tier: the tool end to end on this machine (init, doctor, up, "
-                                    "down, logs, urls; cluster up|down|status|check for a local OpenChoreo)")
-    dv.add_argument("action", choices=["init", "doctor", "up", "down", "logs", "urls", "cluster"])
+                                    "down, logs, urls, github-apps; cluster up|down|status|check for a local OpenChoreo)")
+    dv.add_argument("action", choices=["init", "doctor", "up", "down", "logs", "urls", "cluster", "github-apps"])
     dv.add_argument("services", nargs="*", help="With logs: only these services. With cluster: up, down, status "
                                                 "or check")
     dv.add_argument("--home", help="Where the bundle lives (default ~/.valxel/laptop)")
@@ -221,3 +234,5 @@ def add_parser(sub) -> None:
     dv.add_argument("--governance", choices=["local", "github"], help="init: where governance is read from")
     dv.add_argument("--force", action="store_true", help="init: overwrite the policy template and examples")
     dv.add_argument("--wipe", action="store_true", help="down: also delete the databases and artifacts")
+    dv.add_argument("--org", help="github-apps: register the Apps under this GitHub org (the one you'll install "
+                                  "them on); default your own account")

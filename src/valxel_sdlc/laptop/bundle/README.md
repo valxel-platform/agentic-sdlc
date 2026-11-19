@@ -35,6 +35,33 @@ Products are built with `docker build` from their repos at the merged commit, an
 (development, staging, production) runs as its own Compose project. External endpoints are published
 on 127.0.0.1 at a port that stays the same across deploys. `valxel dev urls` lists them.
 
+## Connecting GitHub through the sign-up wizard
+
+A personal token is the quickest start. To test the GitHub step customers go through instead
+(Install, GitHub's consent screen, Valxel checking that the installation belongs to whoever
+installed it, then the next step), give the laptop its own pair of GitHub Apps:
+
+```sh
+valxel dev github-apps --org your-test-org   # registers the Delivery and Provisioning Apps on GitHub
+valxel dev up                                # restart, so the tool picks them up
+```
+
+Then open http://localhost:8080, sign up (choose a plan, name the workspace), and click
+**Install** in the wizard's GitHub step for both Apps. `valxel dev doctor` shows which accounts
+each App is installed on.
+
+- **Registration.** `github-apps` uses GitHub's manifest flow: you confirm each App's name on
+  GitHub, and its id, OAuth client, private key and webhook secret go into `.env`. They're never
+  printed.
+- **Where to register.** The Apps are private, so register them under the org you'll install them
+  on. Leave out `--org` to register them under your own account.
+- **Which credentials win.** Once the Apps are set up, the tool uses them instead of the personal
+  token. Repos are created with the Provisioning App, as on the platform.
+- **Webhooks.** The Apps' webhooks are registered off, because GitHub can't reach a laptop. CI and
+  pull request changes are picked up on the watcher's timer instead.
+- **Ports.** Both laptop ports (8080, and 8090 beside a local OpenChoreo) are registered as callback
+  URLs, so switching modes doesn't need new Apps.
+
 ## With OpenChoreo instead of plain Docker
 
 To test the cluster tier's path on your machine (components, workflow runs, releases and release
