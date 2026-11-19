@@ -13,6 +13,7 @@ dates are when the decision took effect.
 | [0004](0004-stub-first.md) | Every integration has an offline stand-in; strict mode refuses them in production | Accepted |
 | [0005](0005-one-deployable-with-enforced-seams.md) | One deployable with enforced seams, not separate services yet | Accepted |
 | [0006](0006-business-source-license.md) | The Business Source License 1.1 | Accepted |
+| [0007](0007-deployment-tiers.md) | Three ways to run the tool (laptop, single VM, cluster) from one image and one set of settings | Accepted |
 
 Write a new one from [the template](template.md): the context (what forces the choice), the
 decision, what else was considered, and what follows from it, good and bad. Link it from here.
