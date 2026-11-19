@@ -620,6 +620,8 @@ def make_escalation(phase: str, services):
             "type": "escalation", "phase": phase, "feature_id": state["feature_id"],
             "product_id": state["product_id"], "title": state["title"],
             "reason": esc.get("reason", ""), "findings": esc.get("findings", []),
+            # Set when the agents stopped for making no progress: the pattern, and between whom.
+            **({"stall": esc["stall"]} if esc.get("stall") else {}),
             "artifact": state.get("artifacts", {}).get(spec.kind),
             "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
             "budget_usd": state.get("token_budget_usd"),

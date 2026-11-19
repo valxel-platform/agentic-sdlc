@@ -102,7 +102,9 @@ def test_failed_ci_goes_back_to_people_who_can_let_agents_retry(engine, services
     v = to_build(engine)
     fid = v["feature_id"]
     (esc,) = engine.pending(fid)
-    assert esc["type"] == "escalation" and esc["phase"] == "build" and "CI checks failed" in esc["reason"]
+    # The same checks failed after the agents' fix: stopped then, not at the retry limit.
+    assert esc["type"] == "escalation" and esc["phase"] == "build"
+    assert esc["reason"].startswith("No progress after 2 tries (repeating, build and CI)")
     services.github.ci_default = "success"  # the agents' next attempt fixes it
     engine.decide(fid, esc["interrupt_id"], {"decision": "retry", "approver": "lead", "feedback": "fix the test"})
     v = engine.auto_drive(fid)
@@ -497,5 +499,8 @@ def test_people_see_red_ci_only_when_the_agents_retries_run_out(engine, services
     (esc,) = engine.pending(v["feature_id"])
     assert esc["type"] == "escalation" and esc["phase"] == "build"
     events = engine.view(v["feature_id"])["events"]
+    # One retry; the same failures came back, so people see it then (valxel_sdlc.loops).
     assert [e["detail"].split("(")[-1] for e in events if e["node"] == "ci_wait" and e["kind"] == "retry"] == [
-        "try 1 of 3)", "try 2 of 3)", "try 3 of 3)"]
+        "try 1 of 3)"]
+    [stopped] = [e for e in events if e["node"] == "ci_wait" and e["kind"] == "failed"]
+    assert stopped["stall"]["pattern"] == "repeating"

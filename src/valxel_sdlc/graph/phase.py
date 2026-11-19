@@ -22,7 +22,7 @@ from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers, skills_dir_of, task_texts
 from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
-from .. import budgets, retrieval, diary, performance
+from .. import budgets, diary, loops, performance, retrieval
 from .. import evals, lessons, telemetry
 from ..config import ProductConfig
 from ..provisioning import naming_policy
@@ -456,15 +456,20 @@ def merge_second_opinion(review: dict, res: AgentResult, role: str, model: str, 
     return out
 
 
-def _finish(s: PhaseState, findings: list[str], usage: dict) -> dict:
+def _finish(s: PhaseState, findings: list[str], usage: dict, *, between: str = "writer and critic") -> dict:
     spent = s.get("usage", {}).get("cost_usd", 0.0) + usage.get("cost_usd", 0.0)
+    history = list(s.get("finding_history") or [])
+    kept = {"finding_history": history + [list(findings)]}
     if not findings:
-        return {"status": "passed", "reason": ""}
+        return {"status": "passed", "reason": "", **kept}
     if spent >= s["budget_remaining_usd"]:
-        return {"status": "escalated", "reason": "token budget exhausted (VX-10)"}
+        return {"status": "escalated", "reason": "token budget exhausted (VX-10)", **kept}
+    stuck = loops.stall(history, findings, default=between)
+    if stuck and s["attempt"] < s["max_loops"]:  # at the cap anyway: the cap's reason is as good
+        return {"status": "escalated", "reason": loops.reason(stuck, s["attempt"]), "stall": stuck, **kept}
     if s["attempt"] >= s["max_loops"]:
-        return {"status": "escalated", "reason": f"{s['max_loops']} evaluator loops failed"}
-    return {"status": "retry", "reason": ""}
+        return {"status": "escalated", "reason": f"{s['max_loops']} evaluator loops failed", **kept}
+    return {"status": "retry", "reason": "", **kept}
 
 
 ATTACHMENT_PHASES = ("discovery", "spec", "design")  # the designer sees the screenshots people attach
@@ -1204,7 +1209,7 @@ def build_build_subgraph(services):
                   for tid, rv in sorted(reviews.items())]
         draft = {"kind": spec.kind, "content": "\n".join(lines) + "\n"}
         return {"findings": findings, "score": min([rv["score"] for rv in reviews.values()] or [0.0]),
-                "draft": draft, **_finish(s, findings, {})}
+                "draft": draft, **_finish(s, findings, {}, between="coder and reviewer")}
 
     g = StateGraph(PhaseState)
     g.add_node("start", start)
@@ -1315,7 +1320,8 @@ def make_phase_node(phase: str, services):
             "cost_usd": float(usage.get("cost_usd", 0.0)),
             "events": [event(phase, status, out.get("reason", ""), attempts=out.get("attempt", 0),
                              score=out.get("score", 0.0),
-                             **({"critic": out["critic"]} if out.get("critic") else {}))],
+                             **({"critic": out["critic"]} if out.get("critic") else {}),
+                             **({"stall": out["stall"]} if out.get("stall") else {}))],
         }
         if phase == "architecture":  # which repos the architect read, at which commit (G4 shows it)
             delta["code_read"] = (out.get("ctx") or {}).get("code_read") or {}
@@ -1360,7 +1366,8 @@ def make_phase_node(phase: str, services):
                 log.warning("%s %s: eval case not kept", state["feature_id"], phase, exc_info=True)
         if status == "escalated":
             delta["escalations"] = {phase: {"phase": phase, "reason": out.get("reason", ""),
-                                            "findings": list(out.get("findings") or [])}}
+                                            "findings": list(out.get("findings") or []),
+                                            **({"stall": out["stall"]} if out.get("stall") else {})}}
             return delta
 
         snap = services.feature_snapshot(state)

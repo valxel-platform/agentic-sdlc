@@ -101,7 +101,10 @@ def test_persistent_failure_escalates_after_the_loop_cap(engine, services):
     v = approve(engine, fid, "g1")
     [esc] = v["pending"]
     assert esc["type"] == "escalation" and esc["phase"] == "spec"
-    assert esc["reason"] == "3 evaluator loops failed"
+    # The same defect every try: stopped at the second, not run to the cap (valxel_sdlc.loops).
+    assert esc["reason"].startswith("No progress after 2 tries (repeating, writer and critic)")
+    assert esc["stall"]["pattern"] == "repeating"
+    assert engine.view(fid)["loop_count"]["spec"] == 2
     assert any("not testable" in f for f in esc["findings"])
 
     fixed = (

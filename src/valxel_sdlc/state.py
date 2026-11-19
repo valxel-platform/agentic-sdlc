@@ -95,6 +95,7 @@ class FeatureState(TypedDict, total=False):
     design: Annotated[dict, last]  # the design review G4 approved: decisions, supersessions, contract changes
     flag: Annotated[str, last]  # the feature's flag key, created when G4 approves ('' = no flag service)
     ci_retries: Annotated[int, last]  # automatic build retries after red CI, since CI was last green
+    ci_failures: Annotated[list, last]  # each red CI's failures since CI was last green (valxel_sdlc.loops)
     fix_retries: Annotated[int, last]  # agents' fixes for failures after merge, before production (since staging last passed)
     fix_branch: Annotated[str, last]  # the branch the current fix goes on ('' before merge)
     performance: Annotated[dict, last]  # repo -> the performance test it needs (valxel_sdlc.performance)
@@ -159,4 +160,6 @@ class PhaseState(TypedDict, total=False):
     usage: Annotated[dict, add_usage]
     task_results: Annotated[dict[str, dict], merge_dict]
     reviews: Annotated[dict[str, dict], merge_dict]
+    finding_history: list[list[str]]  # each try's findings, oldest first (valxel_sdlc.loops)
+    stall: dict  # set when the loop stopped for making no progress (valxel_sdlc.loops)
     critic: dict  # the last critic verdict: checklist items, and the 0-1 score with what it would have decided

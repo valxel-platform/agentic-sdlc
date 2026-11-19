@@ -8,7 +8,7 @@ from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
 from ..state import FeatureState
-from .. import store
+from .. import loops, store
 from ..waits import LABELS, TIMEOUT_S
 from .phase import event, gates_status, now
 from .infra import oc_target
@@ -265,6 +265,7 @@ def make_ci_wait(services):
         res = interrupt(external(state, "ci", targets, quality_packet(services, state, "ci", targets)))
         if res["status"] == "success":
             return Command(goto=nxt, update={"delivery": {"ci": res}, **_quality_update(res), "ci_retries": 0,
+                                             "ci_failures": [],
                                              "events": [event("ci_wait", "passed", f"CI green on {len(prs)} PRs")]})
         if res["status"] == "security":
             fix = "Fix these security findings:\n" + "\n".join(
@@ -289,11 +290,20 @@ def make_ci_wait(services):
         tries = int(state.get("ci_retries") or 0)
         limit = services.feature_snapshot(state).product.max_loops
         failing = sorted({r["repo"] for r in res.get("results") or [] if r.get("state") == "failure"})
+        history = list(state.get("ci_failures") or []) if tries else []
+        stuck = loops.stall(history, findings, default="build and CI")
+        if stuck and failing:  # the coder's fixes aren't fixing CI: stop now, not at the limit
+            why = loops.reason(stuck, tries + 1)
+            return Command(goto="escalate_build", update={
+                "delivery": {"ci": res}, **_quality_update(res), "phase_status": {"build": "escalated"},
+                "ci_failures": history + [findings],
+                "escalations": {"build": {"phase": "build", "reason": why, "findings": findings, "stall": stuck}},
+                "events": [event("ci_wait", "failed", why, findings=findings, stall=stuck)]})
         if tries < limit and failing:
             fix = "CI failed on the pull requests. Fix these failures:\n" + "\n".join(f"- {f}" for f in findings)
             return Command(goto="build", update={
                 "delivery": {"ci": res}, **_quality_update(res), "ci_retries": tries + 1, "rerun_repos": failing,
-                "feedback": {"build": fix},
+                "feedback": {"build": fix}, "ci_failures": history + [findings],
                 "events": [event("ci_wait", "retry", f"CI red in {', '.join(failing)}: agents fix it "
                                  f"(try {tries + 1} of {limit})", findings=findings)]})
         # The retries ran out: people decide (let agents try again, vouch for it, or stop).
