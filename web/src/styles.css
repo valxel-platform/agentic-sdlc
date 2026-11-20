@@ -3064,6 +3064,15 @@ table.quality tfoot td {
 .ux-choice p {
   margin: 4px 0 0;
 }
+.launch-choice {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px 12px;
+  margin: 12px 0;
+}
+.launch-choice .field {
+  max-width: 220px;
+}
 
 /* G3 mockups */
 .mockups {

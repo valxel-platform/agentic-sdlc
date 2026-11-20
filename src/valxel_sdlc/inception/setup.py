@@ -107,7 +107,10 @@ def goals_yaml(brief: str) -> tuple[str, dict]:
     return yaml.safe_dump({"goals": rows}, sort_keys=False, allow_unicode=True), mapping
 
 
-def initiative_files(brief: str, roadmap: str, approved_by: str) -> dict[str, str]:
+def initiative_files(brief: str, roadmap: str, approved_by: str, launch: dict | None = None) -> dict[str, str]:
+    """Each initiative's record. The first is the launch: its date and must-have features as the
+    product gate approved them (T-100)."""
+    launch = launch or {}
     pid = ids(brief)["product_id"]
     _, goal_ids = goals_yaml(brief)
     out = {}
@@ -117,10 +120,14 @@ def initiative_files(brief: str, roadmap: str, approved_by: str) -> dict[str, st
         record = {"id": iid, "title": ini["title"], "goal": goals[0] if goals else "", "horizon": ini["horizon"],
                   "status": "approved", "budget_usd": ini["budget_usd"], "lanes": [pid], "release_model": "launch",
                   "owner": "", "scope": "product", "approved_by": approved_by, "approved_at": _today()}
+        must = set(launch.get("must") or []) if n == 1 else set()
+        if n == 1 and launch.get("target_date"):
+            record["target_date"] = launch["target_date"]
         after = ", ".join(f"{pid}-INI-{a.split('-')[-1]}" for a in ini["after"]) or "none"
         body = (f"## Outcome\n\nMoves {', '.join(goals) or 'the product goals'}. Comes after: {after}.\n\n"
                 "## Candidate features\n\n"
-                + "\n".join(f"- {f['title']}: {f['does']} (builds {', '.join(f['builds'])})"
+                + "\n".join(f"- {f['title']}{' (must)' if f['title'] in must else ''}: {f['does']} "
+                            f"(builds {', '.join(f['builds'])})"
                             for f in ini["features"] if f.get("title")) + "\n")
         out[f"roadmap/initiatives/{iid}.md"] = render_initiative(record, body=body)
     return out
@@ -137,7 +144,7 @@ def capacity_file(brief: str, architecture: str, plat: dict | None) -> str:
 
 
 def governance_files(vision: Vision, brief: str, architecture: str, roadmap: str, approved_by: str,
-                     research: str = "", plat: dict | None = None) -> dict[str, str]:
+                     research: str = "", plat: dict | None = None, launch: dict | None = None) -> dict[str, str]:
     i = ids(brief)
     goals, _ = goals_yaml(brief)
     sized = capacity_file(brief, architecture, plat)
@@ -146,7 +153,7 @@ def governance_files(vision: Vision, brief: str, architecture: str, roadmap: str
         "architecture/brief.md": brief,
         "architecture/product-architecture.md": architecture,
         "roadmap/goals.yaml": goals,
-        **initiative_files(brief, roadmap, approved_by),
+        **initiative_files(brief, roadmap, approved_by, launch),
         **({"architecture/research.md": research} if research else {}),
     }
     if not vision.existing:
@@ -203,7 +210,7 @@ def add_to_registry(text: str, line: str) -> str:
 
 
 def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str, approved_by: str,
-        thread_id: str, config_repo: str | None = None, research: str = "") -> dict:
+        thread_id: str, config_repo: str | None = None, research: str = "", launch: dict | None = None) -> dict:
     """Open the pull requests that record the approved product. Returns what was done, step by step."""
     gh = services.github
     i = ids(brief)
@@ -214,7 +221,7 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
         plat = platform(services)
     except Exception:
         plat = {}
-    files = governance_files(vision, brief, architecture, roadmap, approved_by, research, plat)
+    files = governance_files(vision, brief, architecture, roadmap, approved_by, research, plat, launch)
     if not vision.existing:
         files.update(starter_contracts(services))
     from .diagrams import drawio_files

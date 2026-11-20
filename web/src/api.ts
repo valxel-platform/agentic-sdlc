@@ -212,6 +212,14 @@ export interface PendingItem {
   ship?: { current: Ship; releases: OpenRelease[] } | null;
   /** G4: a feature in a launch that won't have a flag waits like a train (T-97). */
   flag_warning?: string;
+  /** Inception's product gate: the first initiative is the launch; its date and must-haves (T-100). */
+  launch?: {
+    initiative: string;
+    title: string;
+    features: string[];
+    must: string[];
+    target_date: string;
+  } | null;
   /** The release gate: how many of its features are ready, and where the rest are (T-99). */
   readiness?: ReleaseReadiness | null;
   mockups?: MockupSet | null;
@@ -1106,6 +1114,7 @@ export interface Candidate {
   title: string;
   description: string;
   started?: boolean;
+  must?: boolean;
 }
 export interface InitiativeDraft {
   goal: string;
@@ -1252,6 +1261,7 @@ export interface RoadmapInitiative {
   spent_usd: number;
   features: FeatureRow[];
   progress: { released: number; total: number; planned: number };
+  candidates?: Candidate[];
   outcome?: {
     goal_id: string;
     status: OutcomeStatus;

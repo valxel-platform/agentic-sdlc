@@ -358,6 +358,8 @@ export function DecisionPanel({
   }, [featureId, item.interrupt_id, item.can_decide, item.type]);
 
   const [newDate, setNewDate] = useState("");
+  const [launchDate, setLaunchDate] = useState("");
+  const [must, setMust] = useState<string[] | null>(null);
 
   async function send(decision: string, extra: Record<string, unknown> = {}) {
     setBusy(true);
@@ -653,6 +655,41 @@ export function DecisionPanel({
       )}
 
       {item.type === "gate" && item.readiness && <Readiness r={item.readiness} />}
+
+      {item.type === "gate" && item.launch && (
+        <fieldset className="launch-choice">
+          <legend>The launch: {item.launch.title}</legend>
+          <p className="small muted">
+            The first initiative is the product's launch. Its features go live together on its date; it can't
+            ship without its must-haves.
+          </p>
+          <label className="field">
+            Launch date (optional)
+            <input
+              type="date"
+              value={launchDate}
+              min={tomorrow()}
+              disabled={!item.can_decide}
+              onChange={(e) => setLaunchDate(e.target.value)}
+            />
+          </label>
+          <p className="small">Must-haves</p>
+          {item.launch.features.map((f) => (
+            <label className="check" key={f}>
+              <input
+                type="checkbox"
+                checked={(must ?? item.launch!.must).includes(f)}
+                disabled={!item.can_decide}
+                onChange={(e) => {
+                  const cur = must ?? item.launch!.must;
+                  setMust(e.target.checked ? [...cur, f] : cur.filter((x) => x !== f));
+                }}
+              />
+              <span>{f}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
 
       {item.ux_design && (
         <div className="ux-choice">
@@ -1549,6 +1586,12 @@ export function DecisionPanel({
                                 : {}),
                               ...(item.ship && ship !== null && ship !== (item.ship.current.release_id ?? "")
                                 ? { ship }
+                                : {}),
+                              ...(item.launch
+                                ? {
+                                    ...(launchDate ? { target_date: launchDate } : {}),
+                                    ...(must ? { must } : {}),
+                                  }
                                 : {}),
                             },
                     )

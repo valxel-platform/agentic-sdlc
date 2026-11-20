@@ -292,6 +292,18 @@ describe("RoadmapPage", () => {
     expect(screen.getByText(/record waiting for its pull request to merge/)).toBeInTheDocument();
   });
 
+  it("names the planned features that haven't started, must-haves marked", async () => {
+    const fixture = roadmapFixture();
+    fixture.initiatives[1].candidates = [
+      { title: "Walk-in queue", description: "", started: true },
+      { title: "SMS reminders", description: "", started: false, must: true },
+      { title: "Kiosk mode", description: "", started: false },
+    ];
+    vi.mocked(api.roadmap).mockResolvedValue(fixture);
+    renderRoadmap();
+    expect(await screen.findByText("Not started: SMS reminders (must-have), Kiosk mode")).toBeInTheDocument();
+  });
+
   it("shows the next-review date when no review is waiting", async () => {
     const fixture = roadmapFixture();
     const live = fixture.initiatives[1];

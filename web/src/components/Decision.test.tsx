@@ -960,6 +960,39 @@ describe("how it ships (G1), launch flags (G4) and release readiness", () => {
   });
 });
 
+describe("inception's launch", () => {
+  const launch = {
+    initiative: "INI-1",
+    title: "First alerts",
+    features: ["Moisture alerts", "Field map"],
+    must: ["Moisture alerts", "Field map"],
+    target_date: "",
+  };
+
+  it("approves with the date and the must-haves chosen", async () => {
+    const user = userEvent.setup();
+    renderPanel(gateItem({ gate: "product", launch }));
+    expect(await screen.findByText("The launch: First alerts")).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Field map" }));
+    await user.type(screen.getByLabelText("Launch date (optional)"), "2027-02-01");
+    await user.click(screen.getAllByRole("button", { name: /Approve/ })[0]);
+    expect(apiMock.decide).toHaveBeenCalledWith(
+      "CLN-1",
+      "int-1",
+      expect.objectContaining({ decision: "approve", target_date: "2027-02-01", must: ["Moisture alerts"] }),
+    );
+  });
+
+  it("leaves them as proposed when untouched", async () => {
+    const user = userEvent.setup();
+    renderPanel(gateItem({ gate: "product", launch }));
+    await user.click((await screen.findAllByRole("button", { name: /Approve/ }))[0]);
+    const sent = apiMock.decide.mock.calls.at(-1)![2];
+    expect(sent).not.toHaveProperty("must");
+    expect(sent).not.toHaveProperty("target_date");
+  });
+});
+
 describe("G2 UX toggle", () => {
   it("sends ui=false when the design is switched off", async () => {
     const user = userEvent.setup();

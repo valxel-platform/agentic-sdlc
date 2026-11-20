@@ -101,6 +101,8 @@ def product_roadmap(engine, product_id: str) -> dict:
         i["spent_usd"] = round(sum(f["cost_usd"] for f in linked), 2)
         i["progress"] = {"released": sum(_live(f) for f in linked), "total": len(linked),
                          "planned": len(i.get("candidates") or [])}
+        started = {f["title"].lower() for f in linked}  # which planned features haven't started (T-100)
+        i["candidates"] = [{**c, "started": c["title"].lower() in started} for c in i.get("candidates") or []]
     releases = {r["id"]: {**r, "record": "merged"} for r in record["releases"]}
     for row in engine._rows(product_id, "release"):
         v = thread_view(engine, row["feature_id"])

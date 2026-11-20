@@ -14,6 +14,7 @@ requests merge.
 from __future__ import annotations
 
 import operator
+import re
 from datetime import datetime, timezone
 from typing import Annotated, TypedDict
 
@@ -55,7 +56,35 @@ class InceptionState(TypedDict, total=False):
     diagrams: Annotated[list[dict], operator.add]  # the architecture's published diagrams, each version
     events: Annotated[list[dict], operator.add]
     setup: Annotated[dict, last]
+    launch: Annotated[dict, last]  # the product gate's launch: {"target_date", "must": [feature titles]} (T-100)
     cost_usd: Annotated[float, operator.add]
+
+
+def launch_plan(roadmap: str) -> dict | None:
+    """The first initiative is the product's launch: its features, all must-haves until the product
+    gate says otherwise, and no date until it sets one."""
+    from .formats import initiatives
+
+    inis = [i for i in initiatives(roadmap or "") if i.get("id")]
+    if not inis:
+        return None
+    feats = [f["title"] for f in inis[0]["features"] if f.get("title")]
+    return {"initiative": inis[0]["id"], "title": inis[0]["title"], "features": feats, "must": feats,
+            "target_date": ""}
+
+
+def launch_choice(plan: dict | None, d: dict) -> dict:
+    """The launch date and must-haves the product gate approved with (T-100)."""
+    if not plan:
+        return {}
+    when = str(d.get("target_date") or "")
+    if when and (not re.fullmatch(r"\d{4}-\d{2}-\d{2}", when) or when <= now()[:10]):
+        raise ValueError("The launch date must be a future date (YYYY-MM-DD)")
+    must = plan["must"] if d.get("must") is None else [str(m) for m in d["must"]]
+    unknown = [m for m in must if m not in plan["features"]]
+    if unknown:
+        raise ValueError(f"Not a feature of {plan['title']}: {', '.join(unknown)}")
+    return {"target_date": when, "must": must}
 
 
 def council(services, workspace: str = "") -> list[str]:
@@ -157,8 +186,11 @@ def build_inception_graph(services, checkpointer=None):
                     "findings": cap.get("findings") or [],
                     "stages": {k: {"monthly_usd": v.get("monthly_usd", 0), "monthly_usd_max": v.get("monthly_usd_max", 0)}
                                for k, v in (cap.get("stages") or {}).items()}} if cap.get("stages") else None)
+        plan = launch_plan(state.get("roadmap", ""))
         d = gate(state, "product", preview, {"docs": ["architecture", "roadmap"],
-                                             "monthly_usd": arch.get("monthly_usd") or {}, "capacity": summary})
+                                             "monthly_usd": arch.get("monthly_usd") or {}, "capacity": summary,
+                                             "launch": plan})
+        launch = launch_choice(plan, d) if d["decision"] == "approve" else {}
         rec = {"gate": "product", "at": now(), **d}
         if d["decision"] == "revise":
             return Command(goto="plan", update={"gate_decisions": [rec], "feedback": {"plan": d.get("feedback", "")},
@@ -169,15 +201,18 @@ def build_inception_graph(services, checkpointer=None):
             return Command(goto=END, update={"gate_decisions": [rec], "status": "dropped",
                                              "events": [event("product_gate", "dropped", d.get("feedback", ""),
                                                               approver=d.get("approver", ""))]})
-        return Command(goto="setup", update={"gate_decisions": [rec],
-                                             "events": [event("product_gate", "approved", approver=d.get("approver", ""))]})
+        said = ((f"launch {launch['target_date']}" if launch.get("target_date") else "no launch date yet")
+                + f", {len(launch.get('must') or [])} must-have(s)") if launch else ""
+        return Command(goto="setup", update={"gate_decisions": [rec], "launch": launch,
+                                             "events": [event("product_gate", "approved", said,
+                                                              approver=d.get("approver", ""))]})
 
     def setup(state: InceptionState) -> dict:
         approvers = ", ".join(sorted({g.get("approver", "") for g in state.get("gate_decisions") or []
                                       if g.get("decision") == "approve"}))
         out = setup_mod.run(services, vision(state), brief=state["brief"], architecture=state["architecture"],
                             roadmap=state["roadmap"], approved_by=approvers, thread_id=state["inception_id"],
-                            research=state.get("research", ""))
+                            research=state.get("research", ""), launch=state.get("launch") or {})
         return {"setup": out, "status": "set_up",
                 "events": [event("setup", s["step"], s.get("url") or s.get("error") or s.get("why", ""), ok=s["ok"])
                            for s in out["steps"]]}

@@ -362,12 +362,26 @@ class RoadmapMixin:
             return None
         s = self._state(initiative_id)
         d = s.get("draft") or {}
-        if s.get("status") != "approved" or d.get("release_model") not in ("launch", "train"):
+        if s.get("status") != "approved":  # not approved here: a merged record (an inception's initiatives)
+            d = self._merged_initiative(pid, initiative_id)
+            s = {"title": d.get("title", ""), "created_by": d.get("approved_by", "")} if d else {}
+            if not d or d.get("status") not in ("approved", "active"):
+                return None
+        if d.get("release_model") not in ("launch", "train"):
             return None
         rid = self.create_release(product_id=pid, title=s.get("title") or initiative_id, model=d["release_model"],
                                   features=[], target_date=d.get("target_date", ""), initiative=initiative_id,
                                   candidates=d.get("candidates") or [], created_by=s.get("created_by", ""))
         return {"id": rid, "model": d["release_model"], "status": "planned", "open": True}
+
+    def _merged_initiative(self, product_id: str, initiative_id: str) -> dict:
+        from ..roadmap import read_roadmap
+
+        try:
+            inis = read_roadmap(self.services, product_id)["initiatives"]
+        except Exception:  # noqa: BLE001 - no readable record: ships on its own, as before
+            return {}
+        return next((i for i in inis if i["id"] == initiative_id), {})
 
     def default_ship(self, initiative_id: str) -> dict:
         rel = self.initiative_release(initiative_id)

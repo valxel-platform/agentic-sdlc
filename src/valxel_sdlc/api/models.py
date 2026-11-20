@@ -141,7 +141,10 @@ class DecisionIn(BaseModel):
     review_by: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$",
                                   description="Initiative reviews, continue: the next review date")
     target_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$",
-                                    description="A release's date decision, move_date: the new date")
+                                    description="A release's date decision, move_date: the new date; "
+                                                "the product gate: the launch date")
+    must: list[str] | None = Field(default=None, max_length=100,
+                                   description="The product gate: the launch's must-have features (titles)")
     ui: bool | None = Field(default=None, description="G2 only: whether UX design runs (it changes what people see)")
     comments: list[LineComment] | None = Field(default=None, max_length=50,
                                                description="Revise: comments on specific lines of the document")

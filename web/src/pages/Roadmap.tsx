@@ -28,6 +28,15 @@ function Progress({ i }: { i: RoadmapInitiative }) {
         {i.progress.released} of {started} started feature{started === 1 ? "" : "s"} live
         {i.progress.planned > started && `, ${i.progress.planned - started} not started yet`}
       </p>
+      {(i.candidates ?? []).some((c) => !c.started) && (
+        <p className="small muted">
+          Not started:{" "}
+          {(i.candidates ?? [])
+            .filter((c) => !c.started)
+            .map((c) => c.title + (c.must ? " (must-have)" : ""))
+            .join(", ")}
+        </p>
+      )}
       <div className="bar" role="img" aria-label={`${money(i.spent_usd)} spent of ${money(i.budget_usd)}`}>
         <span style={{ width: `${pct}%` }} className={i.spent_usd > i.budget_usd ? "over" : ""} />
       </div>
