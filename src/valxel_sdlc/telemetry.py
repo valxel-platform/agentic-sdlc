@@ -66,6 +66,34 @@ def current_labels() -> dict:
     return dict(_labels.get())
 
 
+def current_traceparent() -> str:
+    """The active span as a W3C traceparent; empty when nothing is traced."""
+    trace_id, span_id = current_ids()
+    return f"00-{trace_id}-{span_id}-01" if trace_id else ""
+
+
+@contextmanager
+def joined(traceparent: str):
+    """Make the trace a W3C traceparent names the current one inside this block: a queued run
+    continues the trace of the request that queued it. A no-op without one or without the SDK."""
+    if not traceparent:
+        yield
+        return
+    try:
+        from opentelemetry import context as otel_context
+        from opentelemetry.trace.propagation.tracecontext import (
+            TraceContextTextMapPropagator,
+        )
+    except ImportError:
+        yield
+        return
+    token = otel_context.attach(TraceContextTextMapPropagator().extract({"traceparent": traceparent}))
+    try:
+        yield
+    finally:
+        otel_context.detach(token)
+
+
 def current_ids() -> tuple[str, str]:
     """(trace id, span id) of the active span, as hex; empty when nothing is traced."""
     try:
@@ -128,7 +156,9 @@ def load_config(config_dir: Path | str, env=None) -> TelemetryConfig:
 def _otlp_provider(cfg: TelemetryConfig):
     """A tracer provider exporting OTLP/HTTP to the endpoint, or None without the SDK."""
     try:
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+            OTLPSpanExporter,
+        )
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -183,8 +213,21 @@ class Telemetry:
             yield span
 
     def traceparent(self) -> str:
-        trace_id, span_id = current_ids()
-        return f"00-{trace_id}-{span_id}-01" if trace_id else ""
+        return current_traceparent()
+
+    @contextmanager
+    def request_span(self, method: str, route: str, traceparent: str = ""):
+        """One API request as a server span, continuing the browser's trace when its request carried
+        a traceparent (web/src/telemetry.ts). Yields the span (None when tracing is off)."""
+        if not self.enabled:
+            yield None
+            return
+        with joined(traceparent):
+            from opentelemetry.trace import SpanKind
+
+            with self._tracer.start_as_current_span(f"{method} {route}", kind=SpanKind.SERVER, attributes={
+                    "http.request.method": method, "http.route": route}) as span:
+                yield span
 
     def subprocess_env(self, task, runtime: str) -> dict:
         """Environment for a Claude Code or Codex session: export to the collector under our span,

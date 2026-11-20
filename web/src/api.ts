@@ -1,6 +1,15 @@
 import { traceHeaders } from "./telemetry";
 
 export type StationState = "done" | "skipped" | "waiting" | "current" | "stopped" | "todo";
+export interface DesignIssue {
+  task: string;
+  by: "coder" | "reviewer";
+  document: "spec" | "design" | "architecture";
+  section: string;
+  problem: string;
+  evidence: string;
+}
+
 export interface Station {
   key: string;
   kind: "phase" | "gate";
@@ -181,6 +190,8 @@ export interface PendingItem {
   pull_requests?: string[];
   reason?: string;
   findings?: string[];
+  /** Build found the approved spec, design or architecture wrong; people can reopen it. */
+  design_issues?: DesignIssue[];
   constitution_version?: string;
   /** G5 and G6: the performance test each repo of the change needed, and why. */
   performance?: PerformanceDecision[] | null;
@@ -624,6 +635,8 @@ export interface Me {
   orgs: string[];
   teams: string[];
   lanes: { id: string; name: string }[];
+  /** The API takes this app's spans at /otlp/v1/traces (forwarded to the trace store). */
+  tracing?: boolean;
   email?: string;
   idp?: "github" | "cognito" | "dev";
   strong?: boolean; // two factors at sign-in (a passkey through Cognito)

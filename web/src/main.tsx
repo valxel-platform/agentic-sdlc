@@ -29,7 +29,15 @@ import { startTelemetry } from "./telemetry";
 
 // Tracing fails open: a missing endpoint or a collector that can't be
 // reached never breaks app boot (startTelemetry returns null when off).
-startTelemetry();
+// A build-time endpoint (VITE_OTEL_EXPORTER_OTLP_ENDPOINT) starts it now;
+// otherwise it starts once the API says it takes spans (see App below).
+let tracing = startTelemetry() !== null;
+
+/** Start tracing through the API's own /otlp/v1/traces, once, when the API takes spans. */
+export function traceThroughApi(me: Me): void {
+  if (tracing || !me.tracing) return;
+  tracing = startTelemetry({ endpoint: new URL("/otlp/v1/traces", window.location.origin).href }) !== null;
+}
 
 function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; onChanged: () => void }) {
   const live = useLiveStatus();
@@ -320,7 +328,10 @@ function App() {
   const load = useCallback(() => {
     api
       .me()
-      .then(setMe)
+      .then((m) => {
+        traceThroughApi(m);
+        setMe(m);
+      })
       .catch((e) => {
         if (e instanceof ApiError && e.status === 401) setMe(null);
         else setMe(null);

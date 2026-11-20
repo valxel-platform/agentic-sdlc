@@ -609,6 +609,27 @@ def _design_entry(state: FeatureState, design: dict) -> dict:
             "contracts": [c for c in design.get("contracts", []) if c.get("next")]}
 
 
+# What build can send back to when the approved design turns out wrong, and the approvals each undoes:
+# a new spec must be designed and architected again; a new design or architecture must fit again.
+REOPEN = ("spec", "design", "architecture")
+REOPEN_UNDOES = {"spec": ("g2", "g3", "g4"), "design": ("g3",), "architecture": ("g4",)}
+
+
+def reopen(state: FeatureState, to: str, esc: dict, d: dict) -> dict:
+    """Send approved work back to `to`, with what build found and what people added. The gates it
+    undoes decide again; plan and build run again after them, on the same branch."""
+    issues = [i for i in esc.get("design_issues") or [] if i.get("document") == to] or esc.get("design_issues") or []
+    said = "Build found this can't be built as approved:\n" + "\n".join(
+        f"- {i.get('section') or 'the document'}: {i['problem']} (evidence: {i.get('evidence') or 'none given'}; "
+        f"{i['by']} on {i['task']})" for i in issues) + (f"\n\nFrom {d['approver']}: {d['feedback']}" if d["feedback"] else "")
+    return {"feedback": {to: said}, "approvals": {g: False for g in REOPEN_UNDOES[to]},
+            "phase_status": {to: "reopened", "plan": "pending", "build": "pending"},
+            "escalations": {"build": {**esc, "resolved": True}},
+            "rerun_repos": [], "ci_retries": 0, "ci_failures": [],
+            "reopened": list(state.get("reopened") or []) + [to],
+            **({"ui": True} if to == "design" else {})}
+
+
 def make_escalation(phase: str, services):
     spec = PHASE_SPECS[phase]
 
@@ -622,6 +643,8 @@ def make_escalation(phase: str, services):
             "reason": esc.get("reason", ""), "findings": esc.get("findings", []),
             # Set when the agents stopped for making no progress: the pattern, and between whom.
             **({"stall": esc["stall"]} if esc.get("stall") else {}),
+            # Build found the approved design wrong: people can reopen the document it names.
+            **({"design_issues": esc["design_issues"]} if esc.get("design_issues") else {}),
             "artifact": state.get("artifacts", {}).get(spec.kind),
             "cost_usd": round(float(state.get("cost_usd", 0.0)), 4),
             "budget_usd": state.get("token_budget_usd"),
@@ -629,9 +652,9 @@ def make_escalation(phase: str, services):
             "history": correction_history(state, phase), "revisions": times_sent_back(state, phase),
             "content": draft,
             "agent_notes": list((state.get("diaries") or {}).get(phase) or []),
-            "allowed": list(ESCALATION_DECISIONS),
+            "allowed": list(allowed := ESCALATION_DECISIONS + (REOPEN if esc.get("design_issues") else ())),
         }
-        d = normalize(interrupt(packet), ESCALATION_DECISIONS)
+        d = normalize(interrupt(packet), allowed)
         rec = _record(f"escalation:{phase}", phase, d)
         update: dict = {"gate_decisions": [rec]}
         mine = d.get("artifact_content") or ""
@@ -657,6 +680,10 @@ def make_escalation(phase: str, services):
             update |= {"feedback": {phase: d["feedback"]},
                        "events": [event(f"escalate_{phase}", "retry", d["feedback"], approver=d["approver"])] + learned}
             return Command(goto=phase, update=update)
+        if d["decision"] in REOPEN:  # build found the approved design wrong: back to that document
+            return Command(goto=d["decision"], update=update | reopen(state, d["decision"], esc, d) | {
+                "events": [event(f"escalate_{phase}", "reopened", d["feedback"], approver=d["approver"],
+                                 to=d["decision"], issues=esc.get("design_issues") or [])] + learned})
 
         # resolved: the human took the phase over and hands back a finished artifact.
         update |= {"phase_status": {phase: "resolved"}, "escalations": {phase: {**esc, "resolved": True}},
@@ -692,7 +719,7 @@ def make_escalation(phase: str, services):
         if phase == "spec":
             targets.add("architecture")
     elif phase == "build":
-        targets |= {"g5", "merge_train"}
+        targets |= {"g5", "merge_train"} | set(REOPEN)
     else:
         targets.add(NEXT_AFTER_PHASE[phase])
     return escalate, tuple(sorted(targets))

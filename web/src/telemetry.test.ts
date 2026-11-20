@@ -6,6 +6,7 @@ import {
   SERVICE_NAME,
   endpointIgnorePattern,
   recordError,
+  sameOrigin,
   startTelemetry,
   stripQuery,
   traceHeaders,
@@ -56,6 +57,12 @@ describe("telemetry off", () => {
     expect(pattern?.test("https://otel.example.test:4318/v1/traces")).toBe(true);
     expect(pattern?.test("https://otel.example.test.evil.com/v1/traces")).toBe(false);
     expect(pattern?.test("https://other.example.test/v1/traces")).toBe(false);
+  });
+
+  test("the API's own /otlp/ endpoint is same-origin, so API calls keep their traceparent", () => {
+    expect(sameOrigin(new URL("/otlp/v1/traces", window.location.origin).href)).toBe(true);
+    expect(sameOrigin("https://otel.example.test:4318/v1/traces")).toBe(false);
+    expect(sameOrigin("not a url")).toBe(false);
   });
 
   test("endpointIgnorePattern returns undefined for an invalid URL", () => {

@@ -141,6 +141,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "pilot": bool(state.get("pilot")),
         "config_variant": state.get("config_variant", ""),
         "simulate_faults": dict(state.get("simulate_faults") or {}),
+        "reopened": list(state.get("reopened") or []),  # documents build has sent back (gates.reopen)
         "tasks": list(state.get("tasks") or []),
         "sessions": dict(state.get("sessions") or {}),
         "cases": list(state.get("cases") or []),
@@ -916,6 +917,13 @@ def perf_pending(services, pr: dict, level: str) -> None:
         pass
 
 
+DESIGN_ISSUE = (" If the approved spec, UX design or architecture can't be built as written (a contract that"
+                " can't hold, an endpoint the code can't offer, criteria that contradict each other), don't work"
+                " around it: set design_issue with the document, its section, the problem and the evidence, and"
+                " stop. People decide whether to reopen that document. Not for preferences, or for what the"
+                " code can reasonably absorb.")
+
+
 def coder_tail(ctx: dict, task: dict, fix: list[str], mine: list[dict], live: bool) -> str:
     """The coder's instructions for a task: the same for a build and for its eval replay
     (valxel_sdlc.code_evals)."""
@@ -938,8 +946,29 @@ def coder_tail(ctx: dict, task: dict, fix: list[str], mine: list[dict], live: bo
           + integration_instruction(ctx, task) + sandbox_instruction(ctx, task)
           + documents_instruction(ctx, task) + channels_instruction(ctx, task) + agent_tools_instruction(ctx, task)
           + " The summary is the PR description: what changed, and every flag, audit record and event"
-            " type the change uses. " + diary.CODER + " " + sessions_instruction()
+            " type the change uses. " + diary.CODER + " " + sessions_instruction() + DESIGN_ISSUE
           + "\n\n" + structured.instruction(structured.CoderReply))
+
+
+def stub_design_issue(ctx: dict, task: dict) -> dict | None:
+    """Stand-in agents (tests, demos): simulate_faults {"design_issue": "<document>"} has the first
+    task's coder find that document wrong, once (until it's been reopened)."""
+    doc = ctx["simulate_faults"].get("design_issue")
+    if not doc or doc in ctx.get("reopened", []) or not ctx["tasks"] or task["id"] != ctx["tasks"][0]["id"]:
+        return None
+    return {"document": doc, "section": "## Endpoints", "problem": f"{task['repo']} can't offer the endpoint as "
+            "specified: the record it returns doesn't exist until the import finishes",
+            "evidence": f"test_{task['id'].lower()}_returns_record fails: 404 before the import job runs"}
+
+
+def design_issues(results: dict, reviews: dict) -> list[dict]:
+    """What the coder or the reviewer said is wrong with the approved documents, per task."""
+    out = []
+    for tid in sorted(set(results) | set(reviews)):
+        for by, src in (("coder", results.get(tid) or {}), ("reviewer", reviews.get(tid) or {})):
+            if src.get("design_issue"):
+                out.append({"task": tid, "by": by, **src["design_issue"]})
+    return out
 
 
 def build_build_subgraph(services):
@@ -1005,7 +1034,8 @@ def build_build_subgraph(services):
             resume_tail=(f"Continue {task['id']} on the same branch, in a fresh checkout of it." + fixes
                          + " Run the tests again and reply in the same JSON format, handoff included.") if prev and fixes else "",
             tail=coder_tail(ctx, task, payload.get("fix") or [], mine, live),
-            stub_text=templates.code_result(ctx, task, passed=not fail),
+            stub_text=templates.code_result(ctx, task, passed=not fail,
+                                            design_issue=stub_design_issue(ctx, task)),
             schema=structured.schema(structured.CoderReply),
         )
         if payload.get("attempt") == 1 and not prev and not payload.get("fix"):
@@ -1049,6 +1079,8 @@ def build_build_subgraph(services):
                   "notes": diary.entries(list(reply.notes)) if reply else [],
                   "tests": reply.tests.model_dump() if reply else {"passed": False, "failed": [],
                                                                     "error": f"no structured result: {error}"}}
+        if reply and reply.design_issue:
+            result["design_issue"] = reply.design_issue.model_dump()
         if stale:  # the coder changed contracts/: it goes back, whatever its tests said
             result["tests_passed"] = False
             result["tests"] = {**result["tests"], "passed": False,
@@ -1132,6 +1164,7 @@ def build_build_subgraph(services):
                       + " Approve only if nothing must change before merge; list what must change as blocking,"
                         " each naming its evidence (a file and line, a test, a criterion, the test output)."
                       + review_evidence(r, weakened)
+                      + DESIGN_ISSUE.replace("don't work around it", "don't block the code for it")
                       + f"\n\n{structured.instruction(structured.ReviewReply)}\n\nThe pull request description:\n"
                       + untrusted.wrap("pull-request-description", r["summary"])),
                 stub_text=json.dumps({"approve": True, "blocking": [], "notes": [], "score": 0.9}), max_tokens=1024,
@@ -1154,7 +1187,9 @@ def build_build_subgraph(services):
                              "weakened": weakened, "attempt": r.get("attempt"),
                              "coder_notes": r.get("notes") or [],
                              "blocking": reply.blocking, "notes": reply.notes, "role": r["role"],
-                             "performance": perf.as_dict()} if reply else
+                             "performance": perf.as_dict(),
+                             **({"design_issue": reply.design_issue.model_dump()} if reply.design_issue else {})}
+                            if reply else
                             {"pr": pr, "score": 0.0, "approve": False, "role": r["role"], "notes": [], "performance": perf.as_dict(),
                              "weakened": weakened, "attempt": r.get("attempt"),
                              "blocking": [f"The review reply didn't fit its schema: {error}"]})
@@ -1185,6 +1220,14 @@ def build_build_subgraph(services):
 
     def evaluate(s: PhaseState) -> dict:
         results, reviews = s.get("task_results") or {}, s.get("reviews") or {}
+        issues = design_issues(results, reviews)
+        if issues:  # the approved design is wrong: more tries can't fix it, people decide (gates.py)
+            first = issues[0]
+            return {"findings": [f"{i['task']}: {i['document']} {i['section']}: {i['problem']}".replace("  ", " ")
+                                 for i in issues],
+                    "score": 0.0, "status": "escalated", "design_issues": issues,
+                    "reason": f"The {first['document']} needs changing ({first['by']} on {first['task']}): "
+                              f"{first['problem'][:300]}"}
         findings = [f"{t['id']}: tests failing in {t['repo']}" for t in s["ctx"]["tasks"]
                     if not results.get(t["id"], {}).get("tests_passed")]
         findings += [f"{tid}: the review blocks: " + "; ".join(rv.get("blocking") or ["not approved"])
@@ -1321,7 +1364,8 @@ def make_phase_node(phase: str, services):
             "events": [event(phase, status, out.get("reason", ""), attempts=out.get("attempt", 0),
                              score=out.get("score", 0.0),
                              **({"critic": out["critic"]} if out.get("critic") else {}),
-                             **({"stall": out["stall"]} if out.get("stall") else {}))],
+                             **({"stall": out["stall"]} if out.get("stall") else {}),
+                             **({"design_issues": out["design_issues"]} if out.get("design_issues") else {}))],
         }
         if phase == "architecture":  # which repos the architect read, at which commit (G4 shows it)
             delta["code_read"] = (out.get("ctx") or {}).get("code_read") or {}
@@ -1367,7 +1411,9 @@ def make_phase_node(phase: str, services):
         if status == "escalated":
             delta["escalations"] = {phase: {"phase": phase, "reason": out.get("reason", ""),
                                             "findings": list(out.get("findings") or []),
-                                            **({"stall": out["stall"]} if out.get("stall") else {})}}
+                                            **({"stall": out["stall"]} if out.get("stall") else {}),
+                                            **({"design_issues": out["design_issues"]}
+                                               if out.get("design_issues") else {})}}
             return delta
 
         snap = services.feature_snapshot(state)

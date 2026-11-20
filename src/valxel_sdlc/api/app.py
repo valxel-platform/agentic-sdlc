@@ -155,6 +155,22 @@ def prepare(engine: FeatureEngine, pool: Any, *, auth_mode: str) -> None:
                 log.warning(msg)
 
 
+def forward_spans(cfg, body: bytes, kind: str, opener=None) -> int:
+    """POST the browser's OTLP spans to the trace store; the store's answer, or 502 when unreachable."""
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(f"{cfg.endpoint}/v1/traces", data=body, method="POST",
+                                 headers={"Content-Type": kind, **(cfg.headers or {})})
+    try:
+        with (opener or urllib.request.urlopen)(req, timeout=10) as resp:
+            return int(resp.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+    except OSError:
+        return 502
+
+
 def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = None,
                oauth: GitHubOAuth | None = None, web_dist: Path | None = WEB_DIST) -> FastAPI:
     ctx = make_context(engine, auth, oauth)
@@ -200,6 +216,42 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                      if who is not None else tenancy.PLATFORM)
         with tenancy.bound(scope, who.login if who is not None else ""):
             return await call_next(request)
+    @app.middleware("http")
+    async def trace_requests(request: Request, call_next):
+        """Each API request is a server span, continuing the browser's trace (its traceparent header);
+        what the request queues continues it too (run_queue.py). Nothing when tracing is off."""
+        tel = state["engine"].services.telemetry if state["engine"] is not None else None
+        if tel is None or not tel.enabled or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        route = request.url.path  # ids, not names, are in paths (web/src/telemetry.ts)
+        with tel.request_span(request.method, route, request.headers.get("traceparent", "")) as span:
+            response = await call_next(request)
+            if span is not None:
+                span.set_attribute("http.response.status_code", response.status_code)
+            return response
+
+    @app.post("/otlp/v1/traces")
+    async def browser_traces(request: Request):
+        """The browser's spans, forwarded to the trace store (VALXEL_OTEL_ENDPOINT), so the collector
+        isn't exposed to the internet and the browser needs no build-time endpoint. Signed-in people
+        only; at most 1 MB."""
+        from fastapi.concurrency import run_in_threadpool
+        from fastapi.responses import Response
+
+        tel = state["engine"].services.telemetry if state["engine"] is not None else None
+        if tel is None or not tel.enabled or not tel.cfg.endpoint:
+            return Response(status_code=404)
+        if ctx.signed_in(request) is None:
+            return Response(status_code=401)
+        body = await request.body()
+        if len(body) > 1_000_000:
+            return Response(status_code=413)
+        kind = request.headers.get("content-type", "application/json").split(";")[0]
+        if kind not in ("application/json", "application/x-protobuf"):
+            return Response(status_code=415)
+        status = await run_in_threadpool(forward_spans, tel.cfg, body, kind)
+        return Response(status_code=status)
+
     api = APIRouter(prefix="/api")
     for group in (auth_routes, signals, evals, features, findings, workspaces, reports, threads, intake, events):
         api.include_router(group.build(ctx))

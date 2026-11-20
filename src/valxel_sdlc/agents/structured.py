@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import TypeVar
+from typing import Literal, TypeVar
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -36,6 +36,16 @@ class CriticReply(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class DesignIssue(BaseModel):
+    """The approved design can't be built as written: build stops and people decide whether to
+    reopen it (graph/gates.py). Not for preferences or for what the code can work around."""
+
+    document: Literal["spec", "design", "architecture"]  # the approved document that's wrong
+    section: str = ""  # its heading, e.g. '## Endpoints'
+    problem: str  # what in it can't be built as written, and why
+    evidence: str  # what shows it: a failing test, a constraint in the code, a contract, a criterion
+
+
 class ReviewReply(BaseModel):
     approve: bool
     # What must change before the PR can merge; empty when approved.
@@ -45,6 +55,8 @@ class ReviewReply(BaseModel):
     # Performance risks the change brings (an N+1 query, a call in a loop, an unbounded read, a
     # blocking call on a hot path): each one makes the pull request run its performance smoke test.
     performance: list[str] = Field(default_factory=list)
+    # Set only when the approved design itself is wrong (not the code): see DesignIssue.
+    design_issue: DesignIssue | None = None
 
 
 class TestRun(BaseModel):
@@ -63,6 +75,8 @@ class CoderReply(BaseModel):
     notes: list[str] = Field(default_factory=list)
     # For whoever works on this task next, when it isn't this session resumed (valxel_sdlc.sessions).
     handoff: Handoff = Field(default_factory=Handoff)
+    # Set only when the task can't be built as the approved documents say (DesignIssue): build stops.
+    design_issue: DesignIssue | None = None
 
 
 M = TypeVar("M", bound=BaseModel)

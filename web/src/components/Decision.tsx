@@ -267,6 +267,8 @@ function ReleaseCandidates({ items }: { items: ReleaseCandidate[] }) {
   );
 }
 
+const DOC_NAME: Record<string, string> = { spec: "Spec", design: "UX design", architecture: "Architecture" };
+
 export function DecisionPanel({
   item,
   featureId,
@@ -377,6 +379,8 @@ export function DecisionPanel({
         ? GATES[item.gate]
         : undefined;
   const fitCheck = item.phase === "fit";
+  const issues = item.design_issues ?? [];
+  const reopenTo = [...new Set(issues.map((i) => i.document))].filter((d) => item.allowed?.includes(d));
   const incidentGate = item.gate === "incident" || item.gate === "postmortem";
   const inceptionGate = item.gate === "brief" || item.gate === "product";
   const reviewGate = item.gate === "review";
@@ -543,6 +547,28 @@ export function DecisionPanel({
           <p className="small muted">
             Both were approved separately; this was checked before planning starts. Send one back with these
             as its feedback, or carry on and say why.
+          </p>
+        </div>
+      )}
+
+      {issues.length > 0 && (
+        <div>
+          <h3>What build found wrong with the approved documents</h3>
+          <ul className="findings">
+            {issues.map((i) => (
+              <li key={`${i.task}-${i.by}-${i.document}`}>
+                <span className="chip plain">{DOC_NAME[i.document]}</span> {i.section ? `${i.section}: ` : ""}
+                {i.problem}
+                <span className="small muted">
+                  {" "}
+                  Evidence: {i.evidence || "none given"} ({i.by} on {i.task})
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="small muted">
+            Reopening sends the document back with this as its feedback, plus anything you add. Its gate
+            decides again, then the plan and the build run again on the same branch.
           </p>
         </div>
       )}
@@ -1479,7 +1505,16 @@ export function DecisionPanel({
             )}
             {item.type === "escalation" && !delivery && !security && !fitCheck && mode === null && (
               <>
-                <button className="btn go" disabled={busy} onClick={() => setMode("resolve")}>
+                {reopenTo.map((d) => (
+                  <button key={d} className="btn go" disabled={busy} onClick={() => send(d)}>
+                    Reopen the {DOC_NAME[d].toLowerCase()}
+                  </button>
+                ))}
+                <button
+                  className={`btn ${reopenTo.length ? "secondary" : "go"}`}
+                  disabled={busy}
+                  onClick={() => setMode("resolve")}
+                >
                   {item.content ? "Finish it myself" : "Mark resolved"}
                 </button>
                 <button className="btn secondary" disabled={busy} onClick={() => setMode("retry")}>

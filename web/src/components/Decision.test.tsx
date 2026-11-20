@@ -782,6 +782,42 @@ describe("G2 UX toggle", () => {
 });
 
 describe("escalations", () => {
+  it("reopens the document build found wrong, with the evidence shown", async () => {
+    const user = userEvent.setup();
+    renderPanel(
+      gateItem({
+        type: "escalation",
+        phase: "build",
+        reason: "The architecture needs changing (coder on T1): the record doesn't exist yet",
+        allowed: ["resolved", "retry", "abort", "spec", "design", "architecture"],
+        design_issues: [
+          {
+            task: "T1",
+            by: "coder",
+            document: "architecture",
+            section: "## Endpoints",
+            problem: "the record doesn't exist until the import finishes",
+            evidence: "404 before the import job runs",
+          },
+        ],
+      }),
+    );
+    expect(await screen.findByText(/404 before the import job runs \(coder on T1\)/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reopen the spec" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reopen the architecture" }));
+    expect(apiMock.decide).toHaveBeenCalledWith(
+      "CLN-1",
+      "int-1",
+      expect.objectContaining({ decision: "architecture" }),
+    );
+  });
+
+  it("offers no reopen without a design issue", async () => {
+    renderPanel(gateItem({ type: "escalation", phase: "build", reason: "CI failed" }));
+    await screen.findByRole("button", { name: "Let agents retry" });
+    expect(screen.queryByRole("button", { name: /^Reopen/ })).not.toBeInTheDocument();
+  });
+
   it("retries a generic escalation with a raised budget", async () => {
     const user = userEvent.setup();
     renderPanel(

@@ -119,6 +119,7 @@ class FeatureState(TypedDict, total=False):
     # Whether the feature changes what people see: when it doesn't, UX design and G3 are skipped.
     # Decided at creation (the intake's judgement), and G2's approver can change it.
     ui: Annotated[bool, last]
+    reopened: Annotated[list[str], last]  # approved documents build sent back, in order (graph/gates.reopen)
     ui_why: Annotated[str, last]
     mockups: Annotated[dict, last]  # the UX spec's screens drawn for G3 (valxel_sdlc.mockups)
     code_read: Annotated[dict, last]  # the repos the architect read, at which commit (valxel_sdlc.workspace)
@@ -162,4 +163,5 @@ class PhaseState(TypedDict, total=False):
     reviews: Annotated[dict[str, dict], merge_dict]
     finding_history: list[list[str]]  # each try's findings, oldest first (valxel_sdlc.loops)
     stall: dict  # set when the loop stopped for making no progress (valxel_sdlc.loops)
+    design_issues: list[dict]  # build: what the coder or reviewer said is wrong with the approved design
     critic: dict  # the last critic verdict: checklist items, and the 0-1 score with what it would have decided

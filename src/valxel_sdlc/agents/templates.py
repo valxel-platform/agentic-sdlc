@@ -615,9 +615,10 @@ def stub_tests(cases: list[dict]) -> dict[str, str]:
     return {path: "\n".join(lines) for path, lines in files.items()}
 
 
-def code_result(ctx: dict, task: dict, passed: bool) -> str:
+def code_result(ctx: dict, task: dict, passed: bool, design_issue: dict | None = None) -> str:
     """The coder's structured reply in stub mode (agents/structured.py CoderReply)."""
-    return json.dumps({"summary": code_task(ctx, task, passed), "files": list(task["files"]),
+    return json.dumps({**({"design_issue": design_issue} if design_issue else {}),
+                       "summary": code_task(ctx, task, passed), "files": list(task["files"]),
                        "tests": {"command": "the repo's test command", "passed": passed,
                                  "failed": [] if passed else [f"test_{_slug(task['id'])}"]},
                        "notes": [f"Assumed: {task['repo']}'s public API stays compatible for its other callers"],

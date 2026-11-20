@@ -160,7 +160,10 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     def me(user: User = Depends(current_user)) -> dict:
         lanes = lanes_for(user)
         names = IntakeAgent(eng().services).lane_names(lanes)
-        return {**asdict(user), "lanes": [{"id": k, "name": v} for k, v in names.items()]}
+        tel = eng().services.telemetry
+        return {**asdict(user), "lanes": [{"id": k, "name": v} for k, v in names.items()],
+                # The web app sends its spans to /otlp/v1/traces when this is on (web/src/telemetry.ts).
+                "tracing": bool(tel is not None and tel.enabled and tel.cfg.endpoint)}
 
     # --- governance and features ---
     @api.get("/healthz")

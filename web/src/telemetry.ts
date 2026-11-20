@@ -12,7 +12,14 @@
  * Uncaught errors are recorded as `browser.error` spans with the error's type
  * only.
  *
- * EXPORTER ROUTE — why there is no relative `/otlp/` path here:
+ * EXPORTER ROUTE. The API now takes spans itself at `/otlp/v1/traces` and
+ * forwards them to the trace store (VALXEL_OTEL_ENDPOINT), for signed-in
+ * people; `/api/me` says `tracing: true` when it does, and main.tsx then
+ * starts tracing with that same-origin endpoint. That works in the published
+ * image, which has no build-time endpoint. The build-time variable below
+ * still works, and wins, for a collector reached directly.
+ *
+ * The original note, kept for the build-time path:
  * The template points its exporter at `${origin}/otlp/v1/traces` because an
  * nginx in front of the template forwards `/otlp/` to the data plane's
  * collector. This app is served by FastAPI (StaticFiles + an SPA catch-all),
@@ -97,7 +104,12 @@ export function startTelemetry({
           ignoreUrls: [
             /\/otlp\//,
             /\/ofrep\//,
-            ...(url ? [endpointIgnorePattern(url)].filter((p): p is RegExp => p !== undefined) : []),
+            // A collector elsewhere: none of its calls. The API's own /otlp/ (same
+            // origin) is already ignored above; ignoring its whole origin would
+            // drop traceparent from every API call.
+            ...(url && !sameOrigin(url)
+              ? [endpointIgnorePattern(url)].filter((p): p is RegExp => p !== undefined)
+              : []),
           ],
           propagateTraceHeaderCorsUrls: [],
           // Query strings never reach a trace: they can hold what a person searched for.
@@ -138,6 +150,15 @@ export function recordError(error: unknown): void {
   span.setAttribute("error.type", error instanceof Error ? error.name : typeof error);
   span.setStatus({ code: SpanStatusCode.ERROR });
   span.end();
+}
+
+/** Whether the endpoint is this app's own origin (the API's /otlp/ route). */
+export function sameOrigin(endpoint: string): boolean {
+  try {
+    return new URL(endpoint).origin === window.location.origin;
+  } catch {
+    return false;
+  }
 }
 
 /** A regex matching fetches to the given endpoint's origin, or undefined if the URL is invalid. */

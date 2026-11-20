@@ -33,6 +33,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from .telemetry import current_traceparent, joined  # noqa: E402
+
 log = logging.getLogger(__name__)
 
 SCHEMA = (
@@ -48,6 +50,8 @@ SCHEMA = (
          claimed_until timestamptz,
          attempts integer not null default 0)""",
     "create index if not exists valxel_run_queue_thread on valxel_run_queue (thread_id, id)",
+    # The trace of the request that queued the run, so the run's agent sessions join it.
+    "alter table valxel_run_queue add column if not exists traceparent text not null default ''",
 )
 
 _CLAIM = """
@@ -59,15 +63,15 @@ update valxel_run_queue set claimed_by = %(me)s, claimed_until = now() + make_in
               order by q.id
               for update skip locked
               limit 1)
-returning id, thread_id, workspace, payload_type, payload, attempts"""
+returning id, thread_id, workspace, payload_type, payload, attempts, traceparent"""
 _RENEW = ("update valxel_run_queue set claimed_until = now() + make_interval(secs => %(lease)s) "
           "where id = any(%(ids)s) and claimed_by = %(me)s")
 _DONE = "delete from valxel_run_queue where id = %(id)s and claimed_by = %(me)s"
 _LATER = ("update valxel_run_queue set claimed_by = null, claimed_until = null, attempts = attempts - 1, "
           "available_at = now() + make_interval(secs => %(delay)s) where id = %(id)s and claimed_by = %(me)s")
 _QUEUED = "select distinct thread_id from valxel_run_queue where thread_id = any(%(ids)s)"
-_ENQUEUE = ("insert into valxel_run_queue (thread_id, workspace, payload_type, payload) "
-            "values (%(thread)s, %(workspace)s, %(type)s, %(data)s) returning id")
+_ENQUEUE = ("insert into valxel_run_queue (thread_id, workspace, payload_type, payload, traceparent) "
+            "values (%(thread)s, %(workspace)s, %(type)s, %(data)s, %(traceparent)s) returning id")
 _DEPTH = ("select count(*) as queued, count(*) filter (where claimed_until > now()) as running, "
           "coalesce(extract(epoch from now() - min(enqueued_at)), 0) as oldest_s from valxel_run_queue")
 
@@ -105,6 +109,7 @@ class Job:
     workspace: str
     payload: Any
     attempts: int
+    traceparent: str = ""  # the trace of the request that queued it
 
 
 class RunQueue(Protocol):
@@ -128,7 +133,7 @@ class PostgresRunQueue:
         kind, data = encode(payload)
         with self.pool.connection() as conn:
             row = conn.execute(_ENQUEUE, {"thread": thread_id, "workspace": workspace, "type": kind,
-                                          "data": data}).fetchone()
+                                          "data": data, "traceparent": current_traceparent()}).fetchone()
         return int(_get(row, "id", 0))
 
     def claim(self, me: str, lease_s: float) -> Job | None:
@@ -138,7 +143,7 @@ class PostgresRunQueue:
             return None
         return Job(id=int(_get(row, "id", 0)), thread_id=_get(row, "thread_id", 1), workspace=_get(row, "workspace", 2),
                    payload=decode(_get(row, "payload_type", 3), _get(row, "payload", 4)),
-                   attempts=int(_get(row, "attempts", 5)))
+                   attempts=int(_get(row, "attempts", 5)), traceparent=_get(row, "traceparent", 6) or "")
 
     def renew(self, me: str, ids: list[int], lease_s: float) -> None:
         if ids:
@@ -181,7 +186,7 @@ class MemoryRunQueue:
             self._next += 1
             self.rows[self._next] = {"thread_id": thread_id, "workspace": workspace, "type": kind, "data": data,
                                      "available": self.clock(), "by": None, "until": 0.0, "attempts": 0,
-                                     "at": self.clock()}
+                                     "at": self.clock(), "traceparent": current_traceparent()}
             return self._next
 
     def claim(self, me: str, lease_s: float) -> Job | None:
@@ -192,7 +197,8 @@ class MemoryRunQueue:
                 earlier = any(j < i and o["thread_id"] == r["thread_id"] for j, o in self.rows.items())
                 if r["available"] <= now and (r["by"] is None or r["until"] < now) and not earlier:
                     r.update(by=me, until=now + lease_s, attempts=r["attempts"] + 1)
-                    return Job(i, r["thread_id"], r["workspace"], decode(r["type"], r["data"]), r["attempts"])
+                    return Job(i, r["thread_id"], r["workspace"], decode(r["type"], r["data"]), r["attempts"],
+                               r["traceparent"])
         return None
 
     def renew(self, me: str, ids: list[int], lease_s: float) -> None:
@@ -295,7 +301,8 @@ class Worker:
                     self.queue.done(self.me, job.id)
                 return
             try:
-                self.engine.run_job(job.thread_id, job.payload)
+                with joined(job.traceparent):  # the run continues the trace that queued it
+                    self.engine.run_job(job.thread_id, job.payload)
             except (Busy, LeaseLost):  # another worker has the thread now: try again shortly
                 with bound(PLATFORM):
                     self.queue.later(self.me, job.id, self.busy_delay_s)
