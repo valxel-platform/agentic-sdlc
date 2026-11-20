@@ -7,8 +7,8 @@ When a gate is approved, the documents it approved go to the product's governanc
   G2  the PRD
   G3  the UX design and its prototype (one HTML page to click through; older features: a mockup per screen)
   G4  the HLD
-  G5  the plan the build followed
-  G6  the release record
+  G5  the plan the build followed and the build's summary
+  G6  the release record, and the plan and build summary when G5 was skipped (a low-risk change)
 
 Each gate is one pull request from `valxel/records/<feature>-<gate>`, which the tool merges at once:
 the gate was the review. If the repo's rules want another review, the pull request stays open for
@@ -27,8 +27,30 @@ import json
 import os
 from datetime import datetime, timezone
 
-GATE_KINDS = {"g1": ("OPP",), "g2": ("PRD",), "g3": ("UX",), "g4": ("HLD",), "g5": ("PLAN",), "g6": ("REL",)}
-NAMES = {"OPP": "discovery.md", "PRD": "prd.md", "UX": "ux.md", "HLD": "hld.md", "PLAN": "plan.md", "REL": "release.md"}
+GATE_KINDS = {"g1": ("OPP",), "g2": ("PRD",), "g3": ("UX",), "g4": ("HLD",), "g5": ("PLAN", "BUILD"), "g6": ("REL",)}
+NAMES = {"OPP": "discovery.md", "PRD": "prd.md", "UX": "ux.md", "HLD": "hld.md", "PLAN": "plan.md", "BUILD": "build.md",
+         "REL": "release.md"}
+
+
+def approved(state: dict, gate: str) -> bool:
+    return any(e.get("node") == gate and e.get("kind") == "approved" for e in state.get("events") or [])
+
+
+def kinds_for(state: dict, gate: str) -> tuple[str, ...]:
+    """The documents a gate's record holds: G6 also carries G5's when G5 was skipped, so the product
+    holds the plan and the build summary of every release."""
+    kinds = GATE_KINDS.get(gate, ())
+    if gate == "g6" and not approved(state, "g5"):
+        kinds = GATE_KINDS["g5"] + kinds
+    return kinds
+
+
+def gate_of(state: dict, kind: str) -> str | None:
+    """The gate whose record holds this kind of document for this feature."""
+    for gate, kinds in GATE_KINDS.items():
+        if kind in kinds:
+            return "g6" if gate == "g5" and not approved(state, "g5") else gate
+    return None
 SENSITIVE = ("phi", "payments")
 
 
@@ -56,7 +78,7 @@ def files_for(services, state: dict, gate: str, *, env=None) -> tuple[dict[str, 
     arts = state.get("artifacts") or {}
     files: dict[str, str | bytes] = {}
     left: list[dict] = []
-    for kind in GATE_KINDS.get(gate, ()):
+    for kind in kinds_for(state, gate):
         ref = arts.get(kind)
         if ref:
             files[f"{base}/{NAMES[kind]}"] = services.artifacts.load(ref)

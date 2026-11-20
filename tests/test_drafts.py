@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from test_drift import Notes
 
-from valxel_sdlc import drafts, prototype
+from valxel_sdlc import drafts, prototype, records
 
 
 def approve_all(engine, fid):
@@ -26,6 +26,14 @@ def test_the_plan_keeps_only_what_the_product_doesnt_hold_yet():
                         {"node": "g2", "kind": "approved"}, {"node": "g2", "kind": "documents_recorded", "merged": False},
                         {"node": "g3", "kind": "approved"}, {"node": "g3", "kind": "documents_not_recorded"}]}
     assert drafts.plan(state) == {"remove": ["HANDOFF-T1", "HLD", "OPP"], "keep": ["PRD", "PROTOTYPE", "UX"]}
+
+
+def test_a_released_feature_keeps_what_no_record_holds():
+    """Released, so no gate is "never approved" in the stopped sense: a document whose gate didn't
+    run, or that no record holds, stays with the tool."""
+    state = {"status": "done", "artifacts": {k: {} for k in ("OPP", "PRD", "UX", "OPS")},
+             "events": [{"node": "g1", "kind": "approved"}, {"node": "g1", "kind": "documents_recorded", "merged": True}]}
+    assert drafts.plan(state) == {"remove": ["OPP"], "keep": ["OPS", "PRD", "UX"]}
 
 
 def test_only_finished_features_past_the_retention_time_are_due():
@@ -48,8 +56,12 @@ def test_a_released_feature_reads_its_documents_from_the_product_once_its_drafts
 
     assert drafts.remove(engine.services, engine.cluster, state) is None  # not due yet: just finished
     later = datetime.now(UTC) + timedelta(days=31)
+    assert not any(e["node"] == "g5" and e["kind"] == "approved" for e in state["events"])  # a low-risk change
+    files, _ = records.files_for(engine.services, state, "g6")
+    assert {f"features/{fid}/plan.md", f"features/{fid}/build.md"} <= set(files)  # G6 carries what G5 would have
     done = drafts.remove(engine.services, engine.cluster, state, now=later)
-    assert {"OPP", "PRD", "UX", "PROTOTYPE", "HLD"} <= set(done["removed"]) and done["keep"] == [] and done["files"] >= 5
+    assert {"OPP", "PRD", "UX", "PROTOTYPE", "HLD", "PLAN", "BUILD", "REL", "SKETCH"} <= set(done["removed"])
+    assert done["keep"] == ["OPS"] and done["files"] >= 9  # no record holds the operations report: it stays
     assert not list(store._dir(fid).glob("PRD.v*.md"))
     assert drafts.remove(engine.services, engine.cluster, state, now=later) is None  # nothing left to do
 

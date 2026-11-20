@@ -6,12 +6,14 @@ product's governance repo (records.py, T-54), and from then on that's the copy o
 feature is finished (released or stopped) and VALXEL_DRAFT_RETENTION_DAYS have passed (30 by
 default), the daily job deletes the tool's copies:
 
-  a gate's documents (every version, the rejected ones too)   when that gate's record pull request
-                                                              merged; if it's still open or failed,
-                                                              the tool may hold the only approved
-                                                              copy, so they stay until it merges
-  documents of a gate never approved (a stopped feature)       never the product's record: deleted
-  build handoffs (HANDOFF-<task>)                             the tool's own working notes: deleted
+  a document whose record merged (every version, the        deleted: the product's repo holds it
+  rejected ones too)
+  a stopped feature's document whose gate was never         deleted: never approved, never the
+  approved                                                  product's record
+  build handoffs (HANDOFF-<task>)                           deleted: the tool's own working notes
+  anything else                                             kept: an approved document whose record
+                                                            is open or failed, or a document no
+                                                            record holds yet (the operations report)
 
 After that, people opening a recorded document see it read from the product's repo (`load`).
 Prompts, agent transcripts and evaluator notes never go to the product (records.py) and are
@@ -24,15 +26,14 @@ import logging
 import os
 from datetime import UTC, datetime, timedelta
 
-from .records import GATE_KINDS, NAMES
+from .records import GATE_KINDS, NAMES, gate_of
 
 log = logging.getLogger(__name__)
 
 DONE = ("done", "aborted")
 NOTE = "drafts:removed:{}"
-# Each kind of document, the gate whose record holds it, and its file there.
-GATE_OF = {kind: gate for gate, kinds in GATE_KINDS.items() for kind in kinds} | {"PROTOTYPE": "g3", "MOCKUPS": "g3",
-                                                                                      "SKETCH": "g1"}
+# Documents recorded with a gate besides its own kinds (records.py), and each one's file there.
+EXTRA = {"PROTOTYPE": "g3", "MOCKUPS": "g3", "SKETCH": "g1"}
 RECORDED_AS = dict(NAMES) | {"PROTOTYPE": "prototype.html", "SKETCH": "sketch.html"}
 
 
@@ -69,13 +70,15 @@ def recorded(state: dict) -> dict[str, bool]:
 def plan(state: dict) -> dict[str, list[str]]:
     """Which kinds may go now and which must stay, with why: {"remove": [...], "keep": [...]}."""
     done = recorded(state)
+    stopped = state.get("status") == "aborted"
     remove, keep = [], []
     for kind in sorted(state.get("artifacts") or {}):
-        gate = GATE_OF.get(kind)
-        # the tool's own notes; a gate never approved (never the product's record); a merged record
-        if kind.startswith("HANDOFF-") or gate is None or gate not in done or done[gate]:
+        gate = EXTRA.get(kind) or gate_of(state, kind)
+        if (kind.startswith("HANDOFF-")  # the tool's own notes
+                or (gate and done.get(gate))  # the product's repo holds it
+                or (gate and stopped and gate not in done)):  # a stopped feature's never-approved draft
             remove.append(kind)
-        else:
+        else:  # its record isn't merged, or nothing records it: the tool may hold the only copy
             keep.append(kind)
     return {"remove": remove, "keep": keep}
 
