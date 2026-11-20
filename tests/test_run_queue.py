@@ -99,6 +99,10 @@ def test_a_run_whose_worker_kept_dying_is_dropped_with_a_note(queued):
     q.rows[next(iter(q.rows))]["attempts"] = 3  # claimed three times, never finished
     Worker(engine, q, max_attempts=3).run_once()
     assert not q.rows and "never finished" in engine.errors.get(fid) and engine.pending(fid) == []
+    from valxel_sdlc.run_queue import DEAD_LETTERS
+
+    [dead] = engine.cluster.get(DEAD_LETTERS)  # counted by the tool's health
+    assert dead["thread_id"] == fid and dead["attempts"] == 3
 
 
 def test_stopping_hands_back_what_is_still_running(queued):

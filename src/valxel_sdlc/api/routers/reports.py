@@ -108,15 +108,19 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         return eng().lookback(product_id, months)
 
     @api.get("/reports/health")
-    def tool_health(fresh: bool = False, user: User = Depends(current_user)) -> dict:
+    def tool_health(fresh: bool = False, product_id: str = "", user: User = Depends(current_user)) -> dict:
         """The tool's own health (valxel_sdlc.health): its agents on real work, against their
-        baseline, and what's alerting. The latest hourly measurement, or a fresh one. Across every
-        product, so only the tool's owners (VALXEL_EVAL_APPROVERS) see it."""
+        baseline, and what's alerting. With product_id: that product's agents on its work, for its
+        members. Without: the latest hourly measurement across every product (or a fresh one), for
+        the tool's owners (VALXEL_EVAL_APPROVERS) only."""
         from ... import health
+        from .auth import tool_owner
 
-        owners = {t for t in os.environ.get("VALXEL_EVAL_APPROVERS", "").split(",") if t}
-        if not owners & set(user.teams) and user.login not in owners:
-            raise HTTPException(403, "Only the tool's owners (VALXEL_EVAL_APPROVERS) see its health")
+        if product_id:
+            member_of(user, product_id)
+            return health.for_product(eng(), product_id)
+        if not tool_owner(user):
+            raise HTTPException(403, "Only the tool's owners (VALXEL_EVAL_APPROVERS) see its health across products")
         latest = None if fresh else eng().cluster.get(health.NOTE)
         return latest or health.run(eng(), alert=lambda _text: None)
 

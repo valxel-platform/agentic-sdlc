@@ -130,5 +130,32 @@ def test_only_the_tools_owners_see_its_health(client):
     sign_in(client, "maya")
     r = client.get("/api/reports/health?fresh=true")
     assert r.status_code == 200 and {"current", "baseline", "alerts"} <= set(r.json())
+    assert r.json()["dead_letters"] == {"count": 0, "recent": []}
+    assert client.get("/api/me").json()["tool_owner"] is True
     sign_in(client, "someone-else")
     assert client.get("/api/reports/health").status_code == 403
+    assert client.get("/api/me").json()["tool_owner"] is False
+
+
+def test_a_products_people_see_its_own_health(client):
+    sign_in(client, "priya", teams=["acme-farm/product-owners"], orgs=["acme-farm"])
+    r = client.get("/api/reports/health?product_id=FARM")
+    assert r.status_code == 200 and r.json()["product_id"] == "FARM"
+    assert client.get("/api/reports/health").status_code == 403  # not across products
+    sign_in(client, "someone-else", orgs=["acme-clinic"])
+    assert client.get("/api/reports/health?product_id=FARM").status_code == 403
+
+
+def test_runs_the_queue_gave_up_on_alert():
+    dead = [{"at": "2026-11-19T00:00:00+00:00", "thread_id": "FARM-FEAT-9", "run_id": "r1", "attempts": 3}]
+    [t] = health.check({}, {}, {"dead_letters": 1}, dead=dead)
+    assert t["rule"] == "dead_letters" and "FARM-FEAT-9" in t["says"]
+    assert health.check({}, {}, {"dead_letters": 1}, dead=[]) == []
+
+
+def test_one_product_sees_its_own_health(engine):
+    engine.start(product_id="FARM", title="Soil sensor import")
+    got = health.for_product(engine, "FARM")
+    assert got["product_id"] == "FARM" and got["safe_mode"] is None
+    assert {"phases", "critic", "gates"} <= set(got["current"])
+    assert all(a["rule"] not in ("queue_oldest_minutes", "external_wait_hours", "dead_letters") for a in got["alerts"])

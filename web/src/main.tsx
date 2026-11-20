@@ -18,6 +18,7 @@ import { CostsPage } from "./pages/Costs";
 import { ChangesPage } from "./pages/Changes";
 import { InventoryPage } from "./pages/Inventory";
 import { PilotPage } from "./pages/Pilot";
+import { HealthPage } from "./pages/Health";
 import { LessonsPage } from "./pages/Lessons";
 import { InceptionPage, ProductsPage } from "./pages/Products";
 import { JoinPage, WorkspacePage, WorkspacesPage } from "./pages/Workspace";
@@ -96,6 +97,7 @@ function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; on
       <Route path="/reviews/:id" element={<ReviewPage />} />
       <Route path="/incidents" element={<IncidentsPage me={me} />} />
       <Route path="/costs" element={<CostsPage me={me} />} />
+      <Route path="/health" element={<HealthPage me={me} />} />
       <Route path="/lessons" element={<LessonsPage me={me} />} />
       <Route path="/pilot" element={<PilotPage me={me} />} />
       <Route path="/changes" element={<ChangesPage me={me} />} />
@@ -154,6 +156,7 @@ function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; on
             <NavLink to="/incidents">Incidents</NavLink>
             <NavLink to="/pilot">Pilot</NavLink>
             <NavLink to="/costs">Costs</NavLink>
+            <NavLink to="/health">Agent health</NavLink>
             <NavLink to="/inventory">Inventory</NavLink>
             <NavLink to="/lessons">Lessons</NavLink>
           </div>
@@ -223,6 +226,7 @@ function More({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     ["Incidents", "/incidents"],
     ["Pilot", "/pilot"],
     ["Costs", "/costs"],
+    ["Agent health", "/health"],
     ["Inventory", "/inventory"],
     ["Lessons", "/lessons"],
     ["Connected apps", "/connected-apps"],

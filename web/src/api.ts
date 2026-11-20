@@ -29,6 +29,68 @@ export interface SecondCritic {
   says: string;
 }
 
+/** The tool's own health (valxel_sdlc.health): its agents on real work, against their baseline. */
+export interface HealthMeasure {
+  since: string;
+  until: string;
+  features: number;
+  phases: Record<
+    string,
+    {
+      runs: number;
+      escalation_rate: number | null;
+      stall_rate: number | null;
+      stalls: number;
+      loops_mean: number | null;
+      loops_p90: number | null;
+    }
+  >;
+  critic: Record<
+    string,
+    { passed: number; false_pass: number | null; failed: number; false_fail: number | null }
+  >;
+  gates: Record<string, { decided: number; first_time_approval: number | null }>;
+  escalation_reasons: Record<string, number>;
+  stalls: Record<string, number>;
+  reopened: Record<string, number>;
+  cost_by_phase_role: Record<string, number>;
+  agent_minutes_by_phase_role: Record<string, number>;
+  cost_per_feature: { features: number; mean: number | null; max: number | null };
+}
+
+export interface HealthAlert {
+  key: string;
+  rule: string;
+  scope: string;
+  value: number | null;
+  baseline: number | null;
+  says: string;
+}
+
+export interface SafeModeStatus extends SafeMode {
+  hours: number;
+  ready: boolean;
+  causes: { source: string; rule: string; scope: string; says: string; at: string }[];
+  checks: { at: string; source: string; normal: boolean | null; counted: boolean; says: string }[];
+  approvals_to_review: { feature_id: string; gate: string; at: string }[];
+}
+
+export interface ToolHealth {
+  at: string;
+  product_id?: string;
+  window_days?: number;
+  baseline_days?: number;
+  current: HealthMeasure;
+  baseline: HealthMeasure;
+  alerts: HealthAlert[];
+  what_changed_summary?: string;
+  /** One product: its safe mode or null. Across products: every product in safe mode. */
+  safe_mode?: SafeModeStatus | Record<string, SafeModeStatus> | null;
+  queue?: { queued: number; running: number; oldest_s: number } | null;
+  dead_letters?: { count: number; recent: { at: string; thread_id: string; attempts: number }[] };
+  drift?: { at: string; regressions: string[]; anchor_cases: number } | null;
+}
+
 export interface DesignIssue {
   task: string;
   by: "coder" | "reviewer";
@@ -670,6 +732,8 @@ export interface Me {
   lanes: { id: string; name: string }[];
   /** The API takes this app's spans at /otlp/v1/traces (forwarded to the trace store). */
   tracing?: boolean;
+  /** The tool's owners (VALXEL_EVAL_APPROVERS): its health across products, drift, safe mode. */
+  tool_owner?: boolean;
   email?: string;
   idp?: "github" | "cognito" | "dev";
   strong?: boolean; // two factors at sign-in (a passkey through Cognito)
@@ -1710,6 +1774,23 @@ export const api = {
     request<LessonsOverview>("GET", `/products/${encodeURIComponent(productId)}/lessons`),
   pilotReport: (productId: string) =>
     request<PilotReport>("GET", `/reports/pilot?product_id=${encodeURIComponent(productId)}`),
+  toolHealth: (productId?: string) =>
+    request<ToolHealth>(
+      "GET",
+      productId ? `/reports/health?product_id=${encodeURIComponent(productId)}` : "/reports/health",
+    ),
+  safeModeEnter: (productId: string, note: string) =>
+    request<unknown>("POST", `/safe-mode/${encodeURIComponent(productId)}/enter`, { note }),
+  safeModeFixed: (productId: string, note: string) =>
+    request<unknown>("POST", `/safe-mode/${encodeURIComponent(productId)}/fixed`, { note }),
+  safeModeReplay: (productId: string) =>
+    request<unknown>("POST", `/safe-mode/${encodeURIComponent(productId)}/replay`, {}),
+  safeModeLeave: (productId: string) =>
+    request<SafeModeStatus & { approvals_to_review: { feature_id: string; gate: string; at: string }[] }>(
+      "POST",
+      `/safe-mode/${encodeURIComponent(productId)}/leave`,
+      {},
+    ),
 };
 
 export interface ReleaseCandidate {

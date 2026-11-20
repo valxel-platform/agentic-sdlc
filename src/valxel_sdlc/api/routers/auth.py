@@ -163,7 +163,9 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         tel = eng().services.telemetry
         return {**asdict(user), "lanes": [{"id": k, "name": v} for k, v in names.items()],
                 # The web app sends its spans to /otlp/v1/traces when this is on (web/src/telemetry.ts).
-                "tracing": bool(tel is not None and tel.enabled and tel.cfg.endpoint)}
+                "tracing": bool(tel is not None and tel.enabled and tel.cfg.endpoint),
+                # The tool's owners (VALXEL_EVAL_APPROVERS): its health across products, drift, safe mode.
+                "tool_owner": tool_owner(user)}
 
     # --- governance and features ---
     @api.get("/healthz")
@@ -181,3 +183,8 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         return {"ok": not stale, "stale": stale}
 
     return api
+
+
+def tool_owner(user) -> bool:
+    owners = {t for t in os.environ.get("VALXEL_EVAL_APPROVERS", "").split(",") if t}
+    return bool(owners & set(user.teams)) or user.login in owners

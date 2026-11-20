@@ -186,7 +186,7 @@ def _trip(rule: dict, now: float | None, base: float | None, n: int, base_n: int
 
 
 def check(current: dict, baseline: dict, rules: dict, *, queue: dict | None = None,
-          waiting: list[dict] | None = None) -> list[dict]:
+          waiting: list[dict] | None = None, dead: list[dict] | None = None) -> list[dict]:
     """The rules that trip: [{key, rule, scope, value, baseline, says}]. `key` is stable while
     the same thing stays wrong, for alerting once."""
     out: list[dict] = []
@@ -238,6 +238,11 @@ def check(current: dict, baseline: dict, rules: dict, *, queue: dict | None = No
         add("queue_oldest_minutes", "run_queue", round(float(queue["oldest_s"]) / 60, 1), None,
             f"A run has been queued {float(queue['oldest_s']) / 60:.0f} minutes ({queue['queued']} queued, "
             f"{queue.get('running', 0)} running): is a worker up?")
+    limit = rules.get("dead_letters")
+    if limit and dead and len(dead) >= int(limit):
+        add("dead_letters", "run_queue", len(dead), None,
+            f"The queue gave up on {len(dead)} run(s) in the window after repeated worker deaths "
+            f"(latest: {dead[0]['thread_id']}): those features wait for someone to resume them")
     limit = rules.get("external_wait_hours")
     for w in waiting or []:
         if limit and float(w["hours"]) >= float(limit):
@@ -291,17 +296,52 @@ def run(engine, *, now: datetime | None = None, alert=None, clock=None) -> dict:
     current = measure(states, records, since=_iso(since), until=_iso(until))
     baseline = measure(states, records, since=_iso(b_since), until=_iso(since))
     queue = engine.queue.depth() if getattr(engine, "queue", None) is not None else None
-    tripped = check(current, baseline, rules.rules, queue=queue, waiting=external_waits(engine, now=now))
+    dead = dead_letters(engine.cluster, since=_iso(since), until=_iso(until))
+    tripped = check(current, baseline, rules.rules, queue=queue, waiting=external_waits(engine, now=now), dead=dead)
     # The weekly drift evals' latest result (valxel_sdlc.drift), alerted by that job itself.
     drift = engine.cluster.get("drift:latest")
     changed = changes.what_changed(engine.services, engine.cluster, records, since=_iso(since), until=_iso(until))
     result = {"at": _iso(now), "current": current, "baseline": baseline, "queue": queue, "alerts": tripped,
-              "drift": drift, "what_changed": changed}
+              "drift": drift, "what_changed": changed, "dead_letters": {"count": len(dead), "recent": dead[:5]}}
     result["safe_mode"] = by_product(engine, states, records, rules, now=now, since=since, b_since=b_since,
                                      alert=alert)
     engine.cluster.put(NOTE, result)
     _alert(engine.cluster, tripped, alert=alert, clock=clock, context=changes.summary(changed))
     return result
+
+
+def dead_letters(cluster, *, since: str, until: str) -> list[dict]:
+    """Runs the queue gave up on in the window (run_queue.dead_letter), newest first."""
+    from .run_queue import DEAD_LETTERS
+
+    return [d for d in cluster.get(DEAD_LETTERS) or [] if since <= d["at"] < until]
+
+
+def for_product(engine, product_id: str, *, now: datetime | None = None) -> dict:
+    """One product's view of the tool's health, for its own people beside its business metrics: its
+    agents on its work against its own baseline, what's alerting for it (quality and cost; stuck
+    work and the queue are the tool's owners' to watch), what changed, and its safe mode."""
+    from . import safe_mode
+    from . import what_changed as changes
+
+    now = now or datetime.now(UTC)
+    rules = Rules.load(engine.services.settings.config_dir)
+    until, since = now, now - timedelta(days=rules.window_days)
+    b_since = since - timedelta(days=rules.baseline_days)
+    states = [s for f in engine.feature_summaries(product_id) if (s := engine._state(f["feature_id"]))
+              and any((e.get("at") or "") >= _iso(b_since) for e in s.get("events") or [])]
+    records = [r for r in engine.services.ledger.records(since=_iso(b_since)) if r.product_id == product_id]
+    current = measure(states, records, since=_iso(since), until=_iso(until))
+    baseline = measure(states, records, since=_iso(b_since), until=_iso(since))
+    mine = {k: v for k, v in rules.rules.items() if k in QUALITY or k == "cost_per_feature"}
+    tripped = check(current, baseline, mine)
+    changed = changes.what_changed(engine.services, engine.cluster, records, since=_iso(since), until=_iso(until),
+                                   products=[product_id])
+    sm = safe_mode.overview(engine.services, engine.cluster, [product_id], now=_iso(now)).get(product_id)
+    return {"at": _iso(now), "product_id": product_id, "window_days": rules.window_days,
+            "baseline_days": rules.baseline_days, "current": current, "baseline": baseline, "alerts": tripped,
+            "what_changed": changed, "what_changed_summary": changes.summary(changed) if tripped else "",
+            "safe_mode": sm}
 
 
 # Rules about the quality of the agents' work: these put a product in safe mode. Cost and stuck

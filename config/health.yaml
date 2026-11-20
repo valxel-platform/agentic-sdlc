@@ -50,4 +50,6 @@ rules:
   # Work stuck: a run queued this long, or a feature waiting on CI, a deploy or another system
   # (not on a person) for this long.
   queue_oldest_minutes: 15
+  # Runs the queue gave up on (their worker died VALXEL_RUN_QUEUE_MAX_ATTEMPTS times) in the window.
+  dead_letters: 1
   external_wait_hours: 24

@@ -299,6 +299,7 @@ class Worker:
                                                      "finished; resume it from the feature page")
                 with bound(PLATFORM):
                     self.queue.done(self.me, job.id)
+                    dead_letter(self.engine, job)
                 return
             try:
                 with joined(job.traceparent):  # the run continues the trace that queued it
@@ -399,3 +400,20 @@ def serve_health(worker: Worker, port: int) -> Any:
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)  # noqa: S104 - the pod's probe port
     threading.Thread(target=server.serve_forever, name="worker-health", daemon=True).start()
     return server
+
+
+DEAD_LETTERS = "queue:dead_letters"
+
+
+def dead_letter(engine, job) -> None:
+    """Keep a note of a run the queue gave up on, for the tool's health (valxel_sdlc.health)."""
+    from datetime import UTC, datetime
+
+    try:
+        cluster = engine.cluster
+        seen = list(cluster.get(DEAD_LETTERS) or [])
+        seen.insert(0, {"at": datetime.now(UTC).isoformat(), "thread_id": job.thread_id, "run_id": job.id,
+                        "attempts": job.attempts - 1})
+        cluster.put(DEAD_LETTERS, seen[:200])
+    except Exception:  # the run is already dropped and logged; the note is extra
+        log.exception("dead letter for %s not noted", job.id)
