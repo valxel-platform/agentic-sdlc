@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -104,6 +106,19 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         if not 1 <= months <= 24:
             raise HTTPException(400, "months is 1 to 24")
         return eng().lookback(product_id, months)
+
+    @api.get("/reports/health")
+    def tool_health(fresh: bool = False, user: User = Depends(current_user)) -> dict:
+        """The tool's own health (valxel_sdlc.health): its agents on real work, against their
+        baseline, and what's alerting. The latest hourly measurement, or a fresh one. Across every
+        product, so only the tool's owners (VALXEL_EVAL_APPROVERS) see it."""
+        from ... import health
+
+        owners = {t for t in os.environ.get("VALXEL_EVAL_APPROVERS", "").split(",") if t}
+        if not owners & set(user.teams) and user.login not in owners:
+            raise HTTPException(403, "Only the tool's owners (VALXEL_EVAL_APPROVERS) see its health")
+        latest = None if fresh else eng().cluster.get(health.NOTE)
+        return latest or health.run(eng(), alert=lambda _text: None)
 
     @api.get("/reports/pilot")
     def pilot_report(product_id: str, pilot_only: bool = True, since: str = "", format: str = "json",

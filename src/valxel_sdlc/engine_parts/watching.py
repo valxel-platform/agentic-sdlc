@@ -134,7 +134,14 @@ class WatchingMixin:
             Job("expire_transcripts", self.expire_transcripts, 3600),
             Job("check_connections", self.check_connections, 3600),
             Job("catch_up_receipts", self.catch_up_receipts, 3600),
+            Job("tool_health", self.tool_health, 3600),  # the tool's own agents against their baseline
         ]
+
+    def tool_health(self) -> dict:
+        """The tool's own health against its baseline, with alerts (valxel_sdlc.health)."""
+        from .. import health
+
+        return health.run(self)
 
     def sweep_change_set_envs(self) -> list[str]:
         """Delete change-set environments whose feature stopped, finished or outlived the product's

@@ -1,0 +1,53 @@
+# The tool's own health (valxel_sdlc.health): how its agents are doing on real work, measured
+# every hour over the last `window_days`, against the `baseline_days` before that. An alert goes
+# to VALXEL_NOTIFY_WEBHOOK when a rule trips, once, then daily while it stays tripped.
+#
+# Rates compare a phase (or gate) with itself: the spec critic against the spec critic's own
+# baseline. `min_samples` keeps a quiet week from alerting on one or two features. A rule trips
+# when the current value is past `at_least` (or `at_most`) AND moved past the baseline by `by`
+# (when there's a baseline with enough samples; without one, `at_least`/`at_most` alone decide).
+
+window_days: 7
+baseline_days: 28
+
+rules:
+  # The critic passed a document that people then sent back or took over. The most important
+  # one: a critic that grades badly lets weak work through to people, and nothing else shows it.
+  critic_false_pass:
+    at_least: 0.25
+    by: 0.15
+    min_samples: 5
+
+  # The critic kept failing a document that people then accepted as it was.
+  critic_false_fail:
+    at_least: 0.3
+    by: 0.15
+    min_samples: 5
+
+  # Share of a gate's first decisions that were approvals.
+  first_time_approval:
+    at_most: 0.6
+    by: 0.2
+    min_samples: 5
+
+  # Share of a phase's runs that escalated to a person (loop cap, budget, stall, design issue).
+  escalation_rate:
+    at_least: 0.3
+    by: 0.15
+    min_samples: 5
+
+  # Share of a phase's runs that stopped for making no progress (valxel_sdlc.loops).
+  stall_rate:
+    at_least: 0.2
+    by: 0.1
+    min_samples: 5
+
+  # Model spend per feature that reached a gate or finished, against the baseline's.
+  cost_per_feature:
+    ratio: 1.5
+    min_samples: 3
+
+  # Work stuck: a run queued this long, or a feature waiting on CI, a deploy or another system
+  # (not on a person) for this long.
+  queue_oldest_minutes: 15
+  external_wait_hours: 24
