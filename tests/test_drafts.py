@@ -60,8 +60,8 @@ def test_a_released_feature_reads_its_documents_from_the_product_once_its_drafts
     files, _ = records.files_for(engine.services, state, "g6")
     assert {f"features/{fid}/plan.md", f"features/{fid}/build.md"} <= set(files)  # G6 carries what G5 would have
     done = drafts.remove(engine.services, engine.cluster, state, now=later)
-    assert {"OPP", "PRD", "UX", "PROTOTYPE", "HLD", "PLAN", "BUILD", "REL", "SKETCH"} <= set(done["removed"])
-    assert done["keep"] == ["OPS"] and done["files"] >= 9  # no record holds the operations report: it stays
+    assert {"OPP", "PRD", "UX", "PROTOTYPE", "HLD", "PLAN", "BUILD", "REL", "SKETCH", "OPS"} <= set(done["removed"])
+    assert done["keep"] == [] and done["files"] >= 10  # the operations report is recorded after release too
     assert not list(store._dir(fid).glob("PRD.v*.md"))
     assert drafts.remove(engine.services, engine.cluster, state, now=later) is None  # nothing left to do
 

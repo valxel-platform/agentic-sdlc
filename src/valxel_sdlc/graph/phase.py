@@ -1474,6 +1474,14 @@ def make_phase_node(phase: str, services):
                                 "production": False}
         elif phase == "operate":
             delta["events"] += _knowledge_writeback(services, state, ctx)
+            if (delta.get("artifacts") or {}).get(spec.kind):  # the product keeps the report (records.py)
+                from .gates import record_documents
+
+                released_by = next((e.get("approver", "") for e in reversed(state.get("events") or [])
+                                    if e.get("node") == "g6" and e.get("kind") == "approved"), "")
+                delta["events"].append(record_documents(
+                    services, {**state, "artifacts": {**(state.get("artifacts") or {}), **delta["artifacts"]}},
+                    "operate", released_by or "valxel"))
         return delta
 
     return node
@@ -1514,7 +1522,8 @@ def _knowledge_writeback(services, state: FeatureState, ctx: dict) -> list[dict]
         "id": cap_id, "product_id": state["product_id"], "name": state["title"], "status": "live",
         "feature": state["feature_id"], "adrs": design.get("adrs", []),
         "contracts": [c for c in design.get("contracts", []) if c.get("next")],
-        "artifacts": [r["id"] for r in state.get("artifacts", {}).values()],
+        # Its documents are the product's record, not the tool's copies (which go: valxel_sdlc.drafts).
+        "record": {"repo": _governance_repo(services, state), "path": f"features/{state['feature_id']}/"},
         "release": state.get("change_set", {}).get("id"),
     })
     events = [event("operate", "capability_registered", cap_id)]
@@ -1624,3 +1633,10 @@ def publish_diagram(services, state: FeatureState, content: str) -> tuple[str, d
     ref = {**ref, "at": now()}
     return (content.rstrip() + "\n\n## Diagrams\n" + "\n".join(links) + "\n", ref,
             event("architecture", "diagram_published", ref["url"], provider=provider, version=version))
+
+
+def _governance_repo(services, state) -> str:
+    try:
+        return services.settings.entry(state["product_id"]).governance.full_name
+    except Exception:  # noqa: BLE001 - the catalog entry still names the feature
+        return ""

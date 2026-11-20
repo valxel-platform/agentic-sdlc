@@ -678,12 +678,13 @@ def _quality_lines(ctx: dict) -> list[str]:
 
 def operate(ctx: dict, defective: bool) -> str:
     cap = f"CAP-{ctx['product_id']}-{_slug(ctx['title']).upper()[:24]}"
-    lines = [f"# Operating report: {ctx['title']}"]
+    lines = [f"# Operating report: {ctx['title']}", "", "## What shipped",
+             f"- {ctx['title']}, in {', '.join(ctx.get('components') or []) or 'the product'}",
+             "", "## How it's released", "- Behind its flag, rolled out in the release's steps"]
     if not defective:
-        lines += ["", "## Metrics vs brief", "- M1: baseline captured; first read in 7 days",
-                  "- M2: baseline captured; first read in 7 days"]
-    lines += ["", "## Capability", f"- Registered {cap}",
-              "", "## New intakes", "- None yet; Operate re-checks metrics on its next run"]
+        lines += ["", "## What to watch", "- M1: the brief's first metric toward its target; readouts at 7, 30 and 90 days",
+                  "- M2: the brief's second metric toward its target; readouts at 7, 30 and 90 days"]
+    lines += ["", "## Capability", f"- Registered {cap}"]
     return "\n".join(lines + _feedback(ctx)) + "\n"
 
 

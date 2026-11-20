@@ -1287,6 +1287,8 @@ export interface FeatureOutcome {
   instrumentation: InstrumentationCheck | null;
   readouts: Readout[];
   upcoming: { goal_id: string; window_days: number; due: string }[];
+  /** The product's record of the outcome: outcome.md in its governance repo, once a readout is in. */
+  record?: { repo: string; path: string; url: string } | null;
 }
 export interface Roadmap {
   product_id: string;

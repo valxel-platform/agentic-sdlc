@@ -21,12 +21,31 @@ class RoadmapMixin:
         from ..outcomes import readouts
 
         taken = readouts.run(self, product_id)
+        self.record_outcomes(taken)
         for pid in [product_id] if product_id else sorted({r["product_id"] for r in self.index.all()}):
             try:
                 self.start_due_reviews(pid)
             except Exception:
                 continue
         return taken
+
+    def record_outcomes(self, taken: list[dict]) -> int:
+        """Each feature with a readout whose number is in: its outcome.md in the product's governance
+        repo, from all its readouts so far (valxel_sdlc.records.record_outcome). Never raises: the
+        readouts are in the tool's database either way."""
+        from .. import records
+        from ..outcomes.readouts import final
+
+        n = 0
+        for fid in sorted({r["feature_id"] for r in taken if final(r)}):
+            try:
+                state = {**self._state(fid), "feature_id": fid}
+                rows = [r for r in self.services.readings.readouts(state["product_id"]) if r["feature_id"] == fid]
+                if records.record_outcome(self.services, state, rows).get("status") in ("merged", "open"):
+                    n += 1
+            except Exception:
+                log.exception("outcome of %s not recorded", fid)
+        return n
 
     def review_summaries(self, product_id: str) -> list[dict]:
         out = []

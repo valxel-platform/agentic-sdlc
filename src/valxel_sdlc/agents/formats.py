@@ -217,8 +217,12 @@ customProperties:
 ## Staging
 - <what was verified in staging>""",
     "operate": """# Operating report: <title>
-## Metrics vs brief
-- M1: <measured value against the target>
+## What shipped
+- <what changed for people, and in which repos>
+## How it's released
+- <the flag, the rollout steps, who it's on for now>
+## What to watch
+- M1: <the brief's metric> toward <its target>; readouts at 7, 30 and 90 days after release
 ## Capability
 - <the capability this release registered or extended>""",
 }

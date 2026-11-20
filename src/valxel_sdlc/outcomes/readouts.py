@@ -257,6 +257,12 @@ def retake_waiting(engine, product_id: str, goal_id: str) -> list[dict]:
     return out
 
 
+def final(r: dict) -> bool:
+    """Whether a readout's number is in (or it stopped waiting for one): worth recording in the
+    product's outcome.md (the engine does, after taking them: Roadmap.record_outcomes)."""
+    return (r.get("after") or {}).get("status") in ("ok", "suppressed") or r.get("tries", 1) >= RETRIES
+
+
 def feature_outcome(engine, feature_id: str) -> dict:
     """What the feature page shows: the goals the feature moves, its events in staging, and its
     readouts so far (and which windows are still to come)."""
@@ -281,4 +287,15 @@ def feature_outcome(engine, feature_id: str) -> dict:
             "metrics": {g: ms[g].as_dict() for g in goals if g in ms},
             "released_at": released.isoformat() if released else "",
             "instrumentation": state.get("instrumentation_check") or None,
-            "readouts": rows, "upcoming": upcoming}
+            "readouts": rows, "upcoming": upcoming,
+            # The product's record of it: outcome.md in its governance repo, once a readout is in.
+            "record": _record_link(services, pid, feature_id) if any(final(r) for r in rows) else None}
+
+
+def _record_link(services, product_id: str, feature_id: str) -> dict | None:
+    try:
+        repo = services.settings.entry(product_id).governance.full_name
+    except Exception:  # noqa: BLE001 - an unknown product: no link
+        return None
+    path = f"features/{feature_id}/outcome.md"
+    return {"repo": repo, "path": path, "url": f"https://github.com/{repo}/blob/HEAD/{path}"}

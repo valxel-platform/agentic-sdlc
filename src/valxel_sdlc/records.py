@@ -9,6 +9,9 @@ When a gate is approved, the documents it approved go to the product's governanc
   G4  the HLD
   G5  the plan the build followed and the build's summary
   G6  the release record, and the plan and build summary when G5 was skipped (a low-risk change)
+  after release   the operations report (operate: what shipped, how it's released, what to watch)
+  each readout    the outcome: the brief's metrics before and after release, at 7, 30 and 90 days
+                  (outcome.md, rewritten as readouts come in; record_outcome)
 
 Each gate is one pull request from `valxel/records/<feature>-<gate>`, which the tool merges at once:
 the gate was the review. If the repo's rules want another review, the pull request stays open for
@@ -27,9 +30,10 @@ import json
 import os
 from datetime import datetime, timezone
 
-GATE_KINDS = {"g1": ("OPP",), "g2": ("PRD",), "g3": ("UX",), "g4": ("HLD",), "g5": ("PLAN", "BUILD"), "g6": ("REL",)}
+GATE_KINDS = {"g1": ("OPP",), "g2": ("PRD",), "g3": ("UX",), "g4": ("HLD",), "g5": ("PLAN", "BUILD"), "g6": ("REL",),
+              "operate": ("OPS",)}  # not a gate: recorded when the step after release finishes
 NAMES = {"OPP": "discovery.md", "PRD": "prd.md", "UX": "ux.md", "HLD": "hld.md", "PLAN": "plan.md", "BUILD": "build.md",
-         "REL": "release.md"}
+         "REL": "release.md", "OPS": "operations.md"}
 
 
 def approved(state: dict, gate: str) -> bool:
@@ -121,10 +125,11 @@ def files_for(services, state: dict, gate: str, *, env=None) -> tuple[dict[str, 
 
 def approval_record(state: dict, gate: str, approvers: str, files: dict, left: list[dict], at: str) -> str:
     arts = state.get("artifacts") or {}
-    lines = [f"# {state['feature_id']}: {gate.upper()} approved", "",
+    what = "operations report after release" if gate == "operate" else f"{gate.upper()} approved"
+    lines = [f"# {state['feature_id']}: {what}", "",
              f"- Feature: {state.get('title') or state['feature_id']}",
              f"- Product: {state.get('product_id', '')}",
-             f"- Approved by: {approvers or 'unknown'}",
+             f"- {'Released by' if gate == 'operate' else 'Approved by'}: {approvers or 'unknown'}",
              f"- At: {at}", "", "## Documents", ""]
     for kind in GATE_KINDS.get(gate, ()):
         ref = arts.get(kind)
@@ -151,7 +156,8 @@ def record(services, state: dict, gate: str, approvers: str, *, env=None) -> dic
     path = f"features/{state['feature_id']}/approvals/{gate}.md"
     files[path] = approval_record(state, gate, approvers, files, left, at)
     branch = f"valxel/records/{state['feature_id']}-{gate}"
-    message = f"{state['feature_id']}: documents approved at {gate.upper()}"
+    message = (f"{state['feature_id']}: operations report after release" if gate == "operate"
+               else f"{state['feature_id']}: documents approved at {gate.upper()}")
     for p, content in files.items():
         if isinstance(content, bytes):
             gh.put_bytes(repo=repo, branch=branch, path=p, content=content, message=message)
@@ -169,3 +175,55 @@ def record(services, state: dict, gate: str, approvers: str, *, env=None) -> dic
         status, pr = "open", {**pr, "why": str(exc)[:300]}
     return {"status": status, "repo": repo, "url": pr.get("url", ""), "files": len(files),
             "left_out": len(left), **({"why": pr["why"]} if "why" in pr else {})}
+
+
+def outcome_text(state: dict, readouts: list[dict]) -> str:
+    """outcome.md: each of the brief's goals, before and after release, per window."""
+    def num(v):
+        return "no data" if v is None else f"{v:g}"
+
+    def side(x: dict) -> str:
+        status = (x or {}).get("status", "")
+        if status == "suppressed":
+            return "suppressed (too few people to show)"
+        return num((x or {}).get("value")) if status == "ok" else (status or "no data").replace("_", " ")
+
+    lines = [f"# {state['feature_id']}: outcome", "", f"- Feature: {state.get('title') or state['feature_id']}",
+             f"- Product: {state.get('product_id', '')}"]
+    released = next((r.get("released_at") for r in readouts if r.get("released_at")), "")
+    if released:
+        lines.append(f"- Released: {released[:10]}")
+    for goal in sorted({r["goal_id"] for r in readouts}):
+        rs = sorted((r for r in readouts if r["goal_id"] == goal), key=lambda r: int(r["window_days"]))
+        unit = rs[0].get("unit") or ""
+        lines += ["", f"## {goal}{f' ({unit})' if unit else ''}", "",
+                  "| Window | Before | After | Change | Toward the target |", "|---|---|---|---|---|"]
+        for r in rs:
+            toward = {True: "yes", False: "no"}.get(r.get("toward"), "not yet known")
+            lines.append(f"| {int(r['window_days'])} days | {side(r.get('before'))} | {side(r.get('after'))} | "
+                         f"{num(r.get('change'))} | {toward} |")
+    lines += ["", f"_{readouts[0].get('caveat', '')}_" if readouts and readouts[0].get("caveat") else ""]
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def record_outcome(services, state: dict, readouts: list[dict], *, env=None) -> dict:
+    """Rewrite the feature's outcome.md in the product's governance repo from its readouts. Merged at
+    once like the gates' records; never raises into the readouts job."""
+    if not enabled(env) or not readouts:
+        return {"status": "nothing"}
+    gh = services.github
+    repo = services.settings.entry(state["product_id"]).governance.full_name
+    path = f"features/{state['feature_id']}/outcome.md"
+    windows = sorted({int(r["window_days"]) for r in readouts})
+    branch = f"valxel/records/{state['feature_id']}-outcome-{windows[-1]}d"
+    message = f"{state['feature_id']}: outcome at {windows[-1]} days"
+    gh.put_file(repo=repo, branch=branch, path=path, content=outcome_text(state, readouts), message=message)
+    pr = gh.open_pr(repo=repo, branch=branch, title=message, files=[path], labels=["valxel", "records"],
+                    body="The feature's goals before and after release, from the Valxel SDLC's readouts: aggregates "
+                         "only. A before-and-after readout is not proof the feature caused the change.")
+    try:
+        merged = gh.merge(repo=repo, number=pr["number"], actor="valxel", sha=pr.get("head_sha", ""))
+        status = "merged" if merged.get("state") == "merged" or merged.get("merged") else "open"
+    except Exception as exc:  # noqa: BLE001 — the repo's rules may want another review; the PR waits
+        status, pr = "open", {**pr, "why": str(exc)[:300]}
+    return {"status": status, "repo": repo, "path": path, "url": pr.get("url", "")}

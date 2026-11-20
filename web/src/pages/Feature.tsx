@@ -160,6 +160,15 @@ function Outcome({ featureId, version }: { featureId: string; version: number })
             .join(", ")}
         </p>
       )}
+      {o.record && (
+        <p className="small muted pad">
+          The product&apos;s record:{" "}
+          <a href={o.record.url} target="_blank" rel="noopener noreferrer">
+            {o.record.path}
+          </a>{" "}
+          in {o.record.repo}
+        </p>
+      )}
     </section>
   );
 }

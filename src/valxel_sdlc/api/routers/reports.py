@@ -258,6 +258,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         retaken = readouts.retake_waiting(eng(), product_id, goal_id)
+        eng().record_outcomes(retaken)  # the product's outcome.md, now the number is in
         return {"reading": r.as_dict(), "readouts": retaken}
 
     return api

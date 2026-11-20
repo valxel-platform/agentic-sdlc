@@ -686,7 +686,9 @@ def _release(text: str, ctx: dict) -> list[str]:
 
 
 def _operate(text: str, ctx: dict) -> list[str]:
-    return [] if bullets(section(text, "Metrics vs brief")) else ["No metrics against the brief's success criteria"]
+    # Written at release: nothing is measured yet, so it says what to watch; the readouts measure it
+    # (valxel_sdlc.outcomes.readouts) and the product's outcome.md keeps them (records.record_outcome).
+    return [] if bullets(section(text, "What to watch")) else ["Nothing to watch: name the brief's metrics and targets"]
 
 
 CHECKS = {

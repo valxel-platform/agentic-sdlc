@@ -481,9 +481,18 @@ describe("FeaturePage path, notify, timeline and cost", () => {
       instrumentation: { checked: true, environment: "staging", fired: {}, missing: [], events: [] },
       readouts: [],
       upcoming: [{ goal_id: "G1", window_days: 7, due: "2026-11-17" }],
+      record: {
+        repo: "acme/cln-governance",
+        path: "features/CLN-1/outcome.md",
+        url: "https://github.com/acme/cln-governance/blob/HEAD/features/CLN-1/outcome.md",
+      },
     });
     renderFeature();
     expect(await screen.findByRole("heading", { name: "Outcome" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "features/CLN-1/outcome.md" })).toHaveAttribute(
+      "href",
+      "https://github.com/acme/cln-governance/blob/HEAD/features/CLN-1/outcome.md",
+    );
     expect(screen.getByText(/Moves G1\./)).toBeInTheDocument();
     expect(screen.queryByText(/Readouts start once the feature reaches everyone/)).not.toBeInTheDocument();
     expect(screen.getByText("At 50%")).toBeInTheDocument();
