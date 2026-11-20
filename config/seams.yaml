@@ -13,7 +13,7 @@ seams:
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # and the tool's health, which measures every seam's agents on real work.
 root: [engine, engine_parts, api, web, cli, services, strict, worksync, run_queue, watcher_jobs, checkpoint_archive,
-       lite, evals, code_evals, code_eval_runner, coder_injection, injection, health, drift]
+       lite, evals, code_evals, code_eval_runner, coder_injection, injection, health, drift, what_changed]
 # Imports that break the rules today: known debt. tests/test_seams.py fails on a new one, and on one
 # listed here that's gone (delete its line). Fix one by moving the shared piece into the core, or
 # by passing it in from the root (services.py) instead of importing it.

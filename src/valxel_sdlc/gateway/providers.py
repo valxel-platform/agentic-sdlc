@@ -55,6 +55,9 @@ class ModelResponse:
     session_id: str = ""
     # The model's context window, when the vendor reported it with the response (0: from config).
     context_window: int = 0
+    # The model the provider says answered (its own name for it), "" when it didn't say. A change
+    # here under the same config is a provider moving a model (valxel_sdlc.what_changed).
+    served_model: str = ""
 
 
 class ProviderUnavailable(RuntimeError):
@@ -114,6 +117,7 @@ class StubProvider:
             cache_creation_input_tokens=write,
             cache_read_input_tokens=read,
             output_tokens=estimate_tokens(text),
+            served_model=req.model.split("/", 1)[-1],  # a stand-in answers as what was asked for
         )
 
 
@@ -187,6 +191,7 @@ class AnthropicProvider:
             output_tokens=u.output_tokens,
             web_searches=int(getattr(getattr(u, "server_tool_use", None), "web_search_requests", 0) or 0),
             request_id=getattr(resp, "id", "") or "",
+            served_model=str(getattr(resp, "model", "") or ""),
         )
 
 
@@ -228,4 +233,5 @@ class OpenAICompatibleProvider:
             cache_read_input_tokens=cached,
             output_tokens=int(u.get("completion_tokens") or 0),
             request_id=str(data.get("id") or ""),
+            served_model=str(data.get("model") or ""),  # the resolved snapshot, for an alias
         )

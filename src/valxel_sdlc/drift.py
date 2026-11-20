@@ -108,8 +108,16 @@ def run(services: Any, cluster: Any, *, now: datetime | None = None, force: bool
         result["recent_comparison"] = cmp
         result["regressions"] += [f"This week's work: {x}" for x in cmp["regressions"] if "cases didn't run" not in x]
     result["recent_cases"] = len(recent)
-    cluster.put(ANCHOR, anchor)
     before = cluster.get(LATEST) or {}
+    ledger = getattr(services, "ledger", None)
+    if ledger is not None:  # what moved since the last run: setup, models, products (valxel_sdlc.what_changed)
+        from . import what_changed as changes
+
+        since = before.get("at") or (now - timedelta(days=cfg["every_days"])).isoformat()
+        records = ledger.records(since=(datetime.fromisoformat(since) - timedelta(days=28)).isoformat())
+        result["what_changed"] = changes.what_changed(services, cluster, records, since=since, until=now.isoformat())
+        result["what_changed_summary"] = changes.summary(result["what_changed"])
+    cluster.put(ANCHOR, anchor)
     cluster.put(LATEST, result)
     cluster.put(RUNS, ([{k: result[k] for k in ("at", "config", "regressions")}] + list(cluster.get(RUNS) or []))[:KEEP_RUNS])
     _say(result, before, alert)
@@ -123,8 +131,8 @@ def _say(result: dict, before: dict, alert) -> None:
     try:
         if result["regressions"]:
             log.warning("drift evals: %s", "; ".join(result["regressions"]))
-            say("Valxel drift evals: the agents did worse this week with no config change. "
-                + "; ".join(result["regressions"][:5]))
+            say("Valxel drift evals: the agents did worse this week. " + "; ".join(result["regressions"][:5])
+                + (f" {result['what_changed_summary']}" if result.get("what_changed_summary") else ""))
         elif before.get("regressions"):
             say("Valxel drift evals: back to the baseline.")
     except Exception:

@@ -50,6 +50,8 @@ class UsageRecord:
     context_window: int = 0
     context_tokens: int = 0
     layer_tokens: dict = field(default_factory=dict)
+    # The model the provider says answered ("" when it didn't say): valxel_sdlc.what_changed.
+    served_model: str = ""
 
     @property
     def total_input(self) -> int:
@@ -108,6 +110,7 @@ class PostgresLedger:
     ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS context_window INT NOT NULL DEFAULT 0;
     ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS context_tokens INT NOT NULL DEFAULT 0;
     ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS layer_tokens JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS served_model TEXT NOT NULL DEFAULT '';
     CREATE INDEX IF NOT EXISTS valxel_usage_feature ON valxel_usage (feature_id);
     CREATE INDEX IF NOT EXISTS valxel_usage_product_ts ON valxel_usage (product_id, ts);
     """

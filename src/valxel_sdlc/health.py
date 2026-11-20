@@ -275,6 +275,9 @@ def run(engine, *, now: datetime | None = None, alert=None, clock=None) -> dict:
 
     now = now or datetime.now(UTC)
     clock = clock or time.time
+    from . import what_changed as changes
+
+    changes.observe(engine.services, engine.cluster, at=_iso(now))  # products' governance, as it changes
     rules = Rules.load(engine.services.settings.config_dir)
     until, since = now, now - timedelta(days=rules.window_days)
     b_since = since - timedelta(days=rules.baseline_days)
@@ -291,14 +294,15 @@ def run(engine, *, now: datetime | None = None, alert=None, clock=None) -> dict:
     tripped = check(current, baseline, rules.rules, queue=queue, waiting=external_waits(engine, now=now))
     # The weekly drift evals' latest result (valxel_sdlc.drift), alerted by that job itself.
     drift = engine.cluster.get("drift:latest")
+    changed = changes.what_changed(engine.services, engine.cluster, records, since=_iso(since), until=_iso(until))
     result = {"at": _iso(now), "current": current, "baseline": baseline, "queue": queue, "alerts": tripped,
-              "drift": drift}
+              "drift": drift, "what_changed": changed}
     engine.cluster.put(NOTE, result)
-    _alert(engine.cluster, tripped, alert=alert, clock=clock)
+    _alert(engine.cluster, tripped, alert=alert, clock=clock, context=changes.summary(changed))
     return result
 
 
-def _alert(cluster, tripped: list[dict], *, alert=None, clock) -> None:
+def _alert(cluster, tripped: list[dict], *, alert=None, clock, context: str = "") -> None:
     from .watcher_jobs import _webhook_alert
 
     say = alert or _webhook_alert
@@ -310,7 +314,7 @@ def _alert(cluster, tripped: list[dict], *, alert=None, clock) -> None:
             continue
         log.warning("tool health: %s", t["says"])
         try:
-            say(f"Valxel tool health: {t['says']}")
+            say(f"Valxel tool health: {t['says']}" + (f" {context}" if context else ""))
         except Exception:
             log.exception("tool health alert not delivered")
             continue

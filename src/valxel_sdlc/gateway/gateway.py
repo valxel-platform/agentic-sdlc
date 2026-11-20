@@ -166,6 +166,7 @@ class ModelGateway:
             context_tokens=int(getattr(resp, "context_tokens", 0) or (
                 resp.input_tokens + resp.cache_creation_input_tokens + resp.cache_read_input_tokens)),
             layer_tokens=layer_tokens(layers),
+            served_model=str(getattr(resp, "served_model", "") or ""),
             **_trace_fields(),
         )
         self.ledger.record(rec)

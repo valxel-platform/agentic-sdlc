@@ -223,6 +223,7 @@ class ClaudeCodeRuntime:
             context_tokens=int(out.get("peak") or 0),
             session_id=str(out.get("session_id") or ""),
             context_window=window_of(out.get("model_usage") or {}, model),
+            served_model=served_of(out.get("model_usage") or {}),
         )
         extra = plugins.extra(set(out.get("skills") or ()), task.skills)
         if extra:
@@ -283,6 +284,17 @@ def prompt_tokens(usage) -> int:
 def reported_window(result, model: str) -> int:
     """The context window Claude Code reported for the model with its result, 0 when it didn't."""
     return window_of(getattr(result, "model_usage", None) or {}, model)
+
+
+def served_of(usage: dict) -> str:
+    """The model that did most of a session's work, by output tokens, from Claude Code's per-model
+    usage (a session can call a smaller model for side tasks)."""
+    best, most = "", -1
+    for key, u in usage.items() if isinstance(usage, dict) else ():
+        n = int((u or {}).get("outputTokens") or (u or {}).get("output_tokens") or 0) if isinstance(u, dict) else 0
+        if n > most:
+            best, most = str(key), n
+    return best
 
 
 def window_of(usage: dict, model: str) -> int:
