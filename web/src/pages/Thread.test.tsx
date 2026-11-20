@@ -445,6 +445,19 @@ describe("InitiativePage", () => {
 });
 
 describe("ReleasePage", () => {
+  it("names the incident that turned a shipped feature off, the rest staying on", async () => {
+    const base = releaseFixture();
+    const features = base.features.map((f) =>
+      f.feature_id === "CLN-2" ? { ...f, turned_off_by: "CLN-INC-4" } : f,
+    );
+    vi.mocked(api.release).mockResolvedValue(releaseFixture({ status: "shipped", features }));
+    renderThread("/releases/CLN-REL-1");
+    expect(await screen.findByRole("link", { name: "CLN-INC-4" })).toBeInTheDocument();
+    expect(screen.getByText(/Turned off by/)).toBeInTheDocument();
+    expect(screen.queryByText("In production, flag off")).not.toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
+  });
+
   it("shows Loading… then features, notes, evidence and dropped items", async () => {
     vi.mocked(api.release).mockResolvedValue(releaseFixture());
     renderThread("/releases/CLN-REL-1");

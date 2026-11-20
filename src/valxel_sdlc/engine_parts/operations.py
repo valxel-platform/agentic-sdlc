@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 
 
 from langgraph.types import Command
@@ -321,6 +323,49 @@ class OperationsMixin:
                             "flag": rel.get("flag", ""), "flag_on": self._flag_on(s), "repos": sorted(repos),
                             "track": s.get("track", "standard"), **extra})
         return sorted(out, key=lambda x: x["released_at"], reverse=True)
+
+    def live_features(self, product_id: str) -> dict[str, dict]:
+        """Features in production of this product and the products built on it, with what undoing
+        each needs (ops/undo.py): its flag, what depends on it, whether its data can go back."""
+        products = [product_id]
+        for pid in self.services.settings.registry:
+            try:
+                if pid != product_id and product_id in self.services.snapshot(pid).product.depends_on:
+                    products.append(pid)
+            except Exception:  # a product whose governance can't be read adds nothing
+                logging.getLogger(__name__).debug("%s: can't read its governance", pid, exc_info=True)
+                continue
+        out = {}
+        for pid in products:
+            for row in self._rows(pid, "feature"):
+                s = self._state(row["feature_id"])
+                rel = s.get("release") or {}
+                if not rel.get("production"):
+                    continue
+                u = s.get("undo") or {}
+                repos = set((s.get("change_set") or {}).get("merge_order") or []) | \
+                    {pr["repo"] for pr in (s.get("pull_requests") or {}).values()}
+                r = self.release_for(row["feature_id"])
+                out[row["feature_id"]] = {
+                    "title": s.get("title", ""), "flag": rel.get("flag", ""), "flag_on": self._flag_on(s),
+                    "depends_on": list(u.get("depends_on") or []), "flag_off": u.get("flag_off", ""),
+                    "rollback": u.get("rollback") or {}, "repos": sorted(repos),
+                    "release": {"id": r["id"], "size": len(self.release_members(r["id"]))} if r else {}}
+        return out
+
+    def turned_off(self, product_id: str) -> dict[str, str]:
+        """Features an incident turned off in production: feature id -> the incident (latest wins)."""
+        out: dict[str, str] = {}
+        for row in self._rows(product_id, "incident"):
+            for t in self._state(row["feature_id"]).get("taken") or []:
+                if t.get("type") == "flag_off" and t.get("ok") and t.get("feature_id"):
+                    out[t["feature_id"]] = row["feature_id"]
+        return out
+
+    def undo_plan(self, product_id: str, actions: list[dict], component: str = "") -> list[dict]:
+        from ..undo import plan
+
+        return plan(actions, self.live_features(product_id), component)
 
     def start_hotfix(self, incident: dict, *, repo: str, change: str, approver: str) -> str:
         if not repo:

@@ -393,6 +393,10 @@ def make_gate(gate: str, services):
 
             update["cost_plan"] = plan_from_g4(aws_summary(services, state, snap, ref), state, approvers)
             # The feature's flag exists before any code does, so the coder builds behind it.
+            from ..undo import facts as undo_facts
+
+            # What an incident needs to undo it alone: who depends on it, the flag off, the data (T-101..103).
+            update["undo"] = undo_facts(services.artifacts.load(ref)) if ref else {}
             update["flag"], note = assign_flag(services, state, approvers)
             update["events"].append(note)
             if not update["flag"] and (warn := launch_flag_warning(services, state)):

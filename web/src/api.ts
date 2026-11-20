@@ -1142,6 +1142,8 @@ export interface FeatureRow {
   initiative_id: string;
   cost_usd: number;
   flag_on: boolean | null;
+  /** On a shipped release: the incident that turned this feature off in production (T-104). */
+  turned_off_by?: string;
 }
 export interface ThreadBase {
   feature_id: string;

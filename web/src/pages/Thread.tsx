@@ -298,7 +298,14 @@ export function ReleasePage() {
                 <div className="work-line">
                   <Link to={threadPath(f.feature_id)}>{f.feature_id}</Link> {f.title}
                   {f.flag_on === true && <span className="chip go">Live</span>}
-                  {f.flag_on === false && <span className="chip wait">In production, flag off</span>}
+                  {f.flag_on === false && f.turned_off_by && (
+                    <span className="chip stop">
+                      Turned off by <Link to={threadPath(f.turned_off_by)}>{f.turned_off_by}</Link>
+                    </span>
+                  )}
+                  {f.flag_on === false && !f.turned_off_by && (
+                    <span className="chip wait">In production, flag off</span>
+                  )}
                   {f.flag_on == null && (
                     <span className="chip plain">
                       {f.status === "stopped" ? "Stopped" : f.stage || f.status}

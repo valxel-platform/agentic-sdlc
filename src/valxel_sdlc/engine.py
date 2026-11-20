@@ -123,6 +123,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         services.roadmap_fit = self.roadmap_fit
         services.incident_signals = lambda iid: services.signals.for_incident(iid)
         services.suspects = self.suspects
+        services.undo_plan = self.undo_plan  # the smallest undo first (ops/undo.py, T-104)
         services.feature_state = self._state
         services.flag_of = lambda fid: (self._state(fid).get("release") or {}).get("flag", "")
         services.start_hotfix = self.start_hotfix

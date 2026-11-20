@@ -72,10 +72,22 @@ def thread_view(engine, thread_id: str) -> dict:
         out |= {"model": s.get("model"), "target_date": s.get("target_date", ""), "initiative": s.get("initiative", ""),
                 "notes": s.get("notes", ""), "evidence": s.get("evidence", ""), "approved_by": s.get("approved_by", ""),
                 "dropped": s.get("dropped", []), "flags": s.get("flags", {}),
-                "features": [by_id.get(fid, {"feature_id": fid, "title": fid, "status": "unknown"})
-                             for fid in engine.release_members(thread_id)],
+                "features": _members(engine, s, thread_id, by_id),
                 # How many are ready and where the rest are (T-99).
                 "readiness": engine.release_readiness(thread_id)}
+    return out
+
+
+def _members(engine, s: dict, release_id: str, by_id: dict) -> list[dict]:
+    """The release's features; one turned off in production by an incident after the release shipped
+    says so, with the incident (T-104): the rest of the release stays on."""
+    off = engine.turned_off(s["product_id"]) if s.get("status") == "shipped" else {}
+    out = []
+    for fid in engine.release_members(release_id):
+        f = dict(by_id.get(fid, {"feature_id": fid, "title": fid, "status": "unknown"}))
+        if f.get("flag_on") is False and fid in off:
+            f["turned_off_by"] = off[fid]
+        out.append(f)
     return out
 
 

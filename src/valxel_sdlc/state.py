@@ -96,6 +96,7 @@ class FeatureState(TypedDict, total=False):
     change_set: Annotated[dict, last]
     lanes_touched: Annotated[list[str], last]  # dependency lanes whose repos the HLD changes
     design: Annotated[dict, last]  # the design review G4 approved: decisions, supersessions, contract changes
+    undo: Annotated[dict, last]  # from the approved HLD: depends_on, flag_off, rollback (ops/undo.py)
     flag: Annotated[str, last]  # the feature's flag key, created when G4 approves ('' = no flag service)
     ci_retries: Annotated[int, last]  # automatic build retries after red CI, since CI was last green
     ci_failures: Annotated[list, last]  # each red CI's failures since CI was last green (valxel_sdlc.loops)

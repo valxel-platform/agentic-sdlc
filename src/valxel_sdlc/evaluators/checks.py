@@ -12,10 +12,10 @@ from ..agents.parse import (
     is_testable,
     parse_ac_goals,
     parse_acs,
+    parse_affected_repos,
     parse_cases,
     parse_deferred,
     parse_nfrs,
-    parse_affected_repos,
     parse_tasks,
     parse_trace,
     section,
@@ -151,7 +151,14 @@ def _design(text: str, ctx: dict) -> list[str]:
 
 def _ux_structure(text: str, ctx: dict) -> list[str]:
     """What a builder needs: each screen's app, its states, how people move between screens, and the copy."""
-    from ..agents.parse import SCREEN_ROLES, parse_copy, parse_flow, parse_screen_apps, parse_screens, parse_states
+    from ..agents.parse import (
+        SCREEN_ROLES,
+        parse_copy,
+        parse_flow,
+        parse_screen_apps,
+        parse_screens,
+        parse_states,
+    )
 
     screens = parse_screens(text)
     if not screens:
@@ -229,6 +236,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
         out.append("HLD has no contracts section (VX-4)")
     out += _audit(text, repos, ctx)
     out += _data(text, repos, ctx)
+    out += _undo(text, repos, ctx)
     out += _threats(text, repos, ctx)
     out += _events(text, repos)
     out += _datasets(text, repos + new, ctx)
@@ -362,6 +370,34 @@ def _data(text: str, repos: list[dict], ctx: dict) -> list[str]:
                        "later release, so the version running during the rollout still works (say so on Migration)")
     if ctx.get("data_class") in ("phi", "payments") and changed and not d["retention"]:
         out.append(f"Data: a {ctx['data_class']} product's tables need a Retention line: how long, and why")
+    return out
+
+
+def _undo(text: str, repos: list[dict], ctx: dict) -> list[str]:
+    """What undoing the feature in production needs (ops/undo.py): the features it depends on, what
+    users get with its flag off, and whether its data changes survive a rollback."""
+    from ..agents.parse import parse_data
+    from ..template_contract import roles_with
+    from ..undo import parse_depends, rollback_safety
+
+    out = []
+    dep = parse_depends(text)
+    if not dep["present"]:
+        out.append("HLD has no Depends on features section: '- <FEATURE-ID>: <what it uses>' for each released "
+                   "feature this one needs, or '- None: <why>'. An incident turns those off together.")
+    out += [f"Depends on features: '{b[:80]}' isn't '- <FEATURE-ID>: <what it uses>' or '- None: <why>'"
+            for b in dep["bad"]]
+    if ctx.get("feature_id") in dep["ids"]:
+        out.append("Depends on features lists the feature itself")
+    if any(r["role"] in roles_with("flags") for r in repos) and not section(text, "Flag off"):
+        out.append("HLD has no Flag off section: what users get with the feature's flag off. It must be today's "
+                   "behavior, so turning the flag off undoes the feature without breaking what uses it.")
+    if any(r["role"] in DATA_ROLES for r in repos) and section(text, "Data"):
+        d = parse_data(text)
+        if d["rollback"] and any(t["change"] != "none" for t in d["tables"]) and \
+                rollback_safety(d["rollback"])["safe"] is None:
+            out.append("Data: the Rollback line starts with 'safe' or 'not safe', then why: an incident rolls back "
+                       "only when it's safe, and fixes forward otherwise")
     return out
 
 

@@ -166,7 +166,13 @@ customProperties:
 - Migration: <Flyway version>; <expand now, contract in a later release | one step: why it's safe>
 - Backfill: <none | how, how long, whether it runs while the product is live>
 - Retention: <how long records are kept, and why>      (required for PHI and payments products)
-- Rollback: <what happens to data the new version wrote if the release is rolled back>
+- Rollback: <safe | not safe>; <what happens to data the new version wrote if the release is rolled back>
+                               (safe: the previous version runs on the new data. Not safe: an incident
+                                fixes forward instead of rolling back)
+## Depends on features         (every design: released features this one needs; an incident turns them off together)
+- <FEATURE-ID>: <what it uses>                            (or '- None: <why>')
+## Flag off                    (when a provider, web app or agent changes: what users get with the flag off)
+- <today's behavior, unchanged: what still works for the features that use this one>
 ## Threats                     (every product)
 - Boundary: <org>/<repo>: <where untrusted input enters>        (each project, namespace or external endpoint)
 - Authorization: <org>/<repo> <endpoint or 'all endpoints'>: <who may call it, and which records they may touch>

@@ -154,6 +154,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "waivers": list(state.get("waivers") or []),
         # The feature's flag (created at G4): the coder builds behind it, the reviewer checks it.
         "flag": state.get("flag", ""),
+        "flag_off": (state.get("undo") or {}).get("flag_off", ""),
+        "flagged_roles": FLAGGED_ROLES,
         # What the approved design says gets audited (VX-15); the build must publish those records.
         "audit": _audit_actions(services, arts),
         # The events the approved design names (VX-16): providers publish them, workers apply them.
@@ -608,7 +610,9 @@ def flag_instruction(ctx: dict, task: dict) -> str:
         return ""
     return (f" Put the new behavior behind feature flag {ctx['flag']}: read it through OpenFeature as a boolean"
             " with default false (the repo's flags module), and keep today's behavior when it is off. Tests"
-            " cover both. Name the flag key in the patch summary.")
+            " cover both. Name the flag key in the patch summary, and add a line 'Flag off: <what the tests"
+            " show users get with the flag off>'"
+            + (f"; the architecture says: {ctx['flag_off']}" if ctx.get("flag_off") else "") + ".")
 
 
 # Repos that serve or change records, whose template has an auditor (the contract's `audit`):
@@ -908,6 +912,19 @@ def flag_findings(ctx: dict, results: dict) -> list[str]:
         return []
     return [f"No task builds behind feature flag {flag}: gate the new behavior in "
             + ", ".join(sorted({r['repo'] for r in runtime}))]
+
+
+def flag_off_findings(ctx: dict, results: dict) -> list[str]:
+    """Deterministic (T-102): turning the flag off is how an incident undoes the feature, so the
+    build shows what users get with it off, tested, in each repo users reach."""
+    flag = ctx.get("flag")
+    runtime = [r for r in results.values() if r.get("role") in FLAGGED_ROLES and r.get("tests_passed")]
+    missing = sorted({r["repo"] for r in runtime if not re.search(r"^\s*Flag off\s*:", r.get("summary") or "",
+                                                                     re.IGNORECASE | re.MULTILINE)})
+    if not flag or not missing:
+        return []
+    return [(f"{', '.join(missing)}: the patch doesn't say what users get with flag {flag} off ('Flag off: ...'), "
+             "and the tests must show it's today's behavior")]
 
 
 def perf_pending(services, pr: dict, level: str) -> None:
@@ -1244,6 +1261,7 @@ def build_build_subgraph(services):
         findings += [f"{tid}: weakens a check to pass: {w}" for tid, rv in sorted(reviews.items())
                      for w in rv.get("weakened") or []]
         findings += flag_findings(s["ctx"], results)
+        findings += flag_off_findings(s["ctx"], results)
         findings += audit_findings(s["ctx"], results)
         findings += events_findings(s["ctx"], results)
         findings += instrumentation_findings(s["ctx"], results)

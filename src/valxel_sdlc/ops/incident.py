@@ -313,7 +313,10 @@ def build_incident_graph(services, checkpointer=None):
             "Write Markdown: ## Summary, ## Impact, ## Likely cause, ## Proposed actions with one bullet per action:"
             " '- flag_off: <feature id>', '- rollback: <repo>', '- hotfix: <repo>: <what to change>',"
             " '- intent_change: feature|initiative: <the new intent>' (when it works as built but not as users need),"
-            " '- monitor: <why no action>'. Prefer turning a recent feature's flag off over rolling back."
+            " '- monitor: <why no action>'. Undo the smallest thing that stops it: turn the suspect feature's"
+            " flag off (the tool also turns off the features that depend on it); roll back a component only"
+            " when no flag covers the failure; never roll back a whole release while one feature can be"
+            " found and turned off."
             + (f" The tool may itself {' and '.join(a.replace('_', ' ') for a in ctx['may'])} for a change released"
                " recently, at once, without waiting for on-call: when one of those fits, propose it first."
                if ctx.get("may") else "")
@@ -326,9 +329,15 @@ def build_incident_graph(services, checkpointer=None):
         res = run_agent(services, role="ops", product_id=state["product_id"], thread_id=state["incident_id"],
                         phase="incident", skills=TRIAGE_SKILLS, tail=tail, stub_text=stub)
         keep_case(state, ctx, tail, logs, stub, res.text)
-        return {"triage": res.text, "actions": parse_actions(res.text), "status": "awaiting_decision",
+        actions = parse_actions(res.text)
+        if callable(getattr(services, "undo_plan", None)):
+            try:  # dependents' flags first; no rollback the data can't survive (ops/undo.py)
+                actions = services.undo_plan(state["product_id"], actions, ctx.get("component", ""))
+            except Exception:  # triage's own proposals stand
+                log.exception("%s: undo plan failed", state["incident_id"])
+        return {"triage": res.text, "actions": actions, "status": "awaiting_decision",
                 "cost_usd": res.cost_usd, "tokens_used": res.tokens,
-                "events": [event("triage", "triaged", f"{len(parse_actions(res.text))} actions proposed")]}
+                "events": [event("triage", "triaged", f"{len(actions)} actions proposed")]}
 
     def keep_case(state: IncidentState, ctx: dict, tail: str, logs: str, stub: str, output: str) -> None:
         """Each triage is an eval case (valxel_sdlc.evals), labeled with what fixed the incident when it

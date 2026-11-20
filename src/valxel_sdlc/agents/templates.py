@@ -285,6 +285,9 @@ def architecture(ctx: dict, defective: bool) -> str:
             f"- {r['name']}: model text-embedding-3-small via {via}; sources: {record}s (events {_stub_topic(ctx)}, compacted)"
             for r in knowledge]
     lines += _data_lines(ctx, repos) + _threat_lines(ctx, repos)
+    lines += ["", "## Depends on features", "- None: it adds to the product without using another feature's work"]
+    lines += ["", "## Flag off", (f"- Today's behavior: {ctx['title'].lower()} isn't offered and every existing "
+                                  "screen and endpoint works as before")]
     lines += _resource_lines(ctx, repos, provider, lines)
     if any(r["role"] == "event-worker" for r in repos):
         record = _slug(ctx["title"]).split("-", 1)[0] or "record"
@@ -343,7 +346,7 @@ def _data_lines(ctx: dict, repos: list[dict]) -> list[str]:
             f"- Migration: V2__{record}.sql; one step: a new table, nothing existing changes",
             "- Backfill: none",
             f"- Retention: {keep}",
-            "- Rollback: the table stays; the previous version doesn't read it, so nothing breaks"]
+            "- Rollback: safe; the table stays and the previous version doesn't read it, so nothing breaks"]
 
 
 def _threat_lines(ctx: dict, repos: list[dict]) -> list[str]:
@@ -583,6 +586,9 @@ def _acceptance_lines(ctx: dict, repos: list[dict], acs: list[str], slug: str) -
     return out
 
 
+_TODAY = "today's behavior, unchanged"
+
+
 def code_task(ctx: dict, task: dict, passed: bool) -> str:
     return "\n".join([
         f"## Patch for {task['id']}", f"Repo: {task['repo']}", f"Branch: feature/{ctx['feature_id']}",
@@ -590,6 +596,8 @@ def code_task(ctx: dict, task: dict, passed: bool) -> str:
         f"Acceptance criteria: {', '.join(task['acs']) or 'none'}",
         *([f"Feature flag: {ctx['flag']} (default off; tests cover on and off)"]
           if ctx.get("flag") and task.get("role") in ("provider", "consumer", "agent", "mcp-server") else []),
+        *([f"Flag off: {ctx.get('flag_off') or _TODAY} (tested)"]
+          if ctx.get("flag") and task.get("role") in (ctx.get("flagged_roles") or ()) else []),
         *([f"Audit: {', '.join(a['action'] for a in ctx['audit'])} (ids only; fails closed)"]
           if ctx.get("audit") and task.get("role") in ("provider", "agent", "mcp-server") else []),
         *([f"Events: {', '.join(e['type'] for e in ctx['events'])} "
