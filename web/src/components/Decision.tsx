@@ -108,6 +108,10 @@ const SEV_TONE: Record<string, string> = {
   info: "plain",
 };
 
+function tomorrow(): string {
+  return new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+}
+
 /** What's being decided, the evidence, and the actions this person is allowed to take. */
 const NOTE_LABEL: Record<AgentNote["kind"], string> = {
   open: "Open question",
@@ -353,6 +357,8 @@ export function DecisionPanel({
     };
   }, [featureId, item.interrupt_id, item.can_decide, item.type]);
 
+  const [newDate, setNewDate] = useState("");
+
   async function send(decision: string, extra: Record<string, unknown> = {}) {
     setBusy(true);
     setErr("");
@@ -380,8 +386,14 @@ export function DecisionPanel({
     setComments((cs) => (cs.some((c) => c.text === text) ? cs : [...cs, { quote: "", text }]));
   }
 
-  const gate =
-    item.gate === "release"
+  const dateGate = item.gate === "release_date";
+  const gate = dateGate
+    ? {
+        name: "Release date",
+        question: "Its date has come and not everything is ready",
+        approve: "Ship what's ready",
+      }
+    : item.gate === "release"
       ? item.model === "launch"
         ? { name: "Release", question: "Launch these features together?", approve: "Launch" }
         : { name: "Release", question: "Ship this release train?", approve: "Approve release" }
@@ -1473,7 +1485,38 @@ export function DecisionPanel({
                   : "Stop, keep its features"}
               </button>
             )}
-            {item.type === "gate" && !reviewGate && mode === null && (
+            {dateGate && (
+              <>
+                {item.allowed?.includes("ship_ready") && (
+                  <button className="btn go" disabled={busy} onClick={() => send("ship_ready")}>
+                    Ship what's ready
+                  </button>
+                )}
+                <label className="field">
+                  New date
+                  <input
+                    type="date"
+                    value={newDate}
+                    min={tomorrow()}
+                    onChange={(e) => setNewDate(e.target.value)}
+                  />
+                </label>
+                <button
+                  className="btn secondary"
+                  disabled={busy || !newDate}
+                  onClick={() => send("move_date", { target_date: newDate })}
+                >
+                  Move the date
+                </button>
+                {!item.allowed?.includes("ship_ready") && (
+                  <p className="small muted">
+                    Shipping what's ready isn't offered:{" "}
+                    {item.readiness?.ready ? "a must-have isn't ready" : "nothing is ready yet"}.
+                  </p>
+                )}
+              </>
+            )}
+            {item.type === "gate" && !reviewGate && !dateGate && mode === null && (
               <>
                 {item.traceability?.blocks && (
                   <label className="field" style={{ width: "100%" }}>

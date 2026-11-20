@@ -167,6 +167,19 @@ class Notifier:
         self._send(people, subject, f"{tid} {thread_title} is waiting for {what}.\n{self.link(tid)}", "needed", ref)
         return [p.login for p in people]
 
+    def notice(self, thread_id: str, title: str, text: str, approvers: list[str], ref: str) -> list[str]:
+        """Something the people who decide a thread should know ahead of time (a release date that
+        its features won't make). Once per ref."""
+        with self._lock:
+            if ref in self.announced:
+                return []
+            self.announced.add(ref)
+            people = [p for p in self.prefs.values() if p.needed and any(_matches(p, a) for a in approvers)]
+            self._save()
+        self._send(people, f"{thread_id} {title}: {text.splitlines()[0]}", f"{text}\n{self.link(thread_id)}",
+                   "notice", ref)
+        return [p.login for p in people]
+
     def reached(self, thread_id: str, title: str, where: str) -> list[str]:
         """Work reached a stage (staging): tell the people watching it who asked for that."""
         ref = f"{thread_id}:{where}"

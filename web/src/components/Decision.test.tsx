@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, configure, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import type { IncidentAction, PendingItem } from "../api";
+import type { IncidentAction, PendingItem, ReleaseReadiness } from "../api";
 import { apiMock, resetApiMock } from "../test/apiMock";
 import { DecisionPanel } from "./Decision";
 
@@ -910,6 +910,53 @@ describe("how it ships (G1), launch flags (G4) and release readiness", () => {
     expect(screen.getByText("Must-haves not ready:")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "FARM-FEAT-14" })).toBeInTheDocument();
     expect(screen.getByText("Harvest export")).toBeInTheDocument();
+  });
+
+  const due: ReleaseReadiness = {
+    release_id: "FARM-REL-1",
+    model: "train",
+    target_date: "2026-11-20",
+    status: "planned",
+    counts: { ready: 1, checking: 0, building: 1, design: 0, not_started: 0, stopped: 0 },
+    total: 2,
+    ready: 1,
+    features: [],
+    not_started: [],
+    must: { total: 0, ready: 0, missing: [] },
+    says: "1 of 2 ready; 1 building",
+  };
+
+  it("on a release's date, ships what's ready or moves the date", async () => {
+    const user = userEvent.setup();
+    renderPanel(gateItem({ gate: "release_date", allowed: ["ship_ready", "move_date"], readiness: due }));
+    await user.click(await screen.findByRole("button", { name: "Ship what's ready" }));
+    expect(apiMock.decide).toHaveBeenCalledWith(
+      "CLN-1",
+      "int-1",
+      expect.objectContaining({ decision: "ship_ready" }),
+    );
+  });
+
+  it("moves the date when a must-have isn't ready", async () => {
+    const user = userEvent.setup();
+    renderPanel(
+      gateItem({
+        gate: "release_date",
+        allowed: ["move_date"],
+        readiness: { ...due, must: { total: 1, ready: 0, missing: ["FARM-FEAT-14"] } },
+      }),
+    );
+    expect(await screen.findByText(/a must-have isn't ready/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ship what's ready" })).not.toBeInTheDocument();
+    const move = screen.getByRole("button", { name: "Move the date" });
+    expect(move).toBeDisabled();
+    await user.type(screen.getByLabelText("New date"), "2026-12-15");
+    await user.click(move);
+    expect(apiMock.decide).toHaveBeenCalledWith(
+      "CLN-1",
+      "int-1",
+      expect.objectContaining({ decision: "move_date", target_date: "2026-12-15" }),
+    );
   });
 });
 

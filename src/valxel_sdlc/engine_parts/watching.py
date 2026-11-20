@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 from langgraph.types import Command
 
@@ -148,6 +148,7 @@ class WatchingMixin:
             Job("review_costs", self.review_costs, 3600),
             Job("expire_transcripts", self.expire_transcripts, 3600),
             Job("remove_drafts", self.remove_drafts, DAILY),  # finished features' drafts (drafts.py)
+            Job("warn_release_dates", self.warn_release_dates, DAILY),  # a week before a release's date
             Job("check_connections", self.check_connections, 3600),
             Job("catch_up_receipts", self.catch_up_receipts, 3600),
             Job("tool_health", self.tool_health, 3600),  # the tool's own agents against their baseline
@@ -303,8 +304,11 @@ class WatchingMixin:
                                           for p in self.pending(f))]
         # Who's in it now: features join and leave until they reach G6 (their own choice, `ship`).
         members = self.release_members(packet["release_id"]) if packet.get("release_id") else list(packet["features"])
+        due = bool(packet.get("target_date")) and datetime.now(UTC).date().isoformat() >= packet["target_date"]
         if self.release_readiness(packet["release_id"])["not_started"] if packet.get("release_id") else False:
-            return None  # planned features of its initiative haven't started: the list isn't complete
+            # Planned features of its initiative haven't started: the list isn't complete. On its
+            # date, its people decide: ship what's ready, or move the date (roadmap.graphs).
+            return {"status": "due", "at": datetime.now(UTC).isoformat()} if due else None
         for fid in [*members, *riding]:
             s = self._state(fid)
             if s.get("status") == "aborted":
@@ -317,7 +321,7 @@ class WatchingMixin:
             else:
                 ok = waiting
             if not ok:
-                return None
+                return {"status": "due", "at": datetime.now(UTC).isoformat()} if due else None
             ready.append(fid)
             lanes |= set(s.get("lanes_touched") or [])
             if (s.get("release") or {}).get("flag"):

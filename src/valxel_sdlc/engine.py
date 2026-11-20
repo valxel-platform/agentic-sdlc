@@ -119,6 +119,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         services.release_for = self.release_for
         services.open_releases = self.open_releases  # G1: the releases a feature could join (T-96)
         services.release_readiness = self.release_readiness  # the release gate's summary (T-99)
+        services.release_leave = self.release_leave  # late features on a release's date (T-98)
         services.roadmap_fit = self.roadmap_fit
         services.incident_signals = lambda iid: services.signals.for_incident(iid)
         services.suspects = self.suspects
@@ -556,7 +557,16 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
 
     def pending(self, feature_id: str) -> list[dict]:
         snap = self._g(feature_id).get_state(self._config(feature_id))
-        return [{"interrupt_id": i.id, **i.value} for i in snap.interrupts]
+        out = [{"interrupt_id": i.id, **i.value} for i in snap.interrupts]
+        for p in out:  # a release's date decision shows where its features are now, not when it opened
+            if p.get("gate") == "release_date":
+                p.update(self._date_choices(feature_id))
+        return out
+
+    def _date_choices(self, release_id: str) -> dict:
+        r = self.release_readiness(release_id)
+        can_ship = bool(r.get("ready")) and not r["must"]["missing"]
+        return {"readiness": r, "can_ship": can_ship, "allowed": (["ship_ready"] if can_ship else []) + ["move_date"]}
 
     def item(self, feature_id: str, interrupt_id: str) -> dict:
         for p in self.pending(feature_id):

@@ -11,6 +11,7 @@ Release:     plan (governance PR) -> wait until its features are ready -> notes 
 from __future__ import annotations
 
 import operator
+import re
 from datetime import datetime, timezone
 from typing import Annotated, Any, TypedDict
 
@@ -18,10 +19,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from ..agents import untrusted
-from ..research import DOC_SECTIONS
-from ..research import summary as research_summary
 from ..agents.context import build_layers, skills_dir_of
 from ..gateway import CallTags
+from ..research import DOC_SECTIONS
+from ..research import summary as research_summary
 from ..runtime import AgentTask
 from ..state import last, merge_dict
 from . import governance_pr, read_roadmap
@@ -30,6 +31,7 @@ from .record import render_initiative, render_release
 
 INITIATIVE_DECISIONS = ("approve", "revise", "abort")
 RELEASE_DECISIONS = ("approve", "abort")
+DATE_DECISIONS = ("ship_ready", "move_date")  # a release's date came and not everything is ready
 
 
 def now() -> str:
@@ -340,9 +342,12 @@ def build_release_graph(services, checkpointer=None):
     def wait_ready(state: ReleaseState) -> dict:
         label = ("every feature is in production with its flag off" if state["model"] == "launch"
                  else "every feature has passed staging")
-        res = interrupt({"type": "external", "wait": "release_ready", "label": f"Waiting until {label}",
+        res = interrupt({"type": "external", "wait": "release_ready", "label": f"Waiting until {label}"
+                         + (f", or its date {state['target_date']}" if state.get("target_date") else ""),
                          "release_id": state["release_id"], "model": state["model"], "feature_id": state["release_id"],
-                         "features": state["features"], "since": now()})
+                         "features": state["features"], "target_date": state.get("target_date", ""), "since": now()})
+        if res.get("status") == "due":  # its date, and not everything is ready: its people decide
+            return {"status": "due", "events": [event("wait", "due", f"{state['target_date']}: not every feature is ready")]}
         dropped = list(res.get("dropped") or [])
         # Who was in it when it was ready (features join and leave until G6), and security fixes
         # that joined while it gathered (valxel_sdlc.upkeep).
@@ -357,7 +362,52 @@ def build_release_graph(services, checkpointer=None):
                                  dropped=dropped)]}
 
     def route_after_wait(state: ReleaseState) -> str:
+        if state.get("status") == "due":
+            return "date_gate"
         return END if state.get("status") == "cancelled" else "notes"
+
+    def date_gate(state: ReleaseState) -> Command:
+        """The release's date came and not everything is ready (T-98): ship what's ready (only when
+        every must-have is in), or move the date."""
+        snap = services.snapshot(state["product_id"])
+        ready = (services.release_readiness(state["release_id"])
+                 if callable(getattr(services, "release_readiness", None)) else None) or {}
+        can_ship = bool(ready.get("ready")) and not (ready.get("must") or {}).get("missing")
+        allowed = (("ship_ready",) if can_ship else ()) + ("move_date",)
+        packet = {"type": "gate", "gate": "release_date", "phase": "release", "kind": "release",
+                  "lane": state["product_id"], "feature_id": state["release_id"], "product_id": state["product_id"],
+                  "title": state["title"], "model": state["model"], "target_date": state.get("target_date", ""),
+                  "label": f"Its date {state.get('target_date', '')} has come: ship what's ready, or move the date",
+                  "readiness": ready, "can_ship": can_ship,
+                  "approvers": lane_approvers(snap.product, "release"), "allowed": list(allowed)}
+        # Decided on where the features are when the answer comes, not when the question was asked.
+        raw = interrupt(packet)
+        ready = (services.release_readiness(state["release_id"])
+                 if callable(getattr(services, "release_readiness", None)) else None) or {}
+        can_ship = bool(ready.get("ready")) and not (ready.get("must") or {}).get("missing")
+        d = _decide(raw, (("ship_ready",) if can_ship else ()) + ("move_date",))
+        rec = {"gate": "release_date", "lane": state["product_id"], "at": now(), **d}
+        if d["decision"] == "move_date":
+            new = str(d.get("target_date") or "")
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", new) or new <= now()[:10]:
+                raise ValueError("Moving the date needs a new date (YYYY-MM-DD) in the future")
+            return Command(goto="wait_ready", update={
+                "gate_decisions": [rec], "target_date": new, "status": "planned",
+                "events": [event("release_date", "moved", f"{state.get('target_date')} to {new}",
+                                 approver=d["approver"])]
+                + record({**state, "target_date": new}, "planned",
+                         f"{state['release_id']}'s date moved to {new} by {d['approver']}.")})
+        late = [f["feature_id"] for f in ready.get("features") or [] if f["group"] not in ("ready", "stopped")]
+        leave = getattr(services, "release_leave", None)
+        if callable(leave):
+            leave(state["release_id"], late, f"Not ready on {state['release_id']}'s date {state.get('target_date')}")
+        dropped_plans = [c["title"] for c in ready.get("not_started") or []]
+        return Command(goto="wait_ready", update={
+            "gate_decisions": [rec], "candidates": [], "status": "planned",
+            "events": [event("release_date", "ship_ready", f"Ships the {ready.get('ready', 0)} ready; "
+                             + (f"{', '.join(late)} ship on their own" if late else "none late")
+                             + (f"; not started, left out: {', '.join(dropped_plans)}" if dropped_plans else ""),
+                             approver=d["approver"])]})
 
     def notes(state: ReleaseState) -> dict:
         titles = services.feature_titles(state["features"]) if callable(getattr(services, "feature_titles", None)) else {}
@@ -587,6 +637,7 @@ def build_release_graph(services, checkpointer=None):
     g.add_node("launch_rollout", launch_rollout, destinations=("launch_rollout", END))
     g.add_edge(START, "plan")
     g.add_edge("plan", "wait_ready")
-    g.add_conditional_edges("wait_ready", route_after_wait, ["notes", END])
+    g.add_conditional_edges("wait_ready", route_after_wait, ["notes", "date_gate", END])
+    g.add_node("date_gate", date_gate, destinations=("wait_ready",))
     g.add_edge("notes", "gate")
     return g.compile(checkpointer=checkpointer, name="valxel_release")

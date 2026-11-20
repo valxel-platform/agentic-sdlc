@@ -408,6 +408,55 @@ class RoadmapMixin:
              "detail": f"Ships with {release_id}" if release_id else "Ships on its own"}]})
         return ship
 
+    def release_leave(self, release_id: str, feature_ids: list[str], why: str) -> None:
+        """Features that weren't ready on their release's date ship on their own (T-98)."""
+        for fid in feature_ids:
+            try:
+                _at = datetime.now(UTC).isoformat()
+                self._g(fid).update_state(self._config(fid), {
+                    "ship": {"own": True, "chosen": True, "why": why},
+                    "events": [{"at": _at, "node": "ship", "kind": "left_release", "detail": f"{why}: ships on its own",
+                                "release_id": release_id}]})
+            except Exception:
+                log.exception("%s didn't leave %s", fid, release_id)
+
+    WARN_DAYS = 7
+
+    def warn_release_dates(self, today: str | None = None) -> list[str]:
+        """A week before a release's date (VALXEL_RELEASE_WARN_DAYS), tell its people which features
+        aren't on track (not yet ready, or not started). Once per release and date."""
+        import os
+        from datetime import date, timedelta
+
+        today = today or datetime.now(UTC).date().isoformat()
+        days = int(os.environ.get("VALXEL_RELEASE_WARN_DAYS") or self.WARN_DAYS)
+        horizon = (date.fromisoformat(today) + timedelta(days=days)).isoformat()
+        warned = []
+        for row in self.index.all():
+            if row.get("kind") != "release":
+                continue
+            s = self._state(row["feature_id"])
+            when = s.get("target_date") or ""
+            if s.get("status", "") not in ("", "planned") or not when or not (today <= when <= horizon):
+                continue
+            r = self.release_readiness(row["feature_id"])
+            behind = [f"{f['feature_id']} {f['title']} ({dict(self.READINESS)[f['group']].lower()})"
+                      for f in r["features"] if f["group"] not in ("ready", "stopped")]
+            behind += [f"{c['title']} (not started)" for c in r["not_started"]]
+            if not behind:
+                continue
+            try:
+                approvers = self.services.snapshot(s["product_id"]).product.approvers.get("release", [])
+            except Exception:
+                approvers = []
+            text = (f"{r['says']}, with {when} {(date.fromisoformat(when) - date.fromisoformat(today)).days} days away."
+                    "\nNot on track: " + "; ".join(behind))
+            ref = f"{row['feature_id']}:date:{when}"
+            self.services.notifier.notice(row["feature_id"], s.get("title", ""), text, approvers, ref)
+            if ref in self.services.notifier.announced:  # told now, or earlier
+                warned.append(row["feature_id"])
+        return warned
+
     def release_members(self, release_id: str) -> list[str]:
         """A release's features: the ones it was created with, and the ones whose own choice points at
         it (G1, or a change before G6); a feature that chose otherwise since isn't one."""
