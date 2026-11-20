@@ -140,7 +140,7 @@ def make_gate(gate: str, services):
         corrections: list[dict] = []
         taken: list[tuple[dict, str, str]] = []  # (decision, agents' draft, person's version)
         human: str | None = None
-        from .. import confidence, safe_mode
+        from .. import confidence, preview, safe_mode
 
         safe = safe_mode.active(services, state["product_id"])
         safe_banner = safe_mode.banner(safe) if safe else None
@@ -196,6 +196,7 @@ def make_gate(gate: str, services):
                 # G3 looks at a mockup of each screen, with what their checks found.
                 "mockups": (state.get("mockups") or None) if gate == "g3" else None,
                 "sketch": (state.get("sketch") or None) if gate == "g1" else None,
+                "try_it": preview.for_feature(services, state) if gate == "g5" else None,
                 # G4: what the design's added load does to the product's approved capacity (valxel_sdlc.capacity).
                 "capacity_change": (_capacity_change(services, state, snap)
                                     if gate == "g4" and lane_id == state["product_id"] else None),

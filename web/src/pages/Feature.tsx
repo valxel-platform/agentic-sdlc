@@ -265,6 +265,14 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
             <span title={PROFILE_HELP[f.profile]}>{PROFILE_LABEL[f.profile]} workflow</span>
           )}
           {f.risk_tier && <span>{RISK[f.risk_tier]}</span>}
+          {f.try_it?.url && (
+            <span>
+              <a href={f.try_it.url} target="_blank" rel="noopener noreferrer">
+                Try the change
+              </a>{" "}
+              before it merges
+            </span>
+          )}
           {f.lanes_touched && f.lanes_touched.length > 0 && (
             <span>Also changes {f.lanes_touched.join(", ")}</span>
           )}

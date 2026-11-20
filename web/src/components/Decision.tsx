@@ -1058,6 +1058,29 @@ export function DecisionPanel({
         </div>
       )}
 
+      {item.type === "gate" && item.try_it && (
+        <section className="mockups" aria-labelledby="preview-h">
+          <h3 id="preview-h">Try the change</h3>
+          {item.try_it.url ? (
+            <p>
+              <a className="btn secondary" href={item.try_it.url} target="_blank" rel="noopener noreferrer">
+                Open it in {item.try_it.env}
+              </a>{" "}
+              <span className="small faint">
+                The app as built from this change, with its backend and test data: sign in with the test
+                account
+                {item.try_it.expires_at
+                  ? `. Removed when the change merges, or at ${item.try_it.expires_at.slice(0, 16).replace("T", " ")} UTC`
+                  : ". Removed when the change merges"}
+                .
+              </span>
+            </p>
+          ) : (
+            <p className="small muted">{item.try_it.gone}</p>
+          )}
+        </section>
+      )}
+
       {item.type === "gate" && item.sketch && (
         <section className="mockups" aria-labelledby="sketch-h">
           <h3 id="sketch-h">A rough sketch</h3>

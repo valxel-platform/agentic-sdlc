@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { configure, render, screen } from "@testing-library/react";
+import { cleanup, configure, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { IncidentAction, PendingItem } from "../api";
@@ -528,6 +528,33 @@ describe("G6 traceability", () => {
     expect(screen.getByText("The screens, as approved and as built")).toBeInTheDocument();
     expect(screen.getByText("Serious")).toBeInTheDocument();
     expect(screen.getByText(/color-contrast: low contrast text/)).toBeInTheDocument();
+  });
+
+  it("offers the change set's environment at G5, or says it's gone", async () => {
+    renderPanel(
+      gateItem({
+        gate: "g5",
+        try_it: {
+          url: "https://web.cs-cln-1.dev.example",
+          env: "cs-cln-1",
+          expires_at: "2026-11-22T18:00:00+00:00",
+        },
+      }),
+    );
+    const link = await screen.findByRole("link", { name: "Open it in cs-cln-1" });
+    expect(link).toHaveAttribute("href", "https://web.cs-cln-1.dev.example");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(
+      screen.getByText(/Removed when the change merges, or at 2026-11-22 18:00 UTC/),
+    ).toBeInTheDocument();
+    cleanup();
+    renderPanel(
+      gateItem({
+        gate: "g5",
+        try_it: { gone: "Its environment ran out of time (48 hours) and was removed" },
+      }),
+    );
+    expect(await screen.findByText(/ran out of time/)).toBeInTheDocument();
   });
 
   it("shows a rough sketch beside the brief at G1, with no scripts", async () => {

@@ -209,6 +209,8 @@ export interface PendingItem {
   // G2: whether UX design runs. The fit check: what doesn't fit, and which document should change.
   ux_design?: { runs: boolean; why: string } | null;
   mockups?: MockupSet | null;
+  /** G5: the change set's environment, to use the change as built before it merges. */
+  try_it?: Preview | null;
   /** G1: a rough sketch of the main screens the brief implies (valxel_sdlc.sketch). */
   sketch?: { version: number; findings: string[] } | null;
   screens?: ScreensAtRelease | null;
@@ -536,8 +538,18 @@ export interface NotifyPrefs {
   channels: { email: boolean; chat: boolean };
   sent: { at: string; kind: string; ref: string; subject: string }[];
 }
+/** The change set's environment to try the change in, until it merges (valxel_sdlc.preview). */
+export interface Preview {
+  url?: string;
+  env?: string;
+  expires_at?: string;
+  /** Why the link is gone (merged, stopped, or out of time). */
+  gone?: string;
+}
+
 export interface Feature extends FeatureSummary {
   path?: FeaturePath;
+  try_it?: Preview | null;
   watching?: boolean;
   attachments?: Attachment[];
   description: string;

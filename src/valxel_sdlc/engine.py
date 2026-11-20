@@ -617,6 +617,8 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             "status": s.get("status"),
             "profile": s.get("profile", "feature"),
             "profile_note": s.get("profile_note", ""),
+            # The change set's environment to try the change in, until it merges (valxel_sdlc.preview).
+            "try_it": _preview(self.services, s),
             # Safe mode now, whatever it was when the gate opened (valxel_sdlc.safe_mode).
             "safe_mode": _safe_banner(self.cluster, s.get("product_id") or ""),
             "config_variant": s.get("config_variant", ""),
@@ -738,3 +740,12 @@ def _safe_banner(cluster, product_id: str) -> dict | None:
 
     sm = safe_mode.get(cluster, product_id)
     return safe_mode.banner(sm) if sm else None
+
+
+def _preview(services, state: dict) -> dict | None:
+    from . import preview
+
+    try:
+        return preview.for_feature(services, state) if state else None
+    except Exception:  # noqa: BLE001 - a view never fails over the link
+        return None
