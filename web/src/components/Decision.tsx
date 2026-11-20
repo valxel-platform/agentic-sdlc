@@ -13,6 +13,7 @@ import {
 } from "../api";
 import { CommentableDoc, DecisionBrief } from "./DecisionBrief";
 import { Mockups } from "./Mockups";
+import { Readiness } from "./Readiness";
 import { ScreensBuilt } from "./ScreensBuilt";
 import { Md } from "../components/Md";
 import {
@@ -301,6 +302,7 @@ export function DecisionPanel({
   const [lesson, setLesson] = useState("");
   const [comments, setComments] = useState<LineComment[]>([]);
   const [ux, setUx] = useState<boolean | null>(null);
+  const [ship, setShip] = useState<string | null>(null); // G1: a release id, "" for on its own
   const [docView, setDocView] = useState<"read" | "comment">("read");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -323,6 +325,7 @@ export function DecisionPanel({
     setComments([]);
     setDocView("read");
     setUx(null);
+    setShip(null);
   }, [item.interrupt_id, item.content, item.next_review]);
 
   // Time with this decision open and in view, reported every 15 s (the server keeps it per person and
@@ -606,6 +609,38 @@ export function DecisionPanel({
           </p>
         </div>
       )}
+
+      {item.type === "gate" && item.ship && (
+        <div className="ux-choice">
+          <h3>How does this ship?</h3>
+          <label className="small" htmlFor="ship-choice">
+            When it&apos;s approved at G6
+          </label>{" "}
+          <select
+            id="ship-choice"
+            value={ship ?? item.ship.current.release_id ?? ""}
+            disabled={!item.can_decide}
+            onChange={(e) => setShip(e.target.value)}
+          >
+            <option value="">On its own, as soon as it&apos;s approved</option>
+            {item.ship.releases.map((r) => (
+              <option key={r.id} value={r.id}>
+                With {r.id} {r.title} ({r.model === "train" ? "train" : "launch"}
+                {r.target_date ? `, ${r.target_date}` : ""})
+              </option>
+            ))}
+          </select>
+          <p className="small muted">{item.ship.current.why}. It can change until the feature reaches G6.</p>
+        </div>
+      )}
+
+      {item.type === "gate" && item.flag_warning && (
+        <p className="warn-note" role="status">
+          {item.flag_warning}
+        </p>
+      )}
+
+      {item.type === "gate" && item.readiness && <Readiness r={item.readiness} />}
 
       {item.ux_design && (
         <div className="ux-choice">
@@ -1465,9 +1500,14 @@ export function DecisionPanel({
                         ? { action_ids: chosen }
                         : item.traceability?.blocks
                           ? { override_reason: override.trim() }
-                          : item.ux_design && ux !== null && ux !== item.ux_design.runs
-                            ? { ui: ux }
-                            : {},
+                          : {
+                              ...(item.ux_design && ux !== null && ux !== item.ux_design.runs
+                                ? { ui: ux }
+                                : {}),
+                              ...(item.ship && ship !== null && ship !== (item.ship.current.release_id ?? "")
+                                ? { ship }
+                                : {}),
+                            },
                     )
                   }
                 >

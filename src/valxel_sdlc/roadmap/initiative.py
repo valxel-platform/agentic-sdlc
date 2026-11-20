@@ -6,7 +6,10 @@ from __future__ import annotations
 import re
 
 from ..duplicates import DUPLICATE, describe, find_similar, similarity
-from .record import HORIZONS, RELEASE_MODELS, section
+from .record import HORIZONS, SHIP_MODELS, section
+
+MUST = re.compile(r"\s*\((?:must|must-have|must have)\)\s*$", re.IGNORECASE)  # as record.candidates reads it
+DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 GOAL_LINE = re.compile(r"^-\s*(GOAL-[A-Z0-9-]+)\s*:", re.M)
 NEW_GOAL = re.compile(r"^-\s*New goal:\s*(.+?)\s*\(measure:\s*(.+?)\)\s*$", re.M)
@@ -28,8 +31,10 @@ def parse_draft(text: str) -> dict:
         line = line.strip()
         if line.startswith("- "):
             title, _, desc = line[2:].partition(":")
-            if title.strip():
-                cands.append({"title": title.strip(), "description": desc.strip()})
+            must = bool(MUST.search(title))
+            title = MUST.sub("", title).strip()
+            if title:
+                cands.append({"title": title, "description": desc.strip(), "must": must})
     return {
         "goal": goal.group(1) if goal else "",
         "new_goal": {"title": new_goal.group(1).strip(), "measure": new_goal.group(2).strip()} if new_goal else None,
@@ -40,6 +45,9 @@ def parse_draft(text: str) -> dict:
         "lanes": [ln.strip()[2:].split()[0] for ln in section(text, "Lanes").splitlines() if ln.strip().startswith("- ")],
         "release_model": _first_bullet(text, "Release model").split()[0].lower() if section(text, "Release model") else "",
         "candidates": cands,
+        # The date the release aims for, or "" (none: it ships when every feature is ready).
+        "target_date": "" if _first_bullet(text, "Release date").lower() in ("", "none", "-") else
+        _first_bullet(text, "Release date").split()[0],
         "risks": section(text, "Risks"),
         "evidence": section(text, "Evidence"),
         "assumptions": section(text, "Assumptions"),
@@ -79,6 +87,7 @@ def stub_draft(ctx: dict) -> str:
         "", "## Budget", f"- {int(ctx['feature_budget'] * max(2, len(cands)))}",
         "", "## Lanes", *[f"- {lane}" for lane in lanes],
         "", "## Release model", "- train" if regulated else "- launch",
+        "", "## Release date", f"- {ctx.get('target_date') or 'none'}",
         "", "## Candidate features", *[f"- {t}: {d}" if d else f"- {t}" for t, d in cands],
         "", "## Risks", "- Scope grows beyond the budget; the gate reviews the envelope",
     ]
@@ -113,9 +122,20 @@ def check_draft(d: dict, ctx: dict) -> list[str]:
     for lane in d["lanes"]:
         if lane not in allowed:
             out.append(f"Lane {lane} is not the product or a lane it depends on ({', '.join(sorted(allowed))})")
-    if d["release_model"] not in RELEASE_MODELS:
-        out.append("Release model must be 'launch' (default: features ship dark and launch together) or 'train' "
-                   "(regulated or contractual shipments)")
+    if d["release_model"] not in SHIP_MODELS:
+        out.append("Release model must be 'launch' (default: features ship dark and launch together), 'train' "
+                   "(regulated or contractual shipments) or 'each' (every feature ships on its own)")
+    if d.get("target_date"):
+        from datetime import UTC, datetime
+
+        if not DATE.match(d["target_date"]):
+            out.append(f"Release date '{d['target_date']}' must be a date (YYYY-MM-DD) or 'none'")
+        elif d["target_date"] <= (ctx.get("today") or datetime.now(UTC).date().isoformat()):
+            out.append(f"Release date {d['target_date']} must be in the future")
+        elif d["release_model"] == "each":
+            out.append("A release date needs a release: 'launch' or 'train', not 'each'")
+    if d["release_model"] == "each" and any(c.get("must") for c in d["candidates"]):
+        out.append("Must-have features need a release: 'launch' or 'train', not 'each'")
     if not d["candidates"]:
         out.append("No candidate features: break the initiative into the features that deliver it")
     for c in d["candidates"]:

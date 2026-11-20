@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
-
-from datetime import datetime, timezone
-
+from datetime import UTC, datetime, timezone
+from typing import ClassVar
 
 from .base import kind_of
 
@@ -348,10 +347,143 @@ class RoadmapMixin:
                 "budget_usd": envelope, "spent_usd": round(spent, 2), "remaining_usd": round(envelope - spent, 2),
                 "over": bool(envelope) and spent > envelope}
 
+    # ------------------------------------------------------------------ how a feature ships
+
+    def initiative_release(self, initiative_id: str, *, create: bool = True) -> dict | None:
+        """The release planned with an approved initiative (its release model launch or train, its
+        date, its must-have features), created the first time it's needed. None for 'each'."""
+        pid = initiative_id.split("-", 1)[0]
+        for row in self._rows(pid, "release"):
+            s = self._state(row["feature_id"])
+            if s.get("initiative") == initiative_id and s.get("status") != "cancelled":
+                return {"id": row["feature_id"], "model": s.get("model", "launch"), "status": s.get("status", ""),
+                        "open": s.get("status", "") in ("", "planned")}
+        if not create:
+            return None
+        s = self._state(initiative_id)
+        d = s.get("draft") or {}
+        if s.get("status") != "approved" or d.get("release_model") not in ("launch", "train"):
+            return None
+        rid = self.create_release(product_id=pid, title=s.get("title") or initiative_id, model=d["release_model"],
+                                  features=[], target_date=d.get("target_date", ""), initiative=initiative_id,
+                                  candidates=d.get("candidates") or [], created_by=s.get("created_by", ""))
+        return {"id": rid, "model": d["release_model"], "status": "planned", "open": True}
+
+    def default_ship(self, initiative_id: str) -> dict:
+        rel = self.initiative_release(initiative_id)
+        if rel and rel["open"]:
+            return {"release_id": rel["id"], "why": f"With {initiative_id}'s release ({rel['model']})"}
+        if rel:
+            return {"own": True, "why": f"{initiative_id}'s release {rel['id']} has closed its list: on its own"}
+        return {"own": True, "why": f"{initiative_id} ships each feature on its own"}
+
+    def open_releases(self, product_id: str) -> list[dict]:
+        """Releases a feature can still join: planned, list not closed."""
+        out = []
+        for row in self._rows(product_id, "release"):
+            s = self._state(row["feature_id"])
+            if s.get("status", "") in ("", "planned"):
+                out.append({"id": row["feature_id"], "title": s.get("title", ""), "model": s.get("model", "launch"),
+                            "target_date": s.get("target_date", ""), "initiative": s.get("initiative", "")})
+        return out
+
+    def set_ship(self, feature_id: str, release_id: str, *, by: str) -> dict:
+        """Change how a feature ships until G6: join an open release, or ship on its own ("")."""
+        s = self._state(feature_id)
+        if not s:
+            raise KeyError(f"Unknown feature {feature_id}")
+        if s.get("status") in ("done", "aborted") or (s.get("approvals") or {}).get("g6") or any(
+                p.get("gate") == "g6" or p.get("wait") == "release_train" for p in self.pending(feature_id)):
+            raise ValueError(f"{feature_id} has reached G6: how it ships is decided")
+        if release_id:
+            rel = next((r for r in self.open_releases(s["product_id"]) if r["id"] == release_id), None)
+            if rel is None:
+                raise ValueError(f"{release_id} isn't an open release of {s['product_id']}")
+            ship = {"release_id": release_id, "chosen": True, "why": f"Joined by {by}"}
+        else:
+            ship = {"own": True, "chosen": True, "why": f"On its own, by {by}"}
+        _at = datetime.now(UTC).isoformat()
+        self._g(feature_id).update_state(self._config(feature_id), {"ship": ship, "events": [
+            {"at": _at, "node": "ship", "kind": "changed", "by": by,
+             "detail": f"Ships with {release_id}" if release_id else "Ships on its own"}]})
+        return ship
+
+    def release_members(self, release_id: str) -> list[str]:
+        """A release's features: the ones it was created with, and the ones whose own choice points at
+        it (G1, or a change before G6); a feature that chose otherwise since isn't one."""
+        s = self._state(release_id)
+        pid = s.get("product_id") or release_id.split("-", 1)[0]
+        out = []
+        for fid in s.get("features") or []:
+            ship = (self._state(fid) or {}).get("ship") or {}
+            # Listed when the release was made, unless it has since chosen otherwise.
+            if ship.get("release_id") == release_id or not (ship.get("chosen") or ship.get("release_id")):
+                out.append(fid)
+        for row in self.index.all():
+            if row["product_id"] != pid or row.get("kind", "feature") != "feature" or row["feature_id"] in out:
+                continue
+            if ((self._state(row["feature_id"]) or {}).get("ship") or {}).get("release_id") == release_id:
+                out.append(row["feature_id"])
+        return out
+
+    # Where each member is, for the release page and its gate (T-99), in the order shown.
+    READINESS = (("ready", "Ready"), ("checking", "Being checked"), ("building", "Building"),
+                 ("design", "In design"), ("not_started", "Not started"), ("stopped", "Stopped"))
+    _STAGE_GROUP: ClassVar[dict[str, str]] = {**dict.fromkeys(("discovery", "g1", "spec", "g2", "design", "g3", "architecture", "g4"), "design"),
+                    **dict.fromkeys(("plan", "build", "g5"), "building"), **dict.fromkeys(("release", "g6"), "checking")}
+
+    def release_readiness(self, release_id: str) -> dict:
+        """How many of a release's features are ready, and where the others are: being checked
+        (staging), building (plan to G5), in design (discovery to G4), not started (its initiative's
+        planned features nobody has started), or stopped. Must-haves marked."""
+        s = self._state(release_id)
+        pid = s.get("product_id") or release_id.split("-", 1)[0]
+        model = s.get("model", "launch")
+        members = self.release_members(release_id)
+        summaries = {f["feature_id"]: f for f in self.feature_summaries(pid)}
+        cands = s.get("candidates") or []
+        must_titles = {c["title"].lower() for c in cands if c.get("must")}
+        initiative_titles = {f["title"].lower() for f in summaries.values()
+                             if s.get("initiative") and f.get("initiative_id") == s.get("initiative")}
+        rows = []
+        for fid in members:
+            f = summaries.get(fid) or {"feature_id": fid, "title": fid, "status": "unknown", "stage": ""}
+            st = self._state(fid) or {}
+            waiting = any(p.get("wait") == "release_train" for p in self.pending(fid))
+            if f["status"] == "stopped":
+                group = "stopped"
+            elif waiting or f["status"] == "released" or (model == "launch" and (st.get("release") or {}).get("production")):
+                group = "ready"  # train: held after staging; launch: in production with its flag off
+            else:
+                group = self._STAGE_GROUP.get((f.get("stage") or "").lower(), "building")  # "G1" or "spec"
+            rows.append({"feature_id": fid, "title": f["title"], "group": group, "stage": f.get("stage", ""),
+                         "must": f["title"].lower() in must_titles})
+        not_started = [{"title": c["title"], "must": bool(c.get("must"))} for c in cands
+                       if c["title"].lower() not in initiative_titles]
+        counts = {k: 0 for k, _ in self.READINESS}
+        for r in rows:
+            counts[r["group"]] += 1
+        counts["not_started"] = len(not_started)
+        musts = [r for r in rows if r["must"]] + [c for c in not_started if c["must"]]
+        missing = [r.get("feature_id") or r["title"] for r in musts if r.get("group") != "ready"]
+        return {"release_id": release_id, "model": model, "target_date": s.get("target_date", ""),
+                "status": s.get("status", ""), "counts": counts,
+                "total": len(rows) - counts["stopped"] + len(not_started), "ready": counts["ready"],
+                "features": rows, "not_started": not_started,
+                "must": {"total": len(musts), "ready": len(musts) - len(missing), "missing": missing},
+                "says": summary_line(counts, len(rows) - counts["stopped"] + len(not_started), musts, missing)}
+
     def release_for(self, feature_id: str, *, active: bool = False) -> dict | None:
         """The latest release a feature was put in. Cancelled ones count (a feature's G6 replays the
         same steps on resume), unless `active` asks for releases still under way."""
         product_id = feature_id.split("-", 1)[0]
+        ship = (self._state(feature_id) or {}).get("ship") or {}
+        if ship.get("release_id"):  # its own choice (G1, or a change before G6) comes first
+            s = self._state(ship["release_id"])
+            if s and not (active and s.get("status") == "cancelled"):
+                return {"id": ship["release_id"], "model": s.get("model", "launch"), "status": s.get("status", "")}
+        if ship.get("own") and ship.get("chosen"):
+            return None  # it chose to ship on its own, whatever release listed it before
         found = None
         for row in self._rows(product_id, "release"):
             s = self._state(row["feature_id"])
@@ -366,13 +498,14 @@ class RoadmapMixin:
         return found
 
     def create_release(self, *, product_id: str, title: str, model: str, features: list[str], target_date: str = "",
-                       initiative: str = "", created_by: str = "", background: bool = False) -> str:
+                       initiative: str = "", created_by: str = "", background: bool = False,
+                       candidates: list[dict] | None = None) -> str:
         if model not in ("launch", "train"):
             raise ValueError("model must be launch (default) or train")
-        if not features:
-            raise ValueError("A release needs at least one feature")
+        if not features and not initiative:
+            raise ValueError("A release needs at least one feature, or an initiative whose features it gathers")
         known = {f["feature_id"]: f for f in self.feature_summaries(product_id)}
-        for fid in features:
+        for fid in features:  # a planned release from an initiative may start empty: its features join as they start
             f = known.get(fid)
             if not f:
                 raise ValueError(f"{fid} is not a feature of {product_id}")
@@ -386,7 +519,19 @@ class RoadmapMixin:
         rid = self._new_id(product_id, "release", title)
         inp = {"release_id": rid, "product_id": product_id, "title": title, "model": model,
                "features": list(dict.fromkeys(features)), "target_date": target_date, "initiative": initiative,
-               "created_by": created_by}
+               "created_by": created_by,
+               # The initiative's planned features ({title, must}): the ones not started yet keep it waiting.
+               "candidates": [{"title": c["title"], "must": bool(c.get("must"))} for c in candidates or []]}
         self.bus.publish({"type": "feature.created", "feature_id": rid, "product_id": product_id})
         (self._submit if background else self._execute)(rid, inp)
         return rid
+
+
+def summary_line(counts: dict, total: int, musts: list, missing: list) -> str:
+    """'6 of 10 ready; 2 building; 1 in design; 1 not started; must-haves 4 of 5 ready'."""
+    words = {"checking": "being checked", "building": "building", "design": "in design",
+             "not_started": "not started", "stopped": "stopped"}
+    parts = [f"{counts['ready']} of {total} ready"] + [f"{counts[k]} {w}" for k, w in words.items() if counts.get(k)]
+    if musts:
+        parts.append(f"must-haves {len(musts) - len(missing)} of {len(musts)} ready")
+    return "; ".join(parts)

@@ -114,6 +114,10 @@ class LineComment(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
+class ShipIn(BaseModel):
+    release_id: str = Field("", max_length=120, description="An open release to ship with, or \"\" for on its own")
+
+
 class DecisionIn(BaseModel):
     decision: str = Field(examples=["approve", "revise", "takeover", "handback", "resolved", "retry", "abort"])
     feedback: str = ""
@@ -127,6 +131,8 @@ class DecisionIn(BaseModel):
     action_ids: list[str] | None = Field(default=None, description="Incidents only: which proposed actions to approve")
     reason: str | None = Field(default=None, description="Why it's sent back (revise, retry, abort): one of the "
                                "pilot's reasons, e.g. missing_requirement, wrong_approach, quality")
+    ship: str | None = Field(default=None, max_length=120, description="G1 only: how the feature ships: an open "
+                             "release's id to ship with it, or \"\" to ship on its own; left out, it stays as it is")
     override_reason: str | None = Field(default=None, max_length=1000, description="G6 only: release although the "
                                         "traceability matrix has gaps (or tracker drift that blocks), and why. "
                                         "Only the product's traceability approvers may.")

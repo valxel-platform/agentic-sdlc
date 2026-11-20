@@ -198,7 +198,7 @@ def build_initiative_graph(services, checkpointer=None):
                     + state["research"].split("\n", 1)[-1][:14000] if state.get("research") else ""),
                 "research": research_summary(state.get("research_report")),
                 "initiative": {k: d.get(k) for k in ("goal", "new_goal", "measure", "horizon", "budget_usd", "lanes",
-                                                     "release_model", "candidates")},
+                                                     "release_model", "target_date", "candidates")},
                 "approvers": lane_approvers(lanes[lane_id], "g0"),
                 "cost_usd": round(float(state.get("cost_usd", 0.0)), 4), "allowed": list(INITIATIVE_DECISIONS),
             }
@@ -226,7 +226,8 @@ def build_initiative_graph(services, checkpointer=None):
         initiative = {"id": state["initiative_id"], "title": state["title"],
                       "goal": d["goal"] or f"new: {d['new_goal']['title']}", "horizon": d["horizon"],
                       "status": "approved", "budget_usd": d["budget_usd"], "lanes": d["lanes"],
-                      "release_model": d["release_model"], "measure": d["measure"], "owner": state.get("created_by", ""),
+                      "release_model": d["release_model"], "target_date": d.get("target_date", ""),
+                      "measure": d["measure"], "owner": state.get("created_by", ""),
                       "scope": "product", "approved_by": approvers, "approved_at": now()[:10]}
         body = state["content"].split("\n", 1)[1] if state["content"].startswith("# ") else state["content"]
         files = {f"roadmap/initiatives/{state['initiative_id']}.md": render_initiative(initiative, body=body)}
@@ -295,6 +296,7 @@ class ReleaseState(TypedDict, total=False):
     initiative: str
     created_by: str
     features: Annotated[list[str], last]
+    candidates: list[dict]  # the initiative's planned features: {title, must}
     dropped: Annotated[list[str], last]  # members stopped before the release
     status: Annotated[str, last]  # planned | ready | approved | shipped | cancelled
     notes: Annotated[str, last]
@@ -342,9 +344,10 @@ def build_release_graph(services, checkpointer=None):
                          "release_id": state["release_id"], "model": state["model"], "feature_id": state["release_id"],
                          "features": state["features"], "since": now()})
         dropped = list(res.get("dropped") or [])
-        # Security fixes that joined while it gathered (valxel_sdlc.upkeep) are released with it.
-        members = [f for f in state["features"] if f not in dropped] + [
-            f for f in res.get("joined") or [] if f not in state["features"]]
+        # Who was in it when it was ready (features join and leave until G6), and security fixes
+        # that joined while it gathered (valxel_sdlc.upkeep).
+        base = res["members"] if "members" in res else [f for f in state["features"] if f not in dropped]
+        members = list(base) + [f for f in res.get("joined") or [] if f not in base]
         if not members:
             return {"status": "cancelled", "dropped": dropped,
                     "events": [event("wait", "cancelled", "every feature in the release was stopped")]}
@@ -382,6 +385,9 @@ def build_release_graph(services, checkpointer=None):
                 "dropped": state.get("dropped") or [], "preview": state.get("notes", "")[:4000],
                 "evidence": state.get("evidence", ""), "target_date": state.get("target_date", ""),
                 "summary": f"Approving {what} {', '.join(state['features'])}.",
+                # Ready, being checked, building, in design, not started, stopped (T-99).
+                "readiness": (services.release_readiness(state["release_id"])
+                              if callable(getattr(services, "release_readiness", None)) else None),
                 "approvers": lane_approvers(lanes[lane_id], "release"), "allowed": list(RELEASE_DECISIONS),
             }
             decision = _decide(interrupt(packet), RELEASE_DECISIONS)

@@ -170,6 +170,7 @@ export const apiMock = {
   roadmap: vi.fn(),
   recordReading: vi.fn(),
   featureOutcome: vi.fn(),
+  setShip: vi.fn(),
   createInitiative: vi.fn(),
   records: vi.fn(),
   mergeRecord: vi.fn(),

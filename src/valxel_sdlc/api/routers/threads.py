@@ -13,7 +13,7 @@ from ...web.auth import (
     User,
     can_decide,
 )
-from ..models import InitiativeIn, StartCandidateIn, InceptionIn, ReleaseIn, NotifyIn, WatchIn, RequestIn, StartIn
+from ..models import InitiativeIn, StartCandidateIn, InceptionIn, ReleaseIn, NotifyIn, WatchIn, RequestIn, StartIn, ShipIn
 
 
 def build(ctx: SimpleNamespace) -> APIRouter:
@@ -134,6 +134,23 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
         except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @api.put("/features/{feature_id}/ship")
+    def change_ship(feature_id: str, body: ShipIn, user: User = Depends(current_user)) -> dict:
+        """How the feature ships, until it reaches G6: with an open release, or on its own (the
+        person who asked for it, or its idea approvers)."""
+        try:
+            v = eng().view(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        member_of(user, v["product_id"])
+        g1 = eng().services.snapshot(v["product_id"]).product.approvers.get("g1", [])
+        if v.get("created_by") != user.login and not can_decide(user, {"approvers": g1}):
+            raise HTTPException(403, "Only the person who asked for it, or its idea approvers, can change how it ships")
+        try:
+            return eng().set_ship(feature_id, body.release_id.strip(), by=user.login)
+        except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
 
     @api.post("/threads/{thread_id}/resize", status_code=201)

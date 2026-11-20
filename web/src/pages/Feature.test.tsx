@@ -501,6 +501,40 @@ describe("FeaturePage path, notify, timeline and cost", () => {
   });
 });
 
+describe("FeaturePage how it ships", () => {
+  it("changes how it ships until G6", async () => {
+    const user = userEvent.setup();
+    apiMock.feature.mockResolvedValue(
+      feature({
+        ship: { own: true, why: "On its own" },
+        ship_releases: [
+          {
+            id: "CLN-REL-1",
+            title: "Front desk",
+            model: "launch",
+            target_date: "2027-03-01",
+            initiative: "",
+          },
+        ],
+      }),
+    );
+    apiMock.setShip.mockResolvedValue({ release_id: "CLN-REL-1" });
+    renderFeature();
+    const select = await screen.findByLabelText("Ships");
+    await user.selectOptions(select, "CLN-REL-1");
+    expect(apiMock.setShip).toHaveBeenCalledWith("CLN-1", "CLN-REL-1");
+  });
+
+  it("just says how it ships once G6 has settled it", async () => {
+    apiMock.feature.mockResolvedValue(feature({ ship: { release_id: "CLN-REL-1" }, ship_releases: null }));
+    renderFeature();
+    expect(await screen.findByRole("link", { name: "CLN-REL-1" })).toHaveAttribute(
+      "href",
+      "/releases/CLN-REL-1",
+    );
+  });
+});
+
 describe("FeaturePage artifacts, quality, trace and extras", () => {
   it("switches artifact tabs, defaulting to the last present", async () => {
     const user = userEvent.setup();

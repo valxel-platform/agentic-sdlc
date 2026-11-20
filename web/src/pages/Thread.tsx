@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Md } from "../components/Md";
+import { Readiness } from "../components/Readiness";
 import {
   api,
   ApiError,
@@ -286,6 +287,11 @@ export function ReleasePage() {
               ? "Each feature goes to production with its flag off. Approving the release turns the flags on together."
               : "Each feature waits after staging. Approving the release ships them to production together."}
           </p>
+          {v.readiness && (
+            <div className="pad">
+              <Readiness r={v.readiness} />
+            </div>
+          )}
           <ul className="ext-list">
             {v.features.map((f) => (
               <li key={f.feature_id}>

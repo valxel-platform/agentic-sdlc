@@ -73,7 +73,9 @@ def thread_view(engine, thread_id: str) -> dict:
                 "notes": s.get("notes", ""), "evidence": s.get("evidence", ""), "approved_by": s.get("approved_by", ""),
                 "dropped": s.get("dropped", []), "flags": s.get("flags", {}),
                 "features": [by_id.get(fid, {"feature_id": fid, "title": fid, "status": "unknown"})
-                             for fid in s.get("features", [])]}
+                             for fid in engine.release_members(thread_id)],
+                # How many are ready and where the rest are (T-99).
+                "readiness": engine.release_readiness(thread_id)}
     return out
 
 

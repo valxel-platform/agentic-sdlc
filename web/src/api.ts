@@ -208,6 +208,12 @@ export interface PendingItem {
   batch_why?: string;
   // G2: whether UX design runs. The fit check: what doesn't fit, and which document should change.
   ux_design?: { runs: boolean; why: string } | null;
+  /** G1: how the feature ships (T-96): its current answer, and the releases it could join. */
+  ship?: { current: Ship; releases: OpenRelease[] } | null;
+  /** G4: a feature in a launch that won't have a flag waits like a train (T-97). */
+  flag_warning?: string;
+  /** The release gate: how many of its features are ready, and where the rest are (T-99). */
+  readiness?: ReleaseReadiness | null;
   mockups?: MockupSet | null;
   /** G5: the change set's environment, to use the change as built before it merges. */
   try_it?: Preview | null;
@@ -538,6 +544,37 @@ export interface NotifyPrefs {
   channels: { email: boolean; chat: boolean };
   sent: { at: string; kind: string; ref: string; subject: string }[];
 }
+/** How a feature ships: with a release, or on its own (G1, changeable until G6). */
+export interface Ship {
+  release_id?: string;
+  own?: boolean;
+  chosen?: boolean;
+  why?: string;
+}
+
+export interface OpenRelease {
+  id: string;
+  title: string;
+  model: "launch" | "train";
+  target_date: string;
+  initiative: string;
+}
+
+/** Where a release's features are: ready, being checked, building, in design, not started, stopped. */
+export interface ReleaseReadiness {
+  release_id: string;
+  model: "launch" | "train";
+  target_date: string;
+  status: string;
+  counts: Record<"ready" | "checking" | "building" | "design" | "not_started" | "stopped", number>;
+  total: number;
+  ready: number;
+  features: { feature_id: string; title: string; group: string; stage: string; must: boolean }[];
+  not_started: { title: string; must: boolean }[];
+  must: { total: number; ready: number; missing: string[] };
+  says: string;
+}
+
 /** The change set's environment to try the change in, until it merges (valxel_sdlc.preview). */
 export interface Preview {
   url?: string;
@@ -549,6 +586,9 @@ export interface Preview {
 
 export interface Feature extends FeatureSummary {
   path?: FeaturePath;
+  ship?: Ship;
+  /** Open releases it could ship with; null once how it ships is settled (G6). */
+  ship_releases?: OpenRelease[] | null;
   try_it?: Preview | null;
   watching?: boolean;
   attachments?: Attachment[];
@@ -1129,6 +1169,7 @@ export interface ReleaseView extends ThreadBase {
   approved_by: string;
   dropped: string[];
   features: FeatureRow[];
+  readiness?: ReleaseReadiness;
 }
 /** Product inception (valxel_sdlc.inception): a vision to a brief, an architecture and a roadmap. */
 export interface InceptionReport {
@@ -1603,6 +1644,8 @@ export const api = {
     request<{ accepted: boolean }>("POST", `/features/${encodeURIComponent(id)}/resume`, {}),
   syncWork: (id: string) => request<unknown>("POST", `/features/${encodeURIComponent(id)}/sync`, {}),
   feature: (id: string) => request<Feature>("GET", `/features/${encodeURIComponent(id)}`),
+  setShip: (id: string, releaseId: string) =>
+    request<Ship>("PUT", `/features/${encodeURIComponent(id)}/ship`, { release_id: releaseId }),
   initiative: (id: string) => request<InitiativeView>("GET", `/features/${encodeURIComponent(id)}`),
   inception: (id: string) => request<InceptionView>("GET", `/features/${encodeURIComponent(id)}`),
   inceptions: () => request<InceptionSummary[]>("GET", "/inceptions"),

@@ -117,6 +117,8 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         services.feature_titles = lambda ids: {i: (self._state(i).get("title") or i) for i in ids}
         services.release_waits = self._release_waits
         services.release_for = self.release_for
+        services.open_releases = self.open_releases  # G1: the releases a feature could join (T-96)
+        services.release_readiness = self.release_readiness  # the release gate's summary (T-99)
         services.roadmap_fit = self.roadmap_fit
         services.incident_signals = lambda iid: services.signals.for_incident(iid)
         services.suspects = self.suspects
@@ -456,6 +458,8 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             profile, safe_note = "feature", "Safe mode is on for this product: express runs as a feature, every gate to a person"
         if initiative_id and not self.approved_initiative(product_id, initiative_id):
             raise ValueError(f"{initiative_id} is not an approved initiative of {product_id}")
+        # How it ships, until G1 confirms or changes it: with its initiative's release, or on its own.
+        ship = self.default_ship(initiative_id) if initiative_id else {"own": True, "why": "No initiative: on its own"}
         with self._create_lock:  # two identical requests at once must not both pass the check
             similar = self.similar(product_id, title, description)
             if track == "hotfix":  # a fix for an incident, decided by on-call: not a new intent
@@ -469,7 +473,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
                "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins,
                "related_features": similar, "not_duplicate_reason": not_duplicate_reason.strip(),
                "initiative_id": initiative_id, "track": track, "hotfix": dict(hotfix or {}), "pilot": bool(pilot),
-               "profile": profile, "profile_note": safe_note,
+               "profile": profile, "profile_note": safe_note, "ship": ship,
                # Whether it changes what people see (UX design and G3 run only then); G2 can change it.
                **self._ui(product_id, title, description, ui),
                # A share of new features runs on the candidate config, when one is set (VALXEL_CANARY_*).
@@ -617,6 +621,9 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             "status": s.get("status"),
             "profile": s.get("profile", "feature"),
             "profile_note": s.get("profile_note", ""),
+            "ship": s.get("ship") or {},
+            # What it could join instead, while how it ships can still change (before G6).
+            "ship_releases": self._ship_releases(s),
             # The change set's environment to try the change in, until it merges (valxel_sdlc.preview).
             "try_it": _preview(self.services, s),
             # Safe mode now, whatever it was when the gate opened (valxel_sdlc.safe_mode).
@@ -689,6 +696,15 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
                           for p in v["pending"]]
         out["updated_at"] = v["events"][-1]["at"] if v["events"] else None
         return out
+
+    def _ship_releases(self, s: dict) -> list[dict] | None:
+        """Open releases a feature could ship with, or None once it's settled (G6 or finished)."""
+        if not s or s.get("status") in ("done", "aborted") or (s.get("approvals") or {}).get("g6"):
+            return None
+        try:
+            return self.open_releases(s["product_id"])
+        except Exception:  # noqa: BLE001 - a view never fails over the list
+            return []
 
     def artifact(self, feature_id: str, kind: str) -> dict:
         s = self.graph.get_state(self._config(feature_id)).values

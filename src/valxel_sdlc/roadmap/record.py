@@ -26,6 +26,7 @@ from ..agents.parse import section
 HORIZONS = ("now", "next", "later")
 INITIATIVE_STATUSES = ("proposed", "approved", "active", "done", "dropped")
 RELEASE_MODELS = ("launch", "train")
+SHIP_MODELS = (*RELEASE_MODELS, "each")  # an initiative's: each = every feature ships on its own
 RELEASE_STATUSES = ("planned", "ready", "approved", "shipped", "cancelled")
 _FRONT = re.compile(r"\A---\n(.*?)\n---\n?(.*)\Z", re.S)
 
@@ -43,14 +44,18 @@ def _split(text: str) -> tuple[dict, str] | None:
 
 
 def candidates(body: str) -> list[dict]:
-    """'## Candidate features' bullets: '- Title: what it does'."""
+    """'## Candidate features' bullets: '- Title: what it does', '- Title (must): ...' for a must-have."""
+    import re
+
+    must = re.compile(r"\s*\((?:must|must-have|must have)\)\s*$", re.IGNORECASE)
     out = []
     for line in section(body, "Candidate features").splitlines():
         line = line.strip()
         if line.startswith("- "):
             title, _, desc = line[2:].partition(":")
             if title.strip():
-                out.append({"title": title.strip(), "description": desc.strip()})
+                out.append({"title": must.sub("", title).strip(), "description": desc.strip(),
+                            "must": bool(must.search(title))})
     return out
 
 
@@ -78,7 +83,8 @@ def parse_initiative(text: str, path: str = "") -> dict | None:
         "horizon": horizon if horizon in HORIZONS else "later",
         "status": status if status in INITIATIVE_STATUSES else "proposed",
         "budget_usd": float(meta.get("budget_usd") or 0), "lanes": [str(x) for x in meta.get("lanes") or []],
-        "release_model": model if model in RELEASE_MODELS else "launch",
+        "release_model": model if model in SHIP_MODELS else "launch",
+        "target_date": str(meta.get("target_date") or ""),
         "measure": str(meta.get("measure") or ""), "owner": str(meta.get("owner") or ""),
         "scope": str(meta.get("scope") or "product"),
         "approved_by": str(meta.get("approved_by") or ""), "approved_at": str(meta.get("approved_at") or ""),
@@ -92,7 +98,7 @@ def parse_initiative(text: str, path: str = "") -> dict | None:
 
 def render_initiative(i: dict, *, body: str = "") -> str:
     meta = {k: i.get(k) for k in ("id", "title", "goal", "horizon", "status", "budget_usd", "lanes", "release_model",
-                                  "measure", "owner", "scope", "approved_by", "approved_at", "review_by")}
+                                  "target_date", "measure", "owner", "scope", "approved_by", "approved_at", "review_by")}
     meta = {k: v for k, v in meta.items() if v not in (None, "", [])}
     front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
     if not body:

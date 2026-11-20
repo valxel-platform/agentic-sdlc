@@ -197,6 +197,10 @@ def make_gate(gate: str, services):
                 "mockups": (state.get("mockups") or None) if gate == "g3" else None,
                 "sketch": (state.get("sketch") or None) if gate == "g1" else None,
                 "try_it": preview.for_feature(services, state) if gate == "g5" else None,
+                # How it ships (T-96): with a release, or on its own; the approval can change it.
+                "ship": ship_options(services, state) if gate == "g1" else None,
+                # A launch ships its features dark: one without a flag would wait like a train (T-97).
+                "flag_warning": launch_flag_warning(services, state) if gate == "g4" else "",
                 # G4: what the design's added load does to the product's approved capacity (valxel_sdlc.capacity).
                 "capacity_change": (_capacity_change(services, state, snap)
                                     if gate == "g4" and lane_id == state["product_id"] else None),
@@ -334,6 +338,12 @@ def make_gate(gate: str, services):
         approvers = ", ".join(r["approver"] for r in records if r["decision"] in ("approve", "handback"))
         update: dict = human_update | {"gate_decisions": records, "approvals": {gate: True},
                                        "events": [event(gate, "approved", d["feedback"], approver=approvers, lanes=approving)]}
+        if gate == "g1":  # how it ships (T-96): the approver may change it here
+            ship, said = ship_choice(services, state, d)
+            if ship is not None:
+                update["ship"] = ship
+            if said is not None:
+                update["events"].append(said)
         if gate == "g2":
             # G2 settles whether UX design runs: the creation-time judgement, or what the approver said.
             said = next((r.get("ui") for r in [d] if r.get("ui") is not None), None)
@@ -385,6 +395,8 @@ def make_gate(gate: str, services):
             # The feature's flag exists before any code does, so the coder builds behind it.
             update["flag"], note = assign_flag(services, state, approvers)
             update["events"].append(note)
+            if not update["flag"] and (warn := launch_flag_warning(services, state)):
+                update["events"].append(event("g4", "launch_without_flag", warn))
         if gate == "g6":
             release = dict(state.get("release", {}))
             # Every feature reaches production behind a flag. In a launch group it stays off until the
@@ -772,3 +784,42 @@ def join(state: FeatureState) -> Command:
     if a.get("g3") and a.get("g4"):  # then check they fit together (valxel_sdlc.fit)
         return Command(goto="fit", update={"events": [event("join", "design_and_architecture_approved")]})
     return Command(goto=END, update={"events": [event("join", "waiting_for_other_gate")]})
+
+
+def ship_options(services, state: FeatureState) -> dict:
+    """G1's question: how does this ship? Its current answer and the releases it could join."""
+    opener = getattr(services, "open_releases", None)
+    releases = opener(state["product_id"]) if callable(opener) else []
+    return {"current": state.get("ship") or {"own": True, "why": "On its own"}, "releases": releases}
+
+
+def ship_choice(services, state: FeatureState, d: dict) -> tuple[dict | None, dict | None]:
+    """An approval's answer to "how does this ship?": (the new `ship`, an event), or (None, None)
+    when it didn't change it. "" means on its own; a release must still be open."""
+    if "ship" not in d:
+        return None, None
+    want = str(d.get("ship") or "")
+    now_rid = (state.get("ship") or {}).get("release_id", "")
+    if want == now_rid and (want or (state.get("ship") or {}).get("own")):
+        return None, None
+    if want:
+        opener = getattr(services, "open_releases", None)
+        if not any(r["id"] == want for r in (opener(state["product_id"]) if callable(opener) else [])):
+            return None, event("g1", "ship_refused", f"{want} isn't an open release: how it ships didn't change")
+        return ({"release_id": want, "chosen": True, "why": f"Joined at G1 by {d['approver']}"},
+                event("g1", "ship", f"Ships with {want}", approver=d["approver"]))
+    return ({"own": True, "chosen": True, "why": f"On its own, decided at G1 by {d['approver']}"},
+            event("g1", "ship", "Ships on its own", approver=d["approver"]))
+
+
+def launch_flag_warning(services, state: FeatureState) -> str:
+    """Why a feature in a launch won't ship dark, or "" (it has a flag, or isn't in a launch)."""
+    rel = services.release_for(state["feature_id"]) if callable(getattr(services, "release_for", None)) else None
+    if not rel or rel["model"] != "launch" or state.get("flag"):
+        return ""
+    flags = getattr(services, "flags", None)
+    if flags is not None and flags.available(state["product_id"]):
+        return ""  # one is created at approval; a failure there is reported then
+    return (f"This feature is in launch {rel['id']}, which ships its features dark behind flags, but "
+            f"{state['product_id']} has no flag service: it will wait after staging until the launch is "
+            "approved, like a train. Set up the product's flags, or move it to a train or on its own.")

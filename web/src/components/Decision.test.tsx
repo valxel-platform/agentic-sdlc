@@ -833,6 +833,86 @@ describe("initiative review decisions", () => {
   });
 });
 
+describe("how it ships (G1), launch flags (G4) and release readiness", () => {
+  const releases = [
+    {
+      id: "FARM-REL-1",
+      title: "Spring season",
+      model: "launch" as const,
+      target_date: "2027-03-01",
+      initiative: "FARM-INI-1",
+    },
+  ];
+
+  it("asks at G1 and sends the change with the approval", async () => {
+    const user = userEvent.setup();
+    renderPanel(
+      gateItem({
+        gate: "g1",
+        ship: { current: { release_id: "FARM-REL-1", why: "With FARM-INI-1's release (launch)" }, releases },
+      }),
+    );
+    const select = await screen.findByLabelText("When it's approved at G6");
+    expect(select).toHaveValue("FARM-REL-1");
+    expect(screen.getByText(/With FARM-INI-1's release \(launch\). It can change until/)).toBeInTheDocument();
+    await user.selectOptions(select, "");
+    await user.click(screen.getByRole("button", { name: "Approve the idea" }));
+    expect(apiMock.decide).toHaveBeenCalledWith(
+      "CLN-1",
+      "int-1",
+      expect.objectContaining({ decision: "approve", ship: "" }),
+    );
+  });
+
+  it("sends nothing about shipping when it's untouched", async () => {
+    const user = userEvent.setup();
+    renderPanel(gateItem({ gate: "g1", ship: { current: { own: true, why: "On its own" }, releases } }));
+    await user.click(await screen.findByRole("button", { name: "Approve the idea" }));
+    const body = apiMock.decide.mock.calls[0][2] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("ship");
+  });
+
+  it("warns at G4 when a launch feature won't have a flag", async () => {
+    renderPanel(
+      gateItem({ gate: "g4", flag_warning: "This feature is in launch FARM-REL-1, ... no flag service" }),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("no flag service");
+  });
+
+  it("shows the release's readiness at its gate", async () => {
+    renderPanel(
+      gateItem({
+        gate: "release",
+        readiness: {
+          release_id: "FARM-REL-1",
+          model: "launch",
+          target_date: "2027-03-01",
+          status: "ready",
+          counts: { ready: 6, checking: 0, building: 2, design: 1, not_started: 1, stopped: 0 },
+          total: 10,
+          ready: 6,
+          features: [
+            {
+              feature_id: "FARM-FEAT-14",
+              title: "Soil sensor import",
+              group: "building",
+              stage: "build",
+              must: true,
+            },
+          ],
+          not_started: [{ title: "Harvest export", must: false }],
+          must: { total: 5, ready: 4, missing: ["FARM-FEAT-14"] },
+          says: "6 of 10 ready; 2 building; 1 in design; 1 not started; must-haves 4 of 5 ready",
+        },
+      }),
+    );
+    expect(await screen.findByRole("heading", { name: /6 of 10 ready/ })).toBeInTheDocument();
+    expect(screen.getByText("Must-haves not ready:")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "FARM-FEAT-14" })).toBeInTheDocument();
+    expect(screen.getByText("Harvest export")).toBeInTheDocument();
+  });
+});
+
 describe("G2 UX toggle", () => {
   it("sends ui=false when the design is switched off", async () => {
     const user = userEvent.setup();

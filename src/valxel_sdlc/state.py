@@ -75,6 +75,8 @@ class FeatureState(TypedDict, total=False):
     initiative_id: str  # the approved initiative this feature delivers ('' = unplanned work)
     track: str  # standard | hotfix (an incident's fix: starts at planning, on-call approves G5 and G6)
     profile: str  # feature | express: which phases and gates the work goes through (valxel_sdlc.profiles)
+    # How it ships (G1, changeable until G6): {"release_id", "why"} with a release, or {"own": True, "why"}.
+    ship: Annotated[dict, last]
     profile_note: str  # why the profile differs from the one asked for (safe mode turns express into feature)
     # The hotfix track: an incident's {incident_id, repo, change, severity, approved_by}, or a security fix
     # the upkeep policy started {source: finding, findings, repo, change, severity, outcome, hold, release_by}

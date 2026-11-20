@@ -301,7 +301,11 @@ class WatchingMixin:
                   if f not in packet["features"]]
         riding = [f for f in joined if any(p.get("wait") == "release_train" and p.get("release_id") == packet["release_id"]
                                           for p in self.pending(f))]
-        for fid in [*packet["features"], *riding]:
+        # Who's in it now: features join and leave until they reach G6 (their own choice, `ship`).
+        members = self.release_members(packet["release_id"]) if packet.get("release_id") else list(packet["features"])
+        if self.release_readiness(packet["release_id"])["not_started"] if packet.get("release_id") else False:
+            return None  # planned features of its initiative haven't started: the list isn't complete
+        for fid in [*members, *riding]:
             s = self._state(fid)
             if s.get("status") == "aborted":
                 dropped.append(fid)
@@ -325,4 +329,5 @@ class WatchingMixin:
                             + (f"G5 by {g5}" if (g5 := ', '.join(g['approver'] for g in s.get('gate_decisions', []) if g['gate'] == 'g5'))
                                else f"no G5 needed (risk tier {s.get('risk_tier') or 'low'})"))
         return {"status": "success", "dropped": dropped, "lanes": sorted(lanes), "flags": flags,
-                "evidence": "\n".join(evidence), "joined": [f for f in riding if f in ready]}
+                "evidence": "\n".join(evidence), "joined": [f for f in riding if f in ready],
+                "members": [f for f in members if f not in dropped]}

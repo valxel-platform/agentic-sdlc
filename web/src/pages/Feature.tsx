@@ -222,6 +222,56 @@ function describe(e: FeatureEvent): string {
   }
 }
 
+/** How the feature ships (T-96): with a release or on its own; changeable until G6. */
+function ShipLine({ f, onChanged }: { f: Feature; onChanged: () => void }) {
+  const [err, setErr] = useState("");
+  const current = f.ship?.release_id ?? "";
+  if (!f.ship_releases) {
+    return current ? (
+      <span>
+        Ships with <Link to={threadPath(current)}>{current}</Link>
+      </span>
+    ) : (
+      <span>Ships on its own</span>
+    );
+  }
+  return (
+    <span>
+      <label htmlFor="ship-select">Ships</label>{" "}
+      <select
+        id="ship-select"
+        value={current}
+        onChange={(e) =>
+          api
+            .setShip(f.feature_id, e.target.value)
+            .then(() => {
+              setErr("");
+              onChanged();
+            })
+            .catch((x) => setErr(x.message))
+        }
+      >
+        <option value="">on its own</option>
+        {f.ship_releases.map((r) => (
+          <option key={r.id} value={r.id}>
+            with {r.id} {r.title}
+            {r.target_date ? ` (${r.target_date})` : ""}
+          </option>
+        ))}
+        {current && !f.ship_releases.some((r) => r.id === current) && (
+          <option value={current}>with {current}</option>
+        )}
+      </select>
+      {err && (
+        <span className="error-note small" role="alert">
+          {" "}
+          {err}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function FeaturePage({ canSync }: { canSync: (productId: string) => boolean }) {
   const { id = "" } = useParams();
   const [f, setF] = useState<Feature | null>(null);
@@ -274,6 +324,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
             <span title={PROFILE_HELP[f.profile]}>{PROFILE_LABEL[f.profile]} workflow</span>
           )}
           {f.risk_tier && <span>{RISK[f.risk_tier]}</span>}
+          {f.ship && <ShipLine f={f} onChanged={load} />}
           {f.try_it?.url && (
             <span>
               <a href={f.try_it.url} target="_blank" rel="noopener noreferrer">
