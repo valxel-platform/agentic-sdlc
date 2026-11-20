@@ -122,6 +122,8 @@ class FeatureState(TypedDict, total=False):
     ui: Annotated[bool, last]
     reopened: Annotated[list[str], last]  # approved documents build sent back, in order (graph/gates.reopen)
     ui_why: Annotated[str, last]
+    # Today's screens in staging, from the product's scan, for the prototype (valxel_sdlc.current_screens).
+    today_screens: Annotated[dict, last]
     mockups: Annotated[dict, last]  # the UX spec's screens drawn for G3 (valxel_sdlc.mockups)
     code_read: Annotated[dict, last]  # the repos the architect read, at which commit (valxel_sdlc.workspace)
     fit: Annotated[dict, last]  # whether the approved design and architecture fit together (valxel_sdlc.fit)

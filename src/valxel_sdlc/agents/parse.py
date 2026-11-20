@@ -260,6 +260,15 @@ def parse_screens(ux: str) -> dict[str, str]:
     return {m.group(1): _APP.sub("", m.group(2)).strip() for m in _SCREEN.finditer(section(ux, "Screens"))}
 
 
+def parse_screen_kinds(ux: str) -> dict[str, str]:
+    """Each screen's kind of app, as the spec says it: '- S1: Check-in (web: acme/cln-web)' -> {'S1': 'web'}."""
+    out = {}
+    for m in _SCREEN.finditer(section(ux, "Screens")):
+        a = _APP.search(m.group(2))
+        out[m.group(1)] = a.group(1).lower() if a else ""
+    return out
+
+
 def parse_screen_apps(ux: str) -> dict[str, str]:
     """Which app repo each screen lives in: '- S1: Check-in form (web: acme/cln-web)' -> {'S1': 'acme/cln-web'}."""
     out = {}

@@ -29,6 +29,9 @@ class AgentTask:
     # Web searches the session may make (0: none). Runtimes that can't search ignore it
     # (valxel_sdlc.research.can_search says which can).
     web_searches: int = 0
+    # Pictures for the model to look at with the task, before its text: [{"label", "media_type", "data"
+    # (bytes)}]. Sent with this call only and never stored. Runtimes that can't take them ignore them.
+    images: tuple = ()
     # A folder to work in, read-only: the session may read files there and change nothing
     # (valxel_sdlc.workspace). Runtimes without folder access ignore it.
     cwd: str | None = None

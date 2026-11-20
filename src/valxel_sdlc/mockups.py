@@ -21,7 +21,13 @@ import html
 import json
 import re
 
-from .agents.parse import parse_copy, parse_screen_apps, parse_screens, parse_states
+from .agents.parse import (
+    parse_copy,
+    parse_screen_apps,
+    parse_screen_kinds,
+    parse_screens,
+    parse_states,
+)
 
 KIND = "MOCKUPS"
 _SPLIT = re.compile(r"^=== (S\d+) ===\s*$", re.M)
@@ -167,9 +173,9 @@ def make(services, state: dict, ctx: dict, ux: str, budget_usd: float | None = N
         found = check(ux, pages)
     ref = services.artifacts.save(feature_id=state["feature_id"], kind=KIND, phase="design",
                                   content=json.dumps(pages), parents=[], constitution_version=ctx.get("constitution_version", ""))
-    screens, apps = parse_screens(ux), parse_screen_apps(ux)
+    screens, apps, kinds = parse_screens(ux), parse_screen_apps(ux), parse_screen_kinds(ux)
     return {"artifacts": {KIND: ref}, "cost_usd": cost, "tokens_used": tokens,
-            "mockups": {"screens": [{"id": s, "name": n, "app": apps.get(s, ""), "phone": "mobile" in apps.get(s, "")}
+            "mockups": {"screens": [{"id": s, "name": n, "app": apps.get(s, ""), "phone": kinds.get(s) == "mobile"}
                                     for s, n in screens.items() if s in pages],
                         "findings": found, "version": ref["version"]}}
 

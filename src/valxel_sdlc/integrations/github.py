@@ -132,6 +132,7 @@ class GitHub(Protocol):
     # Provisioning new repositories (see valxel_sdlc.provisioning); each call is idempotent.
     def get_file(self, *, repo: str, path: str, ref: str) -> str | None: ...  # ref '' = default branch
     def get_bytes(self, *, repo: str, path: str, ref: str) -> bytes | None: ...  # a binary file (a screenshot)
+    def head_sha(self, *, repo: str) -> str: ...  # the default branch's latest commit
     def create_repo(self, *, repo: str, template: str | None, private: bool, description: str) -> str: ...
     def update_repo(self, *, repo: str, merge: dict, default_branch: str, description: str) -> None: ...
     def enable_security(self, *, repo: str, **features: bool) -> None: ...
@@ -166,6 +167,9 @@ class StubGitHub:
         # Store apps' release workflows (valxel_sdlc.store): the stub answers a dispatch with the
         # statuses the workflow would post; set to "pending" or "failure" to test waiting and failing.
         self.release_result = "success"
+        # The screens scan (valxel-screens): "pending" to test waiting; screen ids whose route isn't there.
+        self.screens_result = "success"
+        self.screens_missing: set[str] = set()
         # Actions runs for the cost ledger: (repo, branch | sha | event) -> runs. Unset, a PR's branch
         # has one five-minute Linux run.
         self.actions: dict[tuple[str, str], list[dict]] = {}
@@ -293,6 +297,20 @@ class StubGitHub:
             if suite:
                 self.set_status(repo=repo, sha=sha, context=suite, state=result, description="3 passed, 0 failed")
             self.set_status(repo=repo, sha=sha, context=f"release / {stage}", state=result, description="stub release")
+        if event_type == "valxel-screens" and self.screens_result != "pending":
+            stage, fid, lines = payload.get("stage", ""), payload.get("feature_id", ""), []
+            for s in payload.get("screens") or []:
+                if s["id"] in self.screens_missing:  # a route that doesn't exist yet: a new screen
+                    lines.append(f"- {s['id']} {s['route']}: failed")
+                    continue
+                shots = []
+                for width in ("desktop", "phone"):
+                    path = f"{fid}/{stage}/{s['id']}-{width}.png"
+                    self.files[(repo, "valxel-screens", path)] = b"\x89PNG stub " + path.encode()
+                    shots.append(f"{width}: {path}")
+                lines.append(f"- {s['id']} {s['route']}: passed; " + "; ".join(shots))
+            self.statuses.append({"repo": repo, "sha": sha, "context": payload.get("check", ""),
+                                  "state": self.screens_result, "description": "\n".join(lines)})
         if event_type == "valxel-rollout" and payload.get("context") and result != "pending":
             self.set_status(repo=repo, sha=sha, context=payload["context"], state=result,
                             description="crash-free 99.8% of 1200 users (floor 99.00%)")
@@ -308,6 +326,9 @@ class StubGitHub:
     def get_bytes(self, *, repo, path, ref):
         v = self.files.get((repo, ref or "main", path))
         return v.encode() if isinstance(v, str) else v
+
+    def head_sha(self, *, repo) -> str:
+        return hashlib.sha1(f"{repo}@main".encode()).hexdigest()
 
     def create_repo(self, *, repo, template, private, description) -> str:
         r = self._repo(repo, "create_repo")
@@ -618,6 +639,10 @@ class GitHubRest:
         if not res or not isinstance(res, dict) or "content" not in res:
             return None
         return base64.b64decode(res["content"])
+
+    def head_sha(self, *, repo) -> str:
+        branch = (self._call("GET", repo, "") or {}).get("default_branch") or "main"
+        return str((self._call("GET", repo, f"/commits/{quote(branch, safe='')}") or {}).get("sha") or "")
 
     def create_repo(self, *, repo, template, private, description) -> str:
         org, name = repo.split("/", 1)

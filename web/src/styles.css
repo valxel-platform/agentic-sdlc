@@ -683,6 +683,12 @@ label.field {
   margin: 8px 0;
 }
 
+.mock-frame .today-shot {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 .error-note {
   background: var(--stop-bg);
   color: var(--stop-ink);

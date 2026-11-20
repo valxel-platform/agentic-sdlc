@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-LABELS = {"ci": "CI checks", "build": "OpenChoreo builds", "change_set": "Change set's own environment", "dev": "Deploy to dev",
+LABELS = {"today_screens": "Today's screens", "ci": "CI checks", "build": "OpenChoreo builds", "change_set": "Change set's own environment", "dev": "Deploy to dev",
           "staging": "Deploy to staging", "production": "Deploy to production", "rollout": "Staged rollout"}
 # Store builds and Maestro runs take longer than a deployment; a rollout step waits on a day of vitals.
 TIMEOUT_S = {"ci": 3 * 3600, "build": 3600, "change_set": 1800, "dev": 1800, "staging": 1800, "production": 1800,
@@ -119,6 +119,38 @@ class WaitChecker:
             except Exception:
                 self._unclaim(key)  # try again on the next check
 
+    def _today(self, packet: dict) -> dict | None:
+        """Ask the product's scan for today's screens once, then wait for its report. However it
+        ends (a failing scan of today's app is still its screenshots), the prototype is drawn next."""
+        from .current_screens import STAGE, WAIT_S
+
+        t = packet["scan"]
+        key = (packet.get("feature_id"), "today_screens", packet.get("since"), t["repo"])
+        if self._claim(key):
+            try:
+                self.services.github.dispatch(repo=t["repo"], event_type="valxel-screens", payload={
+                    "stage": STAGE, "sha": t["sha"], "feature_id": t["feature_id"], "flag": "", "check": t["check"],
+                    "env": t["env"], "screens": t["screens"]})
+            except Exception as exc:  # noqa: BLE001 - try again on the next check
+                self._unclaim(key)
+                return self._today_late(packet, f"{type(exc).__name__}: {exc}")
+        status = self._status(t, t["check"])
+        if status and status["state"] in ("success", "failure"):
+            return {"status": "success", "wait": "today_screens", "summary": status.get("summary", ""),
+                    "url": status.get("url", ""), "at": now()}
+        return self._today_late(packet, "", WAIT_S)
+
+    def _today_late(self, packet: dict, why: str, limit: float | None = None) -> dict | None:
+        from .current_screens import WAIT_S
+
+        since = packet.get("since")
+        limit = limit or WAIT_S
+        if since and (datetime.now(timezone.utc) - datetime.fromisoformat(since)).total_seconds() > limit:
+            return {"status": "failure", "wait": "today_screens", "at": now(),
+                    "reason": f"Today's screens weren't reported within {int(limit // 60)} minutes"
+                              + (f" ({why})" if why else "")}
+        return None
+
     def _status(self, t: dict, context: str) -> dict | None:
         res = self.services.github.checks(repo=t["repo"], sha=t["sha"])
         return next((c for c in res.get("checks", []) if c.get("name") == context), None)
@@ -186,6 +218,8 @@ class WaitChecker:
                     "fix_window", "corroboration"):  # resolved from the engine's own threads
             fn = getattr(self.services, "release_waits", None)
             return fn(packet) if callable(fn) else None
+        if wait == "today_screens":  # today's screens for the G3 prototype (valxel_sdlc.current_screens)
+            return self._today(packet)
         if wait == "provisioning":  # repos the provisioning worker is creating (security S4)
             prov = getattr(self.services, "provisioner", None)
             done = getattr(prov, "done", None)

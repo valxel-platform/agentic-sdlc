@@ -42,6 +42,7 @@ from .agents.parse import (
     parse_copy,
     parse_flow,
     parse_screen_apps,
+    parse_screen_kinds,
     parse_screens,
     parse_states,
 )
@@ -308,7 +309,8 @@ def stub(ux: str) -> str:
             f'<body>{"".join(parts)}</body></html>')
 
 
-def draw(services, ctx: dict, ux: str, findings: list[str] | None = None, budget_usd: float | None = None):
+def draw(services, ctx: dict, ux: str, findings: list[str] | None = None, budget_usd: float | None = None,
+         images: list | tuple = (), today: str = ""):
     """The designer draws the prototype; returns (document, result)."""
     from .graph.phase import call_agent
 
@@ -328,11 +330,11 @@ def draw(services, ctx: dict, ux: str, findings: list[str] | None = None, budget
         "- Mark what this feature adds with data-change=\"new\" and what it changes with data-change=\"changed\".\n"
         "- The spec's Copy word for word, on its screen. Example values only: never a name, date of birth or number "
         "that could be a real person's. Label every field, put words on every button. No class names starting vx-.\n"
-        "Reply with the whole HTML document only.\n\n<ux-spec>\n" + ux + "\n</ux-spec>")
+        "Reply with the whole HTML document only." + today + "\n\n<ux-spec>\n" + ux + "\n</ux-spec>")
     if findings:
         tail += "\n\nFix these in the prototype:\n" + "\n".join(f"- {f}" for f in findings)
     res = call_agent(services, role="designer", phase="design", ctx=ctx, skills=("design:design-handoff",), tail=tail,
-                     stub_text=stub(ux), max_tokens=24000, budget_usd=budget_usd)
+                     stub_text=stub(ux), max_tokens=24000, budget_usd=budget_usd, images=tuple(images))
     text = res.text or ""
     start = text.lower().find("<!doctype")
     start = start if start >= 0 else text.lower().find("<html")
@@ -341,24 +343,25 @@ def draw(services, ctx: dict, ux: str, findings: list[str] | None = None, budget
     return doc, res
 
 
-def make(services, state: dict, ctx: dict, ux: str, budget_usd: float | None = None) -> dict:
+def make(services, state: dict, ctx: dict, ux: str, budget_usd: float | None = None, images: list | tuple = (),
+         today: str = "") -> dict:
     """Draw, check, redraw once if needed, keep. Returns the state update for the feature: the
     `mockups` entry G3 and G6 read, marked as a prototype."""
-    doc, res = draw(services, ctx, ux, budget_usd=budget_usd)
+    doc, res = draw(services, ctx, ux, budget_usd=budget_usd, images=images, today=today)
     found = check(ux, doc)
     cost, tokens = float(res.cost_usd or 0.0), int(res.tokens or 0)
     if found:
-        doc2, res2 = draw(services, ctx, ux, found, budget_usd=budget_usd)
+        doc2, res2 = draw(services, ctx, ux, found, budget_usd=budget_usd, images=images, today=today)
         cost, tokens = cost + float(res2.cost_usd or 0.0), tokens + int(res2.tokens or 0)
         found2 = check(ux, doc2)
         if len(found2) < len(found):
             doc, found = doc2, found2
     ref = services.artifacts.save(feature_id=state["feature_id"], kind=KIND, phase="design", content=doc, parents=[],
                                   constitution_version=ctx.get("constitution_version", ""))
-    screens, apps, drawn = parse_screens(ux), parse_screen_apps(ux), screens_in(doc)
+    screens, apps, drawn, kinds = parse_screens(ux), parse_screen_apps(ux), screens_in(doc), parse_screen_kinds(ux)
     return {"artifacts": {KIND: ref}, "cost_usd": cost, "tokens_used": tokens,
             "mockups": {"prototype": True,
-                        "screens": [{"id": s, "name": n, "app": apps.get(s, ""), "phone": "mobile" in apps.get(s, "")}
+                        "screens": [{"id": s, "name": n, "app": apps.get(s, ""), "phone": kinds.get(s) == "mobile"}
                                     for s, n in screens.items() if s in drawn],
                         "findings": found, "version": ref["version"]}}
 

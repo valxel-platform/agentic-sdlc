@@ -360,6 +360,28 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         return HTMLResponse(page, headers={"Content-Security-Policy": prototype.CSP, "X-Content-Type-Options": "nosniff",
                                            "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
+    @api.get("/features/{feature_id}/today/{sid}/{width}")
+    def today_shot(feature_id: str, sid: str, width: str, user: User = Depends(current_user)) -> Response:
+        """A screen as it is today in staging, for G3 beside the prototype: read from the product's
+        scanning repo (valxel_sdlc.current_screens), never kept by the tool."""
+        from ... import current_screens
+
+        if width not in ("desktop", "phone"):
+            raise HTTPException(404, "desktop or phone")
+        try:
+            state = eng()._state(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if state.get("product_id") not in lanes_for(user):
+            raise HTTPException(403, f"You aren't a member of {state.get('product_id')}'s organization")
+        today = state.get("today_screens") or {}
+        shot = (today.get("screens") or {}).get(sid) or {}
+        data = current_screens.picture(eng().services, today.get("repo", ""), shot.get(width, "")) if shot.get("today") else None
+        if not data:
+            raise HTTPException(404, f"No screenshot of {sid} today")
+        return Response(data, media_type="image/png", headers={"Cache-Control": "private, max-age=300",
+                                                               "X-Content-Type-Options": "nosniff"})
+
     @api.get("/features/{feature_id}/screens/{sid}/{width}")
     def screen_shot(feature_id: str, sid: str, width: str, user: User = Depends(current_user)) -> Response:
         """A screenshot of a built screen from the staging scan, for the people at G6."""

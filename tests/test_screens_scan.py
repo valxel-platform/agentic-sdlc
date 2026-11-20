@@ -43,7 +43,9 @@ def test_serious_violations_block_and_minor_ones_dont():
 
 def test_staging_scans_the_web_screens_from_the_acceptance_repo():
     ux = "## Screens\n- S1: Check-in (web: acme/web) [/checkin]\n- S2: Detail (mobile: acme/app)\n"
-    svc = SimpleNamespace(artifacts=SimpleNamespace(load=lambda ref: ux))
+    workflows = {"acme/acc": "name: screens"}  # the repo runs the scan (screens.WORKFLOW)
+    svc = SimpleNamespace(artifacts=SimpleNamespace(load=lambda ref: ux),
+                          github=SimpleNamespace(get_file=lambda repo, path, ref: workflows.get(repo)))
     state = {"feature_id": "CLN-FEAT-1", "artifacts": {"UX": {"id": "u"}}, "flag": "cln-feat-1",
              "change_set": {"acceptance": {"repo": "acme/acc", "sha": "abc"}}}
     [t] = screens.targets(svc, state, "staging")
@@ -51,6 +53,8 @@ def test_staging_scans_the_web_screens_from_the_acceptance_repo():
     assert [s["id"] for s in t["screens"]] == ["S1"]  # phone screens aren't visited by route
     assert screens.targets(svc, state, "dev") == []
     assert screens.targets(svc, {**state, "artifacts": {}}, "staging") == []
+    workflows.clear()  # a repo without the scan isn't asked: it would only wait out the stage
+    assert screens.targets(svc, state, "staging") == []
 
 
 def test_the_wait_checker_asks_for_the_scan_once_with_the_urls():

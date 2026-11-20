@@ -89,6 +89,7 @@ class ModelGateway:
         stub_text: str | None = None,
         max_tokens: int = 4096,
         web_searches: int = 0,
+        images: tuple = (),
     ) -> GatewayResult:
         role = self.settings.role(tags.role)
         if not self.allowed(role.provider, tags.data_class):
@@ -104,6 +105,7 @@ class ModelGateway:
             max_tokens=max_tokens,
             stub_text=stub_text,
             web_searches=web_searches,
+            images=tuple(images or ()),
             labels=labels_for(tags),
             data_class=tags.data_class,
         )

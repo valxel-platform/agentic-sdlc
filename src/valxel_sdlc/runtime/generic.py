@@ -15,7 +15,7 @@ class GatewayRuntime:
 
     def run(self, task: AgentTask) -> AgentResult:
         res = self.gateway.complete(task.tags, task.layers, stub_text=task.stub_text, max_tokens=task.max_tokens,
-                                     web_searches=task.web_searches)
+                                     web_searches=task.web_searches, images=task.images)
         out = AgentResult(
             text=res.text,
             tokens=res.total_tokens,

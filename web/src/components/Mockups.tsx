@@ -18,6 +18,7 @@ export function Mockups({
   const [phone, setPhone] = useState<boolean | null>(null);
   const [text, setText] = useState("");
   const [visit, setVisit] = useState(0); // a new frame each time a screen is picked: start the walk there
+  const [before, setBefore] = useState(false); // today's screen instead of the prototype
   if (!set.screens.length) {
     return set.findings.length ? <p className="small muted">{set.findings[0]}</p> : null;
   }
@@ -56,14 +57,48 @@ export function Mockups({
             onClick={() => {
               setAt(i);
               setVisit((v) => v + 1);
+              setBefore(false);
             }}
           >
             <span className="mono">{x.id}</span> {x.name}
+            {x.new ? (
+              <span className="chip go small">New</span>
+            ) : x.today ? (
+              <span className="chip plain small">Changed</span>
+            ) : null}
           </button>
         ))}
       </div>
+      {set.prototype && s.today && (
+        <div className="segmented small" role="group" aria-label={`${s.id}: today or with this change`}>
+          <button
+            type="button"
+            className={before ? "on" : ""}
+            aria-pressed={before}
+            onClick={() => setBefore(true)}
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            className={!before ? "on" : ""}
+            aria-pressed={!before}
+            onClick={() => setBefore(false)}
+          >
+            With this change
+          </button>
+        </div>
+      )}
       <div className={`mock-frame${narrow ? " phone" : ""}`}>
-        {set.prototype ? (
+        {set.prototype && before && s.today ? (
+          <img
+            className="today-shot"
+            src={`/api/features/${encodeURIComponent(featureId)}/today/${s.id}/${
+              (narrow && s.today.phone) || !s.today.desktop ? "phone" : "desktop"
+            }`}
+            alt={`${s.id} ${s.name} as it is today, in staging`}
+          />
+        ) : set.prototype ? (
           <iframe
             key={`${s.id}-${visit}`}
             title={`Prototype, starting at ${s.id}: ${s.name}`}
@@ -82,8 +117,9 @@ export function Mockups({
         <p className="small faint">
           Click through it as a user would: fields keep what you type, the bar at the top switches each
           screen&apos;s states, and &ldquo;Show what&apos;s new&rdquo; outlines what this feature adds or
-          changes. Pick a screen above to start there. Example values only. Not right? Comment on a screen and
-          request changes: the design is drawn again.
+          changes. Pick a screen above to start there
+          {set.screens.some((x) => x.today) ? ", and compare it with the screen as it is today" : ""}. Example
+          values only. Not right? Comment on a screen and request changes: the design is drawn again.
         </p>
       ) : (
         <p className="small faint">

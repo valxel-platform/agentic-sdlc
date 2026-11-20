@@ -33,6 +33,8 @@ class ModelRequest:
     max_tokens: int = 4096
     stub_text: str | None = None  # used only by StubProvider
     web_searches: int = 0  # the Claude API's web search tool, at most this many uses (0: off)
+    # Pictures sent before the tail: [{"label", "media_type", "data" (bytes)}]. This call only.
+    images: tuple = ()
     # Through the LLM gateway (valxel_sdlc.gateway_sessions): what the call is for, and the data
     # class whose rule the gateway holds it to.
     labels: dict[str, str] = field(default_factory=dict)
@@ -121,6 +123,36 @@ class StubProvider:
         )
 
 
+IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
+
+
+def _pictures(req: ModelRequest):
+    import base64
+
+    for im in req.images or ():
+        if im.get("media_type") in IMAGE_TYPES and im.get("data"):
+            yield str(im.get("label") or ""), im["media_type"], base64.b64encode(im["data"]).decode()
+
+
+def _anthropic_content(req: ModelRequest):
+    """The tail as text, or with the pictures before it, each after its label."""
+    parts: list[dict] = []
+    for label, media, b64 in _pictures(req):
+        if label:
+            parts.append({"type": "text", "text": label})
+        parts.append({"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}})
+    return parts + [{"type": "text", "text": req.layers.tail}] if parts else req.layers.tail
+
+
+def _openai_content(req: ModelRequest):
+    parts: list[dict] = []
+    for label, media, b64 in _pictures(req):
+        if label:
+            parts.append({"type": "text", "text": label})
+        parts.append({"type": "image_url", "image_url": {"url": f"data:{media};base64,{b64}"}})
+    return parts + [{"type": "text", "text": req.layers.tail}] if parts else req.layers.tail
+
+
 class AnthropicProvider:
     """Claude API. Requires `pip install .[live]`, and the LLM gateway (VALXEL_LLM_GATEWAY_URL and
     VALXEL_LLM_GATEWAY_API_KEY) or ANTHROPIC_API_KEY.
@@ -169,7 +201,7 @@ class AnthropicProvider:
                 model=req.model.split("/", 1)[-1],
                 max_tokens=req.max_tokens,
                 system=system,
-                messages=[{"role": "user", "content": req.layers.tail}],
+                messages=[{"role": "user", "content": _anthropic_content(req)}],
                 **({"tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": req.web_searches}]}
                    if req.web_searches else {}),
                 **self._headers(req),
@@ -214,7 +246,7 @@ class OpenAICompatibleProvider:
         lay = req.layers.layers()
         system = "\n\n".join(lay[k] for k in ("L1", "L2", "L3", "L4", "L5") if lay[k])
         body = {"model": req.model.split("/", 1)[-1], "max_completion_tokens": req.max_tokens,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": req.layers.tail}]}
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": _openai_content(req)}]}
         try:
             r = self._client.post(self._url, json=body, headers=self._headers)
         except httpx.TransportError as exc:  # connection refused, reset, timed out

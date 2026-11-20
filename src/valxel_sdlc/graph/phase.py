@@ -253,7 +253,7 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
                stub_text: str | None, max_tokens: int = 4096, schema: dict | None = None,
                budget_usd: float | None = None, cwd: str | None = None,
                box: dict | None = None, task_id: str = "", prev_session: dict | None = None,
-               resume_tail: str = "", keep_transcript: bool = False) -> AgentResult:
+               resume_tail: str = "", keep_transcript: bool = False, images: tuple = ()) -> AgentResult:
     """One agent session. Its dollar cap is the role's, and never more than what's left of the
     feature's budget (ctx budget_remaining_usd, or `budget_usd` when the caller knows better).
 
@@ -309,7 +309,7 @@ def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str,
             session_args["keep_transcript"] = keep_transcript
         try:
             res = runtime.run(AgentTask(role=who, phase=phase, tags=tags, layers=layers_for, skills=tuple(skills),
-                                        stub_text=stub_text, max_tokens=max_tokens, schema=schema,
+                                        stub_text=stub_text, max_tokens=max_tokens, schema=schema, images=tuple(images),
                                         max_budget_usd=None if left is None else max(0.0, float(left)),
                                         # A box is a session's own writable checkout; a bare cwd is a
                                         # read-only one (valxel_sdlc.sandbox, valxel_sdlc.workspace).
@@ -1392,22 +1392,6 @@ def make_phase_node(phase: str, services):
             )
             delta["artifacts"] = {spec.kind: ref}
             delta["trace_links"] = [[p, ref["id"]] for p in ctx["parent_ids"]]
-            if phase == "design" and status == "passed":  # what G3 walks through: the prototype (valxel_sdlc.prototype)
-                from .. import prototype
-
-                try:
-                    m = prototype.make(services, state, ctx, out["draft"]["content"],
-                                       budget_usd=ctx.get("budget_remaining_usd"))
-                    delta["artifacts"] = {**delta["artifacts"], **m["artifacts"]}
-                    delta["cost_usd"] += m["cost_usd"]
-                    delta["tokens_used"] += m["tokens_used"]
-                    delta["mockups"] = m["mockups"]
-                    delta["events"].append(event("design", "prototype",
-                                                 f"a prototype of {len(m['mockups']['screens'])} screen(s)",
-                                                 findings=m["mockups"]["findings"]))
-                except Exception as exc:  # G3 still has the spec; say why there's nothing to click through
-                    delta["mockups"] = {"screens": [], "findings": [
-                        f"The prototype couldn't be drawn: {type(exc).__name__}"]}
         if phase in evals.DOC_PHASES and out.get("draft") and getattr(services, "evals", None) is not None:
             try:  # an eval case: what the agent was given, what it wrote and the critic's verdict
                 services.evals.capture(evals.case_from(state, phase, ctx, out,

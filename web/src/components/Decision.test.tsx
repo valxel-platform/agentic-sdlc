@@ -538,8 +538,8 @@ describe("G6 traceability", () => {
         mockups: {
           prototype: true,
           screens: [
-            { id: "S1", name: "Visit list", app: "web", phone: false },
-            { id: "S2", name: "New visit", app: "web", phone: false },
+            { id: "S1", name: "Visit list", app: "web", phone: false, today: { desktop: true, phone: true } },
+            { id: "S2", name: "New visit", app: "web", phone: false, today: null, new: true },
           ],
           findings: [],
         },
@@ -555,12 +555,22 @@ describe("G6 traceability", () => {
     const frame = screen.getByTitle("Prototype, starting at S1: Visit list");
     expect(frame).toHaveAttribute("src", "/api/features/CLN-1/prototype#S1");
     expect(frame).toHaveAttribute("sandbox", "allow-scripts"); // never allow-same-origin
+    expect(screen.getByRole("tab", { name: /S1 Visit list/ })).toHaveTextContent("Changed");
+    expect(screen.getByRole("tab", { name: /S2 New visit/ })).toHaveTextContent("New");
+    await user.click(screen.getByRole("button", { name: "Today" }));
+    expect(screen.getByAltText("S1 Visit list as it is today, in staging")).toHaveAttribute(
+      "src",
+      "/api/features/CLN-1/today/S1/desktop",
+    );
+    await user.click(screen.getByRole("button", { name: "With this change" }));
+    expect(screen.getByTitle("Prototype, starting at S1: Visit list")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: /S2 New visit/ }));
     expect(screen.getByTitle("Prototype, starting at S2: New visit")).toHaveAttribute(
       "src",
       "/api/features/CLN-1/prototype#S2",
     );
     expect(screen.getByText(/Click through it as a user would/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument(); // S2 is new: nothing to compare
     expect(screen.getByTitle("Approved prototype at S1")).toHaveAttribute("sandbox", "allow-scripts");
   });
 

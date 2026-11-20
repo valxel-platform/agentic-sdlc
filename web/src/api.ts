@@ -140,7 +140,16 @@ export interface LineComment {
  * a mockup per screen (valxel_sdlc.mockups). */
 export interface MockupSet {
   prototype?: boolean;
-  screens: { id: string; name: string; app: string; phone: boolean }[];
+  screens: {
+    id: string;
+    name: string;
+    app: string;
+    phone: boolean;
+    /** The screen as it is today in staging (valxel_sdlc.current_screens): which widths there are. */
+    today?: { desktop: boolean; phone: boolean } | null;
+    /** No such screen today: the feature adds it. */
+    new?: boolean;
+  }[];
   findings: string[];
   version?: number;
 }

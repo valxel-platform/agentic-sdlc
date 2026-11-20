@@ -31,6 +31,15 @@ _SCREEN = re.compile(r"^\s*[-*]\s*(S\d+)\s+(/\S*|-)\s*:\s*(passed|failed)\b(.*)$
 _VIOLATION = re.compile(r"^\s*[-*]\s*(S\d+)\s+(critical|serious|moderate|minor)\s+([\w-]+)\s*:\s*(.+)$", re.M | re.I)
 _SHOT = re.compile(r"(desktop|phone)\s*:\s*([^\s;,]+\.png)", re.I)
 BRANCH = "valxel-screens"  # where the scanning workflow keeps the screenshots; the tool serves them
+WORKFLOW = ".github/workflows/screens.yml"  # the scan itself (template-acceptance)
+
+
+def scans(services, repo: str) -> bool:
+    """Whether the repo runs the scan: asking one that doesn't would only wait until the wait times out."""
+    try:
+        return bool(services.github.get_file(repo=repo, path=WORKFLOW, ref=""))
+    except Exception:  # noqa: BLE001 - unreachable now: don't ask it
+        return False
 
 
 def check_name(feature_id: str, stage: str) -> str:
@@ -39,14 +48,20 @@ def check_name(feature_id: str, stage: str) -> str:
 
 def wanted(services, state: dict) -> list[dict]:
     """The screens to visit: the approved UX spec's, with their routes and apps."""
-    from .agents.parse import parse_screen_apps, parse_screen_routes, parse_screens
+    from .agents.parse import (
+        parse_screen_apps,
+        parse_screen_kinds,
+        parse_screen_routes,
+        parse_screens,
+    )
 
     ref = (state.get("artifacts") or {}).get("UX")
     if not ref:
         return []
     ux = services.artifacts.load(ref)
-    names, apps, routes = parse_screens(ux), parse_screen_apps(ux), parse_screen_routes(ux)
-    return [{"id": s, "name": n, "app": apps.get(s, ""), "route": routes.get(s, "")} for s, n in names.items()]
+    names, apps, routes, kinds = parse_screens(ux), parse_screen_apps(ux), parse_screen_routes(ux), parse_screen_kinds(ux)
+    return [{"id": s, "name": n, "app": apps.get(s, ""), "route": routes.get(s, ""), "kind": kinds.get(s, "")}
+            for s, n in names.items()]
 
 
 def scan_repo(services, state: dict) -> tuple[str, str]:
@@ -67,9 +82,9 @@ def targets(services, state: dict, stage: str) -> list[dict]:
     there's a repo to run it from; the wait checker asks that repo to run it, with every component's URL."""
     if stage != "staging":
         return []
-    shown = [s for s in wanted(services, state) if s["route"] and "mobile" not in (s["app"] or "")]
+    shown = [s for s in wanted(services, state) if s["route"] and s.get("kind") != "mobile"]
     repo, sha = scan_repo(services, state)
-    if not shown or not repo:
+    if not shown or not repo or not scans(services, repo):
         return []
     return [{"kind": "screens", "repo": repo, "sha": sha, "feature_id": state["feature_id"], "flag": state.get("flag", ""),
              "screens": shown}]
