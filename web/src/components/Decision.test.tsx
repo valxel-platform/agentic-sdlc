@@ -530,6 +530,40 @@ describe("G6 traceability", () => {
     expect(screen.getByText(/color-contrast: low contrast text/)).toBeInTheDocument();
   });
 
+  it("lets people walk through the prototype at G3, starting at any screen", async () => {
+    const user = userEvent.setup();
+    renderPanel(
+      gateItem({
+        gate: "g3",
+        mockups: {
+          prototype: true,
+          screens: [
+            { id: "S1", name: "Visit list", app: "web", phone: false },
+            { id: "S2", name: "New visit", app: "web", phone: false },
+          ],
+          findings: [],
+        },
+        screens: {
+          scanned: false,
+          state: "not_run",
+          prototype: true,
+          screens: [{ id: "S1", name: "Visit list", app: "web", violations: [] }],
+        },
+      }),
+    );
+    expect(await screen.findByText("Try the flow")).toBeInTheDocument();
+    const frame = screen.getByTitle("Prototype, starting at S1: Visit list");
+    expect(frame).toHaveAttribute("src", "/api/features/CLN-1/prototype#S1");
+    expect(frame).toHaveAttribute("sandbox", "allow-scripts"); // never allow-same-origin
+    await user.click(screen.getByRole("tab", { name: /S2 New visit/ }));
+    expect(screen.getByTitle("Prototype, starting at S2: New visit")).toHaveAttribute(
+      "src",
+      "/api/features/CLN-1/prototype#S2",
+    );
+    expect(screen.getByText(/Click through it as a user would/)).toBeInTheDocument();
+    expect(screen.getByTitle("Approved prototype at S1")).toHaveAttribute("sandbox", "allow-scripts");
+  });
+
   it("notes when no staging scan ran", () => {
     renderPanel(gateItem({ gate: "g6", screens: { scanned: false, state: "not_run", screens: [] } }));
     expect(screen.getByText(/No staging scan reported for these screens/)).toBeInTheDocument();

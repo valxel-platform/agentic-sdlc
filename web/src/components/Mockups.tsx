@@ -1,8 +1,10 @@
 import { useState } from "react";
 import type { MockupSet } from "../api";
 
-/** G3: each screen of the UX spec as a mockup, in a sandboxed frame (no scripts, nothing loaded
- * from elsewhere), at desktop or phone width; a comment on a screen goes back with "Request changes". */
+/** G3: the UX spec's flow as a prototype to click through as a user (valxel_sdlc.prototype), or for
+ * older features a mockup per screen; in a sandboxed frame (only the tool's own runtime runs, nothing
+ * loaded from elsewhere, no access to the app), at desktop or phone width. A comment on a screen goes
+ * back with "Request changes". */
 export function Mockups({
   featureId,
   set,
@@ -15,6 +17,7 @@ export function Mockups({
   const [at, setAt] = useState(0);
   const [phone, setPhone] = useState<boolean | null>(null);
   const [text, setText] = useState("");
+  const [visit, setVisit] = useState(0); // a new frame each time a screen is picked: start the walk there
   if (!set.screens.length) {
     return set.findings.length ? <p className="small muted">{set.findings[0]}</p> : null;
   }
@@ -23,7 +26,7 @@ export function Mockups({
   return (
     <section className="mockups" aria-labelledby="mock-h">
       <div className="doc-head">
-        <h3 id="mock-h">The screens</h3>
+        <h3 id="mock-h">{set.prototype ? "Try the flow" : "The screens"}</h3>
         <div className="segmented small" role="group" aria-label="Width">
           <button
             type="button"
@@ -45,22 +48,49 @@ export function Mockups({
       </div>
       <div className="mock-tabs" role="tablist">
         {set.screens.map((x, i) => (
-          <button key={x.id} type="button" role="tab" aria-selected={i === at} onClick={() => setAt(i)}>
+          <button
+            key={x.id}
+            type="button"
+            role="tab"
+            aria-selected={i === at}
+            onClick={() => {
+              setAt(i);
+              setVisit((v) => v + 1);
+            }}
+          >
             <span className="mono">{x.id}</span> {x.name}
           </button>
         ))}
       </div>
       <div className={`mock-frame${narrow ? " phone" : ""}`}>
-        <iframe
-          title={`Mockup of ${s.id}: ${s.name}`}
-          sandbox=""
-          src={`/api/features/${encodeURIComponent(featureId)}/mockups/${s.id}`}
-        />
+        {set.prototype ? (
+          <iframe
+            key={`${s.id}-${visit}`}
+            title={`Prototype, starting at ${s.id}: ${s.name}`}
+            sandbox="allow-scripts"
+            src={`/api/features/${encodeURIComponent(featureId)}/prototype#${s.id}`}
+          />
+        ) : (
+          <iframe
+            title={`Mockup of ${s.id}: ${s.name}`}
+            sandbox=""
+            src={`/api/features/${encodeURIComponent(featureId)}/mockups/${s.id}`}
+          />
+        )}
       </div>
-      <p className="small faint">
-        A low-fidelity mockup from the UX spec{s.app ? `, for ${s.app}` : ""}: switch its states at the top.
-        Example values only.
-      </p>
+      {set.prototype ? (
+        <p className="small faint">
+          Click through it as a user would: fields keep what you type, the bar at the top switches each
+          screen&apos;s states, and &ldquo;Show what&apos;s new&rdquo; outlines what this feature adds or
+          changes. Pick a screen above to start there. Example values only. Not right? Comment on a screen and
+          request changes: the design is drawn again.
+        </p>
+      ) : (
+        <p className="small faint">
+          A low-fidelity mockup from the UX spec{s.app ? `, for ${s.app}` : ""}: switch its states at the top.
+          Example values only.
+        </p>
+      )}
       {set.findings.length > 0 && (
         <ul className="findings small">
           {set.findings.map((f) => (

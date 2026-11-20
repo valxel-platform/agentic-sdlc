@@ -136,8 +136,10 @@ export interface LineComment {
   quote: string;
   text: string;
 }
-/** G3: the UX spec's screens drawn as mockups (valxel_sdlc.mockups). */
+/** G3: the UX spec's flow as one clickable prototype (valxel_sdlc.prototype), or for older features
+ * a mockup per screen (valxel_sdlc.mockups). */
 export interface MockupSet {
+  prototype?: boolean;
   screens: { id: string; name: string; app: string; phone: boolean }[];
   findings: string[];
   version?: number;
@@ -145,6 +147,7 @@ export interface MockupSet {
 /** G6: each screen as built in staging beside its approved mockup (valxel_sdlc.screens). */
 export interface ScreensAtRelease {
   scanned: boolean;
+  prototype?: boolean;
   state: string;
   screens: {
     id: string;

@@ -5,7 +5,7 @@ When a gate is approved, the documents it approved go to the product's governanc
 
   G1  discovery (OPP) and the files attached to the intent
   G2  the PRD
-  G3  the UX design and its mockups (one HTML page per screen)
+  G3  the UX design and its prototype (one HTML page to click through; older features: a mockup per screen)
   G4  the HLD
   G5  the plan the build followed
   G6  the release record
@@ -47,6 +47,8 @@ def _attachment_limit(env=None) -> int:
 def files_for(services, state: dict, gate: str, *, env=None) -> tuple[dict[str, str | bytes], list[dict]]:
     """path -> content for what this gate approved, and what was left out (and why)."""
     from .mockups import KIND as MOCKUPS
+    from .prototype import KIND as PROTOTYPE
+    from .prototype import assemble
 
     base = f"features/{state['feature_id']}"
     arts = state.get("artifacts") or {}
@@ -64,6 +66,11 @@ def files_for(services, state: dict, gate: str, *, env=None) -> tuple[dict[str, 
         for sid, html in sorted(pages.items()):
             if isinstance(html, str) and sid.replace("-", "").replace("_", "").isalnum():
                 files[f"{base}/mockups/{sid}.html"] = html
+    if gate == "g3" and arts.get(PROTOTYPE):
+        try:  # with the tool's runtime, so it opens and works from the product's repo
+            files[f"{base}/prototype.html"] = assemble(services.artifacts.load(arts[PROTOTYPE]))
+        except OSError:
+            pass
     if gate == "g1":
         sensitive = str(state.get("data_class", "")).lower() in SENSITIVE
         limit = _attachment_limit(env)
@@ -95,7 +102,7 @@ def approval_record(state: dict, gate: str, approvers: str, files: dict, left: l
         if ref:
             lines.append(f"- {NAMES[kind]}: {ref['id']} (version {ref['version']})")
     base = f"features/{state['feature_id']}/"
-    lines += [f"- {p[len(base):]}" for p in sorted(files) if "/mockups/" in p or "/attachments/" in p]
+    lines += [f"- {p[len(base):]}" for p in sorted(files) if "/mockups/" in p or "/attachments/" in p or p.endswith("/prototype.html")]
     if left:
         lines += ["", "## Not committed", "",
                   "Kept with the tool, not in this repo; the digest identifies the file.", ""]

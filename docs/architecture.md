@@ -65,7 +65,7 @@ The GitHub Pages site also has a branded [high-level design](hld.html) and the
   governance repo and pins it by commit for the life of a feature. Products can tighten the
   platform's rules, never loosen them.
 - **Products own their documents.** When a gate is approved, the documents it approved (discovery,
-  PRD, UX and mockups, HLD, plan, release record, intake attachments) go to the product's
+  PRD, UX and its clickable prototype, HLD, plan, release record, intake attachments) go to the product's
   governance repo under `features/<feature>/`, with who approved them. Agent transcripts never do;
   attachments of PHI or payments products are listed by digest, not committed.
 - **Data class picks the model.** The gateway routes PHI and payments work only to providers

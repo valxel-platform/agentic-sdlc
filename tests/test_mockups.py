@@ -50,17 +50,18 @@ def client(engine):
         yield c
 
 
-def test_g3_shows_the_mockups_and_they_are_served_sandboxed(client, engine):
-    sign_in(client, "priya", teams=["acme-farm/product-owners", "acme-farm/design"], orgs=["acme-farm"])
+def test_older_features_mockups_are_still_served_sandboxed(client, engine, monkeypatch):
+    """Features drawn before the prototype (T-90) keep their per-screen mockups at G3 and G6."""
+    sign_in(client, "priya", teams=["acme-farm/product-owners"], orgs=["acme-farm"])
     fid = engine.create(product_id="FARM", title="Field list sorting", description="Sort the field list by moisture")
-    for gate in ("g1", "g2"):
-        p = next(x for x in engine.pending(fid) if x.get("gate") == gate)
-        engine.decide(fid, p["interrupt_id"], {"decision": "approve", "approver": "a"})
-    g3 = next(x for x in engine.pending(fid) if x.get("gate") == "g3")
-    m = g3["mockups"]
-    assert [s["id"] for s in m["screens"]] == ["S1", "S2"] and m["findings"] == []
+    import json
+
+    ref = engine.services.artifacts.save(feature_id=fid, kind=mockups.KIND, phase="design", parents=[],
+                                         constitution_version="", content=json.dumps({"S1": "<h1>Old</h1>"}))
+    real = engine._state
+    monkeypatch.setattr(engine, "_state", lambda t: {**real(t), "artifacts": {mockups.KIND: ref}})
     r = client.get(f"/api/features/{fid}/mockups/S1")
-    assert r.status_code == 200 and "<h1>" in r.text
+    assert r.status_code == 200 and "<h1>Old</h1>" in r.text
     assert "sandbox" in r.headers["content-security-policy"] and "default-src 'none'" in r.headers["content-security-policy"]
     assert client.get(f"/api/features/{fid}/mockups/S9").status_code == 404
     sign_in(client, "stranger", orgs=["acme-clinic"])

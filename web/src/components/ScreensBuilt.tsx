@@ -1,6 +1,6 @@
 import type { ScreensAtRelease } from "../api";
 
-/** G6: each screen as built in staging (screenshot, accessibility scan) beside the mockup G3 approved. */
+/** G6: each screen as built in staging (screenshot, accessibility scan) beside the prototype (or mockup) G3 approved. */
 export function ScreensBuilt({ featureId, s }: { featureId: string; s: ScreensAtRelease }) {
   return (
     <section className="screens-built" aria-labelledby="built-h">
@@ -20,11 +20,19 @@ export function ScreensBuilt({ featureId, s }: { featureId: string; s: ScreensAt
             </p>
             <div className="built-pair">
               <figure>
-                <iframe
-                  title={`Approved mockup of ${x.id}`}
-                  sandbox=""
-                  src={`/api/features/${encodeURIComponent(featureId)}/mockups/${x.id}`}
-                />
+                {s.prototype ? (
+                  <iframe
+                    title={`Approved prototype at ${x.id}`}
+                    sandbox="allow-scripts"
+                    src={`/api/features/${encodeURIComponent(featureId)}/prototype#${x.id}`}
+                  />
+                ) : (
+                  <iframe
+                    title={`Approved mockup of ${x.id}`}
+                    sandbox=""
+                    src={`/api/features/${encodeURIComponent(featureId)}/mockups/${x.id}`}
+                  />
+                )}
                 <figcaption className="small faint">Approved at G3</figcaption>
               </figure>
               <figure>

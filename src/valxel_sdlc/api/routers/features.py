@@ -342,6 +342,24 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
             "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
+    @api.get("/features/{feature_id}/prototype", response_class=HTMLResponse)
+    def prototype_page(feature_id: str, user: User = Depends(current_user)) -> HTMLResponse:
+        """The G3 prototype, for a sandboxed frame: only the tool's own runtime runs in it (its hash
+        is the only script allowed), no connections, nothing loaded from elsewhere, no app origin."""
+        from ... import prototype
+
+        try:
+            state = eng()._state(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if state.get("product_id") not in lanes_for(user):
+            raise HTTPException(403, f"You aren't a member of {state.get('product_id')}'s organization")
+        page = prototype.page(eng().services, state)
+        if page is None:
+            raise HTTPException(404, "No prototype")
+        return HTMLResponse(page, headers={"Content-Security-Policy": prototype.CSP, "X-Content-Type-Options": "nosniff",
+                                           "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
     @api.get("/features/{feature_id}/screens/{sid}/{width}")
     def screen_shot(feature_id: str, sid: str, width: str, user: User = Depends(current_user)) -> Response:
         """A screenshot of a built screen from the staging scan, for the people at G6."""

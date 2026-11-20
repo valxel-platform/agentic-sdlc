@@ -126,6 +126,7 @@ def g6(state: dict) -> dict | None:
     shots = ((row or {}).get("details") or {}).get("screens") or {}
     findings = (row or {}).get("findings") or []
     return {"scanned": row is not None, "state": (row or {}).get("state", ""), "repo": (row or {}).get("repo", ""),
+            "prototype": bool((state.get("mockups") or {}).get("prototype")),
             "screens": [{**s, **({"staging": shots[s["id"]]} if s["id"] in shots else {}),
                          "violations": [f for f in findings if str(f.get("title", "")).startswith(f"{s['id']}:")]}
                         for s in ux_screens]}
