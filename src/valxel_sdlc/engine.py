@@ -690,10 +690,12 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
 
     def artifact(self, feature_id: str, kind: str) -> dict:
         s = self.graph.get_state(self._config(feature_id)).values
+        from .drafts import load
+
         ref = (s.get("artifacts") or {}).get(kind)
         if not ref:
             raise KeyError(f"{feature_id} has no {kind} artifact")
-        return {**ref, "content": self.services.artifacts.load(ref)}
+        return {**ref, "content": load(self.services, {**s, "feature_id": feature_id}, kind)}
 
     def inbox(self, product_id: str | None = None) -> list[dict]:
         out = []

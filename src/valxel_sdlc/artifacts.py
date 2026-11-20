@@ -59,3 +59,14 @@ class ArtifactStore:
 
     def load(self, ref: ArtifactRef | dict) -> str:
         return self.path_of(ref).read_text(encoding="utf-8")
+
+    def drop(self, feature_id: str, kind: str) -> int:
+        """Delete every version of one kind of a thread's documents (valxel_sdlc.drafts). Returns how many."""
+        if not _SAFE.match(kind):
+            raise ValueError(f"Unsafe kind {kind!r}")
+        n = 0
+        for p in self._dir(feature_id).glob(f"{kind}.v*.md"):
+            if re.fullmatch(rf"{re.escape(kind)}\.v\d+\.md", p.name):
+                p.unlink(missing_ok=True)
+                n += 1
+        return n

@@ -86,6 +86,21 @@ class WatchingMixin:
             log.info("Deleted %d session transcripts older than a day", gone)
         return gone
 
+    def remove_drafts(self) -> int:
+        """Finished features' working copies of their documents, once the product's repo holds the
+        record and the retention time has passed (valxel_sdlc.drafts)."""
+        from .. import drafts
+
+        n = 0
+        for row in self.index.all():
+            try:
+                state = self._state(row["feature_id"])
+                if drafts.remove(self.services, self.cluster, {**state, "feature_id": row["feature_id"]}):
+                    n += 1
+            except Exception:
+                log.exception("drafts of %s not removed", row.get("feature_id"))
+        return n
+
     def catch_up_receipts(self) -> int:
         """ServiceNow receipts that never went (valxel_sdlc.ops.servicenow)."""
         catch = getattr(getattr(self.services, "changes", None), "catch_up", None)
@@ -132,6 +147,7 @@ class WatchingMixin:
             Job("collect_costs", self.collect_costs, 3600),  # cost data moves daily; hourly is plenty
             Job("review_costs", self.review_costs, 3600),
             Job("expire_transcripts", self.expire_transcripts, 3600),
+            Job("remove_drafts", self.remove_drafts, DAILY),  # finished features' drafts (drafts.py)
             Job("check_connections", self.check_connections, 3600),
             Job("catch_up_receipts", self.catch_up_receipts, 3600),
             Job("tool_health", self.tool_health, 3600),  # the tool's own agents against their baseline

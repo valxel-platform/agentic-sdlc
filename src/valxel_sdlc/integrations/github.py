@@ -204,6 +204,10 @@ class StubGitHub:
             if pr["state"] != "merged":
                 pr.update(state="merged", merged_by=actor,
                           merge_sha=hashlib.sha1(f"merge:{repo}#{number}".encode()).hexdigest())
+                branch = pr.get("branch") or pr.get("head") or ""
+                for (r, b, p), v in list(self.files.items()):  # like GitHub: the branch's files land on main
+                    if r == repo and b == branch and branch:
+                        self.files[(repo, "main", p)] = v
             return dict(pr)
 
     def put_file(self, *, repo, branch, path, content, message) -> dict:

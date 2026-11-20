@@ -240,8 +240,10 @@ class OperationsMixin:
         arts = s.get("artifacts") or {}
 
         def load(kind: str) -> str:
+            from ..drafts import load as read
+
             try:
-                return self.services.artifacts.load(arts[kind]) if kind in arts else ""
+                return read(self.services, {**s, "feature_id": feature_id}, kind) if kind in arts else ""
             except Exception:
                 return ""
 

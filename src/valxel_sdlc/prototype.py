@@ -374,4 +374,6 @@ def page(services, state: dict) -> str | None:
     try:
         return assemble(services.artifacts.load(ref))
     except OSError:
-        return None
+        from .drafts import from_record
+
+        return from_record(services, state, KIND)  # recorded with the runtime already in it

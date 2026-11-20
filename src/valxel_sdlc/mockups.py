@@ -186,5 +186,15 @@ def page(services, state: dict, sid: str) -> str | None:
         return None
     try:
         return json.loads(services.artifacts.load(ref)).get(sid)
-    except (ValueError, OSError):
+    except ValueError:
         return None
+    except OSError:  # no longer kept here (valxel_sdlc.drafts): the product's record of it
+        import re
+
+        if not re.fullmatch(r"S\d+", sid):
+            return None
+        try:
+            repo = services.settings.entry(state["product_id"]).governance.full_name
+            return services.github.get_file(repo=repo, path=f"features/{state['feature_id']}/mockups/{sid}.html", ref="")
+        except Exception:  # noqa: BLE001 - not there either
+            return None
