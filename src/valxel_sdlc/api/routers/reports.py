@@ -120,6 +120,20 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         latest = None if fresh else eng().cluster.get(health.NOTE)
         return latest or health.run(eng(), alert=lambda _text: None)
 
+    @api.get("/reports/gate-confidence")
+    def gate_confidence(product_id: str, user: User = Depends(current_user)) -> dict:
+        """How far each gate's approval can be predicted from the product's own history, and how
+        often each predicted level held up (valxel_sdlc.confidence)."""
+        from ... import confidence
+        from ...pilot import config_version
+
+        member_of(user, product_id)
+        svc = eng().services
+        if svc.gate_outcomes is None:
+            raise HTTPException(404, "Gate confidence isn't recorded here")
+        return confidence.report(svc.gate_outcomes, product_id, confidence.Settings.load(svc.settings.config_dir),
+                                 config_version(svc.settings))
+
     @api.get("/reports/pilot")
     def pilot_report(product_id: str, pilot_only: bool = True, since: str = "", format: str = "json",
                      user: User = Depends(current_user)):

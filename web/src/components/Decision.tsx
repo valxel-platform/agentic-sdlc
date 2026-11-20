@@ -267,6 +267,13 @@ function ReleaseCandidates({ items }: { items: ReleaseCandidate[] }) {
   );
 }
 
+const CONFIDENCE_LABEL: Record<string, string> = {
+  high: "High confidence",
+  medium: "Medium confidence",
+  low: "Low confidence",
+  unknown: "Not enough history",
+};
+const CONFIDENCE_TONE: Record<string, string> = { high: "go", medium: "wait", low: "stop", unknown: "plain" };
 const DOC_NAME: Record<string, string> = { spec: "Spec", design: "UX design", architecture: "Architecture" };
 
 export function DecisionPanel({
@@ -468,6 +475,15 @@ export function DecisionPanel({
           </p>
         )}
       </div>
+
+      {item.type === "gate" && item.confidence && (
+        <p className="small muted confidence" data-level={item.confidence.level}>
+          <span className={`chip ${CONFIDENCE_TONE[item.confidence.level]}`}>
+            {CONFIDENCE_LABEL[item.confidence.level]}
+          </span>{" "}
+          {item.confidence.says}
+        </p>
+      )}
 
       <h3 className="decision-sec">What you&rsquo;re approving</h3>
       {item.type === "gate" && !reviewGate && item.gate !== "incident" && (

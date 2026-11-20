@@ -1,6 +1,15 @@
 import { traceHeaders } from "./telemetry";
 
 export type StationState = "done" | "skipped" | "waiting" | "current" | "stopped" | "todo";
+export interface GateConfidence {
+  level: "high" | "medium" | "low" | "unknown";
+  decisions: number;
+  held: number;
+  lower_bound: number;
+  checks: string[];
+  says: string;
+}
+
 export interface DesignIssue {
   task: string;
   by: "coder" | "reviewer";
@@ -190,6 +199,8 @@ export interface PendingItem {
   pull_requests?: string[];
   reason?: string;
   findings?: string[];
+  /** G1-G4: how far the product's own history predicts this approval (valxel_sdlc.confidence). */
+  confidence?: GateConfidence | null;
   /** Build found the approved spec, design or architecture wrong; people can reopen it. */
   design_issues?: DesignIssue[];
   constitution_version?: string;

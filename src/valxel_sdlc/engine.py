@@ -80,6 +80,10 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             from .pilot import InMemoryEffortStore
 
             services.effort = InMemoryEffortStore()
+        if getattr(services, "gate_outcomes", None) is None:
+            from .confidence import InMemoryOutcomeStore
+
+            services.gate_outcomes = InMemoryOutcomeStore()
         if getattr(services, "provision_queue", None) is None:
             from .provision_queue import InMemoryProvisionQueue
 

@@ -138,6 +138,8 @@ def make_fit_gate(services):
         said = "The design and the architecture don't fit:\n" + "\n".join(f"- {t}" for t in mine) + (
             f"\n\n{d['feedback']}" if d["feedback"].strip() else "")
         gate = "g3" if to == "design" else "g4"
+        if getattr(services, "gate_outcomes", None) is not None:  # that approval didn't hold (confidence)
+            services.gate_outcomes.missed(state["feature_id"], (gate,), f"sent back by the fit check: {to}")
         update = {"gate_decisions": [rec], "feedback": {to: said}, "approvals": {gate: False},
                   "events": [{"at": now(), "node": "fit", "kind": f"back_to_{to}", "detail": said[:1000],
                               "approver": d["approver"]}]}

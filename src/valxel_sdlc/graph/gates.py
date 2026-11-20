@@ -119,6 +119,9 @@ def make_gate(gate: str, services):
         corrections: list[dict] = []
         taken: list[tuple[dict, str, str]] = []  # (decision, agents' draft, person's version)
         human: str | None = None
+        from .. import confidence
+
+        predicted = confidence.assess(services, state, gate, phase) if preset is None else None
         for lane_id in approving:
             lane = lanes[lane_id]
             if preset is not None:
@@ -137,6 +140,8 @@ def make_gate(gate: str, services):
                 "build_cost": _build_cost(services, state),
                 # On-call decides an incident's hotfix at G5 and G6.
                 "approvers": hotfix_approvers(state, lane, gate),
+                # G1-G4: how far this product's own history predicts the approval (valxel_sdlc.confidence).
+                "confidence": predicted,
                 "track": state.get("track", "standard"),
                 "profile": state.get("profile", "feature"),
                 # Express: no G2, so G4 approves the spec together with the design.
@@ -226,6 +231,10 @@ def make_gate(gate: str, services):
                                               "workflow has published it, or send it back."}
                 d = normalize(interrupt(packet), tuple(allowed))
             records.append(_record(gate, phase, d, lane_id))
+            if predicted:  # kept beside the decision: how often each level held up (confidence.calibration)
+                records[-1]["confidence"] = {k: predicted[k] for k in ("level", "lower_bound", "decisions")}
+                if lane_id == approving[0]:
+                    confidence.record(services, state, gate, d["decision"], predicted)
             if trace and d["decision"] == "approve":
                 trace_decision = (trace, d)
             if state.get("pilot"):  # what the trial rule would have done, beside what the person did
@@ -680,6 +689,10 @@ def make_escalation(phase: str, services):
             update |= {"feedback": {phase: d["feedback"]},
                        "events": [event(f"escalate_{phase}", "retry", d["feedback"], approver=d["approver"])] + learned}
             return Command(goto=phase, update=update)
+        if d["decision"] in REOPEN and getattr(services, "gate_outcomes", None) is not None:
+            # Approvals build has now undone didn't hold: the confidence record counts them as misses.
+            services.gate_outcomes.missed(state["feature_id"], REOPEN_UNDOES[d["decision"]],
+                                          f"reopened from build: {d['decision']}")
         if d["decision"] in REOPEN:  # build found the approved design wrong: back to that document
             return Command(goto=d["decision"], update=update | reopen(state, d["decision"], esc, d) | {
                 "events": [event(f"escalate_{phase}", "reopened", d["feedback"], approver=d["approver"],

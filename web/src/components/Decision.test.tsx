@@ -781,6 +781,32 @@ describe("G2 UX toggle", () => {
   });
 });
 
+describe("gate confidence", () => {
+  it("shows how far the product's history predicts this approval", async () => {
+    renderPanel(
+      gateItem({
+        gate: "g2",
+        confidence: {
+          level: "high",
+          decisions: 42,
+          held: 41,
+          lower_bound: 0.9,
+          checks: [],
+          says: "High confidence: 41 of 42 specs like this were approved first time and kept (at least 90%).",
+        },
+      }),
+    );
+    expect(await screen.findByText("High confidence")).toBeInTheDocument();
+    expect(screen.getByText(/41 of 42 specs like this/)).toBeInTheDocument();
+  });
+
+  it("says nothing without a score", async () => {
+    renderPanel(gateItem({ gate: "g2" }));
+    await screen.findAllByRole("heading");
+    expect(screen.queryByText(/confidence/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("escalations", () => {
   it("reopens the document build found wrong, with the evidence shown", async () => {
     const user = userEvent.setup();

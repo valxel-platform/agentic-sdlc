@@ -8,7 +8,7 @@ seams:
   delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env, environments, acceptance,
              records, traceability, design_record, fit, mockups, screens, scaffolding, sandboxes, jobs,
              template_contract, dependencies, quality, standard_files, agent_tools, performance, capacity,
-             resources, waits, reconcile, pilot]
+             resources, waits, reconcile, pilot, confidence]
   ops: [ops, finops, upkeep]
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # and the tool's health, which measures every seam's agents on real work.

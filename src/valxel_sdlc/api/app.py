@@ -96,6 +96,9 @@ def _create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..pilot import PostgresEffortStore
 
         services.effort = PostgresEffortStore(pool)
+        from ..confidence import PostgresOutcomeStore
+
+        services.gate_outcomes = PostgresOutcomeStore(pool)
         from ..lessons import PostgresLessonStore
 
         services.lessons = PostgresLessonStore(pool)

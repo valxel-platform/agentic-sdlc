@@ -1,0 +1,8 @@
+# Gate confidence (valxel_sdlc.confidence, T-81): how far a gate's approval can be predicted, per
+# product, from its own decisions on the same kind of change under the same agent config.
+# Scores are the Wilson lower bound of "approved first time and kept", not the raw rate.
+
+min_samples: 20   # fewer earlier decisions than this: "not enough history yet"
+high: 0.95        # lower bound for high confidence
+medium: 0.8       # lower bound for medium
+z: 1.645          # one-sided 95% for the lower bound

@@ -144,7 +144,7 @@ def make_pool(dsn: str, **kw):
 BY_PRODUCT = ("valxel_usage", "valxel_costs", "valxel_cost_reviews", "valxel_changes", "valxel_change_incidents",
               "valxel_signals", "valxel_alarm_states", "valxel_findings", "valxel_capabilities", "valxel_eval_cases",
               "valxel_effort", "valxel_corrections", "valxel_lesson_proposals", "valxel_inventory_snapshots",
-              "valxel_metric_readings", "valxel_metric_readouts")
+              "valxel_metric_readings", "valxel_metric_readouts", "valxel_gate_outcomes")
 BY_THREAD = {"checkpoints": "thread_id", "checkpoint_blobs": "thread_id", "checkpoint_writes": "thread_id",
              "valxel_work_items": "feature_id", "valxel_release_joins": "feature_id",
              "valxel_notes": "split_part(key, ':', 2)"}
