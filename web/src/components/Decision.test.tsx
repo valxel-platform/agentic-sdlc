@@ -530,6 +530,14 @@ describe("G6 traceability", () => {
     expect(screen.getByText(/color-contrast: low contrast text/)).toBeInTheDocument();
   });
 
+  it("shows a rough sketch beside the brief at G1, with no scripts", async () => {
+    renderPanel(gateItem({ gate: "g1", sketch: { version: 1, findings: [] } }));
+    const frame = await screen.findByTitle("Rough sketch of the main screens");
+    expect(frame).toHaveAttribute("src", "/api/features/CLN-1/sketch");
+    expect(frame).toHaveAttribute("sandbox", "");
+    expect(screen.getByText(/It isn.t the design/)).toBeInTheDocument();
+  });
+
   it("lets people walk through the prototype at G3, starting at any screen", async () => {
     const user = userEvent.setup();
     renderPanel(

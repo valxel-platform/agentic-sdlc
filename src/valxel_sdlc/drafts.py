@@ -31,8 +31,9 @@ log = logging.getLogger(__name__)
 DONE = ("done", "aborted")
 NOTE = "drafts:removed:{}"
 # Each kind of document, the gate whose record holds it, and its file there.
-GATE_OF = {kind: gate for gate, kinds in GATE_KINDS.items() for kind in kinds} | {"PROTOTYPE": "g3", "MOCKUPS": "g3"}
-RECORDED_AS = dict(NAMES) | {"PROTOTYPE": "prototype.html"}
+GATE_OF = {kind: gate for gate, kinds in GATE_KINDS.items() for kind in kinds} | {"PROTOTYPE": "g3", "MOCKUPS": "g3",
+                                                                                      "SKETCH": "g1"}
+RECORDED_AS = dict(NAMES) | {"PROTOTYPE": "prototype.html", "SKETCH": "sketch.html"}
 
 
 def retention_days(env=None) -> int:

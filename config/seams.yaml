@@ -6,7 +6,7 @@ seams:
   intake: [intake, duplicates, inception, attachments]
   roadmap: [roadmap, outcomes]
   delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env, environments, acceptance,
-             records, drafts, traceability, design_record, fit, mockups, prototype, current_screens, screens, scaffolding, sandboxes, jobs,
+             records, drafts, traceability, design_record, fit, mockups, sketch, prototype, current_screens, screens, scaffolding, sandboxes, jobs,
              template_contract, dependencies, quality, standard_files, agent_tools, performance, capacity,
              resources, waits, reconcile, pilot, confidence]
   ops: [ops, finops, upkeep]

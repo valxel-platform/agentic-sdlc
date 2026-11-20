@@ -209,6 +209,8 @@ export interface PendingItem {
   // G2: whether UX design runs. The fit check: what doesn't fit, and which document should change.
   ux_design?: { runs: boolean; why: string } | null;
   mockups?: MockupSet | null;
+  /** G1: a rough sketch of the main screens the brief implies (valxel_sdlc.sketch). */
+  sketch?: { version: number; findings: string[] } | null;
   screens?: ScreensAtRelease | null;
   code_read?: CodeRead | null;
   // G4: the approved maximums the design's added load raises.

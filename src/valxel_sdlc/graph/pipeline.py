@@ -23,7 +23,7 @@ from .gates import join, make_escalation, make_gate
 from .merge_train import make_ci_wait, make_merge_train
 from .provision import make_provision, make_provision_wait
 from .rollout import finalize, first_step, make_flag_rollout, make_rollout
-from .prototype_steps import make_architecture_done, make_design_prototype
+from .prototype_steps import make_architecture_done, make_design_prototype, make_discovery_sketch
 from .routing import _route, _route_targets
 # Kept importable from here: other modules and tests import these from graph.pipeline.
 from .briefs import hotfix_approvers  # noqa: F401
@@ -50,6 +50,8 @@ def build_pipeline(services, checkpointer=None):
     g.add_node("design_prototype", node, destinations=dest)
     node, dest = make_architecture_done(services)
     g.add_node("architecture_done", node, destinations=dest)
+    node, dest = make_discovery_sketch(services)  # a rough sketch beside the brief at G1 (sketch.py)
+    g.add_node("discovery_sketch", node, destinations=dest)
     from ..fit import make_fit, make_fit_gate
 
     node, dest = make_fit(services)

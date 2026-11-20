@@ -3,7 +3,7 @@
 When a gate is approved, the documents it approved go to the product's governance repo, under
 `features/<feature>/`, with who approved them and when:
 
-  G1  discovery (OPP) and the files attached to the intent
+  G1  discovery (OPP), its rough sketch, and the files attached to the intent
   G2  the PRD
   G3  the UX design and its prototype (one HTML page to click through; older features: a mockup per screen)
   G4  the HLD
@@ -49,6 +49,8 @@ def files_for(services, state: dict, gate: str, *, env=None) -> tuple[dict[str, 
     from .mockups import KIND as MOCKUPS
     from .prototype import KIND as PROTOTYPE
     from .prototype import assemble
+    from .sketch import KIND as SKETCH
+    from .sketch import assemble as assemble_sketch
 
     base = f"features/{state['feature_id']}"
     arts = state.get("artifacts") or {}
@@ -66,6 +68,11 @@ def files_for(services, state: dict, gate: str, *, env=None) -> tuple[dict[str, 
         for sid, html in sorted(pages.items()):
             if isinstance(html, str) and sid.replace("-", "").replace("_", "").isalnum():
                 files[f"{base}/mockups/{sid}.html"] = html
+    if gate == "g1" and arts.get(SKETCH):
+        try:  # greyed and bannered, as G1 showed it
+            files[f"{base}/sketch.html"] = assemble_sketch(services.artifacts.load(arts[SKETCH]))
+        except OSError:
+            pass
     if gate == "g3" and arts.get(PROTOTYPE):
         try:  # with the tool's runtime, so it opens and works from the product's repo
             files[f"{base}/prototype.html"] = assemble(services.artifacts.load(arts[PROTOTYPE]))
@@ -102,7 +109,7 @@ def approval_record(state: dict, gate: str, approvers: str, files: dict, left: l
         if ref:
             lines.append(f"- {NAMES[kind]}: {ref['id']} (version {ref['version']})")
     base = f"features/{state['feature_id']}/"
-    lines += [f"- {p[len(base):]}" for p in sorted(files) if "/mockups/" in p or "/attachments/" in p or p.endswith("/prototype.html")]
+    lines += [f"- {p[len(base):]}" for p in sorted(files) if "/mockups/" in p or "/attachments/" in p or p.endswith(("/prototype.html", "/sketch.html"))]
     if left:
         lines += ["", "## Not committed", "",
                   "Kept with the tool, not in this repo; the digest identifies the file.", ""]

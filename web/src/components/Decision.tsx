@@ -1058,6 +1058,23 @@ export function DecisionPanel({
         </div>
       )}
 
+      {item.type === "gate" && item.sketch && (
+        <section className="mockups" aria-labelledby="sketch-h">
+          <h3 id="sketch-h">A rough sketch</h3>
+          <div className="mock-frame">
+            <iframe
+              title="Rough sketch of the main screens"
+              sandbox=""
+              src={`/api/features/${encodeURIComponent(featureId)}/sketch`}
+            />
+          </div>
+          <p className="small faint">
+            Grey boxes for what the brief implies, to point at while you agree the scope. It isn&apos;t the
+            design: that comes at G3, as a prototype you can click through.
+          </p>
+        </section>
+      )}
+
       {item.mockups && (
         <Mockups
           featureId={featureId}

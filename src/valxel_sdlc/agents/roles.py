@@ -73,7 +73,7 @@ GATE_APPROVE_TARGET: dict[str, str | list[str]] = {
     "g5": "merge_train",
     "g6": "operate",
 }
-NEXT_AFTER_PHASE = {"discovery": "g1", "spec": "g2", "design": "design_prototype",
+NEXT_AFTER_PHASE = {"discovery": "discovery_sketch", "spec": "g2", "design": "design_prototype",
                     "architecture": "architecture_done",
                     "plan": "build", "release": "g6", "operate": "finalize"}
 

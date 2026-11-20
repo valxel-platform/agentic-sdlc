@@ -342,6 +342,23 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox",
             "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
 
+    @api.get("/features/{feature_id}/sketch", response_class=HTMLResponse)
+    def sketch_page(feature_id: str, user: User = Depends(current_user)) -> HTMLResponse:
+        """G1's rough sketch, for a sandboxed frame: no script at all."""
+        from ... import sketch
+
+        try:
+            state = eng()._state(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if state.get("product_id") not in lanes_for(user):
+            raise HTTPException(403, f"You aren't a member of {state.get('product_id')}'s organization")
+        page = sketch.page(eng().services, {**state, "feature_id": feature_id})
+        if page is None:
+            raise HTTPException(404, "No sketch")
+        return HTMLResponse(page, headers={"Content-Security-Policy": sketch.CSP, "X-Content-Type-Options": "nosniff",
+                                           "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
     @api.get("/features/{feature_id}/prototype", response_class=HTMLResponse)
     def prototype_page(feature_id: str, user: User = Depends(current_user)) -> HTMLResponse:
         """The G3 prototype, for a sandboxed frame: only the tool's own runtime runs in it (its hash

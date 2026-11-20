@@ -108,3 +108,34 @@ def make_design_prototype(services):
                              findings=m["mockups"]["findings"])]})
 
     return design_prototype, ("g3",)
+
+
+def make_discovery_sketch(services):
+    """Between discovery and G1: a rough sketch beside the brief (valxel_sdlc.sketch). Nothing runs
+    beside discovery, so this step holds no other gate back."""
+
+    def discovery_sketch(state: FeatureState) -> Command:
+        from .. import budgets, sketch
+
+        arts = state.get("artifacts") or {}
+        if state.get("ui") is False or "OPP" not in arts or (state.get("sketch") or {}).get("for") == arts["OPP"]["id"]:
+            return Command(goto="g1")  # nothing people see changes; no brief; or drawn for this brief already
+        product = services.feature_snapshot(state).product
+        budget = float(state.get("token_budget_usd") or product.budget_usd)
+        left, reason = budgets.over("discovery", state, spent=float(state.get("cost_usd", 0.0)), budget=budget,
+                                    base=float(state.get("budget_base_usd") or budget), shares=product.budget_shares)
+        if reason:
+            return Command(goto="g1")
+        ctx = feature_ctx(services, state, "discovery")
+        ctx["budget_remaining_usd"] = left
+        try:
+            m = sketch.make(services, state, ctx, services.artifacts.load(arts["OPP"]), budget_usd=left)
+        except Exception as exc:  # noqa: BLE001 - G1 still has the brief
+            return Command(goto="g1", update={"events": [event("discovery_sketch", "skipped",
+                                                               f"No sketch: {type(exc).__name__}")]})
+        return Command(goto="g1", update={
+            "artifacts": m["artifacts"], "cost_usd": m["cost_usd"], "tokens_used": m["tokens_used"],
+            "sketch": {**m["sketch"], "for": arts["OPP"]["id"]},
+            "events": [event("discovery_sketch", "sketch", "a rough sketch beside the brief", findings=m["sketch"]["findings"])]})
+
+    return discovery_sketch, ("g1",)

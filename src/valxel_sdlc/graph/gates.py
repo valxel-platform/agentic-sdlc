@@ -195,6 +195,7 @@ def make_gate(gate: str, services):
                 "screens": (__import__("valxel_sdlc.screens", fromlist=["g6"]).g6(state) if gate == "g6" else None),
                 # G3 looks at a mockup of each screen, with what their checks found.
                 "mockups": (state.get("mockups") or None) if gate == "g3" else None,
+                "sketch": (state.get("sketch") or None) if gate == "g1" else None,
                 # G4: what the design's added load does to the product's approved capacity (valxel_sdlc.capacity).
                 "capacity_change": (_capacity_change(services, state, snap)
                                     if gate == "g4" and lane_id == state["product_id"] else None),

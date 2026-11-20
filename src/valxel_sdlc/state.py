@@ -124,7 +124,8 @@ class FeatureState(TypedDict, total=False):
     ui_why: Annotated[str, last]
     # Today's screens in staging, from the product's scan, for the prototype (valxel_sdlc.current_screens).
     today_screens: Annotated[dict, last]
-    mockups: Annotated[dict, last]  # the UX spec's screens drawn for G3 (valxel_sdlc.mockups)
+    mockups: Annotated[dict, last]
+    sketch: Annotated[dict, last]  # G1's rough sketch beside the brief (valxel_sdlc.sketch)  # the UX spec's screens drawn for G3 (valxel_sdlc.mockups)
     code_read: Annotated[dict, last]  # the repos the architect read, at which commit (valxel_sdlc.workspace)
     fit: Annotated[dict, last]  # whether the approved design and architecture fit together (valxel_sdlc.fit)
     capacity_change: Annotated[list, last]  # the approved maximums G4's design raises (valxel_sdlc.capacity.change)
