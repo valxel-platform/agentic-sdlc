@@ -193,9 +193,19 @@ def assess(services: Any, state: dict, gate: str, phase: str) -> dict | None:
               config_version(services.settings), cfg)
     checks = feature_checks(state, phase)
     level = s["level"] if not checks or s["level"] in ("unknown", "low") else "medium"
-    return {**s, "level": level, "category_level": s["level"], "checks": checks,
-            "skippable": False,  # step 3 (T-82); never at G1, G4, G6 nor for PHI or payments
-            "says": says(gate, phase, {**s, "level": level}, checks)}
+    out = {**s, "level": level, "category_level": s["level"], "checks": checks,
+           "skippable": False,  # step 3 (T-82); never at G1, G4, G6 nor for PHI or payments
+           "says": says(gate, phase, {**s, "level": level}, checks)}
+    from .safe_mode import active
+
+    if active(services, state["product_id"]):  # the history was made by agents now in doubt: no quick reads
+        out["quick_read"] = False
+        out["says"] = (out["says"].replace(" You still decide here, but this one can be a quick read.", "")
+                       .replace(" A candidate for a quick approval.", "")
+                       + " Safe mode is on: read it in full whatever the history says.")
+    else:
+        out["quick_read"] = level == "high"
+    return out
 
 
 def says(gate: str, phase: str, s: dict, checks: list[str]) -> str:

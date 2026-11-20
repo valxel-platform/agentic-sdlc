@@ -22,7 +22,7 @@ from ..agents import PHASE_SPECS
 from ..agents import templates
 from ..agents.context import build_layers, skills_dir_of, task_texts
 from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
-from .. import budgets, diary, loops, performance, retrieval
+from .. import budgets, diary, loops, performance, retrieval, safe_mode
 from .. import evals, lessons, telemetry
 from ..config import ProductConfig
 from ..provisioning import naming_policy
@@ -139,6 +139,8 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         # After the change set merged, a fix for a failure in dev or staging goes on a branch of its own.
         "branch": state.get("fix_branch") or f"feature/{state['feature_id']}",
         "pilot": bool(state.get("pilot")),
+        # Safe mode on this phase: a second critic beside the critic (valxel_sdlc.safe_mode).
+        "safe_mode": safe_mode.phase_on(services, state["product_id"], phase),
         "config_variant": state.get("config_variant", ""),
         "simulate_faults": dict(state.get("simulate_faults") or {}),
         "reopened": list(state.get("reopened") or []),  # documents build has sent back (gates.reopen)
@@ -576,8 +578,9 @@ def build_phase_subgraph(phase: str, services):
             score, usage = v.score, {"tokens": v.tokens, "cost_usd": v.cost_usd}
             verdict = {"passed": v.passed, "items": v.items, "legacy_score": v.legacy_score,
                        "legacy_passed": v.legacy_score >= s["threshold"]}
-            if ctx.get("pilot") and "critic_shadow" in services.settings.roles:
-                # Pilot: a cheaper critic judges the same document; only its agreement is kept.
+            if (ctx.get("pilot") or ctx.get("safe_mode")) and "critic_shadow" in services.settings.roles:
+                # Pilot, or safe mode on this phase: another critic judges the same document; its
+                # verdict is kept and, in safe mode, shown at the gate.
                 sv = critique(services, phase=phase, rubric_skills=spec.critic_skills, content=content, ctx=ctx,
                               role="critic_shadow")
                 verdict["shadow"] = {"model": services.settings.role("critic_shadow").model, "passed": sv.passed,
@@ -1205,8 +1208,9 @@ def build_build_subgraph(services):
                 tokens, cost = tokens + sres.tokens, cost + sres.cost_usd
             elif second.skipped:
                 reviews[tid]["second_opinion"] = {"skipped": second.skipped}
-            if ctx.get("pilot") and "reviewer_shadow" in services.settings.roles:
-                # Pilot: a cheaper reviewer reads the same PR; only its agreement is kept.
+            if (ctx.get("pilot") or ctx.get("safe_mode")) and "reviewer_shadow" in services.settings.roles:
+                # Pilot, or safe mode on build: another reviewer reads the same PR; its verdict is
+                # kept and, in safe mode, shown at G5.
                 sres = call_agent(services, role="reviewer_shadow", phase="build", ctx=for_task(ctx, r), skills=spec.critic_skills,
                                   tail=review_tail, max_tokens=1024, schema=structured.schema(structured.ReviewReply),
                                   stub_text=json.dumps({"approve": True, "blocking": [], "notes": [], "score": 0.85}))

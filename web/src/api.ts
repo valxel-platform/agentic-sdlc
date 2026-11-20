@@ -10,6 +10,25 @@ export interface GateConfidence {
   says: string;
 }
 
+/** Safe mode (valxel_sdlc.safe_mode): why every gate of this product goes to a person, read in full. */
+export interface SafeMode {
+  on: boolean;
+  since: string;
+  says: string;
+  phases: string[];
+  normal_checks: number;
+  needed: number;
+  fix?: { at: string; by: string; note: string } | null;
+}
+
+/** In safe mode, a second critic reads the same work; what it said beside the critic. */
+export interface SecondCritic {
+  model: string;
+  agrees: boolean;
+  passed?: boolean;
+  says: string;
+}
+
 export interface DesignIssue {
   task: string;
   by: "coder" | "reviewer";
@@ -201,6 +220,9 @@ export interface PendingItem {
   findings?: string[];
   /** G1-G4: how far the product's own history predicts this approval (valxel_sdlc.confidence). */
   confidence?: GateConfidence | null;
+  /** The product is in safe mode: no batch, no quick reads, read in full. */
+  safe_mode?: SafeMode | null;
+  second_critic?: SecondCritic | null;
   /** Build found the approved spec, design or architecture wrong; people can reopen it. */
   design_issues?: DesignIssue[];
   constitution_version?: string;

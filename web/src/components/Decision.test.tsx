@@ -807,6 +807,35 @@ describe("gate confidence", () => {
   });
 });
 
+describe("safe mode", () => {
+  it("says why every gate is read in full, and what the second critic said", async () => {
+    renderPanel(
+      gateItem({
+        gate: "g2",
+        safe_mode: {
+          on: true,
+          since: "2026-11-18T09:00:00+00:00",
+          says: "Safe mode since 2026-11-18 09:00 UTC: The spec critic passed 50% of documents people then sent back.",
+          phases: ["spec"],
+          normal_checks: 1,
+          needed: 2,
+          fix: { at: "2026-11-19T10:00:00+00:00", by: "sam", note: "Pinned the previous model" },
+        },
+        second_critic: {
+          model: "anthropic/claude-sonnet-5-5",
+          agrees: false,
+          passed: false,
+          says: "The second critic failed it: the critic didn't.",
+        },
+      }),
+    );
+    expect(await screen.findByText("Safe mode.")).toBeInTheDocument();
+    expect(screen.getByText(/Pinned the previous model/)).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 normal checks/)).toBeInTheDocument();
+    expect(screen.getByText("Second critic disagrees")).toBeInTheDocument();
+  });
+});
+
 describe("escalations", () => {
   it("reopens the document build found wrong, with the evidence shown", async () => {
     const user = userEvent.setup();

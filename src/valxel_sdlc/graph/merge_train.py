@@ -322,7 +322,7 @@ def after_green_ci(services, state: FeatureState) -> str:
     snap = services.feature_snapshot(state)
     cfg = changeset_env.config(snap.product.runtime)
     if snap.product.kind != "product" or not snap.product.runtime or not cfg["enabled"]:
-        return after_ci(state)
+        return after_ci(state, services)
     if not changeset_env.components(state, snap.lane_of_repo()):
-        return after_ci(state)
+        return after_ci(state, services)
     return "cs_env"

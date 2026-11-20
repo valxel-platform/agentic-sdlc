@@ -214,6 +214,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
 
     @api.get("/inbox")
     def inbox(user: User = Depends(current_user), mine: bool = False, product_id: str | None = None) -> list[dict]:
+        from ... import safe_mode
         from ...decisions import batch_ready, low_risk
 
         items, products = [], {}
@@ -233,6 +234,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                     item["initiative_id"] = eng()._state(fid).get("initiative_id", "") if "-FEAT-" in fid else ""
                 except Exception:
                     item["initiative_id"] = ""
+                item["safe_mode"] = safe_mode.banner(sm) if (sm := safe_mode.get(eng().cluster, pid)) else None
                 item["low_risk"], item["low_risk_why"] = low_risk(item, dc)
                 item["read_s"] = read_s(item["interrupt_id"], user.login)
                 item["batch_ready"], item["batch_why"] = (batch_ready(item, item["read_s"]) if item["low_risk"]
@@ -245,6 +247,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         """Approve several low-risk decisions at once. Each is checked again here; any that isn't low risk
         (any more), isn't this person's, or that they haven't read (decisions.batch_ready: open for
         MIN_READ_S, unless the feature is express), is left for one-at-a-time."""
+        from ... import safe_mode
         from ...decisions import batch_ready, low_risk
 
         approved, skipped = [], []
@@ -252,6 +255,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             try:
                 item = eng().item(ref.feature_id, ref.interrupt_id)
                 pid = eng().view(ref.feature_id)["product_id"]
+                item = {**item, "safe_mode": safe_mode.get(eng().cluster, pid)}
                 ok, why = low_risk(item, eng().services.snapshot(pid).product.data_class)
                 if ok and not can_decide(user, {"approvers": item_approvers(ref.feature_id, {**item, "product_id": pid})}):
                     ok, why = False, "not yours to decide"
@@ -299,6 +303,14 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                                     "with traceability gaps")
         decision = body.model_dump(exclude_none=True) | {"approver": user.login,
                                                           "viewed_s": read_s(interrupt_id, user.login)}
+        if item.get("type") == "gate" and decision.get("decision") == "approve":
+            from ... import safe_mode
+            from ...decisions import MIN_READ_S
+
+            pid = eng().view(feature_id)["product_id"]
+            if safe_mode.get(eng().cluster, pid) and decision["viewed_s"] < MIN_READ_S:
+                raise HTTPException(409, f"Safe mode is on for {pid}: read it in full before approving "
+                                    f"(open {int(MIN_READ_S)}s or more; {int(decision['viewed_s'])}s so far)")
         if user.idp == "mcp":  # through the person's assistant (api/mcp.py), as its signed session says
             decision["via"] = "mcp"
         if decision.get("comments"):  # line comments go to the agents as part of the feedback

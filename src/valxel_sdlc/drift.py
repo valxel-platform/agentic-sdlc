@@ -121,6 +121,97 @@ def run(services: Any, cluster: Any, *, now: datetime | None = None, force: bool
     cluster.put(LATEST, result)
     cluster.put(RUNS, ([{k: result[k] for k in ("at", "config", "regressions")}] + list(cluster.get(RUNS) or []))[:KEEP_RUNS])
     _say(result, before, alert)
+    _safe_mode(services, cluster, result, since=before.get("at") or now.isoformat(), at=now.isoformat(), alert=alert)
+    return result
+
+
+def phases_in(regressions: list[str]) -> list[str]:
+    """The phases named in regression lines ("Same cases, same config: spec: pass rate fell ...")."""
+    from .safe_mode import PHASES
+
+    out = []
+    for r in regressions:
+        for part in r.split(": "):
+            if part in PHASES and part not in out:
+                out.append(part)
+    return out
+
+
+def _safe_mode(services, cluster, result: dict, *, since: str, at: str, alert=None) -> None:
+    """Same-config drift moves a role every product uses: they all go to safe mode. A clean run is a
+    normal check for the products already in it."""
+    from . import safe_mode
+    from .watcher_jobs import _webhook_alert
+
+    products = list(getattr(services.settings, "registry", None) or [])
+    if result["regressions"]:
+        named = phases_in(result["regressions"])
+        causes = ([{"source": "drift", "rule": "drift", "scope": p, "says": f"Drift evals: {p} did worse"} for p in named]
+                  or [{"source": "drift", "rule": "drift", "scope": "", "says": "Drift evals: the agents did worse"}])
+        for pid in products:
+            safe_mode.record_check(cluster, pid, source="drift", normal=False, at=at, says="; ".join(result["regressions"][:3]))
+        entered = safe_mode.enter(cluster, products, causes, at=at, bad_since=since)
+        if entered:
+            try:
+                (alert or _webhook_alert)(f"Valxel safe mode on for {', '.join(entered)}: the drift evals did worse with "
+                                          "no config change, so every gate goes to a person, read in full.")
+            except Exception:
+                log.exception("safe mode alert not delivered")
+    elif not result.get("first_run_for_config") and result.get("anchor"):
+        for pid in products:
+            safe_mode.record_check(cluster, pid, source="drift", normal=True, at=at,
+                                   says=f"Weekly drift run back at its baseline ({result['anchor_cases']} pinned cases)")
+
+
+REPLAYS = "drift:replays"
+
+
+def replay_scoped(services: Any, cluster: Any, product_id: str, phases: list[str] | None = None, *,
+                  now: datetime | None = None, replay=None, env=None) -> dict:
+    """A replay on demand for one product (T-87): the pinned cases of these phases, and the product's
+    own labelled cases from the last `every_days`, each phase against the anchor's baseline for it.
+    Doesn't move the anchor or the weekly schedule. For a product in safe mode, it's a check."""
+    from . import evals, safe_mode
+
+    now = now or datetime.now(UTC)
+    cfg = _env(env)
+    replay = replay or (lambda cases: evals.run_cases(evals.services_for(services.settings), cases,
+                                                      budget_usd=cfg["budget_usd"]))
+    sm = safe_mode.get(cluster, product_id)
+    phases = list(phases or (sm or {}).get("phases") or [])
+    anchor = cluster.get(ANCHOR) or {}
+    result: dict = {"at": now.isoformat(), "product_id": product_id, "phases": phases or "all", "regressions": [],
+                    "cases": 0}
+    if not anchor.get("baseline"):
+        result["says"] = "No drift baseline yet: run the drift evals once first"
+        normal = None
+    else:
+        def wanted(c) -> bool:
+            return not phases or c.phase in phases
+
+        by_id = {c.id: c for c in services.evals.cases(data_classes=cfg["data_classes"])}
+        pinned = [by_id[i] for i in anchor["case_ids"] if i in by_id and wanted(by_id[i])]
+        own = [c for c in recent_cases(services.evals, now=now, days=cfg["every_days"], data_classes=cfg["data_classes"],
+                                       per_phase=cfg["cases_per_phase"]) if c.product_id == product_id and wanted(c)
+               and c.id not in set(anchor["case_ids"])]
+        # Each phase against its own baseline: the baseline's all-phase totals don't compare with a subset.
+        base = {"summary": {"all": None, "phases": anchor["baseline"].get("phases", {})}}
+        for name, cases, drop in (("Pinned cases", pinned, cfg["max_drop"]), (f"{product_id}'s recent work", own,
+                                                                              cfg["max_drop"] * 2)):
+            if not cases:
+                continue
+            got = replay(cases)
+            result["cases"] += len(cases)
+            cmp = evals.compare(base, got, max_drop=drop)
+            result[name] = got["summary"].get("phases")
+            result["regressions"] += [f"{name}: {r}" for r in cmp["regressions"]]
+        normal = None if not result["cases"] else not result["regressions"]
+        result["says"] = ("No cases for these phases yet" if normal is None else
+                          "; ".join(result["regressions"][:3]) if result["regressions"] else
+                          f"Back at the baseline on {result['cases']} cases")
+    result["normal"] = normal
+    cluster.put(REPLAYS, ([result] + list(cluster.get(REPLAYS) or []))[:KEEP_RUNS])
+    safe_mode.record_check(cluster, product_id, source="replay", normal=normal, at=now.isoformat(), says=result["says"])
     return result
 
 

@@ -297,9 +297,89 @@ def run(engine, *, now: datetime | None = None, alert=None, clock=None) -> dict:
     changed = changes.what_changed(engine.services, engine.cluster, records, since=_iso(since), until=_iso(until))
     result = {"at": _iso(now), "current": current, "baseline": baseline, "queue": queue, "alerts": tripped,
               "drift": drift, "what_changed": changed}
+    result["safe_mode"] = by_product(engine, states, records, rules, now=now, since=since, b_since=b_since,
+                                     alert=alert)
     engine.cluster.put(NOTE, result)
     _alert(engine.cluster, tripped, alert=alert, clock=clock, context=changes.summary(changed))
     return result
+
+
+# Rules about the quality of the agents' work: these put a product in safe mode. Cost and stuck
+# work alert, but don't change how gates are decided.
+QUALITY = ("critic_false_pass", "critic_false_fail", "first_time_approval", "escalation_rate", "stall_rate")
+
+
+def samples(m: dict, cause: dict) -> int:
+    """How many decisions or runs a tripped rule's scope has in a measurement."""
+    rule, scope = cause.get("rule"), cause.get("scope")
+    if rule == "critic_false_pass":
+        return int((m.get("critic", {}).get(scope) or {}).get("passed") or 0)
+    if rule == "critic_false_fail":
+        return int((m.get("critic", {}).get(scope) or {}).get("failed") or 0)
+    if rule == "first_time_approval":
+        return int((m.get("gates", {}).get(scope) or {}).get("decided") or 0)
+    return int((m.get("phases", {}).get(scope) or {}).get("runs") or 0)
+
+
+def by_product(engine, states: list[dict], records: list, rules: Rules, *, now: datetime, since: datetime,
+               b_since: datetime, alert=None) -> dict:
+    """Each product measured on its own: a quality rule that trips puts it in safe mode
+    (valxel_sdlc.safe_mode); one already in it gets a check on its work since the fix."""
+    from . import safe_mode
+    from .watcher_jobs import _webhook_alert
+
+    quality = {k: v for k, v in rules.rules.items() if k in QUALITY}
+    cluster, say = engine.cluster, alert or _webhook_alert
+    for pid in engine.services.settings.registry:
+        st = [s for s in states if s.get("product_id") == pid]
+        rs = [r for r in records if getattr(r, "product_id", "") == pid]
+        was = safe_mode.get(cluster, pid)
+        if was is not None:
+            _check_since_fix(cluster, was, st, rs, rules, quality, now=now)
+        # After safe mode ends, only work since then can put the product back in: not the same bad week.
+        left = (cluster.get(safe_mode.key(pid)) or {}).get("left_at") or ""
+        current = measure(st, rs, since=max(_iso(since), left), until=_iso(now))
+        tripped = check(current, measure(st, rs, since=_iso(b_since), until=_iso(since)), quality)
+        if not tripped:
+            continue
+        causes = [{"source": "health", "rule": t["rule"], "scope": t["scope"], "says": t["says"]} for t in tripped]
+        if safe_mode.enter(cluster, [pid], causes, at=_iso(now), bad_since=_iso(since)):
+            try:
+                say(f"Valxel safe mode on for {pid}: every gate goes to a person, read in full, until two checks "
+                    f"in a row are normal and an owner confirms. Why: {'; '.join(c['says'] for c in causes[:3])}")
+            except Exception:
+                log.exception("safe mode alert not delivered")
+    return safe_mode.overview(engine.services, cluster, engine.services.settings.registry, now=_iso(now))
+
+
+def _check_since_fix(cluster, s: dict, states: list[dict], records: list, rules: Rules, quality: dict, *,
+                     now: datetime) -> None:
+    """The product's work since the fix (or since safe mode began), against its baseline before the
+    bad window. Counted only once each tripped rule has its `min_samples` of new work, and only when
+    there's more work than at the last check: the same evidence doesn't count twice."""
+    from . import safe_mode
+
+    start = (s.get("fix") or {}).get("at") or s["since"]
+    causes = [c for c in s["causes"] if c["source"] == "health"]
+    if not causes:
+        return
+    bad = datetime.fromisoformat(s["bad_since"])
+    base = measure(states, records, since=_iso(bad - timedelta(days=rules.baseline_days)), until=_iso(bad))
+    after = measure(states, records, since=start, until=_iso(now))
+    n = {c["rule"] + ":" + c["scope"]: samples(after, c) for c in causes}
+    short = [k for k, c in zip(n, causes, strict=True) if n[k] < int((quality.get(c["rule"]) or {}).get("min_samples", 1))]
+    total = sum(n.values())
+    if short:
+        safe_mode.record_check(cluster, s["product_id"], source="health", normal=None, at=_iso(now),
+                               says=f"Not enough work since {start[:16]} to measure yet ({', '.join(short)})")
+        return
+    if total <= int(s.get("samples") or 0):
+        return  # nothing new since the last check
+    again = {t["key"]: t for t in check(after, base, quality)}
+    bad_now = [again[k]["says"] for k in n if k in again]
+    safe_mode.record_check(cluster, s["product_id"], source="health", normal=not bad_now, at=_iso(now), samples=total,
+                           says=("; ".join(bad_now) if bad_now else
+                                 f"Back to its baseline on {total} decisions and runs since {start[:16]}"))
 
 
 def _alert(cluster, tripped: list[dict], *, alert=None, clock, context: str = "") -> None:

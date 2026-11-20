@@ -37,6 +37,27 @@ def gate_notes(state: FeatureState, gate: str, phase: str) -> list[dict]:
     return sorted(notes, key=lambda n: ORDER.index(n["kind"]))
 
 
+def second_critic(state: FeatureState, phase: str) -> dict | None:
+    """The latest verdict of the phase's second critic (safe mode runs it beside the critic): the
+    shadow critic for documents, the shadow reviewer for build's PRs."""
+    for e in reversed(state.get("events") or []):
+        if e.get("node") != phase:
+            continue
+        if (e.get("critic") or {}).get("shadow"):
+            sh = e["critic"]["shadow"]
+            return {"model": sh["model"], "passed": sh["passed"], "agrees": sh["agree"],
+                    "says": ("The second critic agrees" if sh["agree"] else
+                             f"The second critic ({sh['model']}) {'passed' if sh['passed'] else 'failed'} it: "
+                             "the critic didn't. Read it with that in mind.")}
+        shadows = [r["shadow"] for r in e.get("reviews") or [] if r.get("shadow")]
+        if shadows:
+            off = [s for s in shadows if not s["agree"]]
+            return {"model": shadows[0]["model"], "agrees": not off,
+                    "says": (f"The second reviewer agrees on all {len(shadows)} PRs" if not off else
+                             f"The second reviewer disagreed on {len(off)} of {len(shadows)} PRs")}
+    return None
+
+
 def record_documents(services, state: dict, gate: str, approvers: str) -> dict:
     """What the gate approved, into the product's governance repo (valxel_sdlc.records)."""
     from .. import records
@@ -119,8 +140,10 @@ def make_gate(gate: str, services):
         corrections: list[dict] = []
         taken: list[tuple[dict, str, str]] = []  # (decision, agents' draft, person's version)
         human: str | None = None
-        from .. import confidence
+        from .. import confidence, safe_mode
 
+        safe = safe_mode.active(services, state["product_id"])
+        safe_banner = safe_mode.banner(safe) if safe else None
         predicted = confidence.assess(services, state, gate, phase) if preset is None else None
         for lane_id in approving:
             lane = lanes[lane_id]
@@ -209,6 +232,9 @@ def make_gate(gate: str, services):
                 # At max_gate_revisions it can't be sent back again.
                 "history": history, "revisions": sent_back, "stuck": sent_back >= limits.takeover_after_revisions,
                 "allowed": allowed,
+                # Safe mode (valxel_sdlc.safe_mode): why it's on, and what the second critic said.
+                "safe_mode": safe_banner,
+                "second_critic": second_critic(state, phase) if safe_banner else None,
             }
             if human is not None:  # an earlier lane took it over: later lanes decide on that version
                 packet["preview"] = human[:2000]
@@ -720,7 +746,7 @@ def make_escalation(phase: str, services):
             if phase == "spec" and "g2" in profiles.get(state.get("profile")).skips_gates:
                 return Command(goto="architecture", update=update)  # express: G4 reviews the spec too
             return Command(goto=approve_target(spec.gate, state), update=update)
-        nxt = after_ci(state) if phase == "build" else after_phase(phase, state)  # a person vouched for CI
+        nxt = after_ci(state, services) if phase == "build" else after_phase(phase, state)  # a person vouched for CI
         return Command(goto=nxt, update=update)
 
     targets = {phase, END}

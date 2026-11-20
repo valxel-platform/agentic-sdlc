@@ -115,8 +115,16 @@ def correction(state: FeatureState, gate: str, phase: str, kind: str, d: dict, n
             "approver": d.get("approver", ""), "n": n, "changes": changes or {}}
 
 
-def after_ci(state: FeatureState) -> str:
-    return "g5" if state.get("risk_tier") in ("high", "regulated") else "merge_train"
+def after_ci(state: FeatureState, services=None) -> str:
+    """G5 for risky changes, and for every change while the product is in safe mode."""
+    if state.get("risk_tier") in ("high", "regulated"):
+        return "g5"
+    if services is not None:
+        from ..safe_mode import active
+
+        if active(services, state["product_id"]):
+            return "g5"
+    return "merge_train"
 
 
 def after_phase(phase: str, state: FeatureState) -> str:

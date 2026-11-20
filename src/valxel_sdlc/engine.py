@@ -163,6 +163,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         # Asked once, across replicas and repeated steps (cluster.py): what a graph step asks another
         # system to start, so a step run again after a crash doesn't ask twice.
         services.ask_once, services.unask = self.cluster.claim, self.cluster.unclaim
+        services.cluster = self.cluster  # shared notes the pipeline reads (safe mode: valxel_sdlc.safe_mode)
         if getattr(services, "cohort_logs", None) is None:
             from .ops.cohorts import from_env as cohorts_from_env
 
@@ -448,6 +449,11 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         if track != "hotfix" and profile not in profiles.allowed(workflow, snap.product.data_class):
             raise ValueError(f"{product_id} doesn't allow the {profile} profile "
                              f"(allowed: {', '.join(profiles.allowed(workflow, snap.product.data_class))})")
+        from . import safe_mode
+
+        safe_note = ""
+        if profile == "express" and safe_mode.get(self.cluster, product_id):
+            profile, safe_note = "feature", "Safe mode is on for this product: express runs as a feature, every gate to a person"
         if initiative_id and not self.approved_initiative(product_id, initiative_id):
             raise ValueError(f"{initiative_id} is not an approved initiative of {product_id}")
         with self._create_lock:  # two identical requests at once must not both pass the check
@@ -463,7 +469,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
                "created_by": created_by, "simulate_faults": dict(simulate_faults or {}), "governance": snap.pins,
                "related_features": similar, "not_duplicate_reason": not_duplicate_reason.strip(),
                "initiative_id": initiative_id, "track": track, "hotfix": dict(hotfix or {}), "pilot": bool(pilot),
-               "profile": profile,
+               "profile": profile, "profile_note": safe_note,
                # Whether it changes what people see (UX design and G3 run only then); G2 can change it.
                **self._ui(product_id, title, description, ui),
                # A share of new features runs on the candidate config, when one is set (VALXEL_CANARY_*).
@@ -610,6 +616,9 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             "created_by": s.get("created_by", ""),
             "status": s.get("status"),
             "profile": s.get("profile", "feature"),
+            "profile_note": s.get("profile_note", ""),
+            # Safe mode now, whatever it was when the gate opened (valxel_sdlc.safe_mode).
+            "safe_mode": _safe_banner(self.cluster, s.get("product_id") or ""),
             "config_variant": s.get("config_variant", ""),
             "track": s.get("track", "standard"),
             "running": (running := self.is_running(feature_id)),
@@ -720,3 +729,10 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
                 d = {"decision": "resolved", "feedback": "resolved by a human"}
             self.decide(feature_id, p["interrupt_id"], {"approver": approver, "active_minutes": 5, **d})
         return self.view(feature_id)
+
+
+def _safe_banner(cluster, product_id: str) -> dict | None:
+    from . import safe_mode
+
+    sm = safe_mode.get(cluster, product_id)
+    return safe_mode.banner(sm) if sm else None

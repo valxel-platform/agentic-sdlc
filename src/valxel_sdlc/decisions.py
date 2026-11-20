@@ -152,7 +152,7 @@ MIN_READ_S = float(os.environ.get("VALXEL_BATCH_MIN_READ_S") or 20)
 
 def batch_ready(item: dict, read_s: float) -> tuple[bool, str]:
     """Whether a low-risk gate may be approved in a batch by someone who read it for read_s seconds."""
-    if item.get("profile") == "express":
+    if item.get("profile") == "express" and not item.get("safe_mode"):
         return True, "express"
     if read_s >= MIN_READ_S:
         return True, f"read for {int(read_s)}s"
@@ -164,6 +164,8 @@ def low_risk(item: dict, data_class: str) -> tuple[bool, str]:
     """Whether a waiting decision may be approved in a batch, and if not, why."""
     if item.get("type") != "gate" or item.get("gate") not in BATCH_GATES:
         return False, "decided one at a time"
+    if item.get("safe_mode"):
+        return False, "safe mode: every gate is read in full"
     if data_class != "general":
         return False, f"{data_class} product"
     if item.get("risk_tier") not in (None, "", "low"):

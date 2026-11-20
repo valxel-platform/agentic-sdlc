@@ -45,9 +45,9 @@ def make_cs_env(services):
         except Exception as exc:
             reason = f"Couldn't set up the change set's environment: {type(exc).__name__}: {exc}"
             if not cfg["required"]:  # optional: say so and carry on as before
-                return Command(goto=after_ci(state), update={"events": [event("cs_env", "skipped", reason)]})
+                return Command(goto=after_ci(state, services), update={"events": [event("cs_env", "skipped", reason)]})
             res = {"status": "failure", "wait": "change_set", "results": [], "reason": reason, "at": now()}
-            return _people_said(state, "change_set", res, ok=after_ci(state), retry="cs_env")
+            return _people_said(state, "change_set", res, ok=after_ci(state, services), retry="cs_env")
         cs["env"] = {**env, "name": name, "namespaces": namespaces, "runs": runs, "deployed": env.get("deployed") or {},
                      "created": env.get("created") or now(), "deleted": False}
         return Command(goto="cs_build_wait", update={"change_set": cs, "events": [
@@ -113,7 +113,7 @@ def make_cs_deploy(services):
         if failures:
             res = {"status": "failure", "wait": "change_set", "results": failures, "at": now(),
                    "reason": f"Couldn't deploy to {name}: " + "; ".join(f["message"] for f in failures)}
-            return _people_said(state, "change_set", res, ok=after_ci(state), retry="cs_deploy",
+            return _people_said(state, "change_set", res, ok=after_ci(state, services), retry="cs_deploy",
                                 extra={"change_set": cs})
         return Command(goto="cs_wait", update={"change_set": cs, "events": [
             event("cs_deploy", "deployed", f"{name}: {', '.join(sorted(deployed))}", env=name)]})
@@ -133,7 +133,7 @@ def make_cs_wait(services):
         targets = [{"repo": d["repo"], "component": d["component"], "project": d.get("project"),
                     "namespace": d.get("namespace"), "env": d["env"],
                     **({"kind": "resource"} if d.get("kind") == "resource" else {})} for d in deployed]
-        nxt = after_ci(state)
+        nxt = after_ci(state, services)
         if not targets:
             return Command(goto=nxt)
         perf = state.get("performance") or {}

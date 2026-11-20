@@ -218,6 +218,11 @@ class DraftIn(BaseModel):
     budget_usd: float | None = Field(default=None, ge=0)
 
 
+class SafeModeIn(BaseModel):
+    note: str = Field("", max_length=2000, description="Why (entering by hand), or what was changed (a fix)")
+    phases: list[str] = Field(default_factory=list, description="Phases to replay (default: the ones that tripped)")
+
+
 class EvalRunIn(BaseModel):
     ref: str = Field(..., description="The config repo commit to evaluate")
     base_ref: str = Field("", description="The commit to compare with (default: the config in use)")

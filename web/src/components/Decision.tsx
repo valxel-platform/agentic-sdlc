@@ -476,6 +476,24 @@ export function DecisionPanel({
         )}
       </div>
 
+      {item.type === "gate" && item.safe_mode && (
+        <div className="safe-mode" role="status">
+          <strong>Safe mode.</strong> {item.safe_mode.says}{" "}
+          {item.safe_mode.fix
+            ? `Fix in: ${item.safe_mode.fix.note} (${item.safe_mode.fix.by}).`
+            : "No fix marked yet."}{" "}
+          {item.safe_mode.normal_checks} of {item.safe_mode.needed} normal checks so far.
+          {item.second_critic && (
+            <p className="small">
+              <span className={`chip ${item.second_critic.agrees ? "go" : "stop"}`}>
+                {item.second_critic.agrees ? "Second critic agrees" : "Second critic disagrees"}
+              </span>{" "}
+              {item.second_critic.says}
+            </p>
+          )}
+        </div>
+      )}
+
       {item.type === "gate" && item.confidence && (
         <p className="small muted confidence" data-level={item.confidence.level}>
           <span className={`chip ${CONFIDENCE_TONE[item.confidence.level]}`}>
