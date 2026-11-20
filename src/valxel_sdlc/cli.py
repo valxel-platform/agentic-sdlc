@@ -470,6 +470,9 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     c.add_argument("action", choices=["verify"])
     from .laptop import add_parser as _add_dev
     _add_dev(sub)
+    lc = sub.add_parser("lessons-check", help="Check a governance repo's lessons the way the tool will when it loads "
+                                              "them (for that repo's CI)")
+    lc.add_argument("directory", nargs="?", default="lessons")
     wk = sub.add_parser("workspaces", help="Give a workspace its first owner (an existing deployment's), or list them "
                                            "(DATABASE_URL)")
     wk.add_argument("action", choices=["owner", "list"])
@@ -559,6 +562,14 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     oc.add_argument("--dry-run", action="store_true", help="read: don't record the reading")
     oc.add_argument("--json", action="store_true")
     args = p.parse_args(argv)
+    if args.cmd == "lessons-check":
+        from .lessons import check_dir
+        problems = check_dir(args.directory)
+        for line in problems:
+            print(line)
+        if not problems:
+            print(f"{args.directory}: every lesson passes")
+        return 1 if problems else 0
     if args.cmd == "dev":
         from .laptop import main as dev_main
         return dev_main(args)

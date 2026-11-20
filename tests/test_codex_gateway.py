@@ -42,7 +42,7 @@ def test_codex_calls_the_gateway_with_a_capped_session_token_not_a_provider_key(
     assert 'model_provider="valxel_gateway"' in flags and 'base_url="http://gw:8080/v1"' in flags
     assert 'wire_api="responses"' in flags and f'env_key="{GATEWAY_TOKEN_ENV}"' in flags
     assert kw["env"][GATEWAY_TOKEN_ENV] == "vgs_token" and "sk-the-tools-own" not in kw["env"].values()
-    assert minted["models"] == ["gpt-5.4"] and minted["budget"] == 15 and minted["revoked"]
+    assert minted["models"] == ["gpt-5.4-2026-03-05"] and minted["budget"] == 15 and minted["revoked"]
     assert res.text == '{"done": true}'
 
 

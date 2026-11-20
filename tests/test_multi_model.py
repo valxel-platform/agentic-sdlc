@@ -311,7 +311,7 @@ def test_every_build_review_gets_a_second_opinion_where_the_data_class_allows(tm
     for fid in (farm, clinic):
         assert eng.auto_drive(fid)["status"] == "done"
     build = lambda fid: svc.artifacts.load(eng._state(fid)["artifacts"]["BUILD"])
-    assert "second opinion (openai/gpt-5.4) approves (advisory)" in build(farm)
+    assert "second opinion (openai/gpt-5.4-2026-03-05) approves (advisory)" in build(farm)
     assert "second opinion (selfhosted/qwen3-coder) approves (advisory)" in build(clinic)
     assert "reviewer_second" in {r.role for r in svc.ledger.records() if r.feature_id == farm}
 

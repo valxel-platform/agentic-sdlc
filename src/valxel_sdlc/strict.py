@@ -72,6 +72,7 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("VALXEL_SIGNALS_TOKENS is not scoped: the platform's signals token is accepted for every "
                    "product's alerts; give each sender its own (`valxel signals-token`) and set it to scoped")
     out += weak_secrets(env, database_url=s.database_url)
+    out += unpinned_models(s, env)
     out += secrets_in_environment(env, live=s.mode == "live")
     out += app_key_in_kms(env)
     out += provisioning_split(env)
@@ -95,6 +96,24 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         cm = tools.get("change_management") or {}
         if cm.get("provider") == "servicenow" and not secret_env.get(f"VALXEL_SERVICENOW_AUTH_{pid.upper()}"):
             out.append(f"{pid}: tools.change_management names ServiceNow, but VALXEL_SERVICENOW_AUTH_{pid.upper()} is not set")
+    return out
+
+
+def unpinned_models(settings, env) -> list[str]:
+    """In live mode every role's model is pinned, so a provider can't swap it silently (valxel_sdlc.pinning)."""
+    from .models import available_roles, optional_roles
+    from .pinning import why_unpinned
+
+    if env.get("VALXEL_MODE", "stub").lower() != "live":
+        return []
+    optional, on = optional_roles(settings), available_roles(settings)
+    out = []
+    for name, rc in sorted(settings.roles.items()):
+        if name in optional and name not in on:  # a fallback that can't run here isn't used
+            continue
+        why = why_unpinned(rc.model, settings.providers)
+        if why:
+            out.append(f"role {name}: {why} (a name a provider can repoint is the most common cause of silent drift)")
     return out
 
 

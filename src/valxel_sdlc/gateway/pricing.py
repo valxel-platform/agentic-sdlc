@@ -29,7 +29,11 @@ def estimate_cost(
 ) -> tuple[float, str]:
     """Return (usd, cost_basis). cost_basis is 'list' or 'unknown'. `prices` (models.yaml) adds or
     overrides prices for other providers' models, keyed by the model name without the provider."""
-    price = (prices or {}).get(model_name(model)) or PRICES.get(model_name(model))
+    from ..pinning import undated
+
+    name = model_name(model)
+    price = ((prices or {}).get(name) or PRICES.get(name)  # a pinned snapshot is priced as its model
+             or (prices or {}).get(undated(name)) or PRICES.get(undated(name)))
     if price is None:
         return 0.0, "unknown"
     pin, pout, pread = price
@@ -43,4 +47,7 @@ def estimate_cost(
 
 
 def has_price(model: str, prices: dict | None = None) -> bool:
-    return model_name(model) in (prices or {}) or model_name(model) in PRICES
+    from ..pinning import undated
+
+    names = {model_name(model), undated(model_name(model))}
+    return any(n in (prices or {}) or n in PRICES for n in names)

@@ -204,6 +204,9 @@ class ProviderConfig:
     base_url: str = ""
     base_url_env: str = ""  # read the URL from this variable instead (self-hosted endpoints)
     api_key_env: str = ""
+    # What a self-hosted server runs (a weights revision or image digest): it serves whatever it was
+    # started with, so this is how its model is pinned (valxel_sdlc.pinning).
+    pinned: str = ""
 
     def url(self) -> str:
         return (os.environ.get(self.base_url_env, "") if self.base_url_env else self.base_url).rstrip("/")
@@ -282,9 +285,15 @@ class Settings:
 
     def context_window(self, model: str) -> int:
         """The model's context window in tokens, 0 when config doesn't say."""
-        w, bare = self.context_windows, model.split("/", 1)[-1]
-        found = w.get(model) or w.get(bare) or next((v for k, v in w.items() if k.split("/", 1)[-1] == bare), 0)
-        return int(found or 0)
+        from .pinning import undated
+
+        w = self.context_windows
+        for name in dict.fromkeys((model, undated(model))):  # a pinned snapshot has its model's window
+            bare = name.split("/", 1)[-1]
+            found = w.get(name) or w.get(bare) or next((v for k, v in w.items() if k.split("/", 1)[-1] == bare), 0)
+            if found:
+                return int(found)
+        return 0
 
 
 DEFAULT_CONTEXT_CAPS = {"L2": 15000, "L3": 8000, "L4": 10000, "L5": 25000, "reserve": 64000}
