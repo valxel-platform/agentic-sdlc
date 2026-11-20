@@ -151,13 +151,13 @@ class PostgresOutcomeStore:
             conn.execute("UPDATE valxel_gate_outcomes SET missed = %s WHERE feature_id = %s AND gate = ANY(%s) "
                          "AND decision = 'approve' AND missed = ''", (why, feature_id, list(gates)))
 
+    ALL = "SELECT * FROM valxel_gate_outcomes WHERE product_id = %s ORDER BY at"
+    ONE_GATE = "SELECT * FROM valxel_gate_outcomes WHERE product_id = %s AND gate = %s ORDER BY at"
+
     def rows(self, product_id, gate=None) -> list[dict]:
-        sql, args = "SELECT * FROM valxel_gate_outcomes WHERE product_id = %s", [product_id]
-        if gate:
-            sql += " AND gate = %s"
-            args.append(gate)
         with self.pool.connection() as conn:
-            got = conn.execute(sql + " ORDER BY at", tuple(args)).fetchall()
+            got = (conn.execute(self.ONE_GATE, (product_id, gate)) if gate
+                   else conn.execute(self.ALL, (product_id,))).fetchall()
         return [{**dict(r), "at": r["at"].isoformat()} for r in got]
 
 
