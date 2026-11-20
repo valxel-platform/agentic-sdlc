@@ -63,7 +63,8 @@ def test_the_product_gate_sets_the_launch_and_setup_records_it(client, engine, s
     meta = yaml.safe_load(ini.split("---")[1])
     assert meta["release_model"] == "launch" and str(meta["target_date"]) == LATER
     assert f"- {first} (must):" in ini and ini.count("(must)") == 1
-    assert "target_date" not in files.get("roadmap/initiatives/AW-INI-2.md", "")
+    later = files.get("roadmap/initiatives/AW-INI-2.md", "")
+    assert "target_date" not in later and (not later or "release_model: each" in later)
     assert any(e["node"] == "product_gate" and LATER in e["detail"] for e in v["events"])
 
 
@@ -93,3 +94,17 @@ def test_its_features_join_the_launch_and_it_shows_what_hasnt_started(tmp_path, 
     [ini] = [i for i in product_roadmap(eng, "FARM")["initiatives"] if i["id"] == "FARM-INI-1"]
     assert [(c["title"], c["started"], c["must"]) for c in ini["candidates"]] == [
         ("Offline crop log", True, True), ("Soil sensor import", False, False)]
+
+
+def test_later_initiatives_ship_each_feature_at_g6(services):
+    from valxel_sdlc.inception import Vision, setup
+    from valxel_sdlc.inception.run import run
+
+    v = Vision(name="Aqua Watch", org="acme-water", vision="Alert farm managers when fields run dry.",
+               goals=["Fewer dry fields (measure: under 2 a month)"], users=["Farm managers"], budget_usd=1500)
+    [b] = run(services, v)
+    files = setup.initiative_files(b.text, ROADMAP, "lead", {"target_date": LATER, "must": ["Field map"]})
+    first, later = (yaml.safe_load(files[f"roadmap/initiatives/AW-INI-{n}.md"].split("---")[1]) for n in (1, 2))
+    assert first["release_model"] == "launch" and str(first["target_date"]) == LATER
+    assert later["release_model"] == "each" and "target_date" not in later
+    assert "- Field map (must):" in files["roadmap/initiatives/AW-INI-1.md"]

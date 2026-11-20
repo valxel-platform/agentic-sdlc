@@ -118,7 +118,9 @@ def initiative_files(brief: str, roadmap: str, approved_by: str, launch: dict | 
         iid = f"{pid}-INI-{n}"
         goals = [goal_ids.get(g, g) for g in ini["goals"]]
         record = {"id": iid, "title": ini["title"], "goal": goals[0] if goals else "", "horizon": ini["horizon"],
-                  "status": "approved", "budget_usd": ini["budget_usd"], "lanes": [pid], "release_model": "launch",
+                  "status": "approved", "budget_usd": ini["budget_usd"], "lanes": [pid],
+                  # The first is the launch; later ones ship each feature at G6 unless given a release.
+                  "release_model": "launch" if n == 1 else "each",
                   "owner": "", "scope": "product", "approved_by": approved_by, "approved_at": _today()}
         must = set(launch.get("must") or []) if n == 1 else set()
         if n == 1 and launch.get("target_date"):
