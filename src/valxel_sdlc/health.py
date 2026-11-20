@@ -289,7 +289,10 @@ def run(engine, *, now: datetime | None = None, alert=None, clock=None) -> dict:
     baseline = measure(states, records, since=_iso(b_since), until=_iso(since))
     queue = engine.queue.depth() if getattr(engine, "queue", None) is not None else None
     tripped = check(current, baseline, rules.rules, queue=queue, waiting=external_waits(engine, now=now))
-    result = {"at": _iso(now), "current": current, "baseline": baseline, "queue": queue, "alerts": tripped}
+    # The weekly drift evals' latest result (valxel_sdlc.drift), alerted by that job itself.
+    drift = engine.cluster.get("drift:latest")
+    result = {"at": _iso(now), "current": current, "baseline": baseline, "queue": queue, "alerts": tripped,
+              "drift": drift}
     engine.cluster.put(NOTE, result)
     _alert(engine.cluster, tripped, alert=alert, clock=clock)
     return result

@@ -135,7 +135,16 @@ class WatchingMixin:
             Job("check_connections", self.check_connections, 3600),
             Job("catch_up_receipts", self.catch_up_receipts, 3600),
             Job("tool_health", self.tool_health, 3600),  # the tool's own agents against their baseline
+            Job("drift_evals", self.drift_evals, DAILY),  # replays weekly (drift.py decides when it's due)
         ]
+
+    def drift_evals(self) -> dict | None:
+        """The live config replayed on real cases, weekly, with no config change (valxel_sdlc.drift)."""
+        from .. import drift
+
+        if self.services.evals is None:
+            return None
+        return drift.run(self.services, self.cluster)
 
     def tool_health(self) -> dict:
         """The tool's own health against its baseline, with alerts (valxel_sdlc.health)."""
