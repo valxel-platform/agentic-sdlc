@@ -121,6 +121,7 @@ def event(action: str, *, actor: str, resource: tuple[str, list[str]], actor_typ
 class Outbox(Protocol):
     def add(self, workspace: str, ev: dict) -> None: ...
     def after(self, seq: int, limit: int) -> list[tuple[int, dict]]: ...  # (seq, event), oldest first
+    def pending(self, seq: int) -> int: ...  # how many came after seq
     def cursor(self, name: str) -> int: ...
     def advance(self, name: str, seq: int) -> None: ...
 
@@ -138,6 +139,10 @@ class InMemoryOutbox:
     def after(self, seq, limit):
         with self._lock:
             return [(s, e) for s, _, e in self.rows if s > seq][:limit]
+
+    def pending(self, seq):
+        with self._lock:
+            return sum(1 for s, _, _ in self.rows if s > seq)
 
     def cursor(self, name):
         return self.cursors.get(name, 0)
@@ -179,6 +184,11 @@ class PostgresOutbox:
             rows = conn.execute("SELECT seq, event FROM valxel_audit_outbox WHERE seq > %s ORDER BY seq LIMIT %s",
                                 (seq, limit)).fetchall()
         return [(r["seq"], r["event"]) for r in rows]
+
+    def pending(self, seq):
+        with self.pool.connection() as conn:
+            r = conn.execute("SELECT count(*) AS n FROM valxel_audit_outbox WHERE seq > %s", (seq,)).fetchone()
+        return int(r["n"])
 
     def cursor(self, name):
         with self.pool.connection() as conn:
@@ -316,4 +326,5 @@ class Auditor:
             sent += len(rows)
 
     def backlog(self) -> int:
-        return len(self.outbox.after(self.outbox.cursor(self.RELAY), 10_000))
+        """Records the sink hasn't had yet (none count when nothing relays: the relay is off)."""
+        return self.outbox.pending(self.outbox.cursor(self.RELAY)) if self.sink is not None else 0

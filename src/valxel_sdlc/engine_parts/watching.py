@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 from datetime import UTC, datetime, timedelta, timezone
 
@@ -141,7 +142,16 @@ class WatchingMixin:
                 watch()
 
         def watch():
+            from .. import metrics
+
+            published = 0.0
             while not self._stop.wait(interval_s):
+                if time.monotonic() - published >= 60:  # every replica: its counters, for the whole picture
+                    published = time.monotonic()
+                    try:
+                        metrics.publish(self.cluster)
+                    except Exception:  # the next minute tries again
+                        log.warning("metrics not published", exc_info=True)
                 if not self.cluster.leader("watcher"):
                     continue  # another replica watches; this one takes over if that one goes
                 for fid in self.waiting_on_external():
@@ -158,6 +168,7 @@ class WatchingMixin:
         return [
             Job("recover_stranded", self.recover_stranded, 60),  # threads a replica dropped (recovery.py)
             Job("publish_audit", self.services.audit.relay, 0, stale_hours=1),  # the outbox, to the audit sink
+            Job("check_tool_metrics", self._metrics_checker().run, 300, stale_hours=1),  # alerts (metrics.py)
             Job("snapshot_inventories", self.snapshot_inventories, DAILY),  # one inventory snapshot a day
             Job("collect_outcomes", self.collect_outcomes, DAILY),  # readouts and goal trends move daily
             Job("sweep_change_set_envs", self.sweep_change_set_envs, 900),  # environments left behind
@@ -184,6 +195,13 @@ class WatchingMixin:
         if self.services.evals is None:
             return None
         return drift.run(self.services, self.cluster)
+
+    def _metrics_checker(self):
+        if getattr(self, "_metrics_check", None) is None:
+            from ..metrics import Checker
+
+            self._metrics_check = Checker(self, alert=self.jobs.alert)
+        return self._metrics_check
 
     def tool_health(self) -> dict:
         """The tool's own health against its baseline, with alerts (valxel_sdlc.health)."""

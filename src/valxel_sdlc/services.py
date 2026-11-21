@@ -122,8 +122,10 @@ class Services:
         if self.telemetry is not None and self.telemetry.enabled:
             from .telemetry import TracedRuntime
 
-            return TracedRuntime(runtime, self.telemetry)
-        return runtime
+            runtime = TracedRuntime(runtime, self.telemetry)
+        from .metrics import MeteredRuntime
+
+        return MeteredRuntime(runtime)  # each session counted, by role and how it ended
 
     def roles_for(self, role: str, data_class: str, variant: str = "") -> list[str]:
         """The role, then its fallbacks for when its provider is unavailable."""

@@ -375,6 +375,8 @@ def serve_health(worker: Worker, port: int) -> Any:
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):  # noqa: N802 - http.server's name
+            if self.path.rstrip("/") == "/metrics":
+                return self._metrics()
             if self.path.rstrip("/") != "/healthz":
                 self.send_response(404)
                 self.end_headers()
@@ -391,6 +393,22 @@ def serve_health(worker: Worker, port: int) -> Any:
             data = json.dumps(body).encode()
             self.send_response(200 if ok else 503)
             self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _metrics(self):
+            """This worker's sessions (valxel_sdlc.metrics), with VALXEL_METRICS_TOKEN as a bearer token."""
+            import hmac
+            import os
+
+            from . import metrics
+
+            want = os.environ.get("VALXEL_METRICS_TOKEN", "")
+            got = (self.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+            code = 404 if not want else 200 if hmac.compare_digest(got.encode(), want.encode()) else 401
+            data = metrics.REGISTRY.text().encode() if code == 200 else b""
+            self.send_response(code)
+            self.send_header("content-type", "text/plain; version=0.0.4")
             self.end_headers()
             self.wfile.write(data)
 

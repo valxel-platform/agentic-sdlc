@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -225,6 +226,44 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                      if who is not None else tenancy.PLATFORM)
         with tenancy.bound(scope, who.login if who is not None else ""):
             return await call_next(request)
+    @app.middleware("http")
+    async def meter_requests(request: Request, call_next):
+        """Each API request counted and timed by route template (valxel_sdlc.metrics)."""
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        from .. import metrics
+
+        started = time.monotonic()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            route = getattr(request.scope.get("route"), "path", "") or "unmatched"
+            metrics.request(request.method, route if route.startswith("/api/") or route == "unmatched"
+                            else "/api" + route, status, time.monotonic() - started)
+
+    @app.get("/metrics", include_in_schema=False)
+    def prometheus_metrics(request: Request):
+        """Prometheus text for this replica (valxel_sdlc.metrics), with VALXEL_METRICS_TOKEN as a
+        bearer token. Without the setting there is nothing here."""
+        import hmac
+
+        from fastapi.responses import PlainTextResponse, Response
+
+        from .. import metrics
+
+        want = os.environ.get("VALXEL_METRICS_TOKEN", "")
+        got = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+        if not want:
+            return Response(status_code=404)
+        if not hmac.compare_digest(got.encode(), want.encode()):
+            return Response(status_code=401)
+        eng_ = state["engine"]
+        return PlainTextResponse(metrics.REGISTRY.text(metrics.gauges(eng_) if eng_ is not None else {}),
+                                 media_type="text/plain; version=0.0.4")
+
     @app.middleware("http")
     async def audit_requests(request: Request, call_next):
         """Every request that changes something, and how it went, to the audit trail
