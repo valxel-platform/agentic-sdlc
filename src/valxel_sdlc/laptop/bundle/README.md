@@ -98,6 +98,9 @@ fine for a cluster that only this machine can reach.
 - Synthetic data only, never real PHI. The gateway's provider has no BAA here, so PHI is refused.
 - Local images aren't scanned or signed. Strict mode, used on the VM and cluster tiers, refuses
   `VALXEL_DELIVERY=local`.
-- Agent sessions run inside the worker container, not in a sandbox of their own (T-68 tracks this).
+- Agent sessions each run in a container of their own, started by the session launcher, on an
+  internal network that reaches only the LLM gateway and the egress proxy (GitHub and package
+  registries; add hosts with `VALXEL_EGRESS_ALLOW`). With gVisor installed in Docker (`runsc`)
+  they run under it; without it, under Docker's default runtime, which isolates less.
 
 `valxel dev down` stops everything. `valxel dev down --wipe` also deletes the databases and artifacts.

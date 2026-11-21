@@ -45,7 +45,13 @@ x-tool: &tool
     # Model calls go through the gateway below; the tool and its sessions never hold the model key.
     VALXEL_LLM_GATEWAY_URL: http://llm-gateway:8080
     VALXEL_LLM_GATEWAY_API_KEY: ${VALXEL_GATEWAY_KEY:?run valxel dev init}
+    # Each agent session runs in a container of its own, started by the session launcher (T-68).
+    VALXEL_SESSION_EXECUTOR: docker
+    VALXEL_SESSION_LAUNCHER_URL: http://session-launcher:8083
+    VALXEL_SESSION_LAUNCHER_TOKEN_FILE: /run/secrets/session_launcher_token
   volumes: [artifacts:/data/artifacts]
+  secrets: [session_launcher_token]
+  networks: [default]
   # OpenChoreo's local hostnames lead to its gateway on this machine (unused in docker mode).
   extra_hosts:
     - "api.openchoreo.localhost:host-gateway"
@@ -79,6 +85,32 @@ services:
       - artifacts:/data/artifacts
       - /var/run/docker.sock:/var/run/docker.sock
 
+  # The only process that starts session containers: each from the tool's image, locked down, on the
+  # internal sessions network, removed after its session (valxel_sdlc.session_launcher).
+  session-launcher:
+    image: ghcr.io/valxel-platform/agentic-sdlc:${VALXEL_VERSION:-main}
+    command: ["valxel", "session-launcher"]
+    user: "10001:${DOCKER_GID:-0}"   # the group that owns the Docker socket
+    environment:
+      VALXEL_SESSION_IMAGE: ghcr.io/valxel-platform/agentic-sdlc:${VALXEL_VERSION:-main}
+      VALXEL_SESSION_NETWORK: valxel-sessions
+      VALXEL_SESSION_RUNTIME: ${VALXEL_SESSION_RUNTIME:-auto}   # gVisor (runsc) when Docker has it
+      VALXEL_SESSION_MAX: ${VALXEL_SESSION_MAX:-4}
+      VALXEL_SESSION_LAUNCHER_TOKEN_FILE: /run/secrets/session_launcher_token
+    secrets: [session_launcher_token]
+    volumes: [/var/run/docker.sock:/var/run/docker.sock]
+    networks: [default, sessions]
+    restart: unless-stopped
+
+  # Sessions' only way out: GitHub and the package registries (valxel_sdlc.egress_proxy).
+  egress-proxy:
+    image: ghcr.io/valxel-platform/agentic-sdlc:${VALXEL_VERSION:-main}
+    command: ["valxel", "egress-proxy"]
+    environment:
+      VALXEL_EGRESS_ALLOW: ${VALXEL_EGRESS_ALLOW:-}
+    networks: [default, sessions]
+    restart: unless-stopped
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -106,6 +138,7 @@ services:
       GATEWAY_AUDIT_KAFKA_BOOTSTRAP: kafka:9092
       GATEWAY_AUDIT_TOPIC: audit.v1
     volumes: [./gateway-policy.local.yaml:/etc/llm-gateway/policy.yaml:ro]   # written by valxel dev init
+    networks: [default, sessions]   # sessions reach the gateway, and nothing else of the tool's
     depends_on:
       kafka: {condition: service_healthy}
     healthcheck:
@@ -151,3 +184,14 @@ volumes:
   pgdata:
   artifacts:
   kafka:
+
+networks:
+  default:
+  # Internal: no route out. Session containers reach the gateway and the egress proxy only.
+  sessions:
+    name: valxel-sessions
+    internal: true
+
+secrets:
+  session_launcher_token:
+    file: ./secrets/session-launcher-token   # written by valxel dev init

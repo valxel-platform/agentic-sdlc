@@ -210,8 +210,9 @@ def session(services, *, repo: str = "", branch: str = "", clone: bool | None = 
 
 
 def remote() -> bool:
-    """Whether agent sessions run in sandboxes of their own (VALXEL_SESSION_EXECUTOR=kubernetes)."""
-    return os.environ.get("VALXEL_SESSION_EXECUTOR", "local").lower() == "kubernetes"
+    """Whether agent sessions run in sandboxes of their own: kubernetes (the cluster's) or docker (a
+    container per session on one machine)."""
+    return os.environ.get("VALXEL_SESSION_EXECUTOR", "local").lower() in ("kubernetes", "docker")
 
 
 def repo_token(services, repo: str) -> str:

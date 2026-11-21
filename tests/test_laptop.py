@@ -26,10 +26,10 @@ def test_model_key_reaches_only_the_gateway():
         assert env["VALXEL_TIER"] == "laptop" and env["VALXEL_DELIVERY"] == "local"
 
 
-def test_only_the_worker_reaches_docker_and_only_the_api_is_published():
+def test_only_the_worker_and_the_session_launcher_reach_docker_and_only_the_api_is_published():
     services = _compose()["services"]
     sock = [n for n, s in services.items() if any("docker.sock" in str(v) for v in s.get("volumes") or [])]
-    assert sock == ["worker"]
+    assert sock == ["worker", "session-launcher"]  # products on the laptop; sessions
     published = {n: s["ports"] for n, s in services.items() if s.get("ports")}
     assert published == {"api": ["127.0.0.1:${VALXEL_PORT:-8080}:8080"]}  # 8090 beside a local OpenChoreo
 
@@ -96,3 +96,23 @@ def test_external_endpoints_publish_on_loopback_at_stable_ports():
     assert spec["services"]["web"]["labels"]["dev.valxel.url.http"] == urls["web/http"]
     assert local_port("farm-development", "web", "http") == port
     assert local_port("farm-staging", "web", "http") != port
+
+
+def test_sessions_run_in_containers_of_their_own_on_an_internal_network(tmp_path, monkeypatch):
+    c = _compose()
+    s = c["services"]
+    assert s["worker"]["environment"]["VALXEL_SESSION_EXECUTOR"] == "docker"
+    assert s["session-launcher"]["command"] == ["valxel", "session-launcher"]
+    assert "/var/run/docker.sock:/var/run/docker.sock" in s["session-launcher"]["volumes"]
+    assert set(s["session-launcher"]["networks"]) == {"default", "sessions"}
+    assert set(s["egress-proxy"]["networks"]) == {"default", "sessions"}
+    assert "sessions" in s["llm-gateway"]["networks"]
+    for name in ("postgres", "kafka", "audit-sink"):  # nothing else of the tool's is on the sessions network
+        assert "sessions" not in (s[name].get("networks") or [])
+    assert c["networks"]["sessions"] == {"name": "valxel-sessions", "internal": True}
+    monkeypatch.setattr(laptop, "docker_gid", lambda: "0")
+    t = laptop.init(target=tmp_path / "l")
+    token = (t / "secrets" / "session-launcher-token").read_text().strip()
+    assert token.startswith("vxl_") and token not in (t / ".env").read_text()
+    laptop.init(target=t)
+    assert (t / "secrets" / "session-launcher-token").read_text().strip() == token  # kept

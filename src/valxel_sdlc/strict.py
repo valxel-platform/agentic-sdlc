@@ -44,9 +44,15 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("DATABASE_URL is not set: features, the catalog and the audit trail are lost on restart")
     from .tenancy import enforced
 
-    if s.mode == "live" and env.get("VALXEL_SESSION_EXECUTOR", "local").lower() != "kubernetes":
-        out.append("VALXEL_SESSION_EXECUTOR is not kubernetes: agent sessions run in the tool's own container, "
-                   "beside its keys and every workspace's work (valxel_sdlc.session_runner)")
+    executor = env.get("VALXEL_SESSION_EXECUTOR", "local").lower()
+    tier = env.get("VALXEL_TIER", "cluster").lower()
+    if s.mode == "live" and executor not in ("kubernetes", "docker"):
+        out.append("VALXEL_SESSION_EXECUTOR is local: agent sessions run in the tool's own container, beside its "
+                   "keys and every workspace's work; use kubernetes (cluster) or docker (laptop, VM) "
+                   "(valxel_sdlc.session_runner, valxel_sdlc.session_launcher)")
+    elif s.mode == "live" and executor == "docker" and tier == "cluster":
+        out.append("VALXEL_SESSION_EXECUTOR is docker on the cluster tier: the cluster runs sessions in Agent "
+                   "Sandbox pods (kubernetes)")
     if env.get("VALXEL_LLM_GATEWAY_URL") and any(env.get(k) for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")):
         out.append("The tool holds a model provider's key while its model calls go through the LLM gateway: "
                    "the key belongs to the gateway alone")

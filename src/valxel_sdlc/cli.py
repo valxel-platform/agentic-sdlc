@@ -436,6 +436,12 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     sr = sub.add_parser("session-runner", help="Run one agent session in this sandbox (valxel_sdlc.session_runner): "
                                                "the image's command in an agent-session sandbox")
     sr.add_argument("--port", type=int, default=int(os.environ.get("VALXEL_SESSION_RUNNER_PORT", "8081")))
+    sl = sub.add_parser("session-launcher", help="Start a container per agent session on this machine's Docker "
+                                                 "(VALXEL_SESSION_EXECUTOR=docker; valxel_sdlc.session_launcher)")
+    sl.add_argument("--port", type=int, default=int(os.environ.get("VALXEL_SESSION_LAUNCHER_PORT", "8083")))
+    ep = sub.add_parser("egress-proxy", help="The HTTPS proxy session containers reach GitHub and package "
+                                             "registries through (valxel_sdlc.egress_proxy)")
+    ep.add_argument("--port", type=int, default=int(os.environ.get("VALXEL_EGRESS_PROXY_PORT", "3128")))
     wr = sub.add_parser("worker", help="Run queued work (VALXEL_RUN_QUEUE=postgres): features, gate decisions and "
                                        "resumes the API queued, and the watcher (valxel_sdlc.run_queue)")
     wr.add_argument("--concurrency", type=int, default=int(os.environ.get("VALXEL_WORKER_CONCURRENCY", "4")))
@@ -628,6 +634,16 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
         from .session_runner import serve
 
         serve(args.port)
+        return 0
+    if args.cmd == "session-launcher":
+        from .session_launcher import serve as serve_launcher
+
+        serve_launcher(args.port)
+        return 0
+    if args.cmd == "egress-proxy":
+        from .egress_proxy import serve as serve_proxy
+
+        serve_proxy(args.port)
         return 0
     if args.cmd == "eval":
         return _eval(args)

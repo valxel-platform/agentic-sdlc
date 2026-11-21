@@ -222,7 +222,7 @@ def test_strict_mode_wants_sessions_in_sandboxes_in_live_mode(services, monkeypa
 
     monkeypatch.setattr(services.settings, "mode", "live")
     found = strict.stand_ins(services, auth_mode="github", env={"VALXEL_DELIVERY": "live"})
-    assert any(f.startswith("VALXEL_SESSION_EXECUTOR is not kubernetes") for f in found)
+    assert any(f.startswith("VALXEL_SESSION_EXECUTOR is local") for f in found)
     found = strict.stand_ins(services, auth_mode="github", env={"VALXEL_DELIVERY": "live",
                                                                  "VALXEL_SESSION_EXECUTOR": "kubernetes"})
     assert not any(f.startswith("VALXEL_SESSION_EXECUTOR") for f in found)

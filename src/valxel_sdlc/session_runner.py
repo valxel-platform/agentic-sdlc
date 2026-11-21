@@ -390,7 +390,8 @@ _executor: Executor | None = None
 
 
 def executor() -> Executor:
-    """The executor VALXEL_SESSION_EXECUTOR names: kubernetes (sandboxes) or local (this process)."""
+    """The executor VALXEL_SESSION_EXECUTOR names: kubernetes (sandboxes), docker (a container per
+    session, through the launcher: valxel_sdlc.session_launcher) or local (this process)."""
     global _executor
     if _executor is None:
         kind = os.environ.get("VALXEL_SESSION_EXECUTOR", "local").lower()
@@ -399,8 +400,12 @@ def executor() -> Executor:
                                            pool=os.environ.get("VALXEL_SESSION_POOL", "agent-session"),
                                            port=int(os.environ.get("VALXEL_SESSION_RUNNER_PORT", "8081")),
                                            ready_s=float(os.environ.get("VALXEL_SESSION_READY_S", "120")))
+        elif kind == "docker":
+            from .session_launcher import executor_from_env
+
+            _executor = executor_from_env()
         elif kind == "local":
             _executor = LocalExecutor()
         else:
-            raise RuntimeError(f"VALXEL_SESSION_EXECUTOR is kubernetes or local, not {kind!r}")
+            raise RuntimeError(f"VALXEL_SESSION_EXECUTOR is kubernetes, docker or local, not {kind!r}")
     return _executor

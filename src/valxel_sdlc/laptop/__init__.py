@@ -109,7 +109,21 @@ def init(*, target: Path | None = None, anthropic_key: str = "", github_token: s
     policy = target / "gateway-policy.local.yaml"
     policy.write_text(gateway_policy(env["VALXEL_GATEWAY_KEY"]))
     policy.chmod(0o644)  # read by the gateway's container user; holds only a hash
+    launcher_token(target)
     return target
+
+
+def launcher_token(target: Path) -> Path:
+    """The worker's token for the session launcher, once (T-68). Readable by the containers' user,
+    which Compose mounts it for; not in .env."""
+    d = target / "secrets"
+    d.mkdir(exist_ok=True)
+    d.chmod(0o755)
+    f = d / "session-launcher-token"
+    if not f.exists() or not f.read_text().strip():
+        f.write_text("vxl_" + secrets.token_urlsafe(32) + "\n")
+    f.chmod(0o644)
+    return f
 
 
 def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
@@ -145,6 +159,8 @@ def doctor(target: Path | None = None, *, run=_run, port_free=_port_free) -> lis
                    ("valxel dev init --github-token-stdin (fine-grained: Administration, Contents, Pull "
                     "requests, Workflows)")))
     checks.append(("Gateway policy", (target / "gateway-policy.local.yaml").exists(), "Run: valxel dev init"))
+    checks.append(("Session launcher token", (target / "secrets" / "session-launcher-token").exists(),
+                   "Run: valxel dev init"))
     port = tool_port(target)
     running = have_docker and run(["docker", "compose", "-p", "valxel", "ps", "-q", "api"]).stdout.strip()
     checks.append((f"Port {port} free", bool(running) or port_free(port),
