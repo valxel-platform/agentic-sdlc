@@ -542,8 +542,15 @@ def openchoreo_client(settings: Settings, *, needs: str = "VALXEL_DELIVERY=live"
                               oc.setting("client_secret"), scope=oc.setting("scope"),
                               resource=oc.setting("resource"))
     server = McpHttp("openchoreo", oc.url, auth=creds)
+    observer = None
+    if oc.setting("observer_url"):  # its tokens name the observer as their audience when the API's do
+        ocreds = ClientCredentials(oc.setting("token_url"), oc.setting("client_id") or "service_mcp_client",
+                                   oc.setting("client_secret"), scope=oc.setting("scope"),
+                                   resource=oc.setting("observer_url") if oc.setting("resource") else None)
+        observer = McpHttp("openchoreo-observer", oc.setting("observer_url"), auth=ocreds)
     return OpenChoreoMcp(server, default_namespace=oc.setting("namespace") or "default",
-                         console_url=oc.setting("console_url"), git_secret_ref=oc.setting("git_secret_ref"))
+                         console_url=oc.setting("console_url"), git_secret_ref=oc.setting("git_secret_ref"),
+                         observer=observer)
 
 
 def local_tokens(settings: Settings, permissions=None):

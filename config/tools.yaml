@@ -37,6 +37,10 @@ servers:
       resource_env: VALXEL_OPENCHOREO_RESOURCE         # optional, the token's audience (RFC 8707)
       git_secret_ref_env: VALXEL_OPENCHOREO_GIT_SECRET_REF  # optional, SecretReference for private repos
       console_url_env: VALXEL_OPENCHOREO_CONSOLE_URL   # optional, links runs to the console
+      # The observability plane's own MCP server (OpenChoreo 1.3: openchoreo-observer), for a
+      # component's logs and metrics in an incident; same credentials. Optional: without it, triage
+      # works from the alerts alone.
+      observer_url_env: VALXEL_OPENCHOREO_OBSERVER_MCP_URL
       namespace: default                               # products may set runtime.namespace
 
 providers:

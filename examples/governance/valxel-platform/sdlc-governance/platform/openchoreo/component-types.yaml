@@ -1,581 +1,2097 @@
-# One shape for every long-running component; the four types differ in their defaults only.
+# The platform's component types, one per kind of repo (repos.yaml `openchoreo.component_type`).
+# Built on OpenChoreo 1.3.3's own types (samples/getting-started/component-types): the image from
+# the workload, a Service and HTTPRoutes per endpoint, and the component's configurations, secrets
+# and dependencies injected as 1.3 does. The platform adds, everywhere: zero-downtime rollouts, zone
+# spread, a disruption budget from 2 pods, graceful shutdown, health probes, and the repo's role as
+# the pods' `valxel.io/role` label (the `role` parameter, set by the Valxel SDLC at registration),
+# which the network policies select on. Each type takes `replicas` and `resources` per environment,
+# set by the Valxel SDLC from the product's runtime/capacity.yaml; no CPU limit, deliberately.
+#
+# agent, code-sandbox, connector and scheduled-task are also locked down: non-root, read-only root
+# file system (tmp only), no privileges to gain, no Kubernetes token unless they need the API, and
+# egress only where they must go. PHI and payments agents and connectors run under gVisor.
+#
+# Builds use the platform's `docker` workflow only (build-workflow.yaml): signed, scanned, with
+# provenance. Checked against OpenChoreo 1.3.3's CRD schemas; run `valxel dev cluster check` and a
+# dry run against your installation before applying.
+
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterComponentType
 metadata:
   name: service
+  annotations:
+    openchoreo.dev/description: A long-running request-serving component (repos.yaml roles service, bff, mcp-server,
+      llm-gateway)
 spec:
   workloadType: deployment
+  allowedWorkflows:
+  - kind: ClusterWorkflow
+    name: docker
   allowedTraits:
-    - { kind: ClusterTrait, name: autoscaler }
-    - { kind: ClusterTrait, name: observability-alert-rule }
-  # Set per environment by the Valxel SDLC from runtime/capacity.yaml (componentTypeEnvironmentConfigs).
-  environmentConfigs:
-    openAPIV3Schema:
-      type: object
-      properties:
-        replicas: { type: integer, minimum: 1, default: 1 }
-        resources:
-          type: object
-          properties:
-            requests:
-              type: object
-              properties:
-                cpu: { type: string, default: "250m" }
-                memory: { type: string, default: "256Mi" }
-            limits:
-              type: object
-              properties:
-                memory: { type: string, default: "256Mi" }
-  resources:
-    - id: deployment
-      template:
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: ${metadata.name}
-        spec:
-          replicas: ${environmentConfigs.replicas}
-          strategy:
-            type: RollingUpdate
-            rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }   # a single pod deploys without downtime
-          selector:
-            matchLabels: ${metadata.podSelectors}
-          template:
-            metadata:
-              labels: ${metadata.podSelectors}
-            spec:
-              terminationGracePeriodSeconds: 30
-              topologySpreadConstraints:
-                - maxSkew: 1
-                  topologyKey: topology.kubernetes.io/zone
-                  whenUnsatisfiable: ScheduleAnyway
-                  labelSelector:
-                    matchLabels: ${metadata.podSelectors}
-              containers:
-                - name: main
-                  image: ${workload.containers.main.image}
-                  resources: ${environmentConfigs.resources}
-                  readinessProbe: { httpGet: { path: /health/ready, port: 8080 }, periodSeconds: 5 }
-                  livenessProbe: { httpGet: { path: /health/live, port: 8080 }, periodSeconds: 10, failureThreshold: 6 }
-                  lifecycle:
-                    preStop: { exec: { command: ["sleep", "5"] } }
-    - id: pdb
-      includeWhen: ${environmentConfigs.replicas >= 2}
-      template:
-        apiVersion: policy/v1
-        kind: PodDisruptionBudget
-        metadata:
-          name: ${metadata.name}
-        spec:
-          maxUnavailable: 1
-          selector:
-            matchLabels: ${metadata.podSelectors}
-# bff, web-app and event-worker: copy this type under their names, changing the defaults and, for the
-# event worker, the probes (it serves no HTTP traffic: probe its health port instead).
----
-# A product's agent (repos.yaml role `agent`): the same deployment as a service, locked down. An agent
-# reads untrusted text (people's messages, documents, tool results), so its pod assumes it may be
-# talked into trying things: it holds no Kubernetes token, can't write outside /tmp, has no privileges
-# to gain, and reaches only the product's LLM gateway, MCP servers, database and event brokers. PHI
-# and payments agents run under gVisor (isolation: gvisor), their system calls served by a kernel of
-# their own. An agent never runs model-written code itself; that goes to a code-execution sandbox.
-apiVersion: openchoreo.dev/v1alpha1
-kind: ClusterComponentType
-metadata:
-  name: agent
-spec:
-  workloadType: deployment
-  allowedTraits:
-    - { kind: ClusterTrait, name: autoscaler }
-    - { kind: ClusterTrait, name: observability-alert-rule }
-  # Set once, when the Valxel SDLC registers the component (repos.yaml `isolation` per data class).
+  - kind: ClusterTrait
+    name: autoscaler
+  - kind: ClusterTrait
+    name: observability-alert-rule
+  validations:
+  - rule: ${size(workload.endpoints) > 0}
+    message: Service components must have at least one endpoint. Use 'deployment/worker' for components without
+      endpoints.
+  - rule: "${workload.endpoints.exists(name, ep, \"external\" in ep.visibility)\n  ? has(gateway.ingress) && has(gateway.ingress.external)\n\
+      \  : true}"
+    message: Endpoints with 'external' visibility require gateway.ingress.external to be configured on the Environment
+      or DataPlane.
+  - rule: "${workload.endpoints.exists(name, ep, \"internal\" in ep.visibility)\n  ? has(gateway.ingress) && has(gateway.ingress.internal)\n\
+      \  : true}"
+    message: Endpoints with 'internal' visibility require gateway.ingress.internal to be configured on the Environment
+      or DataPlane.
   parameters:
     openAPIV3Schema:
       type: object
       properties:
-        isolation: { type: string, enum: [standard, gvisor], default: standard }
+        role:
+          type: string
+          default: ''
+          description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
+            carry it as valxel.io/role for the network policies
   environmentConfigs:
     openAPIV3Schema:
       type: object
       properties:
-        replicas: { type: integer, minimum: 1, default: 1 }
+        replicas:
+          type: integer
+          minimum: 1
+          default: 1
         resources:
           type: object
+          default: {}
           properties:
             requests:
               type: object
+              default: {}
               properties:
-                cpu: { type: string, default: "500m" }
-                memory: { type: string, default: "512Mi" }
+                cpu:
+                  type: string
+                  default: 250m
+                memory:
+                  type: string
+                  default: 256Mi
             limits:
               type: object
+              default: {}
               properties:
-                memory: { type: string, default: "512Mi" }
-        # The MCP tools the agent may call and those it calls without a person, as JSON lists: set
-        # by the Valxel SDLC on every deploy from the repo's agent.yaml (valxel_sdlc.agent_tools).
-        # Unset: none at all.
-        allowedTools: { type: string, default: "[]" }
-        readOnlyTools: { type: string, default: "[]" }
-        # The database and event brokers outside the cluster (the data plane's private subnets),
-        # set by the platform per environment.
-        egressCIDRs: { type: array, items: { type: string }, default: [] }
+                memory:
+                  type: string
+                  default: 256Mi
+        imagePullPolicy:
+          type: string
+          default: IfNotPresent
+          enum:
+          - Always
+          - IfNotPresent
+          - Never
   resources:
-    - id: deployment
-      template:
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: ${metadata.name}
-        spec:
-          replicas: ${environmentConfigs.replicas}
-          strategy:
-            type: RollingUpdate
-            rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
-          selector:
-            matchLabels: ${metadata.podSelectors}
-          template:
-            metadata:
-              labels: ${metadata.podSelectors}
-            spec:
-              automountServiceAccountToken: false        # no Kubernetes API from inside the agent
-              runtimeClassName: '${parameters.isolation == "gvisor" ? "gvisor" : null}'
-              securityContext:
-                runAsNonRoot: true
-                runAsUser: 10001
-                seccompProfile: { type: RuntimeDefault }
-              terminationGracePeriodSeconds: 60          # a run in flight checkpoints before it stops
-              topologySpreadConstraints:
-                - maxSkew: 1
-                  topologyKey: topology.kubernetes.io/zone
-                  whenUnsatisfiable: ScheduleAnyway
-                  labelSelector:
-                    matchLabels: ${metadata.podSelectors}
-              containers:
-                - name: main
-                  image: ${workload.containers.main.image}
-                  env:
-                    - { name: AGENT_ALLOWED_TOOLS, value: '${environmentConfigs.allowedTools}' }
-                    - { name: AGENT_READ_ONLY_TOOLS, value: '${environmentConfigs.readOnlyTools}' }
-                  resources: ${environmentConfigs.resources}
-                  securityContext:
-                    readOnlyRootFilesystem: true
-                    allowPrivilegeEscalation: false
-                    capabilities: { drop: [ALL] }
-                  volumeMounts:
-                    - { name: tmp, mountPath: /tmp }
-                  readinessProbe: { httpGet: { path: /readyz, port: 8080 }, periodSeconds: 5 }
-                  livenessProbe: { httpGet: { path: /healthz, port: 8080 }, periodSeconds: 10, failureThreshold: 6 }
-              volumes:
-                - name: tmp
-                  emptyDir: { sizeLimit: 256Mi }
-    - id: egress
-      template:
-        apiVersion: networking.k8s.io/v1
-        kind: NetworkPolicy
-        metadata:
-          name: ${metadata.name}-egress
-        spec:
-          podSelector:
-            matchLabels: ${metadata.podSelectors}
-          policyTypes: [Egress]
-          egress:
-            # DNS
-            - to:
-                - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
-                  podSelector: { matchLabels: { k8s-app: kube-dns } }
-              ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
-            # The product's MCP servers, its code sandbox and its LLM gateway (every model call goes through it).
-            - to:
-                - namespaceSelector: {}
-                  podSelector:
-                    matchExpressions:
-                      - { key: valxel.io/role, operator: In, values: [mcp-server, llm-gateway, code-sandbox] }
-            # Traces and metrics to the data plane's OpenTelemetry collector.
-            - to:
-                - namespaceSelector: { matchLabels: { valxel.io/plane: observability } }
-              ports: [{ protocol: TCP, port: 4317 }, { protocol: TCP, port: 4318 }]
-            # The database and event brokers.
-            - to: '${environmentConfigs.egressCIDRs.map(c, {"ipBlock": {"cidr": c}})}'
-    - id: pdb
-      includeWhen: ${environmentConfigs.replicas >= 2}
-      template:
-        apiVersion: policy/v1
-        kind: PodDisruptionBudget
-        metadata:
-          name: ${metadata.name}
-        spec:
-          maxUnavailable: 1
-          selector:
-            matchLabels: ${metadata.podSelectors}
+  - id: deployment
+    template:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        replicas: ${environmentConfigs.replicas}
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+        selector:
+          matchLabels: ${metadata.podSelectors}
+        template:
+          metadata:
+            labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+          spec:
+            terminationGracePeriodSeconds: 30
+            topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: ${metadata.podSelectors}
+            containers:
+            - name: main
+              image: ${workload.container.image}
+              imagePullPolicy: ${environmentConfigs.imagePullPolicy}
+              command: '${has(workload.container.command) ? workload.container.command : oc_omit()}
+
+                '
+              args: '${has(workload.container.args) ? workload.container.args : oc_omit()}
+
+                '
+              resources: ${environmentConfigs.resources}
+              env: ${dependencies.toContainerEnvs()}
+              envFrom: ${configurations.toContainerEnvFrom()}
+              volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
+              readinessProbe:
+                httpGet:
+                  path: /health/ready
+                  port: 8080
+                periodSeconds: 5
+              livenessProbe:
+                httpGet:
+                  path: /health/live
+                  port: 8080
+                periodSeconds: 10
+                failureThreshold: 6
+              lifecycle:
+                preStop:
+                  exec:
+                    command:
+                    - sleep
+                    - '5'
+            volumes: ${configurations.toVolumes() + dependencies.toVolumes()}
+  - id: service
+    includeWhen: ${size(workload.endpoints) > 0}
+    template:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ${metadata.componentName}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        type: ClusterIP
+        selector: ${metadata.podSelectors}
+        ports: ${workload.toServicePorts()}
+  - id: httproute-external
+    forEach: ${workload.endpoints.transformMap(name, ep, "external" in ep.visibility && ep.type in ["HTTP", "GraphQL",
+      "Websocket"], ep)}
+    var: endpoint
+    template:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: ${oc_generate_name(metadata.componentName, endpoint.key)}
+        namespace: ${metadata.namespace}
+        labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint.key, "openchoreo.dev/endpoint-visibility":
+          "external"})}'
+      spec:
+        parentRefs:
+        - name: ${gateway.ingress.external.name}
+          namespace: ${gateway.ingress.external.namespace}
+        hostnames: "${[gateway.ingress.external.?http, gateway.ingress.external.?https]\n  .filter(g, g.hasValue()).map(g,\
+          \ g.value().host).distinct()\n  .map(h, metadata.environmentName + \"-\" + metadata.componentNamespace\
+          \ + \".\" + h)}\n"
+        rules:
+        - matches:
+          - path:
+              type: PathPrefix
+              value: /${metadata.componentName}-${endpoint.key}
+          filters:
+          - type: URLRewrite
+            urlRewrite:
+              path:
+                type: ReplacePrefixMatch
+                replacePrefixMatch: ${endpoint.value.?basePath.orValue("/")}
+          - type: CORS
+            cors:
+              allowOrigins:
+              - '*'
+              allowMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+              - HEAD
+              allowHeaders:
+              - '*'
+              exposeHeaders:
+              - '*'
+              allowCredentials: false
+          backendRefs:
+          - name: ${metadata.componentName}
+            port: ${endpoint.value.port}
+  - id: httproute-internal
+    forEach: ${workload.endpoints.transformMap(name, ep, "internal" in ep.visibility && ep.type in ["HTTP", "GraphQL",
+      "Websocket"], ep)}
+    var: endpoint
+    template:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: ${oc_generate_name(metadata.componentName, endpoint.key, "internal")}
+        namespace: ${metadata.namespace}
+        labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint.key, "openchoreo.dev/endpoint-visibility":
+          "internal"})}'
+      spec:
+        parentRefs:
+        - name: ${gateway.ingress.internal.name}
+          namespace: ${gateway.ingress.internal.namespace}
+        hostnames: "${[gateway.ingress.internal.?http, gateway.ingress.internal.?https]\n  .filter(g, g.hasValue()).map(g,\
+          \ g.value().host).distinct()\n  .map(h, metadata.environmentName + \"-\" + metadata.componentNamespace\
+          \ + \".\" + h)}\n"
+        rules:
+        - matches:
+          - path:
+              type: PathPrefix
+              value: /${metadata.componentName}-${endpoint.key}
+          filters:
+          - type: URLRewrite
+            urlRewrite:
+              path:
+                type: ReplacePrefixMatch
+                replacePrefixMatch: ${endpoint.value.?basePath.orValue("/")}
+          backendRefs:
+          - name: ${metadata.componentName}
+            port: ${endpoint.value.port}
+  - id: pdb
+    includeWhen: ${environmentConfigs.replicas >= 2}
+    template:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        maxUnavailable: 1
+        selector:
+          matchLabels: ${metadata.podSelectors}
+  - id: env-config
+    forEach: ${configurations.toConfigEnvsByContainer()}
+    var: envConfig
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${envConfig.resourceName}
+        namespace: ${metadata.namespace}
+      data: '${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+        '
+  - id: file-config
+    forEach: ${configurations.toConfigFileList()}
+    var: config
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${config.resourceName}
+        namespace: ${metadata.namespace}
+      data:
+        ${config.name}: '${config.value}
+
+          '
+  - id: secret-env-external
+    forEach: ${configurations.toSecretEnvsByContainer()}
+    var: secretEnv
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${secretEnv.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${secretEnv.resourceName}
+          creationPolicy: Owner
+        data: "${secretEnv.envs.map(secret, {\n  \"secretKey\": secret.name,\n  \"remoteRef\": {\n    \"key\": secret.remoteRef.key,\n\
+          \    ?\"property\": secret.remoteRef.?property\n  }\n})}\n"
+  - id: secret-file-external
+    forEach: ${configurations.toSecretFileList()}
+    var: file
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${file.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${file.resourceName}
+          creationPolicy: Owner
+        data:
+        - secretKey: ${file.name}
+          remoteRef:
+            key: ${file.remoteRef.key}
+            property: '${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
+              '
 ---
-# A product's code sandbox (repos.yaml role `code-sandbox`, template-code-sandbox): the run_code MCP
-# server. It runs no code itself: each run claims a fresh sandbox from the warm pool
-# (agent-sandbox/code-runner.yaml), so its service account may create, read and delete SandboxClaims
-# in its own namespace, nothing else. Only the product's agents reach it; it reaches only the
-# Kubernetes API and its sandboxes' runners.
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterComponentType
+metadata:
+  name: web-app
+  annotations:
+    openchoreo.dev/description: A web front end served to browsers (repos.yaml role web)
+spec:
+  workloadType: deployment
+  allowedWorkflows:
+  - kind: ClusterWorkflow
+    name: docker
+  allowedTraits:
+  - kind: ClusterTrait
+    name: autoscaler
+  - kind: ClusterTrait
+    name: observability-alert-rule
+  validations:
+  - rule: ${workload.endpoints.exists(name, endpoint, endpoint.type == 'HTTP')}
+    message: Web-application components must have at least one HTTP.
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        role:
+          type: string
+          default: ''
+          description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
+            carry it as valxel.io/role for the network policies
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      properties:
+        replicas:
+          type: integer
+          minimum: 1
+          default: 1
+        resources:
+          type: object
+          default: {}
+          properties:
+            requests:
+              type: object
+              default: {}
+              properties:
+                cpu:
+                  type: string
+                  default: 100m
+                memory:
+                  type: string
+                  default: 128Mi
+            limits:
+              type: object
+              default: {}
+              properties:
+                memory:
+                  type: string
+                  default: 128Mi
+        imagePullPolicy:
+          type: string
+          default: IfNotPresent
+          enum:
+          - Always
+          - IfNotPresent
+          - Never
+  resources:
+  - id: deployment
+    template:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        replicas: ${environmentConfigs.replicas}
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+        selector:
+          matchLabels: ${metadata.podSelectors}
+        template:
+          metadata:
+            labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+          spec:
+            terminationGracePeriodSeconds: 30
+            topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: ${metadata.podSelectors}
+            containers:
+            - name: main
+              image: ${workload.container.image}
+              imagePullPolicy: ${environmentConfigs.imagePullPolicy}
+              command: '${has(workload.container.command) ? workload.container.command : oc_omit()}
+
+                '
+              args: '${has(workload.container.args) ? workload.container.args : oc_omit()}
+
+                '
+              resources: ${environmentConfigs.resources}
+              env: ${dependencies.toContainerEnvs()}
+              envFrom: ${configurations.toContainerEnvFrom()}
+              volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
+              lifecycle:
+                preStop:
+                  exec:
+                    command:
+                    - sleep
+                    - '5'
+            volumes: ${configurations.toVolumes() + dependencies.toVolumes()}
+  - id: service
+    includeWhen: ${size(workload.endpoints) > 0}
+    template:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ${metadata.componentName}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        type: ClusterIP
+        selector: ${metadata.podSelectors}
+        ports: ${workload.toServicePorts()}
+  - id: httproute-external
+    forEach: ${workload.endpoints.transformMap(name, ep, "external" in ep.visibility && ep.type in ["HTTP", "GraphQL",
+      "Websocket"], ep)}
+    var: endpoint
+    template:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: ${oc_generate_name(metadata.componentName, endpoint.key)}
+        namespace: ${metadata.namespace}
+        labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint.key, "openchoreo.dev/endpoint-visibility":
+          "external"})}'
+      spec:
+        parentRefs:
+        - name: ${gateway.ingress.external.name}
+          namespace: ${gateway.ingress.external.namespace}
+        hostnames: "${[gateway.ingress.external.?http, gateway.ingress.external.?https]\n  .filter(g, g.hasValue()).map(g,\
+          \ g.value().host).distinct()\n  .map(h, oc_dns_label(endpoint.key, metadata.componentName, metadata.environmentName,\
+          \ metadata.componentNamespace) + \".\" + h)}\n"
+        rules:
+        - backendRefs:
+          - name: ${metadata.componentName}
+            port: ${endpoint.value.port}
+  - id: httproute-internal
+    forEach: ${workload.endpoints.transformMap(name, ep, "internal" in ep.visibility && ep.type in ["HTTP", "GraphQL",
+      "Websocket"], ep)}
+    var: endpoint
+    template:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: ${oc_generate_name(metadata.componentName, endpoint.key, "internal")}
+        namespace: ${metadata.namespace}
+        labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint.key, "openchoreo.dev/endpoint-visibility":
+          "internal"})}'
+      spec:
+        parentRefs:
+        - name: ${gateway.ingress.internal.name}
+          namespace: ${gateway.ingress.internal.namespace}
+        hostnames: "${[gateway.ingress.internal.?http, gateway.ingress.internal.?https]\n  .filter(g, g.hasValue()).map(g,\
+          \ g.value().host).distinct()\n  .map(h, oc_dns_label(endpoint.key, metadata.componentName, metadata.environmentName,\
+          \ metadata.componentNamespace) + \".\" + h)}\n"
+        rules:
+        - backendRefs:
+          - name: ${metadata.componentName}
+            port: ${endpoint.value.port}
+  - id: pdb
+    includeWhen: ${environmentConfigs.replicas >= 2}
+    template:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        maxUnavailable: 1
+        selector:
+          matchLabels: ${metadata.podSelectors}
+  - id: env-config
+    forEach: ${configurations.toConfigEnvsByContainer()}
+    var: envConfig
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${envConfig.resourceName}
+        namespace: ${metadata.namespace}
+      data: '${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+        '
+  - id: file-config
+    forEach: ${configurations.toConfigFileList()}
+    var: config
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${config.resourceName}
+        namespace: ${metadata.namespace}
+      data:
+        ${config.name}: '${config.value}
+
+          '
+  - id: secret-env-external
+    forEach: ${configurations.toSecretEnvsByContainer()}
+    var: secretEnv
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${secretEnv.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${secretEnv.resourceName}
+          creationPolicy: Owner
+        data: "${secretEnv.envs.map(secret, {\n  \"secretKey\": secret.name,\n  \"remoteRef\": {\n    \"key\": secret.remoteRef.key,\n\
+          \    ?\"property\": secret.remoteRef.?property\n  }\n})}\n"
+  - id: secret-file-external
+    forEach: ${configurations.toSecretFileList()}
+    var: file
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${file.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${file.resourceName}
+          creationPolicy: Owner
+        data:
+        - secretKey: ${file.name}
+          remoteRef:
+            key: ${file.remoteRef.key}
+            property: '${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
+              '
+---
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterComponentType
+metadata:
+  name: worker
+  annotations:
+    openchoreo.dev/description: A long-running background or event-driven component with no endpoints (repos.yaml
+      roles event-worker, reporting)
+spec:
+  workloadType: deployment
+  allowedWorkflows:
+  - kind: ClusterWorkflow
+    name: docker
+  allowedTraits:
+  - kind: ClusterTrait
+    name: autoscaler
+  - kind: ClusterTrait
+    name: observability-alert-rule
+  validations:
+  - rule: ${size(workload.endpoints) == 0}
+    message: Worker components must not have endpoints. Use 'deployment/service' for components with endpoints.
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        role:
+          type: string
+          default: ''
+          description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
+            carry it as valxel.io/role for the network policies
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      properties:
+        replicas:
+          type: integer
+          minimum: 1
+          default: 1
+        resources:
+          type: object
+          default: {}
+          properties:
+            requests:
+              type: object
+              default: {}
+              properties:
+                cpu:
+                  type: string
+                  default: 250m
+                memory:
+                  type: string
+                  default: 256Mi
+            limits:
+              type: object
+              default: {}
+              properties:
+                memory:
+                  type: string
+                  default: 256Mi
+        imagePullPolicy:
+          type: string
+          default: IfNotPresent
+          enum:
+          - Always
+          - IfNotPresent
+          - Never
+  resources:
+  - id: deployment
+    template:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        replicas: ${environmentConfigs.replicas}
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+        selector:
+          matchLabels: ${metadata.podSelectors}
+        template:
+          metadata:
+            labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+          spec:
+            terminationGracePeriodSeconds: 30
+            topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: ${metadata.podSelectors}
+            containers:
+            - name: main
+              image: ${workload.container.image}
+              imagePullPolicy: ${environmentConfigs.imagePullPolicy}
+              command: '${has(workload.container.command) ? workload.container.command : oc_omit()}
+
+                '
+              args: '${has(workload.container.args) ? workload.container.args : oc_omit()}
+
+                '
+              resources: ${environmentConfigs.resources}
+              env: ${dependencies.toContainerEnvs()}
+              envFrom: ${configurations.toContainerEnvFrom()}
+              volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
+              lifecycle:
+                preStop:
+                  exec:
+                    command:
+                    - sleep
+                    - '5'
+            volumes: ${configurations.toVolumes() + dependencies.toVolumes()}
+  - id: pdb
+    includeWhen: ${environmentConfigs.replicas >= 2}
+    template:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        maxUnavailable: 1
+        selector:
+          matchLabels: ${metadata.podSelectors}
+  - id: env-config
+    forEach: ${configurations.toConfigEnvsByContainer()}
+    var: envConfig
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${envConfig.resourceName}
+        namespace: ${metadata.namespace}
+      data: '${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+        '
+  - id: file-config
+    forEach: ${configurations.toConfigFileList()}
+    var: config
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${config.resourceName}
+        namespace: ${metadata.namespace}
+      data:
+        ${config.name}: '${config.value}
+
+          '
+  - id: secret-env-external
+    forEach: ${configurations.toSecretEnvsByContainer()}
+    var: secretEnv
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${secretEnv.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${secretEnv.resourceName}
+          creationPolicy: Owner
+        data: "${secretEnv.envs.map(secret, {\n  \"secretKey\": secret.name,\n  \"remoteRef\": {\n    \"key\": secret.remoteRef.key,\n\
+          \    ?\"property\": secret.remoteRef.?property\n  }\n})}\n"
+  - id: secret-file-external
+    forEach: ${configurations.toSecretFileList()}
+    var: file
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${file.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${file.resourceName}
+          creationPolicy: Owner
+        data:
+        - secretKey: ${file.name}
+          remoteRef:
+            key: ${file.remoteRef.key}
+            property: '${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
+              '
+---
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterComponentType
+metadata:
+  name: agent
+  annotations:
+    openchoreo.dev/description: 'A product''s agent: locked down, it reaches only the product''s LLM gateway, MCP
+      servers, code sandbox, database and event brokers; PHI and payments agents run under gVisor'
+spec:
+  workloadType: deployment
+  allowedWorkflows:
+  - kind: ClusterWorkflow
+    name: docker
+  allowedTraits:
+  - kind: ClusterTrait
+    name: autoscaler
+  - kind: ClusterTrait
+    name: observability-alert-rule
+  validations:
+  - rule: "${workload.endpoints.exists(name, ep, \"external\" in ep.visibility)\n  ? has(gateway.ingress) && has(gateway.ingress.external)\n\
+      \  : true}"
+    message: Endpoints with 'external' visibility require gateway.ingress.external to be configured on the Environment
+      or DataPlane.
+  - rule: "${workload.endpoints.exists(name, ep, \"internal\" in ep.visibility)\n  ? has(gateway.ingress) && has(gateway.ingress.internal)\n\
+      \  : true}"
+    message: Endpoints with 'internal' visibility require gateway.ingress.internal to be configured on the Environment
+      or DataPlane.
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        role:
+          type: string
+          default: ''
+          description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
+            carry it as valxel.io/role for the network policies
+        isolation:
+          type: string
+          enum:
+          - standard
+          - gvisor
+          default: standard
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      properties:
+        replicas:
+          type: integer
+          minimum: 1
+          default: 1
+        resources:
+          type: object
+          default: {}
+          properties:
+            requests:
+              type: object
+              default: {}
+              properties:
+                cpu:
+                  type: string
+                  default: 500m
+                memory:
+                  type: string
+                  default: 512Mi
+            limits:
+              type: object
+              default: {}
+              properties:
+                memory:
+                  type: string
+                  default: 512Mi
+        imagePullPolicy:
+          type: string
+          default: IfNotPresent
+          enum:
+          - Always
+          - IfNotPresent
+          - Never
+        allowedTools:
+          type: string
+          default: '[]'
+          description: The MCP tools the agent may call, as a JSON list, from the repo's agent.yaml on every deploy
+        readOnlyTools:
+          type: string
+          default: '[]'
+          description: The tools it calls without a person, as a JSON list
+        egressCIDRs:
+          type: array
+          items:
+            type: string
+          default: []
+          description: The database and event brokers outside the cluster, per environment
+  resources:
+  - id: deployment
+    template:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        replicas: ${environmentConfigs.replicas}
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+        selector:
+          matchLabels: ${metadata.podSelectors}
+        template:
+          metadata:
+            labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+          spec:
+            automountServiceAccountToken: false
+            runtimeClassName: '${parameters.isolation == "gvisor" ? "gvisor" : oc_omit()}'
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 10001
+              seccompProfile:
+                type: RuntimeDefault
+            terminationGracePeriodSeconds: 60
+            topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: ${metadata.podSelectors}
+            containers:
+            - name: main
+              image: ${workload.container.image}
+              imagePullPolicy: ${environmentConfigs.imagePullPolicy}
+              command: '${has(workload.container.command) ? workload.container.command : oc_omit()}
+
+                '
+              args: '${has(workload.container.args) ? workload.container.args : oc_omit()}
+
+                '
+              resources: ${environmentConfigs.resources}
+              env: '${dependencies.toContainerEnvs() + [{"name": "AGENT_ALLOWED_TOOLS", "value": environmentConfigs.allowedTools},
+                {"name": "AGENT_READ_ONLY_TOOLS", "value": environmentConfigs.readOnlyTools}]}'
+              envFrom: ${configurations.toContainerEnvFrom()}
+              volumeMounts: '${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()
+                + [{"name": "tmp", "mountPath": "/tmp"}]}'
+              securityContext:
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+              readinessProbe:
+                httpGet:
+                  path: /readyz
+                  port: 8080
+                periodSeconds: 5
+              livenessProbe:
+                httpGet:
+                  path: /healthz
+                  port: 8080
+                periodSeconds: 10
+                failureThreshold: 6
+              lifecycle:
+                preStop:
+                  exec:
+                    command:
+                    - sleep
+                    - '5'
+            volumes: '${configurations.toVolumes() + dependencies.toVolumes() + [{"name": "tmp", "emptyDir": {"sizeLimit":
+              "256Mi"}}]}'
+  - id: service
+    includeWhen: ${size(workload.endpoints) > 0}
+    template:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ${metadata.componentName}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        type: ClusterIP
+        selector: ${metadata.podSelectors}
+        ports: ${workload.toServicePorts()}
+  - id: httproute-external
+    forEach: ${workload.endpoints.transformMap(name, ep, "external" in ep.visibility && ep.type in ["HTTP", "GraphQL",
+      "Websocket"], ep)}
+    var: endpoint
+    template:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: ${oc_generate_name(metadata.componentName, endpoint.key)}
+        namespace: ${metadata.namespace}
+        labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint.key, "openchoreo.dev/endpoint-visibility":
+          "external"})}'
+      spec:
+        parentRefs:
+        - name: ${gateway.ingress.external.name}
+          namespace: ${gateway.ingress.external.namespace}
+        hostnames: "${[gateway.ingress.external.?http, gateway.ingress.external.?https]\n  .filter(g, g.hasValue()).map(g,\
+          \ g.value().host).distinct()\n  .map(h, metadata.environmentName + \"-\" + metadata.componentNamespace\
+          \ + \".\" + h)}\n"
+        rules:
+        - matches:
+          - path:
+              type: PathPrefix
+              value: /${metadata.componentName}-${endpoint.key}
+          filters:
+          - type: URLRewrite
+            urlRewrite:
+              path:
+                type: ReplacePrefixMatch
+                replacePrefixMatch: ${endpoint.value.?basePath.orValue("/")}
+          - type: CORS
+            cors:
+              allowOrigins:
+              - '*'
+              allowMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+              - HEAD
+              allowHeaders:
+              - '*'
+              exposeHeaders:
+              - '*'
+              allowCredentials: false
+          backendRefs:
+          - name: ${metadata.componentName}
+            port: ${endpoint.value.port}
+  - id: httproute-internal
+    forEach: ${workload.endpoints.transformMap(name, ep, "internal" in ep.visibility && ep.type in ["HTTP", "GraphQL",
+      "Websocket"], ep)}
+    var: endpoint
+    template:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: ${oc_generate_name(metadata.componentName, endpoint.key, "internal")}
+        namespace: ${metadata.namespace}
+        labels: '${oc_merge(metadata.labels, {"openchoreo.dev/endpoint-name": endpoint.key, "openchoreo.dev/endpoint-visibility":
+          "internal"})}'
+      spec:
+        parentRefs:
+        - name: ${gateway.ingress.internal.name}
+          namespace: ${gateway.ingress.internal.namespace}
+        hostnames: "${[gateway.ingress.internal.?http, gateway.ingress.internal.?https]\n  .filter(g, g.hasValue()).map(g,\
+          \ g.value().host).distinct()\n  .map(h, metadata.environmentName + \"-\" + metadata.componentNamespace\
+          \ + \".\" + h)}\n"
+        rules:
+        - matches:
+          - path:
+              type: PathPrefix
+              value: /${metadata.componentName}-${endpoint.key}
+          filters:
+          - type: URLRewrite
+            urlRewrite:
+              path:
+                type: ReplacePrefixMatch
+                replacePrefixMatch: ${endpoint.value.?basePath.orValue("/")}
+          backendRefs:
+          - name: ${metadata.componentName}
+            port: ${endpoint.value.port}
+  - id: egress
+    template:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: ${metadata.name}-egress
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        podSelector:
+          matchLabels: ${metadata.podSelectors}
+        policyTypes:
+        - Egress
+        egress:
+        - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                k8s-app: kube-dns
+          ports:
+          - protocol: UDP
+            port: 53
+          - protocol: TCP
+            port: 53
+        - to:
+          - namespaceSelector: {}
+            podSelector:
+              matchExpressions:
+              - key: valxel.io/role
+                operator: In
+                values:
+                - mcp-server
+                - llm-gateway
+                - code-sandbox
+        - to:
+          - namespaceSelector:
+              matchLabels:
+                valxel.io/plane: observability
+          ports:
+          - protocol: TCP
+            port: 4317
+          - protocol: TCP
+            port: 4318
+        - to: '${environmentConfigs.egressCIDRs.map(c, {"ipBlock": {"cidr": c}})}'
+  - id: pdb
+    includeWhen: ${environmentConfigs.replicas >= 2}
+    template:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        maxUnavailable: 1
+        selector:
+          matchLabels: ${metadata.podSelectors}
+  - id: env-config
+    forEach: ${configurations.toConfigEnvsByContainer()}
+    var: envConfig
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${envConfig.resourceName}
+        namespace: ${metadata.namespace}
+      data: '${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+        '
+  - id: file-config
+    forEach: ${configurations.toConfigFileList()}
+    var: config
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${config.resourceName}
+        namespace: ${metadata.namespace}
+      data:
+        ${config.name}: '${config.value}
+
+          '
+  - id: secret-env-external
+    forEach: ${configurations.toSecretEnvsByContainer()}
+    var: secretEnv
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${secretEnv.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${secretEnv.resourceName}
+          creationPolicy: Owner
+        data: "${secretEnv.envs.map(secret, {\n  \"secretKey\": secret.name,\n  \"remoteRef\": {\n    \"key\": secret.remoteRef.key,\n\
+          \    ?\"property\": secret.remoteRef.?property\n  }\n})}\n"
+  - id: secret-file-external
+    forEach: ${configurations.toSecretFileList()}
+    var: file
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${file.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${file.resourceName}
+          creationPolicy: Owner
+        data:
+        - secretKey: ${file.name}
+          remoteRef:
+            key: ${file.remoteRef.key}
+            property: '${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
+              '
+---
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterComponentType
 metadata:
   name: code-sandbox
+  annotations:
+    openchoreo.dev/description: 'A product''s code sandbox (the run_code MCP server): claims a fresh sandbox per
+      run; only the product''s agents reach it'
 spec:
   workloadType: deployment
+  allowedWorkflows:
+  - kind: ClusterWorkflow
+    name: docker
   allowedTraits:
-    - { kind: ClusterTrait, name: autoscaler }
-    - { kind: ClusterTrait, name: observability-alert-rule }
+  - kind: ClusterTrait
+    name: autoscaler
+  - kind: ClusterTrait
+    name: observability-alert-rule
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        role:
+          type: string
+          default: ''
+          description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
+            carry it as valxel.io/role for the network policies
   environmentConfigs:
     openAPIV3Schema:
       type: object
       properties:
-        replicas: { type: integer, minimum: 1, default: 2 }
+        replicas:
+          type: integer
+          minimum: 1
+          default: 2
         resources:
           type: object
+          default: {}
           properties:
             requests:
               type: object
+              default: {}
               properties:
-                cpu: { type: string, default: "250m" }
-                memory: { type: string, default: "256Mi" }
+                cpu:
+                  type: string
+                  default: 250m
+                memory:
+                  type: string
+                  default: 256Mi
             limits:
               type: object
+              default: {}
               properties:
-                memory: { type: string, default: "256Mi" }
-        apiServerCIDRs: { type: array, items: { type: string }, default: [] }
+                memory:
+                  type: string
+                  default: 256Mi
+        imagePullPolicy:
+          type: string
+          default: IfNotPresent
+          enum:
+          - Always
+          - IfNotPresent
+          - Never
+        apiServerCIDRs:
+          type: array
+          items:
+            type: string
+          default: []
   resources:
-    - id: serviceaccount
-      template:
-        apiVersion: v1
-        kind: ServiceAccount
-        metadata:
-          name: ${metadata.name}
-    - id: role
-      template:
-        apiVersion: rbac.authorization.k8s.io/v1
+  - id: serviceaccount
+    template:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+  - id: role
+    template:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: ${metadata.name}-claims
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      rules:
+      - apiGroups:
+        - extensions.agents.x-k8s.io
+        resources:
+        - sandboxclaims
+        verbs:
+        - create
+        - get
+        - delete
+  - id: rolebinding
+    template:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: ${metadata.name}-claims
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
         kind: Role
-        metadata:
-          name: ${metadata.name}-claims
-        rules:
-          - apiGroups: [extensions.agents.x-k8s.io]
-            resources: [sandboxclaims]
-            verbs: [create, get, delete]
-    - id: rolebinding
-      template:
-        apiVersion: rbac.authorization.k8s.io/v1
-        kind: RoleBinding
-        metadata:
-          name: ${metadata.name}-claims
-        roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: '${metadata.name}-claims' }
-        subjects: [{ kind: ServiceAccount, name: '${metadata.name}' }]
-    - id: deployment
-      template:
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: ${metadata.name}
-        spec:
-          replicas: ${environmentConfigs.replicas}
-          selector:
-            matchLabels: ${metadata.podSelectors}
-          template:
-            metadata:
-              labels: '${metadata.podSelectors.merge({"valxel.io/role": "code-sandbox"})}'
-            spec:
-              serviceAccountName: ${metadata.name}
+        name: ${metadata.name}-claims
+      subjects:
+      - kind: ServiceAccount
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+  - id: deployment
+    template:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        replicas: ${environmentConfigs.replicas}
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+        selector:
+          matchLabels: ${metadata.podSelectors}
+        template:
+          metadata:
+            labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+          spec:
+            serviceAccountName: ${metadata.name}
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 10001
+              seccompProfile:
+                type: RuntimeDefault
+            terminationGracePeriodSeconds: 30
+            topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: ${metadata.podSelectors}
+            containers:
+            - name: main
+              image: ${workload.container.image}
+              imagePullPolicy: ${environmentConfigs.imagePullPolicy}
+              command: '${has(workload.container.command) ? workload.container.command : oc_omit()}
+
+                '
+              args: '${has(workload.container.args) ? workload.container.args : oc_omit()}
+
+                '
+              resources: ${environmentConfigs.resources}
+              env: '${dependencies.toContainerEnvs() + [{"name": "SANDBOX_EXECUTOR", "value": "kubernetes"}, {"name":
+                "SANDBOX_SANDBOX_TEMPLATE", "value": "code-runner"}]}'
+              envFrom: ${configurations.toContainerEnvFrom()}
+              volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
               securityContext:
-                runAsNonRoot: true
-                runAsUser: 10001
-                seccompProfile: { type: RuntimeDefault }
-              containers:
-                - name: main
-                  image: ${workload.containers.main.image}
-                  resources: ${environmentConfigs.resources}
-                  env:
-                    - { name: SANDBOX_EXECUTOR, value: kubernetes }
-                    - { name: SANDBOX_SANDBOX_TEMPLATE, value: code-runner }
-                  securityContext:
-                    readOnlyRootFilesystem: true
-                    allowPrivilegeEscalation: false
-                    capabilities: { drop: [ALL] }
-                  readinessProbe: { httpGet: { path: /healthz, port: 8080 }, periodSeconds: 5 }
-                  livenessProbe: { httpGet: { path: /healthz, port: 8080 }, periodSeconds: 10, failureThreshold: 6 }
-    - id: network
-      template:
-        apiVersion: networking.k8s.io/v1
-        kind: NetworkPolicy
-        metadata:
-          name: ${metadata.name}
-        spec:
-          podSelector:
-            matchLabels: ${metadata.podSelectors}
-          policyTypes: [Ingress, Egress]
-          ingress:
-            - from:  # the product's agents, and metrics scraping
-                - namespaceSelector: {}
-                  podSelector: { matchLabels: { valxel.io/role: agent } }
-                - namespaceSelector: { matchLabels: { valxel.io/plane: observability } }
-              ports: [{ protocol: TCP, port: 8080 }]
-          egress:
-            - to:
-                - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
-                  podSelector: { matchLabels: { k8s-app: kube-dns } }
-              ports: [{ protocol: UDP, port: 53 }, { protocol: TCP, port: 53 }]
-            - to:  # its sandboxes' runners
-                - podSelector: { matchLabels: { valxel.io/sandbox: code-runner } }
-              ports: [{ protocol: TCP, port: 8888 }]
-            - to:
-                - namespaceSelector: { matchLabels: { valxel.io/plane: observability } }
-              ports: [{ protocol: TCP, port: 4317 }, { protocol: TCP, port: 4318 }]
-            - to: '${environmentConfigs.apiServerCIDRs.map(c, {"ipBlock": {"cidr": c}})}'
-              ports: [{ protocol: TCP, port: 443 }]
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+              readinessProbe:
+                httpGet:
+                  path: /healthz
+                  port: 8080
+                periodSeconds: 5
+              livenessProbe:
+                httpGet:
+                  path: /healthz
+                  port: 8080
+                periodSeconds: 10
+                failureThreshold: 6
+              lifecycle:
+                preStop:
+                  exec:
+                    command:
+                    - sleep
+                    - '5'
+            volumes: ${configurations.toVolumes() + dependencies.toVolumes()}
+  - id: service
+    includeWhen: ${size(workload.endpoints) > 0}
+    template:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ${metadata.componentName}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        type: ClusterIP
+        selector: ${metadata.podSelectors}
+        ports: ${workload.toServicePorts()}
+  - id: network
+    template:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        podSelector:
+          matchLabels: ${metadata.podSelectors}
+        policyTypes:
+        - Ingress
+        - Egress
+        ingress:
+        - from:
+          - namespaceSelector: {}
+            podSelector:
+              matchLabels:
+                valxel.io/role: agent
+          - namespaceSelector:
+              matchLabels:
+                valxel.io/plane: observability
+          ports:
+          - protocol: TCP
+            port: 8080
+        egress:
+        - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                k8s-app: kube-dns
+          ports:
+          - protocol: UDP
+            port: 53
+          - protocol: TCP
+            port: 53
+        - to:
+          - podSelector:
+              matchLabels:
+                valxel.io/sandbox: code-runner
+          ports:
+          - protocol: TCP
+            port: 8888
+        - to:
+          - namespaceSelector:
+              matchLabels:
+                valxel.io/plane: observability
+          ports:
+          - protocol: TCP
+            port: 4317
+          - protocol: TCP
+            port: 4318
+        - to: '${environmentConfigs.apiServerCIDRs.map(c, {"ipBlock": {"cidr": c}})}'
+          ports:
+          - protocol: TCP
+            port: 443
+  - id: pdb
+    includeWhen: ${environmentConfigs.replicas >= 2}
+    template:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        maxUnavailable: 1
+        selector:
+          matchLabels: ${metadata.podSelectors}
+  - id: env-config
+    forEach: ${configurations.toConfigEnvsByContainer()}
+    var: envConfig
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${envConfig.resourceName}
+        namespace: ${metadata.namespace}
+      data: '${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+        '
+  - id: file-config
+    forEach: ${configurations.toConfigFileList()}
+    var: config
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${config.resourceName}
+        namespace: ${metadata.namespace}
+      data:
+        ${config.name}: '${config.value}
+
+          '
+  - id: secret-env-external
+    forEach: ${configurations.toSecretEnvsByContainer()}
+    var: secretEnv
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${secretEnv.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${secretEnv.resourceName}
+          creationPolicy: Owner
+        data: "${secretEnv.envs.map(secret, {\n  \"secretKey\": secret.name,\n  \"remoteRef\": {\n    \"key\": secret.remoteRef.key,\n\
+          \    ?\"property\": secret.remoteRef.?property\n  }\n})}\n"
+  - id: secret-file-external
+    forEach: ${configurations.toSecretFileList()}
+    var: file
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${file.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${file.resourceName}
+          creationPolicy: Owner
+        data:
+        - secretKey: ${file.name}
+          remoteRef:
+            key: ${file.remoteRef.key}
+            property: '${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
+              '
 ---
-# A product's connector to a third party (repos.yaml role `connector`, template-integration), and its
-# channel service (role `channel`, template-channel, the same shape): the same
-# lock-down as an agent, plus a closed door each way. In: the gateway routes only the webhook paths in
-# the repo's integration.yaml, and only the gateway reaches the pod. Out: DNS, telemetry, the product's
-# database and brokers, and HTTPS to the vendor hosts in integration.yaml, by name (Cilium FQDN
-# policy), nothing else. The Valxel SDLC reads integration.yaml at the deployed commit and sets
-# webhookPaths and egressHosts on every deploy (valxel_sdlc.connectors); with neither, nothing is
-# exposed and no vendor is reachable. Vendor secrets are mounted from the platform's secret store
-# (<component>-vendor), never put in environment variables.
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterComponentType
 metadata:
   name: connector
+  annotations:
+    openchoreo.dev/description: 'A product''s connector to a third party, or its channel service: only the gateway
+      reaches its webhook paths, and it reaches only its vendors'' hosts by name'
 spec:
   workloadType: deployment
+  allowedWorkflows:
+  - kind: ClusterWorkflow
+    name: docker
   allowedTraits:
-    - { kind: ClusterTrait, name: autoscaler }
-    - { kind: ClusterTrait, name: observability-alert-rule }
+  - kind: ClusterTrait
+    name: autoscaler
+  - kind: ClusterTrait
+    name: observability-alert-rule
+  validations:
+  - rule: "${workload.endpoints.exists(name, ep, \"external\" in ep.visibility)\n  ? has(gateway.ingress) && has(gateway.ingress.external)\n\
+      \  : true}"
+    message: Endpoints with 'external' visibility require gateway.ingress.external to be configured on the Environment
+      or DataPlane.
+  - rule: "${workload.endpoints.exists(name, ep, \"internal\" in ep.visibility)\n  ? has(gateway.ingress) && has(gateway.ingress.internal)\n\
+      \  : true}"
+    message: Endpoints with 'internal' visibility require gateway.ingress.internal to be configured on the Environment
+      or DataPlane.
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        role:
+          type: string
+          default: ''
+          description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
+            carry it as valxel.io/role for the network policies
   environmentConfigs:
     openAPIV3Schema:
       type: object
       properties:
-        replicas: { type: integer, minimum: 1, default: 2 }
+        replicas:
+          type: integer
+          minimum: 1
+          default: 2
         resources:
           type: object
+          default: {}
           properties:
             requests:
               type: object
+              default: {}
               properties:
-                cpu: { type: string, default: "250m" }
-                memory: { type: string, default: "256Mi" }
+                cpu:
+                  type: string
+                  default: 250m
+                memory:
+                  type: string
+                  default: 256Mi
             limits:
               type: object
+              default: {}
               properties:
-                memory: { type: string, default: "256Mi" }
-        egressCIDRs: { type: array, items: { type: string }, default: [] }
-        # From integration.yaml at the deployed commit (valxel_sdlc.connectors.binding_configs).
-        webhookPaths: { type: array, items: { type: string, pattern: "^/webhooks/[a-z0-9-]+$" }, default: [] }
-        egressHosts: { type: array, items: { type: string }, default: [] }
-        dataClass: { type: string, enum: [general, payments, phi], default: general }
-        # Components inside the product that may call it, by role: none for a connector; the BFF for a
-        # channel service (people confirm a channel link through it). Set by the Valxel SDLC.
-        callerRoles: { type: array, items: { type: string }, default: [] }
+                memory:
+                  type: string
+                  default: 256Mi
+        imagePullPolicy:
+          type: string
+          default: IfNotPresent
+          enum:
+          - Always
+          - IfNotPresent
+          - Never
+        egressCIDRs:
+          type: array
+          items:
+            type: string
+          default: []
+        webhookPaths:
+          type: array
+          items:
+            type: string
+            pattern: ^/webhooks/[a-z0-9-]+$
+          default: []
+          description: From integration.yaml at the deployed commit (valxel_sdlc.connectors)
+        egressHosts:
+          type: array
+          items:
+            type: string
+          default: []
+        dataClass:
+          type: string
+          enum:
+          - general
+          - payments
+          - phi
+          default: general
+        callerRoles:
+          type: array
+          items:
+            type: string
+          default: []
+          description: 'Roles inside the product that may call it: none for a connector, the BFF for a channel'
   resources:
-    - id: deployment
-      template:
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: ${metadata.name}
-        spec:
-          replicas: ${environmentConfigs.replicas}
-          strategy:
-            type: RollingUpdate
-            rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
-          selector:
-            matchLabels: ${metadata.podSelectors}
-          template:
-            metadata:
-              labels: ${metadata.podSelectors}
-            spec:
-              automountServiceAccountToken: false
-              runtimeClassName: '${environmentConfigs.dataClass == "general" ? null : "gvisor"}'
+  - id: deployment
+    template:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        replicas: ${environmentConfigs.replicas}
+        strategy:
+          type: RollingUpdate
+          rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+        selector:
+          matchLabels: ${metadata.podSelectors}
+        template:
+          metadata:
+            labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+          spec:
+            automountServiceAccountToken: false
+            runtimeClassName: '${environmentConfigs.dataClass == "general" ? oc_omit() : "gvisor"}'
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 10001
+              seccompProfile:
+                type: RuntimeDefault
+            terminationGracePeriodSeconds: 30
+            topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels: ${metadata.podSelectors}
+            containers:
+            - name: main
+              image: ${workload.container.image}
+              imagePullPolicy: ${environmentConfigs.imagePullPolicy}
+              command: '${has(workload.container.command) ? workload.container.command : oc_omit()}
+
+                '
+              args: '${has(workload.container.args) ? workload.container.args : oc_omit()}
+
+                '
+              resources: ${environmentConfigs.resources}
+              env: ${dependencies.toContainerEnvs()}
+              envFrom: ${configurations.toContainerEnvFrom()}
+              volumeMounts: '${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()
+                + [{"name": "tmp", "mountPath": "/tmp"}, {"name": "vendor-secrets", "mountPath": "/var/run/secrets/valxel",
+                "readOnly": true}]}'
               securityContext:
-                runAsNonRoot: true
-                runAsUser: 10001
-                seccompProfile: { type: RuntimeDefault }
-              terminationGracePeriodSeconds: 30
-              topologySpreadConstraints:
-                - maxSkew: 1
-                  topologyKey: topology.kubernetes.io/zone
-                  whenUnsatisfiable: ScheduleAnyway
-                  labelSelector:
-                    matchLabels: ${metadata.podSelectors}
-              containers:
-                - name: main
-                  image: ${workload.containers.main.image}
-                  resources: ${environmentConfigs.resources}
-                  securityContext:
-                    readOnlyRootFilesystem: true
-                    allowPrivilegeEscalation: false
-                    capabilities: { drop: [ALL] }
-                  volumeMounts:
-                    - { name: tmp, mountPath: /tmp }
-                    - { name: vendor-secrets, mountPath: /var/run/secrets/valxel, readOnly: true }
-                  readinessProbe: { httpGet: { path: /readyz, port: 8080 }, periodSeconds: 5 }
-                  livenessProbe: { httpGet: { path: /healthz, port: 8080 }, periodSeconds: 10, failureThreshold: 6 }
-              volumes:
-                - name: tmp
-                  emptyDir: { sizeLimit: 64Mi }
-                - name: vendor-secrets
-                  secret: { secretName: '${metadata.name}-vendor', defaultMode: 0400, optional: true }
-    - id: route
-      includeWhen: ${size(environmentConfigs.webhookPaths) > 0}
-      template:
-        apiVersion: gateway.networking.k8s.io/v1
-        kind: HTTPRoute
-        metadata:
-          name: ${metadata.name}-webhooks
-        spec:
-          parentRefs: [{ name: external, namespace: gateway }]
-          rules:
-            - matches: '${environmentConfigs.webhookPaths.map(p, {"path": {"type": "Exact", "value": p}, "method": "POST"})}'
-              backendRefs: [{ name: '${metadata.name}', port: 8080 }]
-    - id: ingress
-      template:
-        apiVersion: networking.k8s.io/v1
-        kind: NetworkPolicy
-        metadata:
-          name: ${metadata.name}-ingress
-        spec:
-          podSelector:
-            matchLabels: ${metadata.podSelectors}
-          policyTypes: [Ingress]
-          ingress:
-            # The gateway (webhooks) and the observability plane (metrics); callerRoles below adds others.
-            - from:
-                - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: gateway } }
-                - namespaceSelector: { matchLabels: { valxel.io/plane: observability } }
-              ports: [{ protocol: TCP, port: 8080 }]
-    - id: callers
-      includeWhen: ${size(environmentConfigs.callerRoles) > 0}
-      template:
-        apiVersion: networking.k8s.io/v1
-        kind: NetworkPolicy
-        metadata:
-          name: ${metadata.name}-callers
-        spec:
-          podSelector:
-            matchLabels: ${metadata.podSelectors}
-          policyTypes: [Ingress]
-          ingress:
-            - from:
-                - podSelector:
-                    matchExpressions:
-                      - { key: valxel.io/role, operator: In, values: '${environmentConfigs.callerRoles}' }
-              ports: [{ protocol: TCP, port: 8080 }]
-    - id: egress
-      template:
-        apiVersion: cilium.io/v2
-        kind: CiliumNetworkPolicy
-        metadata:
-          name: ${metadata.name}-egress
-        spec:
-          endpointSelector:
-            matchLabels: ${metadata.podSelectors}
-          egress:
-            - toEndpoints:
-                - matchLabels: { k8s:io.kubernetes.pod.namespace: kube-system, k8s-app: kube-dns }
-              toPorts:
-                - ports: [{ port: "53", protocol: ANY }]
-                  rules: { dns: [{ matchPattern: "*" }] }   # lets Cilium learn the vendor hosts' addresses
-            - toEndpoints:
-                - matchLabels: { k8s:io.kubernetes.pod.namespace: observability }
-              toPorts: [{ ports: [{ port: "4317", protocol: TCP }, { port: "4318", protocol: TCP }] }]
-            - toCIDR: ${environmentConfigs.egressCIDRs}
-            - toFQDNs: '${environmentConfigs.egressHosts.map(h, {"matchName": h})}'
-              toPorts: [{ ports: [{ port: "443", protocol: TCP }] }]
-    - id: pdb
-      includeWhen: ${environmentConfigs.replicas >= 2}
-      template:
-        apiVersion: policy/v1
-        kind: PodDisruptionBudget
-        metadata:
-          name: ${metadata.name}
-        spec:
-          maxUnavailable: 1
-          selector:
-            matchLabels: ${metadata.podSelectors}
+                readOnlyRootFilesystem: true
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
+              readinessProbe:
+                httpGet:
+                  path: /readyz
+                  port: 8080
+                periodSeconds: 5
+              livenessProbe:
+                httpGet:
+                  path: /healthz
+                  port: 8080
+                periodSeconds: 10
+                failureThreshold: 6
+              lifecycle:
+                preStop:
+                  exec:
+                    command:
+                    - sleep
+                    - '5'
+            volumes: '${configurations.toVolumes() + dependencies.toVolumes() + [{"name": "tmp", "emptyDir": {"sizeLimit":
+              "64Mi"}}, {"name": "vendor-secrets", "secret": {"secretName": metadata.name + "-vendor", "defaultMode":
+              256, "optional": true}}]}'
+  - id: service
+    template:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ${metadata.componentName}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        type: ClusterIP
+        selector: ${metadata.podSelectors}
+        ports:
+        - name: http
+          port: 8080
+          targetPort: 8080
+  - id: route
+    includeWhen: ${size(environmentConfigs.webhookPaths) > 0 && has(gateway.ingress) && has(gateway.ingress.external)}
+    template:
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: ${metadata.name}-webhooks
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        parentRefs:
+        - name: ${gateway.ingress.external.name}
+          namespace: ${gateway.ingress.external.namespace}
+        hostnames: "${[gateway.ingress.external.?http, gateway.ingress.external.?https]\n  .filter(g, g.hasValue()).map(g,\
+          \ g.value().host).distinct()\n  .map(h, metadata.environmentName + \"-\" + metadata.componentNamespace\
+          \ + \".\" + h)}\n"
+        rules:
+        - matches: '${environmentConfigs.webhookPaths.map(p, {"path": {"type": "Exact", "value": p}, "method": "POST"})}'
+          backendRefs:
+          - name: ${metadata.componentName}
+            port: 8080
+  - id: ingress
+    template:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: ${metadata.name}-ingress
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        podSelector:
+          matchLabels: ${metadata.podSelectors}
+        policyTypes:
+        - Ingress
+        ingress:
+        - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ${gateway.ingress.external.namespace}
+          - namespaceSelector:
+              matchLabels:
+                valxel.io/plane: observability
+          ports:
+          - protocol: TCP
+            port: 8080
+  - id: callers
+    includeWhen: ${size(environmentConfigs.callerRoles) > 0}
+    template:
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: ${metadata.name}-callers
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        podSelector:
+          matchLabels: ${metadata.podSelectors}
+        policyTypes:
+        - Ingress
+        ingress:
+        - from:
+          - namespaceSelector: {}
+            podSelector:
+              matchExpressions:
+              - key: valxel.io/role
+                operator: In
+                values: ${environmentConfigs.callerRoles}
+          ports:
+          - protocol: TCP
+            port: 8080
+  - id: egress
+    template:
+      apiVersion: cilium.io/v2
+      kind: CiliumNetworkPolicy
+      metadata:
+        name: ${metadata.name}-egress
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        endpointSelector:
+          matchLabels: ${metadata.podSelectors}
+        egress:
+        - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: kube-system
+              k8s-app: kube-dns
+          toPorts:
+          - ports:
+            - port: '53'
+              protocol: ANY
+            rules:
+              dns:
+              - matchPattern: '*'
+        - toEndpoints:
+          - matchLabels:
+              k8s:io.kubernetes.pod.namespace: observability
+          toPorts:
+          - ports:
+            - port: '4317'
+              protocol: TCP
+            - port: '4318'
+              protocol: TCP
+        - toCIDR: ${environmentConfigs.egressCIDRs}
+        - toFQDNs: '${environmentConfigs.egressHosts.map(h, {"matchName": h})}'
+          toPorts:
+          - ports:
+            - port: '443'
+              protocol: TCP
+  - id: pdb
+    includeWhen: ${environmentConfigs.replicas >= 2}
+    template:
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        maxUnavailable: 1
+        selector:
+          matchLabels: ${metadata.podSelectors}
+  - id: env-config
+    forEach: ${configurations.toConfigEnvsByContainer()}
+    var: envConfig
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${envConfig.resourceName}
+        namespace: ${metadata.namespace}
+      data: '${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+        '
+  - id: file-config
+    forEach: ${configurations.toConfigFileList()}
+    var: config
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${config.resourceName}
+        namespace: ${metadata.namespace}
+      data:
+        ${config.name}: '${config.value}
+
+          '
+  - id: secret-env-external
+    forEach: ${configurations.toSecretEnvsByContainer()}
+    var: secretEnv
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${secretEnv.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${secretEnv.resourceName}
+          creationPolicy: Owner
+        data: "${secretEnv.envs.map(secret, {\n  \"secretKey\": secret.name,\n  \"remoteRef\": {\n    \"key\": secret.remoteRef.key,\n\
+          \    ?\"property\": secret.remoteRef.?property\n  }\n})}\n"
+  - id: secret-file-external
+    forEach: ${configurations.toSecretFileList()}
+    var: file
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${file.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${file.resourceName}
+          creationPolicy: Owner
+        data:
+        - secretKey: ${file.name}
+          remoteRef:
+            key: ${file.remoteRef.key}
+            property: '${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
+              '
 ---
-# A product's scheduled job (repos.yaml role `job`, template-job): a CronJob whose pod runs once and
-# exits. The Valxel SDLC sets environment, schedule, timeZone, suspend and activeDeadlineSeconds per environment
-# from the repo's job.yaml on every deploy, so the schedule changes through a pull request. Runs never
-# overlap (concurrencyPolicy Forbid; the job's own Postgres lock also covers a run started by hand),
-# a failed run isn't retried by Kubernetes (the next run covers its window again), and a run that
-# couldn't start within 10 minutes of its time is skipped rather than started late.
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterComponentType
 metadata:
   name: scheduled-task
+  annotations:
+    openchoreo.dev/description: 'A product''s scheduled job: runs once and exits; runs never overlap, a failed run
+      isn''t retried, and one that couldn''t start within 10 minutes is skipped (repos.yaml role job)'
 spec:
   workloadType: cronjob
+  allowedWorkflows:
+  - kind: ClusterWorkflow
+    name: docker
   allowedTraits:
-    - { kind: ClusterTrait, name: observability-alert-rule }
+  - kind: ClusterTrait
+    name: observability-alert-rule
+  parameters:
+    openAPIV3Schema:
+      type: object
+      properties:
+        role:
+          type: string
+          default: ''
+          description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
+            carry it as valxel.io/role for the network policies
   environmentConfigs:
     openAPIV3Schema:
       type: object
       properties:
-        # The environment's name, for job.yaml's per-environment schedule (JOB_ENVIRONMENT).
-        environment: { type: string, enum: [dev, staging, production], default: dev }
-        schedule: { type: string, default: "15 3 * * *" }
-        timeZone: { type: string, default: "UTC" }
-        suspend: { type: boolean, default: false }
-        activeDeadlineSeconds: { type: integer, minimum: 60, maximum: 86400, default: 1800 }
         resources:
           type: object
+          default: {}
           properties:
             requests:
               type: object
+              default: {}
               properties:
-                cpu: { type: string, default: "250m" }
-                memory: { type: string, default: "256Mi" }
+                cpu:
+                  type: string
+                  default: 250m
+                memory:
+                  type: string
+                  default: 256Mi
             limits:
               type: object
+              default: {}
               properties:
-                memory: { type: string, default: "256Mi" }
+                memory:
+                  type: string
+                  default: 256Mi
+        imagePullPolicy:
+          type: string
+          default: IfNotPresent
+          enum:
+          - Always
+          - IfNotPresent
+          - Never
+        environment:
+          type: string
+          enum:
+          - dev
+          - staging
+          - production
+          default: dev
+          description: The environment's name, for job.yaml's per-environment schedule
+        schedule:
+          type: string
+          default: 15 3 * * *
+        timeZone:
+          type: string
+          default: UTC
+        suspend:
+          type: boolean
+          default: false
+        activeDeadlineSeconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          default: 1800
   resources:
-    - id: cronjob
-      template:
-        apiVersion: batch/v1
-        kind: CronJob
-        metadata:
-          name: ${metadata.name}
-        spec:
-          schedule: ${environmentConfigs.schedule}
-          timeZone: ${environmentConfigs.timeZone}
-          suspend: ${environmentConfigs.suspend}
-          concurrencyPolicy: Forbid
-          startingDeadlineSeconds: 600
-          successfulJobsHistoryLimit: 3
-          failedJobsHistoryLimit: 3
-          jobTemplate:
-            spec:
-              backoffLimit: 0
-              activeDeadlineSeconds: ${environmentConfigs.activeDeadlineSeconds}
-              ttlSecondsAfterFinished: 86400
-              template:
-                metadata:
-                  labels: ${metadata.podSelectors}
-                spec:
-                  restartPolicy: Never
-                  automountServiceAccountToken: false
+  - id: cronjob
+    template:
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: ${metadata.name}
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        schedule: ${environmentConfigs.schedule}
+        timeZone: ${environmentConfigs.timeZone}
+        suspend: ${environmentConfigs.suspend}
+        concurrencyPolicy: Forbid
+        startingDeadlineSeconds: 600
+        successfulJobsHistoryLimit: 3
+        failedJobsHistoryLimit: 3
+        jobTemplate:
+          spec:
+            backoffLimit: 0
+            activeDeadlineSeconds: ${environmentConfigs.activeDeadlineSeconds}
+            ttlSecondsAfterFinished: 86400
+            template:
+              metadata:
+                labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+              spec:
+                restartPolicy: Never
+                automountServiceAccountToken: false
+                securityContext:
+                  runAsNonRoot: true
+                  runAsUser: 10001
+                  seccompProfile:
+                    type: RuntimeDefault
+                terminationGracePeriodSeconds: 45
+                containers:
+                - name: main
+                  image: ${workload.container.image}
+                  imagePullPolicy: ${environmentConfigs.imagePullPolicy}
+                  command: '${has(workload.container.command) ? workload.container.command : oc_omit()}
+
+                    '
+                  args: '${has(workload.container.args) ? workload.container.args : oc_omit()}
+
+                    '
+                  resources: ${environmentConfigs.resources}
+                  env: '${dependencies.toContainerEnvs() + [{"name": "JOB_ENVIRONMENT", "value": environmentConfigs.environment}]}'
+                  envFrom: ${configurations.toContainerEnvFrom()}
+                  volumeMounts: '${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()
+                    + [{"name": "tmp", "mountPath": "/tmp"}]}'
                   securityContext:
-                    runAsNonRoot: true
-                    runAsUser: 10001
-                    seccompProfile: { type: RuntimeDefault }
-                  terminationGracePeriodSeconds: 45     # the job stops itself 30 s before its limit
-                  containers:
-                    - name: main
-                      image: ${workload.containers.main.image}
-                      env:
-                        - { name: JOB_ENVIRONMENT, value: '${environmentConfigs.environment}' }
-                      resources: ${environmentConfigs.resources}
-                      securityContext:
-                        readOnlyRootFilesystem: true
-                        allowPrivilegeEscalation: false
-                        capabilities: { drop: [ALL] }
-                      volumeMounts:
-                        - { name: tmp, mountPath: /tmp }
-                  volumes:
-                    - name: tmp
-                      emptyDir: { sizeLimit: 128Mi }
+                    readOnlyRootFilesystem: true
+                    allowPrivilegeEscalation: false
+                    capabilities:
+                      drop:
+                      - ALL
+                volumes: '${configurations.toVolumes() + dependencies.toVolumes() + [{"name": "tmp", "emptyDir":
+                  {"sizeLimit": "128Mi"}}]}'
+  - id: env-config
+    forEach: ${configurations.toConfigEnvsByContainer()}
+    var: envConfig
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${envConfig.resourceName}
+        namespace: ${metadata.namespace}
+      data: '${envConfig.envs.transformMapEntry(index, env, {env.name: env.value})}
+
+        '
+  - id: file-config
+    forEach: ${configurations.toConfigFileList()}
+    var: config
+    template:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: ${config.resourceName}
+        namespace: ${metadata.namespace}
+      data:
+        ${config.name}: '${config.value}
+
+          '
+  - id: secret-env-external
+    forEach: ${configurations.toSecretEnvsByContainer()}
+    var: secretEnv
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${secretEnv.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${secretEnv.resourceName}
+          creationPolicy: Owner
+        data: "${secretEnv.envs.map(secret, {\n  \"secretKey\": secret.name,\n  \"remoteRef\": {\n    \"key\": secret.remoteRef.key,\n\
+          \    ?\"property\": secret.remoteRef.?property\n  }\n})}\n"
+  - id: secret-file-external
+    forEach: ${configurations.toSecretFileList()}
+    var: file
+    template:
+      apiVersion: external-secrets.io/v1
+      kind: ExternalSecret
+      metadata:
+        name: ${file.resourceName}
+        namespace: ${metadata.namespace}
+      spec:
+        refreshInterval: 15s
+        secretStoreRef:
+          name: ${dataplane.secretStore}
+          kind: ClusterSecretStore
+        target:
+          name: ${file.resourceName}
+          creationPolicy: Owner
+        data:
+        - secretKey: ${file.name}
+          remoteRef:
+            key: ${file.remoteRef.key}
+            property: '${has(file.remoteRef.property) ? file.remoteRef.property : oc_omit()}
+
+              '

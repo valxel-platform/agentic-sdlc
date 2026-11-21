@@ -52,6 +52,7 @@ SETTINGS = {
     "VALXEL_OPENCHOREO_CLIENT_SECRET": "openchoreo-system-app-secret",
     "VALXEL_OPENCHOREO_RESOURCE": f"{API}/mcp",
     "VALXEL_OPENCHOREO_CONSOLE_URL": "http://openchoreo.localhost:8080",
+    "VALXEL_OPENCHOREO_OBSERVER_MCP_URL": "http://observer.openchoreo.localhost:11080/mcp",
     "VALXEL_OPENCHOREO_GIT_SECRET_REF": GIT_SECRET_REF,
     "VALXEL_PORT": TOOL_PORT,
 }
@@ -241,11 +242,14 @@ def repo_standards(text: str) -> tuple[set[str], set[str]]:
 
 
 def check(*, tool_names: set[str], installed_types: set[str], installed_flows: set[str],
-          wanted_types: set[str], wanted_flows: set[str]) -> list[str]:
-    """What the tool needs and this OpenChoreo lacks, one line each (empty: nothing)."""
-    from ..integrations.openchoreo import tools_used
+          wanted_types: set[str], wanted_flows: set[str], observer_tools: set[str] | None = None) -> list[str]:
+    """What the tool needs and this OpenChoreo lacks, one line each (empty: nothing). observer_tools:
+    what the observer's MCP server offers, when one is set (None: not checked)."""
+    from ..integrations.openchoreo import OBSERVER_TOOLS, tools_used
 
     out = []
+    if observer_tools is not None:
+        out += [f"Observer MCP tool missing: {t}" for t in OBSERVER_TOOLS if t not in observer_tools]
     for names in tools_used():
         if not tool_names & set(names):
             out.append(f"MCP tool missing: {' or '.join(names)}")
@@ -266,9 +270,20 @@ def live_check(target: Path | None = None, *, run=_run) -> int:
         items = json.loads(run(_kubectl("get", kind, "-o", "json")).stdout).get("items") or []
         return {i["metadata"]["name"] for i in items}
 
+    observer = None
+    if env.get("VALXEL_OPENCHOREO_OBSERVER_MCP_URL"):
+        ocreds = ClientCredentials(env["VALXEL_OPENCHOREO_TOKEN_URL"], env["VALXEL_OPENCHOREO_CLIENT_ID"],
+                                   env["VALXEL_OPENCHOREO_CLIENT_SECRET"],
+                                   resource=env["VALXEL_OPENCHOREO_OBSERVER_MCP_URL"])
+        try:
+            observer = set(McpHttp("openchoreo-observer", env["VALXEL_OPENCHOREO_OBSERVER_MCP_URL"],
+                                   auth=ocreds).tool_names())
+        except Exception:  # noqa: BLE001 - reported as missing tools below
+            observer = set()
     wanted_types, wanted_flows = repo_standards(repos_yaml(run=run))
     found = check(tool_names=names, installed_types=kinds("clustercomponenttypes"),
-                  installed_flows=kinds("clusterworkflows"), wanted_types=wanted_types, wanted_flows=wanted_flows)
+                  installed_flows=kinds("clusterworkflows"), wanted_types=wanted_types, wanted_flows=wanted_flows,
+                  observer_tools=observer)
     print(f"OpenChoreo {OPENCHOREO_VERSION}: {len(names)} MCP tools offered.")
     for line in found:
         print(f"  {line}")

@@ -88,5 +88,7 @@ def test_the_agent_component_type_sets_both_variables():
     f = Path(__file__).resolve().parents[1] / "examples/governance/valxel-platform/sdlc-governance/platform/openchoreo/component-types.yaml"
     agent = next(d for d in yaml.safe_load_all(f.read_text()) if d and d["metadata"]["name"] == "agent")
     env = agent["spec"]["resources"][0]["template"]["spec"]["template"]["spec"]["containers"][0]["env"]
-    assert {e["name"]: e["value"] for e in env} == {"AGENT_ALLOWED_TOOLS": "${environmentConfigs.allowedTools}",
-                                                    "AGENT_READ_ONLY_TOOLS": "${environmentConfigs.readOnlyTools}"}
+    # OpenChoreo 1.3: the component's dependencies' variables, then the agent's own two.
+    assert env.startswith("${dependencies.toContainerEnvs() + [")
+    assert '{"name": "AGENT_ALLOWED_TOOLS", "value": environmentConfigs.allowedTools}' in env
+    assert '{"name": "AGENT_READ_ONLY_TOOLS", "value": environmentConfigs.readOnlyTools}' in env

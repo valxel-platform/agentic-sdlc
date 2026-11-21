@@ -21,11 +21,14 @@ the published tool schemas, so the adapter tolerates renamed parameters across r
 from __future__ import annotations
 
 import itertools
+import logging
 import threading
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from .mcp_client import McpError, McpTools, fit_args, pick_tool
+
+log = logging.getLogger(__name__)
 
 PIPELINE = ("dev", "staging", "production")
 
@@ -395,6 +398,9 @@ def _condition(obj: dict, ctype: str) -> str | None:
     return None
 
 
+OBSERVER_TOOLS = ("query_component_logs", "query_resource_metrics", "query_http_metrics")  # 1.3's observer
+
+
 def tools_used() -> list[tuple[str, ...]]:
     """Every tool this client calls, as the alternative names it accepts for each (first that the
     server offers wins). Read from this module's own calls, so it can't drift from them; `valxel dev
@@ -414,8 +420,9 @@ def tools_used() -> list[tuple[str, ...]]:
 
 class OpenChoreoMcp:
     def __init__(self, server: McpTools, *, default_namespace: str = "default", console_url: str = "",
-                 git_secret_ref: str = "") -> None:
+                 git_secret_ref: str = "", observer: McpTools | None = None) -> None:
         self.server = server
+        self.observer = observer  # the observability plane's MCP server (1.3: openchoreo-observer)
         self.default_namespace = default_namespace
         self.console_url = console_url.rstrip("/")
         # The SecretReference that holds GitHub credentials for builds of private repos (OpenChoreo
@@ -722,8 +729,12 @@ class OpenChoreoMcp:
 
     # -- operations
     def observe(self, *, component, env, project=None, namespace=None, minutes=60) -> dict:
-        """Recent logs and metrics from OpenChoreo's observability plane. Servers without these
-        tools report available=False; triage then works from the alerts alone."""
+        """Recent logs and metrics from OpenChoreo's observability plane: its own MCP server in 1.3
+        (openchoreo-observer), else tools on the main one. Neither: available=False, and triage works
+        from the alerts alone."""
+        if self.observer is not None:
+            return self._observe_observer(component=component, env=env, project=project, namespace=namespace,
+                                          minutes=minutes)
         scope = {**self._scope(component, project, namespace), _ENV: env,
                  ("since_minutes", "minutes", "duration_minutes", "window_minutes"): minutes}
         out: dict = {"available": False, "logs": [], "metrics": {}}
@@ -741,6 +752,35 @@ class OpenChoreoMcp:
             out["available"] = True
         except McpError:
             pass
+        return out
+
+    def _observe_observer(self, *, component, env, project, namespace, minutes) -> dict:
+        """OpenChoreo 1.3's observer: query_component_logs, query_resource_metrics and
+        query_http_metrics, each over [now - minutes, now]."""
+        end = datetime.now(UTC)
+        start = end - timedelta(minutes=minutes)
+        base = {"namespace": namespace or self.default_namespace, "project": project or "", "component": component,
+                "environment": env, "start_time": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end_time": end.strftime("%Y-%m-%dT%H:%M:%SZ")}
+        base = {k: v for k, v in base.items() if v}
+        out: dict = {"available": False, "logs": [], "metrics": {}}
+        try:
+            res = self.observer.call("query_component_logs", {**base, "limit": 200, "sort_order": "desc"})
+            entries = (res or {}).get("logs") if isinstance(res, dict) else _list(res)
+            out["logs"] = [(f"{e.get('timestamp', '')} {e.get('level', '')} {e.get('log', '')}".strip()
+                            if isinstance(e, dict) else str(e))[:500] for e in entries or []][:200]
+            out["available"] = True
+        except McpError:
+            log.info("%s: no logs from the observer", component, exc_info=True)
+        for tool, key in (("query_resource_metrics", "resources"), ("query_http_metrics", "http")):
+            try:
+                res = self.observer.call(tool, {**base, "step": "5m"})
+                if isinstance(res, dict):
+                    out["metrics"][key] = {name: series[-12:] for name, series in res.items()
+                                           if isinstance(series, list)}  # the last hour at 5-minute steps
+                    out["available"] = True
+            except McpError:
+                log.info("%s: no %s metrics from the observer", component, key, exc_info=True)
         return out
 
     def rollback(self, *, component, env, actor, actor_type, project=None, namespace=None) -> dict:

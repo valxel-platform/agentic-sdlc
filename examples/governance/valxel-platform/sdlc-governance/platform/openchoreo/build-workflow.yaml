@@ -1,37 +1,99 @@
-# The platform's image build (OpenChoreo workflow plane, Argo Workflows). The Valxel SDLC triggers it
+# The platform's image build (OpenChoreo 1.3 workflow plane, Argo Workflows). The Valxel SDLC triggers it
 # only for merge commits that passed the pipeline's gates (components are created with autoBuild off),
 # and reads its steps by name: scan-image (suite `container`), sbom, sign and attest-provenance (suite
 # `provenance`). A build missing any of them doesn't reach an environment.
 #
-#   build-image -> push (by digest) -> scan-image (fails on high or critical CVEs)
+#   checkout -> build-image -> push (by digest) -> scan-image (fails on high or critical CVEs)
 #   -> sbom (CycloneDX) -> sign (cosign, the build system's KMS key) -> attest-provenance (SLSA v1,
 #      and the SBOM as an attestation, both signed with the same key)
+#   -> generate-workload (OpenChoreo's own step: the component's Workload, from the repo's workload.yaml,
+#      pointing at the signed digest; without it the build never becomes deployable)
+#
+# Parameters follow OpenChoreo 1.3: `repository` {url, secretRef, revision {branch, commit}, appPath},
+# marked with the x-openchoreo-component-parameter-* extensions, so the repository the Valxel SDLC
+# registers with the component is the one built. `registry` is where images go: set its default to the
+# platform's registry on install (REPLACE_WITH_REGISTRY), like the image digests below.
 #
 # The signing key is an AWS KMS key only the workflow plane's service account may use
 # (awskms:///alias/valxel-build-signing); the data planes verify with its public key
-# (admission-policy.yaml). Dry-run on your installation first: written against OpenChoreo 1.x and
-# Argo Workflows 3.x documentation, not applied to a live install.
+# (admission-policy.yaml). Checked against OpenChoreo 1.3.3's ClusterWorkflow CRD and its
+# dockerfile-builder; dry-run on your installation before applying.
 apiVersion: openchoreo.dev/v1alpha1
 kind: ClusterWorkflow
 metadata:
   name: docker
+  labels:
+    openchoreo.dev/workflow-type: component
+  annotations:
+    openchoreo.dev/description: "The platform's build: Dockerfile, scanned, SBOM, signed, with provenance"
 spec:
-  schema:
-    parameters:
-      repository: { type: string }
-      commit: { type: string }
-      image: { type: string }          # registry/repository, without a tag
+  workflowPlaneRef:
+    kind: ClusterWorkflowPlane
+    name: default
+  ttlAfterCompletion: "7d"
+  parameters:
+    openAPIV3Schema:
+      type: object
+      required: [repository]
+      properties:
+        repository:
+          type: object
+          required: [url]
+          properties:
+            url:
+              type: string
+              x-openchoreo-component-parameter-repository-url: true
+            secretRef:
+              type: string
+              default: ""
+              x-openchoreo-component-parameter-repository-secret-ref: true
+            revision:
+              type: object
+              default: {}
+              properties:
+                branch:
+                  type: string
+                  default: main
+                  x-openchoreo-component-parameter-repository-branch: true
+                commit:
+                  type: string
+                  default: ""
+                  x-openchoreo-component-parameter-repository-commit: true
+            appPath:
+              type: string
+              default: "."
+              x-openchoreo-component-parameter-repository-app-path: true
+        registry:
+          type: string
+          default: REPLACE_WITH_REGISTRY      # e.g. 123456789012.dkr.ecr.us-east-1.amazonaws.com
   runTemplate:
     apiVersion: argoproj.io/v1alpha1
     kind: Workflow
+    metadata:
+      name: ${metadata.workflowRunName}
+      namespace: ${metadata.namespace}
     spec:
       serviceAccountName: valxel-build    # IRSA role: push to the registry, use the signing key
       entrypoint: build
       arguments:
         parameters:
-          - { name: repository, value: "${parameters.repository}" }
-          - { name: commit, value: "${parameters.commit}" }
-          - { name: image, value: "${parameters.image}" }
+          - { name: git-repo, value: "${parameters.repository.url}" }
+          - { name: branch, value: "${parameters.repository.revision.branch}" }
+          - { name: commit, value: "${parameters.repository.revision.commit}" }
+          - { name: app-path, value: "${parameters.repository.appPath}" }
+          - name: image
+            value: "${parameters.registry}/${metadata.namespaceName}-${metadata.labels['openchoreo.dev/project']}-${metadata.labels['openchoreo.dev/component']}"
+          - { name: workflowrun-name, value: "${metadata.workflowRunName}" }
+          # What OpenChoreo's generate-workload step reads (the source is at /mnt/vol/source).
+          - { name: project-name, value: "${metadata.labels['openchoreo.dev/project']}" }
+          - { name: component-name, value: "${metadata.labels['openchoreo.dev/component']}" }
+          - { name: namespace-name, value: "${metadata.namespaceName}" }
+          - { name: git-secret, value: "${metadata.workflowRunName}-git-secret" }
+      volumeClaimTemplates:
+        - metadata: { name: workspace }
+          spec:
+            accessModes: [ReadWriteOnce]
+            resources: { requests: { storage: 4Gi } }
       templates:
         - name: build
           steps:
@@ -42,38 +104,76 @@ spec:
             - - { name: sbom, template: sbom }
             - - { name: sign, template: sign }
             - - { name: attest-provenance, template: attest-provenance }
+            - - name: generate-workload
+                templateRef: { name: generate-workload, clusterScope: true, template: generate-workload-cr }
+                arguments:
+                  parameters:
+                    - { name: image, value: "{{steps.push.outputs.parameters.image}}" }
+                    - { name: run-name, value: "{{workflow.parameters.workflowrun-name}}" }
+                    - { name: source-commit, value: "{{steps.checkout.outputs.parameters.commit}}" }
+                    - { name: source-branch, value: "{{workflow.parameters.branch}}" }
+                    - { name: source-repository, value: "{{workflow.parameters.git-repo}}" }
+                    - { name: source-authored-at, value: "{{steps.checkout.outputs.parameters.authored-at}}" }
         - name: checkout
+          volumes:
+            - name: git-secret
+              secret: { secretName: "{{workflow.parameters.git-secret}}", optional: true }
           container:
             image: alpine/git:2.47.2@sha256:REPLACE_WITH_DIGEST
             command: [sh, -c]
-            args: ["git clone --depth 1 https://github.com/{{workflow.parameters.repository}} /work/src && cd /work/src && git fetch --depth 1 origin {{workflow.parameters.commit}} && git checkout {{workflow.parameters.commit}}"]
+            # The commit the pipeline approved, or the branch's head when none is given.
+            args:
+              - >-
+                set -e;
+                if [ -f /etc/git-secret/password ]; then
+                git config --global credential.helper '!f() { echo username=x-access-token; echo password=$(cat /etc/git-secret/password); }; f'; fi;
+                git clone --filter=blob:none --branch {{workflow.parameters.branch}} {{workflow.parameters.git-repo}} /mnt/vol/source;
+                cd /mnt/vol/source; c="{{workflow.parameters.commit}}"; [ -n "$c" ] && git checkout "$c";
+                git rev-parse HEAD > /mnt/vol/commit; git log -1 --format=%cI > /mnt/vol/authored-at
+            volumeMounts:
+              - { name: workspace, mountPath: /mnt/vol }
+              - { name: git-secret, mountPath: /etc/git-secret, readOnly: true }
+          outputs:
+            parameters:
+              - { name: commit, valueFrom: { path: /mnt/vol/commit } }
+              - { name: authored-at, valueFrom: { path: /mnt/vol/authored-at } }
         - name: build-image
           container:
             image: moby/buildkit:v0.23.2-rootless@sha256:REPLACE_WITH_DIGEST
             command: [buildctl-daemonless.sh]
-            args: ["build", "--frontend", "dockerfile.v0", "--local", "context=/work/src", "--local", "dockerfile=/work/src",
-                   "--output", "type=oci,dest=/work/image.tar", "--opt", "build-arg:VCS_REF={{workflow.parameters.commit}}"]
+            args: ["build", "--frontend", "dockerfile.v0",
+                   "--local", "context=/mnt/vol/source/{{workflow.parameters.app-path}}",
+                   "--local", "dockerfile=/mnt/vol/source/{{workflow.parameters.app-path}}",
+                   "--output", "type=oci,dest=/mnt/vol/image.tar"]
+            volumeMounts: [{ name: workspace, mountPath: /mnt/vol }]
         - name: push
           container:
             image: gcr.io/go-containerregistry/crane:v0.20.6@sha256:REPLACE_WITH_DIGEST
             command: [sh, -c]
             # Everything after this step refers to the image by its digest, never a tag.
-            args: ["crane push /work/image.tar {{workflow.parameters.image}}:{{workflow.parameters.commit}} --image-refs /work/digest"]
+            args: ["crane push /mnt/vol/image.tar {{workflow.parameters.image}}:$(cat /mnt/vol/commit) --image-refs /mnt/vol/digest"]
+            volumeMounts: [{ name: workspace, mountPath: /mnt/vol }]
+          outputs:
+            parameters:
+              - { name: image, valueFrom: { path: /mnt/vol/digest } }
         - name: scan-image
           container:
             image: aquasec/trivy:0.65.0@sha256:REPLACE_WITH_DIGEST
             command: [sh, -c]
-            args: ["trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed $(cat /work/digest)"]
+            args: ["trivy image --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed $(cat /mnt/vol/digest)"]
+            volumeMounts: [{ name: workspace, mountPath: /mnt/vol }]
         - name: sbom
           container:
             image: anchore/syft:v1.30.0@sha256:REPLACE_WITH_DIGEST
             command: [sh, -c]
-            args: ["syft $(cat /work/digest) -o cyclonedx-json=/work/sbom.cdx.json"]
+            args: ["syft $(cat /mnt/vol/digest) -o cyclonedx-json=/mnt/vol/sbom.cdx.json"]
+            volumeMounts: [{ name: workspace, mountPath: /mnt/vol }]
         - name: sign
           container:
             image: gcr.io/projectsigstore/cosign:v2.5.3@sha256:REPLACE_WITH_DIGEST
             command: [sh, -c]
-            args: ["cosign sign --yes --key awskms:///alias/valxel-build-signing -a repo={{workflow.parameters.repository}} -a commit={{workflow.parameters.commit}} $(cat /work/digest)"]
+            args: ["cosign sign --yes --key awskms:///alias/valxel-build-signing -a repo={{workflow.parameters.git-repo}} -a commit=$(cat /mnt/vol/commit) $(cat /mnt/vol/digest)"]
+            volumeMounts: [{ name: workspace, mountPath: /mnt/vol }]
         - name: attest-provenance
           container:
             image: gcr.io/projectsigstore/cosign:v2.5.3@sha256:REPLACE_WITH_DIGEST
@@ -81,6 +181,41 @@ spec:
             args:
               - >-
                 printf '{"buildDefinition":{"buildType":"https://valxel.io/openchoreo-docker@v1","externalParameters":{"repository":"%s","commit":"%s"}},"runDetails":{"builder":{"id":"https://valxel.io/workflow-plane"}}}'
-                {{workflow.parameters.repository}} {{workflow.parameters.commit}} > /work/provenance.json
-                && cosign attest --yes --key awskms:///alias/valxel-build-signing --type slsaprovenance1 --predicate /work/provenance.json $(cat /work/digest)
-                && cosign attest --yes --key awskms:///alias/valxel-build-signing --type cyclonedx --predicate /work/sbom.cdx.json $(cat /work/digest)
+                {{workflow.parameters.git-repo}} $(cat /mnt/vol/commit) > /mnt/vol/provenance.json
+                && cosign attest --yes --key awskms:///alias/valxel-build-signing --type slsaprovenance1 --predicate /mnt/vol/provenance.json $(cat /mnt/vol/digest)
+                && cosign attest --yes --key awskms:///alias/valxel-build-signing --type cyclonedx --predicate /mnt/vol/sbom.cdx.json $(cat /mnt/vol/digest)
+            volumeMounts: [{ name: workspace, mountPath: /mnt/vol }]
+  # The repository's credentials, when it's private: the secret the component's repository.secretRef
+  # names, through the workflow plane's secret store (as OpenChoreo's dockerfile-builder does).
+  externalRefs:
+    - id: git-secret-reference
+      apiVersion: openchoreo.dev/v1alpha1
+      kind: SecretReference
+      name: ${parameters.repository.secretRef}
+  resources:
+    - id: git-secret
+      includeWhen: ${has(parameters.repository.secretRef) && parameters.repository.secretRef != ""}
+      template:
+        apiVersion: external-secrets.io/v1
+        kind: ExternalSecret
+        metadata:
+          name: ${metadata.workflowRunName}-git-secret
+          namespace: ${metadata.namespace}
+        spec:
+          refreshInterval: 15s
+          secretStoreRef:
+            kind: ClusterSecretStore
+            name: ${workflowplane.secretStore}
+          target:
+            name: ${metadata.workflowRunName}-git-secret
+            creationPolicy: Owner
+            template:
+              type: ${externalRefs['git-secret-reference'].spec.template.type}
+          data: |
+            ${externalRefs['git-secret-reference'].spec.data.map(secret, {
+              "secretKey": secret.secretKey,
+              "remoteRef": {
+                "key": secret.remoteRef.key,
+                "property": has(secret.remoteRef.property) && secret.remoteRef.property != "" ? secret.remoteRef.property : oc_omit()
+              }
+            })}
