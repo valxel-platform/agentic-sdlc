@@ -349,6 +349,7 @@ class OperationsMixin:
                 out[row["feature_id"]] = {
                     "title": s.get("title", ""), "flag": rel.get("flag", ""), "flag_on": self._flag_on(s),
                     "depends_on": list(u.get("depends_on") or []), "flag_off": u.get("flag_off", ""),
+                    "introduces": u.get("introduces") or {}, "uses": u.get("uses") or {},
                     "rollback": u.get("rollback") or {}, "repos": sorted(repos),
                     "release": {"id": r["id"], "size": len(self.release_members(r["id"]))} if r else {}}
         return out
@@ -363,9 +364,16 @@ class OperationsMixin:
         return out
 
     def undo_plan(self, product_id: str, actions: list[dict], component: str = "") -> list[dict]:
-        from ..undo import plan
+        from ..undo import derived_from, plan
 
-        return plan(actions, self.live_features(product_id), component)
+        live = self.live_features(product_id)
+        # Dependents from what each design uses, not only from its G4 list: a feature on for everyone
+        # when another was designed still takes that one off with it (T-110).
+        intro = [{"feature_id": f, "title": i["title"], "introduces": i.get("introduces") or {}} for f, i in live.items()]
+        for f, i in live.items():
+            more = derived_from(i.get("uses") or {}, [o for o in intro if o["feature_id"] != f])
+            i["depends_on"] = list(dict.fromkeys([*i["depends_on"], *more]))
+        return plan(actions, live, component)
 
     def start_hotfix(self, incident: dict, *, repo: str, change: str, approver: str) -> str:
         if not repo:

@@ -264,10 +264,24 @@ class RoadmapMixin:
         started = self._started_candidates(iid)
         return {started[n.lower()]: n for n in (me or {}).get("needs") or [] if n.lower() in started}
 
-    def design_facts(self, product_id: str, exclude: str = "") -> list[dict]:
+    def fully_on(self, s: dict) -> bool:
+        """In production for everyone: no flag, or its flag on at 100%. Until then a feature using
+        what it introduced depends on it (T-110)."""
+        rel = s.get("release") or {}
+        if not rel.get("production"):
+            return False
+        if not rel.get("flag"):
+            return True
+        if self._flag_on(s) is False:
+            return False
+        pct = rel.get("flag_percent")
+        return pct is None or float(pct) >= 100
+
+    def design_facts(self, product_id: str, exclude: str = "", *, include_full: bool = False) -> list[dict]:
         """What each of the product's designed features introduced (undo.introduces), for working
-        out what a new design depends on. Features designed before this was kept get it once, from
-        their approved HLD."""
+        out what a new design depends on. A feature on for everyone (fully_on) is part of the product
+        by then, unless include_full. Features designed before this was kept get it once, from their
+        approved HLD."""
         from .. import drafts
         from ..graph.phase import released_events
         from ..undo import facts
@@ -279,7 +293,7 @@ class RoadmapMixin:
             if fid == exclude or s.get("status") in ("aborted", "stopped") or not self.past_design(fid):
                 continue
             u = s.get("undo") or {}
-            if "introduces" not in u and (s.get("artifacts") or {}).get("HLD"):
+            if ("introduces" not in u or "uses" not in u) and (s.get("artifacts") or {}).get("HLD"):
                 try:
                     if released is None:
                         released = released_events(self.services, product_id)
@@ -289,30 +303,39 @@ class RoadmapMixin:
                 except Exception:
                     log.info("%s: no design to read what it introduced", fid, exc_info=True)
                     continue
-            if u.get("introduces"):
+            if u.get("introduces") and (include_full or not self.fully_on(s)):
                 out.append({"feature_id": fid, "title": s.get("title", ""), "introduces": u["introduces"]})
         return out
 
     def dependencies_unmet(self, feature_id: str) -> list[dict]:
         """What the feature depends on (its G4 list) that isn't live yet and doesn't ship in the same
         release (T-107): it can't reach production before them."""
+        from ..undo import derived_from
+
         s = self._state(feature_id)
+        u = s.get("undo") or {}
         mine = self.release_for(feature_id, active=True)
+        # What it listed, and what its design uses from a feature not yet on for everyone: a
+        # rollout dialled back after this one's G4 counts again (T-110).
+        deps = list(dict.fromkeys([*(u.get("depends_on") or []), *derived_from(
+            u.get("uses") or {}, self.design_facts(s.get("product_id", ""), exclude=feature_id))]))
         out = []
-        for d in (s.get("undo") or {}).get("depends_on") or []:
+        for d in deps:
             ds = self._state(d)
             if not ds:
                 continue  # not a feature the tool knows: nothing to wait for
-            if (ds.get("release") or {}).get("production") and self._flag_on(ds) is not False:
+            if self.fully_on(ds):
                 continue
             other = self.release_for(d, active=True)
             if mine and other and other["id"] == mine["id"]:
                 continue
             stopped = ds.get("status") in ("aborted", "stopped")
+            rel = ds.get("release") or {}
             out.append({"feature_id": d, "title": ds.get("title", ""),
                         "where": "stopped: change this design, or stop this feature" if stopped
-                        else "in production with its flag off" if (ds.get("release") or {}).get("production")
-                        else "not in production yet"})
+                        else "in production with its flag off" if rel.get("production") and self._flag_on(ds) is False
+                        else f"on for {float(rel.get('flag_percent') or 0):g}% of users, not everyone"
+                        if rel.get("production") else "not in production yet"})
         return out
 
     def _start_unblocked(self, feature_id: str) -> list[str]:

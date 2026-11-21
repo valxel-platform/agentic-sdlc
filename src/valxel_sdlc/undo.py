@@ -103,7 +103,13 @@ def uses(hld: str) -> dict:
 def derived(hld: str, others: list[dict]) -> dict[str, list[str]]:
     """Features this design builds on, worked out from what each introduced (T-105): feature id ->
     what it uses. others: [{feature_id, title, introduces}] of the product's other designed features."""
-    u = uses(hld)
+    return derived_from(uses(hld), others)
+
+
+def derived_from(used: dict, others: list[dict]) -> dict[str, list[str]]:
+    """derived(), from what a design uses as kept with the feature (facts()['uses'])."""
+    u = {"tables": set(used.get("tables") or ()), "repos": set(used.get("repos") or ()),
+         "starts": dict(used.get("starts") or {}), "events": set(used.get("events") or ())}
     out: dict[str, list[str]] = {}
     for o in others:
         i = o.get("introduces") or {}
@@ -139,7 +145,8 @@ def facts(hld: str, released_events=()) -> dict:
     changed = any(t["change"] != "none" for t in d["tables"])
     rb = rollback_safety(d["rollback"]) if changed else {"safe": True, "why": "no data changes"}
     return {"depends_on": parse_depends(hld)["ids"], "flag_off": parse_flag_off(hld), "rollback": rb,
-            "introduces": introduces(hld, released_events)}
+            "introduces": introduces(hld, released_events),
+            "uses": {k: (sorted(v) if isinstance(v, set) else v) for k, v in uses(hld).items()}}
 
 
 def _dependents(fid: str, live: dict[str, dict]) -> list[str]:
