@@ -1110,11 +1110,20 @@ export interface UnmatchedSignal {
   reason: string;
   received_at: string;
 }
+/** Starting an initiative's features: started now, queued one at a time, or waiting on what they need. */
+export interface StartResult {
+  started: string[];
+  queued: string[];
+  waiting?: { title: string; on: string[] }[];
+}
 export interface Candidate {
   title: string;
   description: string;
   started?: boolean;
   must?: boolean;
+  /** Other candidates it builds on (G0), and those whose design isn't approved (G4) yet (T-106). */
+  needs?: string[];
+  waiting_on?: string[];
 }
 export interface InitiativeDraft {
   goal: string;
@@ -1708,7 +1717,7 @@ export const api = {
   mergeRecord: (id: string, key: string) =>
     request<RecordPr>("POST", `/threads/${encodeURIComponent(id)}/records/${key}/merge`),
   startFeatures: (id: string, indexes: number[], order: "together" | "sequence") =>
-    request<{ started: string[]; queued: string[] }>("POST", `/initiatives/${encodeURIComponent(id)}/start`, {
+    request<StartResult>("POST", `/initiatives/${encodeURIComponent(id)}/start`, {
       indexes,
       order,
     }),

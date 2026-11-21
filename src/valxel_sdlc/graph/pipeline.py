@@ -23,7 +23,12 @@ from .gates import join, make_escalation, make_gate
 from .merge_train import make_ci_wait, make_merge_train
 from .provision import make_provision, make_provision_wait
 from .rollout import finalize, first_step, make_flag_rollout, make_rollout
-from .prototype_steps import make_architecture_done, make_design_prototype, make_discovery_sketch
+from .prototype_steps import (
+    make_architecture_done,
+    make_dependency_wait,
+    make_design_prototype,
+    make_discovery_sketch,
+)
 from .routing import _route, _route_targets
 # Kept importable from here: other modules and tests import these from graph.pipeline.
 from .briefs import hotfix_approvers  # noqa: F401
@@ -71,7 +76,9 @@ def build_pipeline(services, checkpointer=None):
                        ("cs_wait", make_cs_wait)):
         node, dest = make(services)
         g.add_node(name, node, destinations=dest)
-    for stage, after in (("dev", "deploy_staging"), ("staging", "release")):
+    node, dest = make_dependency_wait(services)  # before release: what it depends on is live (T-107)
+    g.add_node("dependency_wait", node, destinations=dest)
+    for stage, after in (("dev", "deploy_staging"), ("staging", "dependency_wait")):
         node, dest = make_deploy(stage, services, after)
         g.add_node(f"deploy_{stage}", node, destinations=dest)
         node, dest = make_env_wait(services, stage, ok=after, retry=f"deploy_{stage}")

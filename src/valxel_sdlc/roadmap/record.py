@@ -43,20 +43,31 @@ def _split(text: str) -> tuple[dict, str] | None:
 
 
 
-def candidates(body: str) -> list[dict]:
-    """'## Candidate features' bullets: '- Title: what it does', '- Title (must): ...' for a must-have."""
-    import re
+_MUST = re.compile(r"\s*\((?:must|must-have|must have)\)\s*$", re.IGNORECASE)
+_NEEDS = re.compile(r"\s*\[needs:\s*([^\]]*)\]\s*$", re.IGNORECASE)
 
-    must = re.compile(r"\s*\((?:must|must-have|must have)\)\s*$", re.IGNORECASE)
-    out = []
-    for line in section(body, "Candidate features").splitlines():
-        line = line.strip()
-        if line.startswith("- "):
-            title, _, desc = line[2:].partition(":")
-            if title.strip():
-                out.append({"title": must.sub("", title).strip(), "description": desc.strip(),
-                            "must": bool(must.search(title))})
-    return out
+
+def candidate(line: str) -> dict | None:
+    """One candidate bullet: '- Title (must): what it does [needs: Other title; Another]'. needs: the
+    other candidates it builds on (T-106), so they're started first."""
+    line = line.strip()
+    if not line.startswith("- "):
+        return None
+    body = line[2:]
+    needs: list[str] = []
+    if m := _NEEDS.search(body):
+        needs = [n.strip() for n in re.split(r"[;,]", m.group(1)) if n.strip() and n.strip().lower() != "none"]
+        body = body[: m.start()]
+    title, _, desc = body.partition(":")
+    if not title.strip():
+        return None
+    return {"title": _MUST.sub("", title).strip(), "description": desc.strip(), "must": bool(_MUST.search(title)),
+            "needs": needs}
+
+
+def candidates(body: str) -> list[dict]:
+    """'## Candidate features' bullets (see candidate)."""
+    return [c for line in section(body, "Candidate features").splitlines() if (c := candidate(line))]
 
 
 def parse_goals(text: str) -> list[dict]:

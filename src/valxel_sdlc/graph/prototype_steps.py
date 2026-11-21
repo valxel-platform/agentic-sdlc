@@ -139,3 +139,22 @@ def make_discovery_sketch(services):
             "events": [event("discovery_sketch", "sketch", "a rough sketch beside the brief", findings=m["sketch"]["findings"])]})
 
     return discovery_sketch, ("g1",)
+
+
+def make_dependency_wait(services):
+    """After staging, before the release notes and G6 (T-107): a feature doesn't reach production
+    before the features it depends on (its G4 list) are live, unless they ship in the same release."""
+
+    def dependency_wait(state: FeatureState) -> Command:
+        fn = getattr(services, "dependencies_unmet", None)
+        unmet = fn(state["feature_id"]) if callable(fn) else []
+        if not unmet:
+            return Command(goto="release")
+        names = ", ".join(f"{d['feature_id']} ({d['where']})" for d in unmet)
+        interrupt({"type": "external", "wait": "dependencies", "feature_id": state["feature_id"],
+                   "product_id": state["product_id"], "since": now(), "features": unmet,
+                   "label": f"Waiting for what it depends on to be live: {names}"})
+        return Command(goto="release", update={"events": [event("dependencies", "live",
+                                                                 f"{', '.join(d['feature_id'] for d in unmet)} live")]})
+
+    return dependency_wait, ("release",)

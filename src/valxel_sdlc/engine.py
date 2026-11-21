@@ -120,6 +120,9 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         services.open_releases = self.open_releases  # G1: the releases a feature could join (T-96)
         services.release_readiness = self.release_readiness  # the release gate's summary (T-99)
         services.release_leave = self.release_leave  # late features on a release's date (T-98)
+        services.design_facts = self.design_facts  # what other features introduced (T-105)
+        services.planned_needs = self.planned_needs  # what G0 planned a feature to build on (T-106)
+        services.dependencies_unmet = self.dependencies_unmet  # held before release until they're live (T-107)
         services.roadmap_fit = self.roadmap_fit
         services.incident_signals = lambda iid: services.signals.for_incident(iid)
         services.suspects = self.suspects
@@ -537,6 +540,8 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         try:  # an initiative's features started in order: the next one, once this reached everyone
             if kind_of(feature_id) == "feature":
                 self._start_next_in_order(feature_id)
+                if self.past_design(feature_id):  # what waited on its design starts now (T-106)
+                    self._start_unblocked(feature_id)
         except Exception:
             log.warning("starting the next feature after %s failed", feature_id, exc_info=True)
         notifier = getattr(self.services, "notifier", None)

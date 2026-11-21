@@ -131,6 +131,11 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         "repo_prefix": product.repo_prefix,
         # Repos of the lanes this product depends on (shared services, PAY): they may join the
         # change set when the architecture needs them.
+        # The product's other designs, and what G0 planned this one to build on: the architecture
+        # lists what it depends on (T-105, T-106).
+        **({"other_designs": services.design_facts(state["product_id"], exclude=state["feature_id"]),
+            "planned_needs": services.planned_needs(state["feature_id"])}
+           if phase == "architecture" and callable(getattr(services, "design_facts", None)) else {}),
         "dependency_repos": [{"name": r.name, "role": r.role, "lane": lane_id}
                              for lane_id, s in snap.dependencies.items() for r in s.product.repos],
         "parent_texts": parents,

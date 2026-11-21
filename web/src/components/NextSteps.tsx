@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { api, type Candidate, type RecordPr } from "../api";
+import { api, type Candidate, type RecordPr, type StartResult } from "../api";
 import { threadPath } from "../vocab";
 
 /** The pull requests an approval opened: merged here, since the person already approved them. */
@@ -67,17 +67,23 @@ export function StartFeatures({
 }) {
   const nav = useNavigate();
   const open = candidates.map((c, i) => ({ c, i })).filter((x) => !x.c.started);
-  const [picked, setPicked] = useState<number[]>(() => open.slice(0, 2).map((x) => x.i));
+  const blocked = (i: number) => (candidates[i].waiting_on ?? []).length > 0;
+  const [picked, setPicked] = useState<number[]>(() =>
+    open
+      .filter((x) => !blocked(x.i))
+      .slice(0, 2)
+      .map((x) => x.i),
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [done, setDone] = useState<{ started: string[]; queued: string[] } | null>(null);
+  const [done, setDone] = useState<StartResult | null>(null);
   if (open.length === 0) return null;
-  async function go(order: "together" | "sequence") {
+  async function go(order: "together" | "sequence", which: number[] = picked) {
     setBusy(true);
     setErr("");
     try {
-      const r = await api.startFeatures(id, picked, order);
-      if (r.started.length === 1 && !r.queued.length) nav(threadPath(r.started[0]));
+      const r = await api.startFeatures(id, which, order);
+      if (r.started.length === 1 && !r.queued.length && !r.waiting?.length) nav(threadPath(r.started[0]));
       else setDone(r);
     } catch (e) {
       setErr((e as Error).message);
@@ -99,6 +105,13 @@ export function StartFeatures({
           {done.queued.length > 0 && (
             <> Then, one at a time as each reaches everyone: {done.queued.join(", ")}.</>
           )}
+          {(done.waiting ?? []).map((w) => (
+            <span key={w.title}>
+              {" "}
+              {w.title} starts by itself once {w.on.join(" and ")} {w.on.length === 1 ? "has" : "have"} an
+              approved design (G4).
+            </span>
+          ))}
         </p>
       </section>
     );
@@ -113,21 +126,35 @@ export function StartFeatures({
       </p>
       <div className="pick-list">
         {open.map(({ c, i }) => (
-          <label key={c.title} className="check">
-            <input
-              type="checkbox"
-              checked={picked.includes(i)}
-              onChange={(e) =>
-                setPicked(
-                  e.target.checked ? [...picked, i].sort((a, b) => a - b) : picked.filter((x) => x !== i),
-                )
-              }
-            />
-            <span>
-              <strong>{c.title}</strong>
-              {c.description ? <span className="small muted"> {c.description}</span> : null}
-            </span>
-          </label>
+          <div key={c.title}>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={picked.includes(i)}
+                disabled={blocked(i)}
+                onChange={(e) =>
+                  setPicked(
+                    e.target.checked ? [...picked, i].sort((a, b) => a - b) : picked.filter((x) => x !== i),
+                  )
+                }
+              />
+              <span>
+                <strong>{c.title}</strong>
+                {c.description ? <span className="small muted"> {c.description}</span> : null}
+                {(c.needs ?? []).length > 0 && !blocked(i) && (
+                  <span className="small muted"> Builds on {c.needs!.join(", ")}.</span>
+                )}
+              </span>
+            </label>
+            {blocked(i) && (
+              <p className="small muted wait-note">
+                Needs {c.waiting_on!.join(" and ")} to have an approved design (G4) first.{" "}
+                <button type="button" className="linkish" disabled={busy} onClick={() => go("together", [i])}>
+                  Start it when ready
+                </button>
+              </p>
+            )}
+          </div>
         ))}
       </div>
       <div className="actions">

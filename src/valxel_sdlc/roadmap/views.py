@@ -64,7 +64,8 @@ def thread_view(engine, thread_id: str) -> dict:
         out |= {"request": s.get("request", ""), "content": s.get("content", ""), "draft": d,
                 "research": s.get("research", ""), "research_report": s.get("research_report") or {},
                 "findings": s.get("findings", []), "features": linked,
-                "candidates": [{**c, "started": c["title"].lower() in started} for c in d.get("candidates", [])],
+                "candidates": [{**c, "started": c["title"].lower() in started}
+                               for c in engine.candidate_order(thread_id, d.get("candidates", []))],
                 "budget_usd": d.get("budget_usd", 0.0), "spent_usd": round(spent, 2),
                 "progress": {"released": sum(_live(f) for f in linked), "total": len(linked)}}
     else:
@@ -114,7 +115,8 @@ def product_roadmap(engine, product_id: str) -> dict:
         i["progress"] = {"released": sum(_live(f) for f in linked), "total": len(linked),
                          "planned": len(i.get("candidates") or [])}
         started = {f["title"].lower() for f in linked}  # which planned features haven't started (T-100)
-        i["candidates"] = [{**c, "started": c["title"].lower() in started} for c in i.get("candidates") or []]
+        i["candidates"] = [{**c, "started": c["title"].lower() in started}
+                           for c in engine.candidate_order(i["id"], i.get("candidates") or [])]
     releases = {r["id"]: {**r, "record": "merged"} for r in record["releases"]}
     for row in engine._rows(product_id, "release"):
         v = thread_view(engine, row["feature_id"])

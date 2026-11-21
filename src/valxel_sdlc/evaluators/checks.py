@@ -389,6 +389,16 @@ def _undo(text: str, repos: list[dict], ctx: dict) -> list[str]:
             for b in dep["bad"]]
     if ctx.get("feature_id") in dep["ids"]:
         out.append("Depends on features lists the feature itself")
+    from ..undo import derived
+
+    for fid, why in derived(text, ctx.get("other_designs") or []).items():
+        if fid not in dep["ids"]:
+            out.append(f"Depends on features: this design uses {'; '.join(why)} from {fid}: list it "
+                       f"('- {fid}: <what it uses>'), so it isn't released before {fid} and goes off with it")
+    for fid, title in (ctx.get("planned_needs") or {}).items():
+        if fid not in dep["ids"] and fid not in section(text, "Agent notes"):
+            out.append(f"Depends on features: G0 planned this feature to build on {fid} ({title}): list it, or "
+                       "say under Agent notes why the design doesn't need it")
     if any(r["role"] in roles_with("flags") for r in repos) and not section(text, "Flag off"):
         out.append("HLD has no Flag off section: what users get with the feature's flag off. It must be today's "
                    "behavior, so turning the flag off undoes the feature without breaking what uses it.")

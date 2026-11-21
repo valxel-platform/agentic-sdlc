@@ -2972,6 +2972,9 @@ table.quality tfoot td {
 .next-steps {
   margin-bottom: 20px;
 }
+.next-steps .wait-note {
+  margin: 0 0 8px 28px;
+}
 .next-steps .pick-list {
   display: flex;
   flex-direction: column;

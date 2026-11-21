@@ -6,9 +6,8 @@ from __future__ import annotations
 import re
 
 from ..duplicates import DUPLICATE, describe, find_similar, similarity
-from .record import HORIZONS, SHIP_MODELS, section
+from .record import HORIZONS, SHIP_MODELS, candidates, section
 
-MUST = re.compile(r"\s*\((?:must|must-have|must have)\)\s*$", re.IGNORECASE)  # as record.candidates reads it
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 GOAL_LINE = re.compile(r"^-\s*(GOAL-[A-Z0-9-]+)\s*:", re.M)
@@ -26,15 +25,7 @@ def parse_draft(text: str) -> dict:
     goal = GOAL_LINE.search(section(text, "Goal"))
     new_goal = NEW_GOAL.search(section(text, "Goal"))
     budget = re.search(r"[\d.]+", _first_bullet(text, "Budget").replace(",", ""))
-    cands = []
-    for line in section(text, "Candidate features").splitlines():
-        line = line.strip()
-        if line.startswith("- "):
-            title, _, desc = line[2:].partition(":")
-            must = bool(MUST.search(title))
-            title = MUST.sub("", title).strip()
-            if title:
-                cands.append({"title": title, "description": desc.strip(), "must": must})
+    cands = candidates(text)
     return {
         "goal": goal.group(1) if goal else "",
         "new_goal": {"title": new_goal.group(1).strip(), "measure": new_goal.group(2).strip()} if new_goal else None,
@@ -100,6 +91,39 @@ def stub_draft(ctx: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def order_findings(cands: list[dict]) -> list[str]:
+    """The candidates' needs (T-106) name other candidates, and can be built in some order."""
+    titles = {c["title"].lower(): c["title"] for c in cands}
+    out = []
+    for c in cands:
+        for n in c.get("needs") or []:
+            if n.lower() == c["title"].lower():
+                out.append(f"Candidate '{c['title']}' needs itself")
+            elif n.lower() not in titles:
+                out.append(f"Candidate '{c['title']}' needs '{n}', which isn't one of the candidates: name another "
+                           "candidate exactly, or drop it (a released feature needs no ordering)")
+    if not out and build_order(cands) is None:
+        out.append("The candidates' needs go round in a circle: no feature could be started first")
+    return out
+
+
+def build_order(cands: list[dict]) -> list[list[str]] | None:
+    """The candidates in waves: each wave needs only those before it. None: a cycle."""
+    left = {c["title"].lower(): {n.lower() for n in c.get("needs") or []} for c in cands}
+    names = {c["title"].lower(): c["title"] for c in cands}
+    waves: list[list[str]] = []
+    done: set[str] = set()
+    while left:
+        ready = [t for t, needs in left.items() if needs <= done]
+        if not ready:
+            return None
+        waves.append([names[t] for t in ready])
+        done |= set(ready)
+        for t in ready:
+            left.pop(t)
+    return waves
+
+
 def check_draft(d: dict, ctx: dict) -> list[str]:
     out = []
     goal_ids = {g["id"] for g in ctx.get("goals") or []}
@@ -138,6 +162,7 @@ def check_draft(d: dict, ctx: dict) -> list[str]:
         out.append("Must-have features need a release: 'launch' or 'train', not 'each'")
     if not d["candidates"]:
         out.append("No candidate features: break the initiative into the features that deliver it")
+    out += order_findings(d["candidates"])
     for c in d["candidates"]:
         hits = [m for m in find_similar(c["title"], c["description"], ctx.get("features") or [], [])
                 if m["duplicate"] and m["id"] not in c["description"]]

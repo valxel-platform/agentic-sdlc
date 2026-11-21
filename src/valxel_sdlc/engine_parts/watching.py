@@ -277,6 +277,9 @@ class WatchingMixin:
                             errors=(lambda: self.error_lines(pid, comp)) if comp else None)
         if packet["wait"] == "fix_window":  # a held security fix before G6 (valxel_sdlc.upkeep)
             return self.upkeep.fix_window(packet)
+        if packet["wait"] == "dependencies":  # what it depends on isn't live yet (T-107)
+            unmet = self.dependencies_unmet(packet["feature_id"])
+            return None if unmet else {"status": "success", "at": datetime.now(UTC).isoformat()}
         if packet["wait"] == "release_train":  # a feature waiting for its train's approval
             s = self._state(packet["release_id"])
             if packet["feature_id"] not in (s.get("features") or []) and s.get("status") not in ("", "planned"):

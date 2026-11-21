@@ -139,6 +139,43 @@ describe("StartFeatures", () => {
     expect(await screen.findByText("Feature page")).toBeInTheDocument();
   });
 
+  it("keeps a candidate off until what it needs has an approved design", async () => {
+    const user = userEvent.setup();
+    apiMock.startFeatures.mockResolvedValue({
+      started: [],
+      queued: [],
+      waiting: [{ title: "SMS when called", on: ["Walk-in queue"] }],
+    });
+    renderWithRoutes(
+      <StartFeatures
+        id="CLN-INI-1"
+        candidates={[
+          { title: "Walk-in queue", description: "", started: true },
+          { title: "Queue screen", description: "", needs: ["Walk-in queue"], waiting_on: [] },
+          {
+            title: "SMS when called",
+            description: "",
+            needs: ["Walk-in queue"],
+            waiting_on: ["Walk-in queue"],
+          },
+        ]}
+      />,
+    );
+    const blocked = await screen.findByRole("checkbox", { name: /SMS when called/ });
+    expect(blocked).toBeDisabled();
+    expect(blocked).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Queue screen/ })).toBeChecked();
+    expect(screen.getByText(/Builds on Walk-in queue\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Needs Walk-in queue to have an approved design \(G4\) first\./),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Start it when ready" }));
+    expect(apiMock.startFeatures).toHaveBeenCalledWith("CLN-INI-1", [2], "together");
+    expect(
+      await screen.findByText(/SMS when called starts by itself once Walk-in queue has an approved design/),
+    ).toBeInTheDocument();
+  });
+
   it("starts in sequence and shows the started and queued lists", async () => {
     const user = userEvent.setup();
     apiMock.startFeatures.mockResolvedValue({ started: ["CLN-1"], queued: ["CLN-2"] });

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 
-from .agents.parse import parse_data, section
+from .agents.parse import parse_affected_repos, parse_data, parse_new_repos, section
 
 FEATURE_ID = re.compile(r"\b([A-Z][A-Z0-9]*-FEAT-\d+)\b")
 _SAFE = re.compile(r"^\s*(safe|not safe|unsafe)\s*(?:[;:,.-]\s*|$)(.*)$", re.IGNORECASE)
@@ -59,12 +59,61 @@ def rollback_safety(line: str) -> dict:
     return {"safe": m.group(1).lower() == "safe", "why": m.group(2).strip()}
 
 
+_VERSION = re.compile(r"^-\s*([\w./-]+)\s*:\s*v?(\d+\.\d+\.\d+)\s*->\s*v?(\d+\.\d+\.\d+)")
+
+
+def _short(repo: str) -> str:
+    return repo.rsplit("/", 1)[-1]
+
+
+def introduces(hld: str) -> dict:
+    """What the design adds that a later feature can build on: new tables, new repos, and the API
+    versions it raises a contract to."""
+    d = parse_data(hld) if section(hld, "Data") else {"tables": []}
+    versions = {}
+    for line in section(hld, "Contracts").splitlines():
+        if m := _VERSION.match(line.strip()):
+            versions[_short(m.group(1))] = m.group(3)
+    return {"tables": sorted({t["table"] for t in d["tables"] if t["change"] == "new"}),
+            "repos": sorted({_short(r["name"]) for r in parse_new_repos(hld)}), "versions": versions}
+
+
+def uses(hld: str) -> dict:
+    """What the design builds on: the tables it names, the repos it changes, the contract versions it
+    starts from."""
+    d = parse_data(hld) if section(hld, "Data") else {"tables": []}
+    starts = {}
+    for line in section(hld, "Contracts").splitlines():
+        if m := _VERSION.match(line.strip()):
+            starts[_short(m.group(1))] = m.group(2)
+    return {"tables": {t["table"] for t in d["tables"]}, "repos": {_short(r["name"]) for r in parse_affected_repos(hld)},
+            "starts": starts}
+
+
+def derived(hld: str, others: list[dict]) -> dict[str, list[str]]:
+    """Features this design builds on, worked out from what each introduced (T-105): feature id ->
+    what it uses. others: [{feature_id, title, introduces}] of the product's other designed features."""
+    u = uses(hld)
+    out: dict[str, list[str]] = {}
+    for o in others:
+        i = o.get("introduces") or {}
+        why = [f"table {t}" for t in i.get("tables") or [] if t in u["tables"]]
+        why += [f"repo {r}, which it creates" for r in i.get("repos") or [] if r in u["repos"]]
+        why += [f"{r} {v}, the API version it introduces" for r, v in (i.get("versions") or {}).items()
+                if u["starts"].get(r) == v]
+        if why:
+            out[o["feature_id"]] = why
+    return out
+
+
 def facts(hld: str) -> dict:
-    """What an incident needs to know about the feature, from its approved architecture."""
+    """What an incident needs to know about the feature, from its approved architecture, and what it
+    introduces for later features to build on."""
     d = parse_data(hld) if section(hld, "Data") else {"tables": [], "rollback": ""}
     changed = any(t["change"] != "none" for t in d["tables"])
     rb = rollback_safety(d["rollback"]) if changed else {"safe": True, "why": "no data changes"}
-    return {"depends_on": parse_depends(hld)["ids"], "flag_off": parse_flag_off(hld), "rollback": rb}
+    return {"depends_on": parse_depends(hld)["ids"], "flag_off": parse_flag_off(hld), "rollback": rb,
+            "introduces": introduces(hld)}
 
 
 def _dependents(fid: str, live: dict[str, dict]) -> list[str]:

@@ -215,7 +215,7 @@ class WaitChecker:
         """The resume value once the wait is over (success or failure), else None."""
         wait = packet["wait"]
         if wait in ("release_ready", "release_train", "incident_recovery", "analysis_report", "flag_step",
-                    "fix_window", "corroboration"):  # resolved from the engine's own threads
+                    "fix_window", "corroboration", "dependencies"):  # resolved from the engine's own threads
             fn = getattr(self.services, "release_waits", None)
             return fn(packet) if callable(fn) else None
         if wait == "today_screens":  # today's screens for the G3 prototype (valxel_sdlc.current_screens)

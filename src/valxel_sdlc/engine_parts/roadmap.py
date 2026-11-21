@@ -220,16 +220,155 @@ class RoadmapMixin:
 
         (_P(self.services.settings.artifact_dir) / "start-queues.json").write_text(_json.dumps(q), encoding="utf-8")
 
+    # ------------------------------------------------------------------ feature order (T-105..T-107)
+
+    _order_lock = __import__("threading").Lock()
+
+    def past_design(self, feature_id: str) -> bool:
+        """Its design is settled: G4 approved (or a later gate, where G4 was skipped), or it shipped."""
+        s = self._state(feature_id)
+        if s.get("status") == "done" or (s.get("release") or {}).get("production"):
+            return True
+        return any(g.get("gate") in ("g4", "g5", "g6") and g.get("decision") == "approve"
+                   for g in s.get("gate_decisions") or [])
+
+    def _started_candidates(self, initiative_id: str) -> dict[str, str]:
+        """The initiative's started features by title (lower case) -> feature id; stopped ones left out."""
+        pid = initiative_id.split("-", 1)[0]
+        return {f["title"].lower(): f["feature_id"] for f in self.feature_summaries(pid)
+                if f.get("initiative_id") == initiative_id and f.get("status") != "stopped"}
+
+    def candidate_order(self, initiative_id: str, cands: list[dict]) -> list[dict]:
+        """Each candidate with what it waits on: the candidates it needs that haven't passed G4 (T-106)."""
+        started = self._started_candidates(initiative_id)
+        out = []
+        for c in cands:
+            waiting = [n for n in c.get("needs") or []
+                       if not (started.get(n.lower()) and self.past_design(started[n.lower()]))]
+            out.append({**c, "needs": list(c.get("needs") or []), "waiting_on": waiting})
+        return out
+
+    def _initiative_candidates(self, initiative_id: str) -> list[dict]:
+        s = self._state(initiative_id)
+        if s.get("status") == "approved":
+            return list((s.get("draft") or {}).get("candidates") or [])
+        return list(self._merged_initiative(initiative_id.split("-", 1)[0], initiative_id).get("candidates") or [])
+
+    def planned_needs(self, feature_id: str) -> dict[str, str]:
+        """The started features G0 planned this one to build on: feature id -> title."""
+        s = self._state(feature_id)
+        iid = s.get("initiative_id") or ""
+        if not iid:
+            return {}
+        me = next((c for c in self._initiative_candidates(iid) if c["title"].lower() == s.get("title", "").lower()), None)
+        started = self._started_candidates(iid)
+        return {started[n.lower()]: n for n in (me or {}).get("needs") or [] if n.lower() in started}
+
+    def design_facts(self, product_id: str, exclude: str = "") -> list[dict]:
+        """What each of the product's designed features introduced (undo.introduces), for working
+        out what a new design depends on. Features designed before this was kept get it once, from
+        their approved HLD."""
+        from .. import drafts
+        from ..undo import facts
+
+        out = []
+        for row in self._rows(product_id, "feature"):
+            fid = row["feature_id"]
+            s = self._state(fid)
+            if fid == exclude or s.get("status") in ("aborted", "stopped") or not self.past_design(fid):
+                continue
+            u = s.get("undo") or {}
+            if "introduces" not in u and (s.get("artifacts") or {}).get("HLD"):
+                try:
+                    u = {**facts(drafts.load(self.services, s, "HLD")), **{k: v for k, v in u.items()
+                                                                          if k == "depends_on" and v}}
+                    self._g(fid).update_state(self._config(fid), {"undo": u})
+                except Exception:
+                    log.info("%s: no design to read what it introduced", fid, exc_info=True)
+                    continue
+            if u.get("introduces"):
+                out.append({"feature_id": fid, "title": s.get("title", ""), "introduces": u["introduces"]})
+        return out
+
+    def dependencies_unmet(self, feature_id: str) -> list[dict]:
+        """What the feature depends on (its G4 list) that isn't live yet and doesn't ship in the same
+        release (T-107): it can't reach production before them."""
+        s = self._state(feature_id)
+        mine = self.release_for(feature_id, active=True)
+        out = []
+        for d in (s.get("undo") or {}).get("depends_on") or []:
+            ds = self._state(d)
+            if not ds:
+                continue  # not a feature the tool knows: nothing to wait for
+            if (ds.get("release") or {}).get("production") and self._flag_on(ds) is not False:
+                continue
+            other = self.release_for(d, active=True)
+            if mine and other and other["id"] == mine["id"]:
+                continue
+            stopped = ds.get("status") in ("aborted", "stopped")
+            out.append({"feature_id": d, "title": ds.get("title", ""),
+                        "where": "stopped: change this design, or stop this feature" if stopped
+                        else "in production with its flag off" if (ds.get("release") or {}).get("production")
+                        else "not in production yet"})
+        return out
+
+    def _start_unblocked(self, feature_id: str) -> list[str]:
+        """A feature passed G4: start its initiative's waiting candidates whose needs are all past G4."""
+        started = []
+        with self._order_lock:
+            q = self._queue()
+            due = []
+            for key in [k for k in q if k.startswith("needs:")]:
+                iid, e = key[len("needs:"):], q[key]
+                try:
+                    v = self.view(iid)
+                except Exception:
+                    log.warning("reading %s's waiting features failed", iid, exc_info=True)
+                    continue
+                cands = v["candidates"]
+                for i in list(e["waiting"]):
+                    c = cands[i] if i < len(cands) else None
+                    if c is None or c["started"]:
+                        e["waiting"].remove(i)
+                    elif not c["waiting_on"]:
+                        e["waiting"].remove(i)
+                        due.append((iid, v["product_id"], c, e.get("by", "")))
+                if e["waiting"]:
+                    q[key] = e
+                else:
+                    q.pop(key)
+            self._save_queue(q)  # claimed before starting: a step of the new feature doesn't start it twice
+        for iid, pid, c, by in due:
+            try:
+                started.append(self.create(
+                    product_id=pid, title=c["title"], description=c["description"], created_by=by, background=True,
+                    initiative_id=iid, not_duplicate_reason=f"A candidate feature of {iid}, started once what it "
+                                                            "needs passed G4"))
+            except Exception:
+                log.warning("starting %s of %s failed", c["title"], iid, exc_info=True)
+        return started
+
     def start_candidates(self, initiative_id: str, indexes: list[int], *, order: str, by: str) -> dict:
         """Start an approved initiative's candidate features: together, or in order (the next starts
-        when the one before reaches everyone)."""
+        when the one before reaches everyone). One that needs another candidate whose design isn't
+        settled (G4) waits, and starts by itself once it is (T-106)."""
         v = self.view(initiative_id)
         if v["status"] != "approved":
             raise ValueError("Only an approved initiative's features can be started")
         cands = v["candidates"]
-        picked = [i for i in dict.fromkeys(indexes) if 0 <= i < len(cands) and not cands[i]["started"]]
-        if not picked:
+        chosen = [i for i in dict.fromkeys(indexes) if 0 <= i < len(cands) and not cands[i]["started"]]
+        if not chosen:
             raise ValueError("Nothing to start: those features have started already")
+        waiting = [i for i in chosen if cands[i].get("waiting_on")]
+        picked = [i for i in chosen if i not in waiting]
+        q = self._queue()
+        if waiting:
+            key = f"needs:{initiative_id}"
+            q[key] = {"waiting": sorted(set((q.get(key) or {}).get("waiting", [])) | set(waiting)), "by": by}
+            self._save_queue(q)
+        if not picked:
+            return {"started": [], "queued": [], "waiting": [
+                {"title": cands[i]["title"], "on": cands[i]["waiting_on"]} for i in waiting]}
         first = picked if order == "together" else picked[:1]
         started = [self.create(product_id=v["product_id"], title=cands[i]["title"], description=cands[i]["description"],
                                created_by=by, background=True, initiative_id=initiative_id,
@@ -240,7 +379,8 @@ class RoadmapMixin:
         else:
             q.pop(initiative_id, None)
         self._save_queue(q)
-        return {"started": started, "queued": [cands[i]["title"] for i in picked[1:]] if order == "sequence" else []}
+        return {"started": started, "queued": [cands[i]["title"] for i in picked[1:]] if order == "sequence" else [],
+                "waiting": [{"title": cands[i]["title"], "on": cands[i]["waiting_on"]} for i in waiting]}
 
     def _start_next_in_order(self, feature_id: str) -> str | None:
         """A feature that reached everyone: start the next one its initiative queued after it."""
@@ -260,6 +400,16 @@ class RoadmapMixin:
                 self._save_queue(q)
                 return None
             c = v["candidates"][nxt]
+            if c.get("waiting_on"):  # it needs a candidate whose design isn't settled: it waits for that
+                key = f"needs:{iid}"
+                q[key] = {"waiting": sorted(set((q.get(key) or {}).get("waiting", [])) | {nxt}), "by": e.get("by", "")}
+                rest = [i for i in e["next"] if i != nxt]
+                if rest:
+                    q[iid] = {**e, "next": rest}
+                else:
+                    q.pop(iid)
+                self._save_queue(q)
+                return None
             fid = self.create(product_id=v["product_id"], title=c["title"], description=c["description"],
                               created_by=e.get("by", ""), background=True, initiative_id=iid,
                               not_duplicate_reason=f"A candidate feature of {iid}, started in order")

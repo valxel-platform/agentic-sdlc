@@ -155,7 +155,8 @@ def build_initiative_graph(services, checkpointer=None):
             "next or later), ## Budget (USD envelope for all its features), ## Lanes (the product and any lane it "
             "depends on that must change), ## Release model (launch: features ship dark and launch together; train: "
             "regulated or contractual shipments approved together), ## Candidate features ('- Title: what it "
-            "delivers'; don't repeat features the product already has), ## Risks"
+            "delivers', ending '[needs: <other candidate title>; ...]' when it builds on another candidate, so "
+            "that one is started first; don't repeat features the product already has), ## Risks"
             + (f", {DOC_SECTIONS}." if state.get("research") else "."),
             *(["The research note to cite:\n" + untrusted.wrap("research", state["research"])]
               if state.get("research") else []),
