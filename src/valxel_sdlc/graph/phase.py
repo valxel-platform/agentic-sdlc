@@ -134,8 +134,9 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         # The product's other designs, and what G0 planned this one to build on: the architecture
         # lists what it depends on (T-105, T-106).
         **({"other_designs": services.design_facts(state["product_id"], exclude=state["feature_id"]),
-            "planned_needs": services.planned_needs(state["feature_id"])}
-           if phase == "architecture" and callable(getattr(services, "design_facts", None)) else {}),
+            "planned_needs": services.planned_needs(state["feature_id"]),
+            "depends_on": list((state.get("undo") or {}).get("depends_on") or [])}
+           if phase in ("architecture", "build") and callable(getattr(services, "design_facts", None)) else {}),
         "dependency_repos": [{"name": r.name, "role": r.role, "lane": lane_id}
                              for lane_id, s in snap.dependencies.items() for r in s.product.repos],
         "parent_texts": parents,
@@ -986,6 +987,49 @@ def stub_design_issue(ctx: dict, task: dict) -> dict | None:
             "evidence": f"test_{task['id'].lower()}_returns_record fails: 404 before the import job runs"}
 
 
+def released_events(services, product_id: str) -> list[str]:
+    """Event types the product's released data contracts carry."""
+    from ..datasets import events
+
+    return sorted({e for c in released_datasets(services, product_id) for e in events(c)})
+
+
+def code_dependencies(services, ctx: dict, results: dict) -> list[dict]:
+    """The build uses another feature's tables, events or new repos that the design's Depends on
+    features doesn't list (T-109): a design issue for the architecture, so it's listed (and the
+    feature isn't released before that one, and goes off with it)."""
+    from ..undo import code_uses
+
+    others = ctx.get("other_designs") or []
+    if not others:
+        return []
+    listed = set(ctx.get("depends_on") or [])
+    found: dict[str, dict] = {}
+    for tid, r in sorted(results.items()):
+        if not r.get("tests_passed"):
+            continue
+        for path in r.get("files") or []:
+            try:
+                text = services.github.get_file(repo=r["repo"], path=path, ref=r.get("branch") or ctx.get("branch"))
+            except Exception:  # a file it can't read adds nothing
+                logging.getLogger(__name__).debug("%s/%s not read", r["repo"], path, exc_info=True)
+                continue
+            if not isinstance(text, str) or len(text) > 400_000:
+                continue
+            for fid, what in code_uses(text, others).items():
+                if fid in listed:
+                    continue
+                hit = found.setdefault(fid, {"task": tid, "what": set(), "where": set()})
+                hit["what"].update(what)
+                hit["where"].add(f"{r['repo']}/{path}")
+    title = {o["feature_id"]: o.get("title", "") for o in others}
+    return [{"task": h["task"], "by": "the tool", "document": "architecture", "section": "Depends on features",
+             "problem": (f"The build uses {', '.join(sorted(h['what']))} from {fid} ({title.get(fid, '')}), which "
+                         "the design doesn't list: list it, so this feature isn't released before it and goes off "
+                         "with it in an incident"),
+             "evidence": ", ".join(sorted(h["where"]))[:500]} for fid, h in sorted(found.items())]
+
+
 def design_issues(results: dict, reviews: dict) -> list[dict]:
     """What the coder or the reviewer said is wrong with the approved documents, per task."""
     out = []
@@ -1246,7 +1290,7 @@ def build_build_subgraph(services):
 
     def evaluate(s: PhaseState) -> dict:
         results, reviews = s.get("task_results") or {}, s.get("reviews") or {}
-        issues = design_issues(results, reviews)
+        issues = design_issues(results, reviews) or code_dependencies(services, s["ctx"], results)
         if issues:  # the approved design is wrong: more tries can't fix it, people decide (gates.py)
             first = issues[0]
             return {"findings": [f"{i['task']}: {i['document']} {i['section']}: {i['problem']}".replace("  ", " ")

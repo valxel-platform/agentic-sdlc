@@ -58,7 +58,8 @@ SECOND = FIRST.replace("Walk-in queue", "Queue screen").replace("1.2.0 -> 1.3.0"
 
 def test_g4_finds_the_dependency_the_design_didnt_list():
     others = [{"feature_id": "CLN-FEAT-4", "title": "Walk-in queue", "introduces": introduces(FIRST)}]
-    assert introduces(FIRST) == {"tables": ["queue_entry"], "repos": [], "versions": {"cln-intake-api": "1.3.0"}}
+    assert introduces(FIRST) == {"tables": ["queue_entry"], "repos": [], "versions": {"cln-intake-api": "1.3.0"},
+                                 "events": []}
     assert derived(SECOND, others) == {"CLN-FEAT-4": ["table queue_entry", "cln-intake-api 1.3.0, the API version it introduces"]}
     api = [{"name": "acme-clinic/cln-intake-api", "role": "provider"}]
     [f] = _undo(SECOND, api, {"feature_id": "CLN-FEAT-5", "other_designs": others})
@@ -103,7 +104,7 @@ def test_a_feature_isnt_released_before_what_it_depends_on(tmp_path, gov_root, m
     eng, _ = make(tmp_path, gov_root)
     base = eng.create(product_id="FARM", title="Offline crop log")
     real = undo.facts
-    monkeypatch.setattr(undo, "facts", lambda hld: {**real(hld), "depends_on": [base]})  # its G4 says so
+    monkeypatch.setattr(undo, "facts", lambda hld, released=(): {**real(hld, released), "depends_on": [base]})  # its G4 says so
     later = eng.create(product_id="FARM", title="Soil sensor import")
     eng.auto_drive(later)
     while eng.is_running(later):

@@ -19,7 +19,13 @@ from __future__ import annotations
 
 import re
 
-from .agents.parse import parse_affected_repos, parse_data, parse_new_repos, section
+from .agents.parse import (
+    parse_affected_repos,
+    parse_data,
+    parse_events,
+    parse_new_repos,
+    section,
+)
 
 FEATURE_ID = re.compile(r"\b([A-Z][A-Z0-9]*-FEAT-\d+)\b")
 _SAFE = re.compile(r"^\s*(safe|not safe|unsafe)\s*(?:[;:,.-]\s*|$)(.*)$", re.IGNORECASE)
@@ -66,16 +72,20 @@ def _short(repo: str) -> str:
     return repo.rsplit("/", 1)[-1]
 
 
-def introduces(hld: str) -> dict:
-    """What the design adds that a later feature can build on: new tables, new repos, and the API
-    versions it raises a contract to."""
+def introduces(hld: str, released_events=()) -> dict:
+    """What the design adds that a later feature can build on: new tables, new repos, the API
+    versions it raises a contract to, and the events it publishes that weren't released before it."""
     d = parse_data(hld) if section(hld, "Data") else {"tables": []}
     versions = {}
     for line in section(hld, "Contracts").splitlines():
         if m := _VERSION.match(line.strip()):
             versions[_short(m.group(1))] = m.group(3)
+    released = set(released_events)
+    events = sorted({e["type"] for e in parse_events(hld)
+                     if "published by" in e["about"].lower() and e["type"] not in released})
     return {"tables": sorted({t["table"] for t in d["tables"] if t["change"] == "new"}),
-            "repos": sorted({_short(r["name"]) for r in parse_new_repos(hld)}), "versions": versions}
+            "repos": sorted({_short(r["name"]) for r in parse_new_repos(hld)}), "versions": versions,
+            "events": events}
 
 
 def uses(hld: str) -> dict:
@@ -87,7 +97,7 @@ def uses(hld: str) -> dict:
         if m := _VERSION.match(line.strip()):
             starts[_short(m.group(1))] = m.group(2)
     return {"tables": {t["table"] for t in d["tables"]}, "repos": {_short(r["name"]) for r in parse_affected_repos(hld)},
-            "starts": starts}
+            "starts": starts, "events": {e["type"] for e in parse_events(hld)}}
 
 
 def derived(hld: str, others: list[dict]) -> dict[str, list[str]]:
@@ -101,19 +111,35 @@ def derived(hld: str, others: list[dict]) -> dict[str, list[str]]:
         why += [f"repo {r}, which it creates" for r in i.get("repos") or [] if r in u["repos"]]
         why += [f"{r} {v}, the API version it introduces" for r, v in (i.get("versions") or {}).items()
                 if u["starts"].get(r) == v]
+        why += [f"event {e}, which it introduces" for e in i.get("events") or [] if e in u["events"]]
         if why:
             out[o["feature_id"]] = why
     return out
 
 
-def facts(hld: str) -> dict:
+def code_uses(code: str, others: list[dict]) -> dict[str, list[str]]:
+    """Features whose tables, events or new repos appear in the code (T-109): feature id -> what."""
+    out: dict[str, list[str]] = {}
+    for o in others:
+        i = o.get("introduces") or {}
+        names = ([("table", t) for t in i.get("tables") or [] if len(t) >= 4]
+                 + [("event", e) for e in i.get("events") or []]
+                 + [("repo", r) for r in i.get("repos") or [] if len(r) >= 4])
+        hits = [f"{kind} {n}" for kind, n in names
+                if re.search(rf"(?<![\w.-]){re.escape(n)}(?![\w-])", code)]
+        if hits:
+            out[o["feature_id"]] = hits
+    return out
+
+
+def facts(hld: str, released_events=()) -> dict:
     """What an incident needs to know about the feature, from its approved architecture, and what it
     introduces for later features to build on."""
     d = parse_data(hld) if section(hld, "Data") else {"tables": [], "rollback": ""}
     changed = any(t["change"] != "none" for t in d["tables"])
     rb = rollback_safety(d["rollback"]) if changed else {"safe": True, "why": "no data changes"}
     return {"depends_on": parse_depends(hld)["ids"], "flag_off": parse_flag_off(hld), "rollback": rb,
-            "introduces": introduces(hld)}
+            "introduces": introduces(hld, released_events)}
 
 
 def _dependents(fid: str, live: dict[str, dict]) -> list[str]:

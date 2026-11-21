@@ -269,9 +269,10 @@ class RoadmapMixin:
         out what a new design depends on. Features designed before this was kept get it once, from
         their approved HLD."""
         from .. import drafts
+        from ..graph.phase import released_events
         from ..undo import facts
 
-        out = []
+        out, released = [], None
         for row in self._rows(product_id, "feature"):
             fid = row["feature_id"]
             s = self._state(fid)
@@ -280,7 +281,9 @@ class RoadmapMixin:
             u = s.get("undo") or {}
             if "introduces" not in u and (s.get("artifacts") or {}).get("HLD"):
                 try:
-                    u = {**facts(drafts.load(self.services, s, "HLD")), **{k: v for k, v in u.items()
+                    if released is None:
+                        released = released_events(self.services, product_id)
+                    u = {**facts(drafts.load(self.services, s, "HLD"), released), **{k: v for k, v in u.items()
                                                                           if k == "depends_on" and v}}
                     self._g(fid).update_state(self._config(fid), {"undo": u})
                 except Exception:
