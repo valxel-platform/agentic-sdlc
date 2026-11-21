@@ -104,10 +104,14 @@ def intent_task(session: dict) -> dict:
     return task
 
 
-def build(app: Any, signer: Any, verifier: PersonVerifier, public_url: str, version: str) -> list:
-    """The card's route and /a2a's, for the app's router."""
+def build(app: Any, signer: Any, verifier: PersonVerifier, public_url: str, version: str, refused=None) -> list:
+    """The card's route and /a2a's, for the app's router. `refused(why)` records a token turned away."""
     import anyio
     from starlette.routing import Route
+
+    def _refused(_request: Request, why: str) -> None:
+        if refused is not None:
+            refused(why)
 
     the_card = card(public_url, verifier.domain, version)
 
@@ -119,9 +123,11 @@ def build(app: Any, signer: Any, verifier: PersonVerifier, public_url: str, vers
         auth = request.headers.get("authorization", "")
         if not auth.lower().startswith("bearer "):
             return _error(None, INVALID, "Sign in: a person's bearer token is required", 401, challenge)
+        token = auth.split(None, 1)[1].strip()
         try:
-            person = await anyio.to_thread.run_sync(verifier.person, auth.split(None, 1)[1].strip())
+            person = await anyio.to_thread.run_sync(verifier.person, token)
         except NotAPerson as exc:
+            await anyio.to_thread.run_sync(_refused, request, "not a person's token")
             return _error(None, INVALID, f"Not signed in as a person: {exc}", 401, challenge)
         except Exception:  # noqa: BLE001 - the user pool unreachable: no access
             return _error(None, INVALID, "Couldn't check the sign-in; try again", 503)
@@ -135,8 +141,13 @@ def build(app: Any, signer: Any, verifier: PersonVerifier, public_url: str, vers
             return _error(body.get("id") if isinstance(body, dict) else None, INVALID, "Not a JSON-RPC 2.0 request")
         rid, params = body.get("id"), body.get("params") or {}
 
+        try:
+            client = str((verifier.claims(token) or {}).get("client_id") or "")
+        except Exception:  # noqa: BLE001 - verified above; the label is all this is for
+            client = ""
+
         async def api(method: str, path: str, data: dict | None = None) -> Any:
-            return await call_api(app, signer, person, method, path, data)
+            return await call_api(app, signer, person, method, path, data, via="a2a", via_client=client)
 
         try:
             if body["method"] == "SendMessage":

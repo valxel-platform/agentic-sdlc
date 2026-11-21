@@ -107,6 +107,12 @@ class Settings:
             e.get("VALXEL_SESSION_LAUNCHER_TOKEN", "")
 
 
+def named_proxy(proxy: str, session_id: str) -> str:
+    """http://egress-proxy:3128 -> http://<session>@egress-proxy:3128"""
+    scheme, sep, rest = proxy.partition("://")
+    return f"{scheme}{sep}{session_id}@{rest}" if sep and "@" not in rest and session_id else proxy
+
+
 def container_body(s: Settings, runtime: str, session_id: str) -> dict:
     """The container a session runs in: locked down as the cluster's sandbox template is."""
     host: dict = {
@@ -120,7 +126,8 @@ def container_body(s: Settings, runtime: str, session_id: str) -> dict:
     }
     if runtime != "runc":
         host["Runtime"] = runtime
-    proxy = [f"{k}={s.proxy}" for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")] if s.proxy else []
+    named = named_proxy(s.proxy, session_id)  # the proxy keeps this session's refusals (egress_proxy)
+    proxy = [f"{k}={named}" for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy")] if s.proxy else []
     return {
         "Image": s.image, "Cmd": ["valxel", "session-runner", "--port", str(RUNNER_PORT)],
         "User": "10001:10001", "WorkingDir": "/work",
@@ -162,6 +169,19 @@ class Launcher:
 
         return read(self.stream({**spec, "stream": True}), None) if spec.get("stream") else self._run(spec)
 
+    def _refusals(self, http, sid: str) -> list[dict]:
+        """What the egress proxy refused this session, once it's done. Best effort: the proxy logs them too."""
+        if not self.s.proxy or not self.s.token:
+            return []
+        try:
+            r = http.get(f"{self.s.proxy.rstrip('/')}/refusals/{sid}", timeout=5,
+                         headers={"Authorization": f"Bearer {self.s.token}"})
+            got = r.json() if r.status_code == 200 else []
+            return [x for x in got if isinstance(x, dict)][:200]
+        except Exception:  # noqa: BLE001 - the proxy's log still has them
+            log.warning("egress refusals for session %s not collected", sid)
+            return []
+
     def stream(self, spec: dict):
         """The container's streamed /run, line by line: its steps, then the outcome. The container is
         removed when the stream ends, however it ends."""
@@ -191,6 +211,9 @@ class Launcher:
                         yield (raw + "\n").encode()
             finally:
                 resp.close()
+            for r in self._refusals(http, sid):  # for the audit trail (agent_steps: actions)
+                yield line({"step": {"action": {"kind": "egress.refused", "tool": "proxy", "target": r.get("host", ""),
+                                                "port": r.get("port")}}})
         except (Unavailable, httpx.HTTPError) as exc:
             yield line({"outcome": {"ok": False, "error": type(exc).__name__, "transient": True}})
         finally:

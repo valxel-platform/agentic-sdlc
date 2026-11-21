@@ -129,6 +129,9 @@ services:
     command: ["valxel", "egress-proxy"]
     environment:
       VALXEL_EGRESS_ALLOW: ${VALXEL_EGRESS_ALLOW:-}
+      # The launcher's token: it alone collects a session's refusals for the audit trail (T-115).
+      VALXEL_SESSION_LAUNCHER_TOKEN_FILE: /run/secrets/session_launcher_token
+    secrets: [session_launcher_token]
     networks: [default, sessions]
 
   postgres:

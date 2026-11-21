@@ -280,6 +280,8 @@ async def run_query(prompt: str, options, on_step=None) -> dict:
             result = message
             structured = getattr(message, "structured_output", None)
             text = (json.dumps(structured) if structured is not None else getattr(message, "result", "")) or text
+    if steps:
+        steps.finish()
     return {"text": text, "usage": (getattr(result, "usage", None) or {}) if result else {},
             "peak": peak, "session_id": str(session_id or ""), "skills": sorted(loaded), "plugin_errors": errors,
             "is_error": bool(getattr(result, "is_error", False)) if result else False,

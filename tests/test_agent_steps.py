@@ -44,9 +44,17 @@ def test_steps_say_what_without_contents_or_commands():
     r.feed(Msg([Result("t9", "....F\n=== 3 failed, 40 passed in 2.1s ===")]))
     r.feed(Msg([Use("Bash", {"command": "git push origin feature/x"})]))
     r.feed(Msg([Use("Bash", {"command": "curl -H 'Authorization: token ghs_x' https://api.github.com"})]))
-    assert got == ["Reading src/queue.py", "Editing src/queue.py", "Running the tests", "Tests: 3 failing, 40 passing",
-                   "Pushing the branch", "Running curl"]
-    assert not any("ghs_" in s or "SECRET" in s for s in got)
+    shown = [s for s in got if isinstance(s, str)]
+    assert shown == ["Reading src/queue.py", "Editing src/queue.py", "Running the tests", "Tests: 3 failing, 40 passing",
+                     "Pushing the branch", "Running curl"]
+    # For the audit trail (T-115): what changed and which program ran, never contents or command text.
+    r.finish()
+    acts = [s["action"] for s in got if isinstance(s, dict)]
+    assert [(a["kind"], a["target"]) for a in acts] == [
+        ("file.change", "src/queue.py"), ("command.tests", "command"), ("command.git.push", "git"),
+        ("command.other", "curl"), ("files.read", "")]
+    assert acts[-1]["count"] == 2
+    assert not any("ghs_" in json.dumps(s) or "SECRET" in json.dumps(s) for s in got)
     assert st.test_summary("== 12 passed ==") == "Tests: all 12 passing"
 
 

@@ -79,7 +79,7 @@ def test_a_session_runs_in_a_locked_down_container_that_is_then_removed():
     assert h["Runtime"] == "runsc" and h["ReadonlyRootfs"] and h["CapDrop"] == ["ALL"]
     assert h["SecurityOpt"] == ["no-new-privileges"] and h["NetworkMode"] == "valxel-sessions"
     assert h["Memory"] == 4 << 30 and h["PidsLimit"] == 1024 and "uid=10001" in h["Tmpfs"]["/work"]
-    assert "HTTPS_PROXY=http://egress-proxy:3128" in body["Env"]
+    assert "HTTPS_PROXY=http://abc123@egress-proxy:3128" in body["Env"]  # named, for its refusals
 
 
 def test_gvisor_is_used_when_docker_has_it_and_required_when_asked():

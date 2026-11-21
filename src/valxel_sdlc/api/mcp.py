@@ -137,13 +137,15 @@ class ApiError(Exception):
 
 
 async def call_api(app: Any, signer: SessionSigner, person: dict, method: str, path: str, body: dict | None = None,
-                   params: dict | None = None) -> Any:
-    """`app`'s API as `person`, in-process: its own rules decide what they may see and do."""
+                   params: dict | None = None, *, via: str = "mcp", via_client: str = "") -> Any:
+    """`app`'s API as `person`, in-process: its own rules decide what they may see and do. `via` and
+    `client` (the OAuth client the token was issued to) ride in the signed session, so the audit
+    trail records which assistant or agent acted for the person (valxel_sdlc.audit_events)."""
     import httpx
 
     # A session for this one call, never sent anywhere. idp mcp marks what it decides (api/routers/features.py).
     cookie = signer.dumps({**person, "orgs": [], "teams": [], "avatar_url": "", "idp": "mcp",
-                           "exp": int(time.time()) + 60})
+                           "via": via, "client": via_client[:300], "exp": int(time.time()) + 60})
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://valxel.internal",
                                  cookies={SESSION_COOKIE: cookie}, timeout=60) as client:
         r = await client.request(method, "/api" + path, json=body, params=params)
@@ -156,8 +158,9 @@ async def call_api(app: Any, signer: SessionSigner, person: dict, method: str, p
     return r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text
 
 
-def build(app: Any, signer: SessionSigner, verifier: PersonVerifier, resource: str) -> Any:
-    """The MCP server, its tools calling `app` (the API) as the token's person."""
+def build(app: Any, signer: SessionSigner, verifier: PersonVerifier, resource: str, refused=None) -> Any:
+    """The MCP server, its tools calling `app` (the API) as the token's person. `refused(why)`
+    records a token turned away (valxel_sdlc.audit_events)."""
     from mcp.server.auth.middleware.auth_context import get_access_token
     from mcp.server.auth.provider import AccessToken
     from mcp.server.auth.settings import AuthSettings
@@ -172,6 +175,8 @@ def build(app: Any, signer: SessionSigner, verifier: PersonVerifier, resource: s
                 person = await anyio.to_thread.run_sync(verifier.person, token)
                 claims = verifier.claims(token)
             except NotAPerson:
+                if refused is not None:
+                    await anyio.to_thread.run_sync(refused, "not a person's token")
                 return None
             except Exception:  # noqa: BLE001 - the user pool unreachable: no access, never an error page
                 return None
@@ -196,7 +201,8 @@ def build(app: Any, signer: SessionSigner, verifier: PersonVerifier, resource: s
         if not person:
             raise ToolError("Sign in first")
         try:
-            return await call_api(app, signer, person, method, path, body, params)
+            return await call_api(app, signer, person, method, path, body, params, via="mcp",
+                                  via_client=str(getattr(token, "client_id", "") or ""))
         except ApiError as exc:
             raise ToolError(str(exc)) from exc
 

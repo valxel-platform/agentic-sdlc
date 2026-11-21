@@ -15,6 +15,13 @@ What gets recorded:
     signin.*               sign-ins, failed sign-ins and sign-outs
     api.<method>           every request that changes something, with its route and outcome, so a
                            refused attempt (401, 403) is recorded too
+    api.read               every read of the API (T-116), but for the app's own plumbing (/api/me,
+                           health, the live stream); VALXEL_AUDIT_READS=off leaves reads out
+    agent.*                what an agent session did (T-115): files changed, programs run, commits
+                           and pushes, MCP tools called, sites fetched, helpers started, reads
+                           counted, and egress the proxy refused; as the agent, for the feature
+    mcp.refused, a2a.refused   a token turned away (T-117); calls let in are api.* records naming
+                           the person, with the assistant's or agent's OAuth client and `via`
 
 Records name people and things by id. Never put field values in them: names, emails, notes,
 document text. Details hold counts, codes and ids.

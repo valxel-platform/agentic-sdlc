@@ -82,6 +82,35 @@ def tool_step(name: str, args: dict) -> tuple[str, str]:
     return "", ""
 
 
+def action(name: str, args: dict) -> dict | None:
+    """What a tool call did, for the audit trail (T-115): its kind and its target, never contents or a
+    command's text (which can carry a token). Reads and searches are counted, not listed."""
+    a = args if isinstance(args, dict) else {}
+    if name in ("Edit", "MultiEdit", "Write", "NotebookEdit"):
+        path = _rel(a.get("file_path") or a.get("notebook_path") or a.get("path") or "")
+        return {"kind": "file.change", "tool": name, "target": path}
+    if name == "Bash":
+        step, kind = command_step(a.get("command") or "")
+        c = " ".join(str(a.get("command") or "").split())
+        program = c.split(" ", 1)[0].rsplit("/", 1)[-1] if c else ""
+        if kind == "git":
+            kind = "git.push" if "push" in step.lower() else "git.commit"
+        return {"kind": f"command.{kind}", "tool": "Bash",
+                "target": program if re.fullmatch(r"[\w.+-]{1,40}", program or "") else "command"}
+    if name.startswith("mcp__"):
+        parts = name.split("__")
+        return {"kind": "mcp.call", "tool": "mcp", "target": "/".join(parts[1:3])[:120]}
+    if name == "WebFetch":
+        from urllib.parse import urlparse
+
+        return {"kind": "web.fetch", "tool": name, "target": (urlparse(str(a.get("url") or "")).hostname or "")[:120]}
+    if name == "WebSearch":
+        return {"kind": "web.search", "tool": name, "target": ""}
+    if name in ("Task", "Agent"):
+        return {"kind": "agent.delegate", "tool": name, "target": str(a.get("subagent_type") or "")[:60]}
+    return None
+
+
 def test_summary(text: str) -> str:
     """'Tests: 3 failing, 40 passing' from a test run's output, or ''."""
     t = str(text or "")[-4000:]
@@ -99,6 +128,17 @@ class Reader:
 
     def __init__(self, on_step: Step) -> None:
         self.on_step, self.tests, self.last = on_step, set(), ""
+        self.reads = 0  # reads and searches: counted for the audit trail, not listed (finish())
+
+    def _act(self, act: dict) -> None:
+        try:
+            self.on_step({"action": act})  # not shown: the worker records it (reporter)
+        except Exception:  # the audit trail's own failures surface at the worker; never stop the session
+            log.debug("an action wasn't passed on", exc_info=True)
+
+    def finish(self) -> None:
+        if self.reads:
+            self._act({"kind": "files.read", "tool": "Read", "target": "", "count": self.reads})
 
     def _say(self, step: str) -> None:
         if step and step != self.last:  # a run of reads of one file is one step
@@ -112,10 +152,16 @@ class Reader:
         for block in getattr(message, "content", None) or []:
             name = getattr(block, "name", None)
             if name is not None and hasattr(block, "input"):  # a tool use
-                step, kind = tool_step(name, getattr(block, "input", {}) or {})
+                args = getattr(block, "input", {}) or {}
+                step, kind = tool_step(name, args)
                 if kind == "tests":
                     self.tests.add(getattr(block, "id", ""))
                 self._say(step)
+                act = action(name, args)
+                if act:
+                    self._act(act)
+                elif kind in ("read", "search"):
+                    self.reads += 1
             elif hasattr(block, "tool_use_id") and getattr(block, "tool_use_id", "") in self.tests:
                 content = getattr(block, "content", "")
                 text = content if isinstance(content, str) else json.dumps(content, default=str)
@@ -126,20 +172,30 @@ class Reader:
 
 _sink: Callable[[dict], None] | None = None
 _recent: Callable[[str, list[dict]], None] | None = None
+_audit: Callable[[str, str, str, str, dict], None] | None = None
 _lock = threading.Lock()
 _kept: dict[str, list[dict]] = {}
 _saved_at: dict[str, float] = {}
 
 
-def configure(publish: Callable[[dict], None] | None, keep: Callable[[str, list[dict]], None] | None = None) -> None:
-    """The engine's live-event publisher, and where the last steps are kept for other processes."""
-    global _sink, _recent
-    _sink, _recent = publish, keep
+def configure(publish: Callable[[dict], None] | None, keep: Callable[[str, list[dict]], None] | None = None,
+              audit: Callable[[str, str, str, str, dict], None] | None = None) -> None:
+    """The engine's live-event publisher, where the last steps are kept for other processes, and
+    where a session's actions are recorded (feature, phase, role, repo, action)."""
+    global _sink, _recent, _audit
+    _sink, _recent, _audit = publish, keep, audit
 
 
 def reporter(feature_id: str, phase: str, role: str, repo: str = "") -> Step:
     """A step callback for one session: publishes each step and keeps the last KEEP per feature."""
-    def step(text: str) -> None:
+    def step(text) -> None:
+        if isinstance(text, dict):  # an action, for the audit trail, not the page
+            if _audit and isinstance(text.get("action"), dict):
+                try:
+                    _audit(feature_id, phase, role, repo, text["action"])
+                except Exception:  # the session goes on; the gap is logged where operators look
+                    log.exception("agent action for %s not recorded", feature_id)
+            return
         ev = {"type": "feature.progress", "feature_id": feature_id, "phase": phase, "role": role,
               "repo": repo.rsplit("/", 1)[-1], "step": text[:160],
               "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
@@ -188,7 +244,7 @@ def read(lines, on_step: Step | None) -> dict:
             continue
         if "step" in msg and on_step:
             try:
-                on_step(str(msg["step"]))
+                on_step(msg["step"] if isinstance(msg["step"], dict) else str(msg["step"]))
             except Exception:  # progress never stops the session
                 log.debug("a step wasn't passed on", exc_info=True)
         elif "outcome" in msg:

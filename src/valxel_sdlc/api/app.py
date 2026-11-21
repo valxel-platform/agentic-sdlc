@@ -42,6 +42,9 @@ WEB_DIST = Path(
 
 
 log = logging.getLogger(__name__)
+# Not recorded: sign-in records its own, and these are the app's own plumbing, read on every page.
+_UNAUDITED = ("/api/auth/", "/api/healthz", "/api/events")
+_UNAUDITED_PATHS = {"/api/me", "/api/me/notifications"}
 
 
 def create_engine_from_env() -> tuple[FeatureEngine, Any]:
@@ -227,8 +230,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         """Every request that changes something, and how it went, to the audit trail
         (valxel_sdlc.audit_events): refused attempts too. Sign-in records its own."""
         path = request.url.path
-        if (request.method in ("GET", "HEAD", "OPTIONS") or not path.startswith("/api/")
-                or path.startswith("/api/auth/") or state["engine"] is None):
+        reads = os.environ.get("VALXEL_AUDIT_READS", "all").lower() != "off"
+        if (request.method in ("HEAD", "OPTIONS") or not path.startswith("/api/") or state["engine"] is None
+                or path.startswith(_UNAUDITED) or path in _UNAUDITED_PATHS or (request.method == "GET" and not reads)):
             return await call_next(request)
         response = await call_next(request)
         from fastapi.concurrency import run_in_threadpool
@@ -239,21 +243,32 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             log.exception("audit record for %s %s not written", request.method, path)
         return response
 
+    def _refused_token(via: str, why: str) -> None:
+        if state["engine"] is not None:
+            state["engine"].services.audit.record(f"{via}.refused", actor="anonymous", actor_type="service",
+                                                  resource=(via, [via]), outcome="denied", reason=why)
+
     def _audit_request(request: Request, status: int) -> None:
         from .. import tenancy
+        from ..web.auth import SESSION_COOKIE
 
         with tenancy.bound(tenancy.PLATFORM):
             who = ctx.signed_in(request)
+        session = (ctx.signer.loads(request.cookies.get(SESSION_COOKIE)) or {}) if who else {}
+        via = str(session.get("via") or "") if session.get("idp") == "mcp" else ""
         route = getattr(request.scope.get("route"), "path", "") or request.url.path
+        route = route if route.startswith("/api/") else "/api" + route  # the API router's own paths lack it
         params = {k: str(v) for k, v in (request.scope.get("path_params") or {}).items()}
         rtype = route.removeprefix("/api/").split("/", 1)[0] or "api"
         webhook = route.startswith(("/api/signals", "/api/webhooks", "/api/github"))
         outcome = "success" if status < 400 else "denied" if status in (401, 403) else "failure"
         state["engine"].services.audit.record(
-            f"api.{request.method.lower()}", actor=who.login if who else ("webhook" if webhook else "anonymous"),
+            "api.read" if request.method == "GET" else f"api.{request.method.lower()}",
+            actor=who.login if who else ("webhook" if webhook else "anonymous"),
             actor_type="user" if who else "service", resource=(rtype, list(params.values()) or [route]),
             outcome=outcome, workspace=params.get("workspace", ""), product=params.get("product_id", ""),
-            details={"route": route, "status": status})
+            client=str(session.get("client") or "") if via else "",
+            details={"route": route, "status": status, "via": via})
 
     @app.middleware("http")
     async def trace_requests(request: Request, call_next):
@@ -304,7 +319,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         from starlette.routing import Route
 
         verifier = mcp_api.PersonVerifier(mcp_settings["issuer"], mcp_settings["domain"], mcp_settings["client_ids"])
-        mcp_server = mcp_api.build(app, ctx.signer, verifier, mcp_settings["resource"])
+        mcp_server = mcp_api.build(app, ctx.signer, verifier, mcp_settings["resource"],
+                                   refused=lambda why: _refused_token("mcp", why))
         mcp_app = mcp_server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, json_response=True,
                                                  host=urlparse(auth.public_url).hostname or "127.0.0.1")
         # Its own routes (with its bearer-token middleware), ahead of the web app's catch-all.
@@ -317,7 +333,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         from . import a2a
 
         a2a_verifier = mcp_api.PersonVerifier(a2a_settings["issuer"], a2a_settings["domain"], a2a_settings["client_ids"])
-        app.router.routes[:0] = a2a.build(app, ctx.signer, a2a_verifier, auth.public_url, app.version)
+        app.router.routes[:0] = a2a.build(app, ctx.signer, a2a_verifier, auth.public_url, app.version,
+                                          refused=lambda why: _refused_token("a2a", why))
 
     # --- web app ---
     if web_dist and (web_dist / "index.html").is_file():

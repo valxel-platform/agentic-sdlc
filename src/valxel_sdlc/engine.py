@@ -189,7 +189,8 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             agent_steps,  # what agents are doing, live on the feature's page (T-112)
         )
 
-        agent_steps.configure(self.bus.publish, keep=lambda fid, steps: self.cluster.put(f"steps:{fid}", steps))
+        agent_steps.configure(self.bus.publish, keep=lambda fid, steps: self.cluster.put(f"steps:{fid}", steps),
+                              audit=self._audit_agent_action)
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="feature")
         self.running: set[str] = set()  # queued or running on this replica
         self.errors = Notes(self.cluster, "error")  # a thread's last error, whichever replica ran it
@@ -641,6 +642,16 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
                                    resource=(kind_of(feature_id), [feature_id]), workspace=self._cached_workspace(feature_id),
                                    product=str(item.get("product_id") or ""), reason=str(d.get("reason") or ""),
                                    details=details)
+
+    def _audit_agent_action(self, feature_id: str, phase: str, role: str, repo: str, act: dict) -> None:
+        """What an agent session did (valxel_sdlc.agent_steps.action), as the agent, for the feature."""
+        outcome = "denied" if act.get("kind") == "egress.refused" else "success"
+        self.services.audit.record(
+            f"agent.{act.get('kind') or 'action'}", actor=f"agent:{role or 'unknown'}", actor_type="agent",
+            resource=(kind_of(feature_id), [feature_id]), outcome=outcome,
+            workspace=self._cached_workspace(feature_id), product=feature_id.rsplit("-", 2)[0],
+            details={"phase": phase, "role": role, "repo": repo.rsplit("/", 1)[-1], "tool": act.get("tool"),
+                     "target": act.get("target"), "count": act.get("count"), "port": act.get("port")})
 
     def _audit_change(self, rec: dict) -> None:
         self.services.audit.record(
