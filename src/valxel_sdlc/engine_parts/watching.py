@@ -86,6 +86,25 @@ class WatchingMixin:
             log.info("Deleted %d session transcripts older than a day", gone)
         return gone
 
+    def check_backups(self, now: float | None = None) -> str:
+        """The VM tier's nightly backup (VALXEL_BACKUP_MARKER, written by the bundle's backup service)
+        happened in the last 26 hours. Nothing to check where it isn't set."""
+        import os
+        import time as _time
+        from pathlib import Path
+
+        marker = os.environ.get("VALXEL_BACKUP_MARKER", "")
+        if not marker:
+            return "no backups to check here"
+        p = Path(marker)
+        if not p.exists():
+            raise RuntimeError(f"No backup has finished yet ({marker} is missing)")
+        last = datetime.strptime(p.read_text().strip(), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+        age_h = ((now or _time.time()) - last.timestamp()) / 3600
+        if age_h > 26:
+            raise RuntimeError(f"The last backup finished {age_h:.0f} hours ago ({last.isoformat()})")
+        return f"last backup {age_h:.1f} hours ago"
+
     def remove_drafts(self) -> int:
         """Finished features' working copies of their documents, once the product's repo holds the
         record and the retention time has passed (valxel_sdlc.drafts)."""
@@ -149,6 +168,8 @@ class WatchingMixin:
             Job("expire_transcripts", self.expire_transcripts, 3600),
             Job("remove_drafts", self.remove_drafts, DAILY),  # finished features' drafts (drafts.py)
             Job("warn_release_dates", self.warn_release_dates, DAILY),  # a week before a release's date
+            # VM tier: fails while the last backup is over 26 hours old, so it alerts within two (T-69).
+            Job("check_backups", self.check_backups, 3600, stale_hours=2),
             Job("check_connections", self.check_connections, 3600),
             Job("catch_up_receipts", self.catch_up_receipts, 3600),
             Job("tool_health", self.tool_health, 3600),  # the tool's own agents against their baseline

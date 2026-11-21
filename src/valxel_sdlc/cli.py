@@ -476,6 +476,8 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     c.add_argument("action", choices=["verify"])
     from .laptop import add_parser as _add_dev
     _add_dev(sub)
+    from .vm import add_parser as _add_vm
+    _add_vm(sub)
     lc = sub.add_parser("lessons-check", help="Check a governance repo's lessons the way the tool will when it loads "
                                               "them (for that repo's CI)")
     lc.add_argument("directory", nargs="?", default="lessons")
@@ -579,6 +581,9 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     if args.cmd == "dev":
         from .laptop import main as dev_main
         return dev_main(args)
+    if args.cmd == "vm":
+        from .vm import main as vm_main
+        return vm_main(args)
     if args.cmd == "outcomes":
         return _outcomes(args)
     if args.cmd == "inception":

@@ -166,3 +166,40 @@ def test_regulated_lanes_need_the_checkpoint_archive(services):
     assert "CLN" in gap and "FARM" not in gap
     gaps = strict.stand_ins(services, auth_mode="github", env={"VALXEL_CHECKPOINT_ARCHIVE_BUCKET": "b"})
     assert not [g for g in gaps if "CHECKPOINT_ARCHIVE" in g]
+
+
+# --------------------------------------------------------------------------- tiers (ADR 0007, T-69)
+
+VM = {"VALXEL_TIER": "vm", "VALXEL_PUBLIC_URL": "https://valxel.acme.dev", "VALXEL_SESSION_RUNTIME": "runsc",
+      "VALXEL_BACKUP_MARKER": "/backups/last-success"}
+
+
+def test_the_vm_tier_requires_tls_gvisor_no_docker_socket_and_backups(tmp_path):
+    assert strict.tier_checks(VM, tier="vm", live=True, docker_socket=str(tmp_path / "none")) == []
+    sock = tmp_path / "docker.sock"
+    sock.write_text("")
+    found = strict.tier_checks({"VALXEL_PUBLIC_URL": "http://x"}, tier="vm", live=True, docker_socket=str(sock))
+    assert [f.split(":")[0] for f in found] == ["VALXEL_PUBLIC_URL is not https", "VALXEL_SESSION_RUNTIME is not runsc",
+                                                 f"{sock} is in the tool's container",
+                                                 "VALXEL_BACKUP_MARKER is not set"]
+
+
+def test_the_laptop_tier_isnt_for_strict_mode_and_tiers_are_named():
+    [f] = strict.tier_checks({}, tier="laptop", live=True)
+    assert f.startswith("VALXEL_TIER is laptop")
+    assert strict.tier_checks({}, tier="edge", live=True) == ["VALXEL_TIER is one of laptop, vm, cluster, not 'edge'"]
+    assert strict.tier_checks({}, tier="cluster", live=True) == []
+
+
+def test_on_a_vm_sessions_run_in_containers_and_the_app_key_is_a_file_secret(services, monkeypatch, tmp_path):
+    import os
+
+    live_ish(services)
+    real = os.path.exists
+    monkeypatch.setattr(os.path, "exists", lambda p: False if p == "/var/run/docker.sock" else real(p))
+    env = {**LIVE, **VM, "VALXEL_SESSION_EXECUTOR": "docker"}
+    env.pop("VALXEL_GITHUB_APP_KMS_KEY_ID")
+    found = strict.stand_ins(services, auth_mode="github", env=env)
+    assert not any("SESSION_EXECUTOR" in f or "KMS_KEY_ID" in f or f.startswith("VALXEL_TIER") for f in found), found
+    cluster = strict.stand_ins(services, auth_mode="github", env={**LIVE, "VALXEL_SESSION_EXECUTOR": "docker"})
+    assert any("docker on the cluster tier" in f for f in cluster)

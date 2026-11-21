@@ -36,6 +36,7 @@ class Job:
     name: str
     run: Callable[[], Any]
     every: float | str  # seconds, or DAILY (once per UTC day, once it succeeds)
+    stale_hours: float = STALE_HOURS  # alert after this long without a success
 
 
 class Jobs:
@@ -99,7 +100,7 @@ class Jobs:
         for job in jobs:
             h = self.health(job.name)
             since = h.get("last_success") or h.get("first_tried")
-            if since and now - since > STALE_HOURS * 3600:
+            if since and now - since > job.stale_hours * 3600:
                 out.append({"job": job.name, "hours_without_success": round((now - since) / 3600, 1),
                             "failures": int(h.get("failures", 0)), "last_error": h.get("last_error", "")})
         return out

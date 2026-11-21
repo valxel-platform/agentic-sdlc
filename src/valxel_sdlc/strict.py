@@ -46,6 +46,7 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
 
     executor = env.get("VALXEL_SESSION_EXECUTOR", "local").lower()
     tier = env.get("VALXEL_TIER", "cluster").lower()
+    out += tier_checks(env, tier=tier, live=s.mode == "live")
     if s.mode == "live" and executor not in ("kubernetes", "docker"):
         out.append("VALXEL_SESSION_EXECUTOR is local: agent sessions run in the tool's own container, beside its "
                    "keys and every workspace's work; use kubernetes (cluster) or docker (laptop, VM) "
@@ -80,7 +81,7 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
     out += weak_secrets(env, database_url=s.database_url)
     out += unpinned_models(s, env)
     out += secrets_in_environment(env, live=s.mode == "live")
-    out += app_key_in_kms(env)
+    out += app_key_in_kms(env) if tier != "vm" else []  # a VM has no KMS: the key is a file secret there
     out += provisioning_split(env)
     secret_env = _secret_env(env)
     modes = integration_modes(services)
@@ -102,6 +103,37 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         cm = tools.get("change_management") or {}
         if cm.get("provider") == "servicenow" and not secret_env.get(f"VALXEL_SERVICENOW_AUTH_{pid.upper()}"):
             out.append(f"{pid}: tools.change_management names ServiceNow, but VALXEL_SERVICENOW_AUTH_{pid.upper()} is not set")
+    return out
+
+
+TIERS = ("laptop", "vm", "cluster")  # ADR 0007
+
+
+def tier_checks(env, *, tier: str, live: bool, docker_socket: str = "/var/run/docker.sock") -> list[str]:
+    """What each tier requires beyond the common checks (ADR 0007, T-69). The laptop isn't for strict
+    mode; the VM needs TLS, real sign-in, sessions under gVisor, no Docker socket in the tool and
+    backups; the cluster what it always has."""
+    import os as _os
+
+    if tier not in TIERS:
+        return [f"VALXEL_TIER is one of {', '.join(TIERS)}, not {tier!r}"]
+    if tier == "laptop":
+        return [("VALXEL_TIER is laptop: the laptop tier is for one developer's machine (dev sign-in, local builds, "
+                 "the Docker socket in the worker) and doesn't run in strict mode; use the VM tier (`valxel vm init`)")]
+    out = []
+    if tier == "vm":
+        if not (env.get("VALXEL_PUBLIC_URL") or "").startswith("https://"):
+            out.append("VALXEL_PUBLIC_URL is not https: the VM tier serves the tool over TLS only (Caddy in the VM "
+                       "bundle)")
+        if live and env.get("VALXEL_SESSION_RUNTIME", "").lower() != "runsc":
+            out.append("VALXEL_SESSION_RUNTIME is not runsc: on the VM tier each agent session runs under gVisor; "
+                       "install it in Docker (`valxel vm doctor` says how)")
+        if _os.path.exists(docker_socket):
+            out.append(f"{docker_socket} is in the tool's container: on the VM tier only the session launcher "
+                       "reaches Docker")
+        if not env.get("VALXEL_BACKUP_MARKER"):
+            out.append("VALXEL_BACKUP_MARKER is not set: the VM tier backs up its databases and artifacts every night "
+                       "and the tool checks the last one (the VM bundle's backup service)")
     return out
 
 

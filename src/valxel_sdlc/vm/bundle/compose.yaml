@@ -1,0 +1,240 @@
+# The single-VM tier (ADR 0007, T-69): the tool for an early customer or a small team, on one VM,
+# hardened. `valxel vm init` copies this folder and generates its secrets; `valxel vm doctor` checks
+# the VM; `valxel vm up` starts it. See README.md beside this file.
+#
+# What makes it the VM tier: TLS (Caddy) with real sign-in; secrets as files, never in the
+# environment; every image by digest; agent sessions each in a container under gVisor, started by the
+# launcher, the only process with the Docker socket; nightly backups; strict mode on.
+
+name: valxel
+
+x-hardened: &hardened
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  restart: unless-stopped
+
+x-tool: &tool
+  <<: *hardened
+  image: ${VALXEL_IMAGE:?set VALXEL_IMAGE to the tool's image by digest (valxel vm upgrade)}
+  environment: &tool-env
+    VALXEL_TIER: vm
+    VALXEL_STRICT: "1"
+    HOME: /tmp   # the root file system is read-only
+    VALXEL_MODE: live
+    VALXEL_DELIVERY: live
+    VALXEL_PROVISIONING: queue
+    VALXEL_AUTH: ${VALXEL_AUTH:-github}
+    VALXEL_PUBLIC_URL: https://${VALXEL_DOMAIN:?set VALXEL_DOMAIN}
+    VALXEL_RUN_QUEUE: postgres
+    VALXEL_TENANCY: rls
+    VALXEL_SIGNALS_TOKENS: scoped
+    VALXEL_GOVERNANCE_SOURCE: github
+    VALXEL_ARTIFACT_DIR: /data/artifacts
+    # Secrets are files under /run/secrets, each named as its setting (valxel_sdlc.secret_ring).
+    VALXEL_SECRET_STORE: files
+    VALXEL_SECRETS_DIR: /run/secrets
+    VALXEL_GITHUB_APP_ID: ${VALXEL_GITHUB_APP_ID:-}
+    VALXEL_GITHUB_OAUTH_CLIENT_ID: ${VALXEL_GITHUB_OAUTH_CLIENT_ID:-}
+    VALXEL_COGNITO_DOMAIN: ${VALXEL_COGNITO_DOMAIN:-}
+    VALXEL_COGNITO_CLIENT_ID: ${VALXEL_COGNITO_CLIENT_ID:-}
+    VALXEL_COGNITO_ISSUER: ${VALXEL_COGNITO_ISSUER:-}
+    VALXEL_CHECKPOINT_ARCHIVE_BUCKET: ${VALXEL_CHECKPOINT_ARCHIVE_BUCKET:-}
+    VALXEL_LLM_GATEWAY_URL: http://llm-gateway:8080
+    VALXEL_SESSION_EXECUTOR: docker
+    VALXEL_SESSION_RUNTIME: runsc
+    VALXEL_SESSION_LAUNCHER_URL: http://session-launcher:8083
+    VALXEL_SESSION_LAUNCHER_TOKEN_FILE: /run/secrets/session_launcher_token
+    VALXEL_BACKUP_MARKER: /backups/last-success
+  secrets: &tool-secrets
+    - DATABASE_URL
+    - VALXEL_SESSION_SECRET
+    - VALXEL_GITHUB_OAUTH_CLIENT_SECRET
+    - VALXEL_GITHUB_WEBHOOK_SECRET
+    - VALXEL_GITHUB_APP_PRIVATE_KEY
+    - VALXEL_LLM_GATEWAY_API_KEY
+    - session_launcher_token
+  volumes: [artifacts:/data/artifacts, backups:/backups:ro]
+  networks: [default]
+  depends_on:
+    postgres: {condition: service_healthy}
+    llm-gateway: {condition: service_healthy}
+
+services:
+  # TLS for the domain, from Let's Encrypt; the only thing published.
+  caddy:
+    <<: *hardened
+    image: ${CADDY_IMAGE:?set CADDY_IMAGE by digest}
+    cap_add: [NET_BIND_SERVICE]
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      VALXEL_DOMAIN: ${VALXEL_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL for Let's Encrypt}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [api]
+
+  api:
+    <<: *tool
+    environment:
+      <<: *tool-env
+      VALXEL_PROCESS: api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/api/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # Runs the work. No Docker socket: sessions go to the launcher.
+  worker:
+    <<: *tool
+    command: ["valxel", "worker"]
+
+  # Creates product repos with the Provisioning App, which only it can sign for (security S4).
+  provisioner:
+    <<: *tool
+    command: ["valxel", "provisioner"]
+    environment:
+      <<: *tool-env
+      VALXEL_GITHUB_PROVISIONER_APP_ID: ${VALXEL_GITHUB_PROVISIONER_APP_ID:-}
+    secrets: [DATABASE_URL, VALXEL_GITHUB_PROVISIONER_PRIVATE_KEY]
+
+  # The only process with the Docker socket: one locked-down container per session, under gVisor.
+  session-launcher:
+    <<: *hardened
+    image: ${VALXEL_IMAGE}
+    command: ["valxel", "session-launcher"]
+    user: "10001:${DOCKER_GID:?valxel vm init finds the Docker socket's group}"
+    environment:
+      VALXEL_SESSION_IMAGE: ${VALXEL_IMAGE}
+      VALXEL_SESSION_NETWORK: valxel-sessions
+      VALXEL_SESSION_RUNTIME: runsc
+      VALXEL_SESSION_MAX: ${VALXEL_SESSION_MAX:-4}
+      VALXEL_SESSION_LAUNCHER_TOKEN_FILE: /run/secrets/session_launcher_token
+    secrets: [session_launcher_token]
+    volumes: [/var/run/docker.sock:/var/run/docker.sock]
+    networks: [default, sessions]
+
+  # Sessions' only way out: GitHub and the package registries.
+  egress-proxy:
+    <<: *hardened
+    image: ${VALXEL_IMAGE}
+    command: ["valxel", "egress-proxy"]
+    environment:
+      VALXEL_EGRESS_ALLOW: ${VALXEL_EGRESS_ALLOW:-}
+    networks: [default, sessions]
+
+  postgres:
+    image: ${POSTGRES_IMAGE:?set POSTGRES_IMAGE by digest}
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_SUPERUSER_PASSWORD
+    secrets: [POSTGRES_SUPERUSER_PASSWORD, VALXEL_DB_PASSWORD, AUDIT_DB_PASSWORD]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d valxel"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Nightly: both databases and the artifacts, kept VALXEL_BACKUP_KEEP_DAYS days in the backups
+  # volume; the tool checks the last one. Copy them off the VM too (README).
+  backup:
+    image: ${POSTGRES_IMAGE}
+    entrypoint: ["sh", "/backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGPASSWORD_FILE: /run/secrets/POSTGRES_SUPERUSER_PASSWORD
+      VALXEL_BACKUP_KEEP_DAYS: ${VALXEL_BACKUP_KEEP_DAYS:-14}
+    secrets: [POSTGRES_SUPERUSER_PASSWORD]
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - backups:/backups
+      - artifacts:/data/artifacts:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+
+  llm-gateway:
+    <<: *hardened
+    image: ${GATEWAY_IMAGE:?set GATEWAY_IMAGE by digest}
+    env_file: [./secrets/gateway.env]   # the model key: the gateway alone holds it
+    environment:
+      GATEWAY_POLICY: /etc/llm-gateway/policy.yaml
+      GATEWAY_ENVIRONMENT: vm
+      GATEWAY_AUDIT_SINK: kafka
+      GATEWAY_AUDIT_KAFKA_BOOTSTRAP: kafka:9092
+      GATEWAY_AUDIT_TOPIC: audit.v1
+    volumes: [./gateway-policy.local.yaml:/etc/llm-gateway/policy.yaml:ro]
+    networks: [default, sessions]
+    depends_on:
+      kafka: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka:
+    image: ${KAFKA_IMAGE:?set KAFKA_IMAGE by digest}
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes: [kafka:/var/lib/kafka/data]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+    restart: unless-stopped
+
+  audit-sink:
+    <<: *hardened
+    image: ${AUDIT_SINK_IMAGE:?set AUDIT_SINK_IMAGE by digest}
+    env_file: [./secrets/audit-sink.env]   # its database URL, and the archive bucket if any
+    environment:
+      AUDIT_SINK_KAFKA_BOOTSTRAP: kafka:9092
+    depends_on:
+      postgres: {condition: service_healthy}
+      kafka: {condition: service_healthy}
+
+volumes:
+  pgdata:
+  artifacts:
+  kafka:
+  backups:
+  caddy-data:
+  caddy-config:
+
+networks:
+  default:
+  sessions:
+    name: valxel-sessions
+    internal: true
+
+secrets:
+  DATABASE_URL: {file: ./secrets/DATABASE_URL}
+  VALXEL_SESSION_SECRET: {file: ./secrets/VALXEL_SESSION_SECRET}
+  VALXEL_GITHUB_OAUTH_CLIENT_SECRET: {file: ./secrets/VALXEL_GITHUB_OAUTH_CLIENT_SECRET}
+  VALXEL_GITHUB_WEBHOOK_SECRET: {file: ./secrets/VALXEL_GITHUB_WEBHOOK_SECRET}
+  VALXEL_GITHUB_APP_PRIVATE_KEY: {file: ./secrets/VALXEL_GITHUB_APP_PRIVATE_KEY}
+  VALXEL_GITHUB_PROVISIONER_PRIVATE_KEY: {file: ./secrets/VALXEL_GITHUB_PROVISIONER_PRIVATE_KEY}
+  VALXEL_LLM_GATEWAY_API_KEY: {file: ./secrets/VALXEL_LLM_GATEWAY_API_KEY}
+  session_launcher_token: {file: ./secrets/session-launcher-token}
+  POSTGRES_SUPERUSER_PASSWORD: {file: ./secrets/POSTGRES_SUPERUSER_PASSWORD}
+  VALXEL_DB_PASSWORD: {file: ./secrets/VALXEL_DB_PASSWORD}
+  AUDIT_DB_PASSWORD: {file: ./secrets/AUDIT_DB_PASSWORD}
