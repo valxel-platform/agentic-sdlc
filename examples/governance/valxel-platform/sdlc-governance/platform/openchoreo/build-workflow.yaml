@@ -145,11 +145,16 @@ spec:
         - name: build-image
           container:
             image: moby/buildkit:v0.23.2-rootless@sha256:REPLACE_WITH_DIGEST
-            command: [buildctl-daemonless.sh]
-            args: ["build", "--frontend", "dockerfile.v0",
-                   "--local", "context=/mnt/vol/source/{{workflow.parameters.app-path}}",
-                   "--local", "dockerfile=/mnt/vol/source/{{workflow.parameters.app-path}}",
-                   "--output", "type=oci,dest=/mnt/vol/image.tar"]
+            env: [{ name: APP_PATH, value: "{{workflow.parameters.app-path}}" }]
+            command: [sh, -c]
+            # The app's folder inside the checkout, never outside it.
+            args:
+              - >-
+                set -e;
+                case "$APP_PATH" in /*|*..*) echo "appPath must stay inside the repository" >&2; exit 1;; esac;
+                dir="/mnt/vol/source/$APP_PATH";
+                buildctl-daemonless.sh build --frontend dockerfile.v0 --local "context=$dir" --local "dockerfile=$dir"
+                --output type=oci,dest=/mnt/vol/image.tar
             volumeMounts: [{ name: workspace, mountPath: /mnt/vol }]
         - name: push
           container:

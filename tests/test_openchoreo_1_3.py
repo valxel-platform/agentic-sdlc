@@ -70,7 +70,8 @@ def test_no_type_runs_as_root_or_gains_privileges():
 def test_build_parameters_reach_scripts_as_variables_never_spliced_in():
     for tpl in FLOW["spec"]["runTemplate"]["spec"]["templates"][1:]:
         c = tpl.get("container") or {}
-        if c.get("command") == ["sh", "-c"]:
+        if c:
+            assert c.get("command") == ["sh", "-c"], tpl["name"]
             assert "{{" not in " ".join(c.get("args") or []), tpl["name"]
 
 
