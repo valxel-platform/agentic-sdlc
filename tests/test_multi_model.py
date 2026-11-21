@@ -2,8 +2,10 @@
 for text, Codex for code, fallbacks when a provider is unavailable, and a second model's review."""
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -138,7 +140,10 @@ class FakeCodex:
 
     def __call__(self, cmd, **kw):
         self.calls.append((cmd, kw))
-        Path(cmd[cmd.index("-o") + 1]).write_text(self.reply)
+        out = os.path.realpath(cmd[cmd.index("-o") + 1])
+        if not out.startswith(os.path.realpath(tempfile.gettempdir()) + os.sep):  # the test's own folders only
+            raise AssertionError(f"wrote outside the test's folder: {out}")
+        Path(out).write_text(self.reply)
         return subprocess.CompletedProcess(cmd, self.returncode, stdout=self.events, stderr=self.stderr)
 
 

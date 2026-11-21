@@ -2,6 +2,8 @@
 sandbox, what the runner does there, the Kubernetes executor's claim, and the runtime's remote path."""
 
 import json
+import os
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -31,8 +33,10 @@ class FakeSDK:
         if options.get("resume") and self.fail_resume:
             raise RuntimeError("no such session")
         home = options["env"]["HOME"]
-        sid = options.get("resume") or "sess-1"
-        t = sessions.claude_project_dir(home, options["cwd"]) / f"{sid}.jsonl"
+        sid = {"sess-0": "sess-0", "sess-1": "sess-1"}.get(options.get("resume") or "sess-1", "sess-1")
+        t = Path(os.path.realpath(sessions.claude_project_dir(home, options["cwd"]) / f"{sid}.jsonl"))
+        if not str(t).startswith(os.path.realpath(tempfile.gettempdir()) + os.sep):  # the test's own folders only
+            raise AssertionError(f"wrote outside the test's folder: {t}")
         t.parent.mkdir(parents=True, exist_ok=True)
         t.write_text('{"type":"user"}\n')
         return {"text": '{"summary": "done"}', "usage": {"input_tokens": 100, "output_tokens": 20},
