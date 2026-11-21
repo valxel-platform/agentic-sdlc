@@ -56,6 +56,12 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             out["teams"] = sorted(teams)
         return out
 
+    def _signin(action: str, outcome: str, idp: str, actor: str = "", reason: str = "") -> None:
+        """Sign-ins, refused ones too, to the audit trail (valxel_sdlc.audit_events)."""
+        who = actor or "anonymous"
+        eng().services.audit.record(action, actor=who, resource=("person", [who]), outcome=outcome,
+                                    reason=reason, details={"idp": idp})
+
     def _set_session(resp, user: User) -> None:
         resp.set_cookie(SESSION_COOKIE, signer.dumps(session_payload(user)), max_age=SESSION_TTL,
                         httponly=True, samesite="lax", secure=auth.secure_cookies, path="/")
@@ -79,13 +85,17 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     def callback(request: Request, code: str = "", error: str = "") -> RedirectResponse:
         state_param = request.query_params.get("state", "")
         if error or not code:
+            _signin("signin", "failure", "github", reason=(error or "no code")[:100])
             return RedirectResponse("/?signin=failed", status_code=302)
         if not state_param or state_param != request.cookies.get(STATE_COOKIE):
+            _signin("signin", "denied", "github", reason="state mismatch")
             raise HTTPException(400, "Sign-in expired or was started elsewhere; try again")
         try:
             user = oauth.identity(oauth.exchange(code))
         except PermissionError as exc:
+            _signin("signin", "denied", "github", reason="not allowed")
             raise HTTPException(401, str(exc)) from exc
+        _signin("signin", "success", "github", user.login)
         resp = RedirectResponse(local_path(request.cookies.get(NEXT_COOKIE) or "/"), status_code=302)
         resp.delete_cookie(STATE_COOKIE, path="/api/auth")
         resp.delete_cookie(NEXT_COOKIE, path="/api/auth")
@@ -114,15 +124,19 @@ def build(ctx: SimpleNamespace) -> APIRouter:
 
         saved = signer.loads(request.cookies.get(OIDC_COOKIE))
         if error or not code:
+            _signin("signin", "failure", "cognito", reason=(error or "no code")[:100])
             return RedirectResponse("/?signin=failed", status_code=302)
         if cognito is None:
             raise HTTPException(404, "Google and email sign-in aren't enabled")
         if not saved or not state or not secrets.compare_digest(state, str(saved.get("state", ""))):
+            _signin("signin", "denied", "cognito", reason="state mismatch")
             raise HTTPException(400, "Sign-in expired or was started elsewhere; try again")
         try:
             who = cognito.identity(code, verifier=saved["verifier"], nonce=saved["nonce"])
         except SignInError as exc:
+            _signin("signin", "denied", "cognito", reason="identity refused")
             raise HTTPException(401, str(exc)) from exc
+        _signin("signin", "success", "cognito", who.email)
         # The person is their verified email: invitations, groups and approvals find them by it,
         # whichever way they signed in (GitHub's verified email links the same way).
         user = User(login=who.email, name=who.name or who.email.split("@", 1)[0], avatar_url=who.picture,
@@ -148,10 +162,14 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                     idp="dev")
         resp = JSONResponse(asdict(user))
         _set_session(resp, user)
+        _signin("signin", "success", "dev", user.login)
         return resp
 
     @api.post("/auth/logout")
-    def logout() -> JSONResponse:
+    def logout(request: Request) -> JSONResponse:
+        session = signer.loads(request.cookies.get(SESSION_COOKIE)) or {}
+        if isinstance(session, dict) and session.get("login"):
+            _signin("signout", "success", str(session.get("idp") or ""), str(session["login"]))
         resp = JSONResponse({"ok": True})
         resp.delete_cookie(SESSION_COOKIE, path="/")
         return resp

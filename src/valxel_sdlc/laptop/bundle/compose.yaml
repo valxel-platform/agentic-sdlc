@@ -45,6 +45,10 @@ x-tool: &tool
     VALXEL_GOVERNANCE_SOURCE: ${VALXEL_GOVERNANCE_SOURCE:-local}
     # Model calls go through the gateway below; the tool and its sessions never hold the model key.
     VALXEL_LLM_GATEWAY_URL: http://llm-gateway:8080
+    # The tool's own audit records, through Kafka to the audit sink beside the gateway's (T-113).
+    VALXEL_AUDIT_SINK: kafka
+    VALXEL_AUDIT_KAFKA_BOOTSTRAP: kafka:9092
+    VALXEL_AUDIT_TOPIC: audit.v1
     VALXEL_LLM_GATEWAY_API_KEY: ${VALXEL_GATEWAY_KEY:?run valxel dev init}
     # Each agent session runs in a container of its own, started by the session launcher (T-68).
     VALXEL_SESSION_EXECUTOR: docker

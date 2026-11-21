@@ -145,6 +145,14 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             services.changes = WithReceipts(services.changes, ServiceNowReceipts(
                 lambda pid: (services.snapshot(pid).product.tools or {}).get("change_management"),
                 services.change_receipts))
+        # The tool's own audit trail, to the audit sink (valxel_sdlc.audit_events).
+        if getattr(services, "audit", None) is None:
+            from .audit_events import Auditor, InMemoryOutbox, sink_from_env
+
+            services.audit = Auditor(InMemoryOutbox(), sink_from_env())
+        services.changes.on_record = self._audit_change
+        if getattr(services, "workspaces", None) is not None:
+            services.workspaces.store.on_audit = services.audit.from_workspace
         if getattr(services, "inventory_snapshots", None) is None:
             from .ops.inventory import InMemorySnapshots
 
@@ -614,12 +622,35 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             self.services.effort.add({"feature_id": feature_id, "product_id": item.get("product_id", ""),
                                       "kind": "incident_decision", "who": d.get("approver", ""),
                                       "ref": interrupt_id, "minutes": d["active_minutes"]})
+        self._audit_decision(feature_id, interrupt_id, item, d)
         cmd = Command(resume={interrupt_id: d}, update=update) if update else Command(resume={interrupt_id: d})
         if background:
             self._submit(feature_id, cmd)
             return {"feature_id": feature_id, "accepted": True}
         self._run(feature_id, cmd)
         return self.view(feature_id)
+
+    def _audit_decision(self, feature_id: str, interrupt_id: str, item: dict, d: dict) -> None:
+        """A person's answer, before it takes effect: if it can't be recorded, it doesn't happen."""
+        gate = str(item.get("gate") or item.get("kind") or item.get("type") or "")
+        details = {"decision": d["decision"], "gate": gate, "question": interrupt_id,
+                   "budget_usd": d.get("budget_usd"), "override": bool(d.get("override_reason")),
+                   "accepted_risk": d["decision"] == "accept_risk", "via": d.get("via"),
+                   "active_minutes": d.get("active_minutes")}
+        self.services.audit.record("gate.decide", actor=str(d.get("approver") or "unknown"),
+                                   resource=(kind_of(feature_id), [feature_id]), workspace=self._cached_workspace(feature_id),
+                                   product=str(item.get("product_id") or ""), reason=str(d.get("reason") or ""),
+                                   details=details)
+
+    def _audit_change(self, rec: dict) -> None:
+        self.services.audit.record(
+            "change.recorded", actor=str(rec.get("requested_by") or "valxel"),
+            actor_type="user" if rec.get("requested_by") else "service",
+            resource=("change", [rec.get("id", ""), *(x for x in (rec.get("feature_id"), rec.get("release_id"),
+                                                                    rec.get("incident_id")) if x)]),
+            product=str(rec.get("product_id") or ""), workspace=self.workspace_of_product(rec.get("product_id") or ""),
+            details={"kind": rec.get("kind"), "type": rec.get("type"), "action": rec.get("action"),
+                     "env": rec.get("env"), "outcome": rec.get("outcome"), "approved_by": rec.get("approved_by")})
 
     def view(self, feature_id: str) -> dict:
         if kind_of(feature_id) != "feature":

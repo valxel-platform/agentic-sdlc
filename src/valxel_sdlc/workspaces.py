@@ -133,6 +133,8 @@ class InMemoryWorkspaceStore:
             self._audit.append(chained(mine[-1]["hash"] if mine else GENESIS, {
                 "workspace": workspace, "at": now(), "actor": actor, "action": action,
                 "detail": json.loads(json.dumps(detail))}))
+        if getattr(self, "on_audit", None):  # mirrored to the audit sink (valxel_sdlc.audit_events)
+            self.on_audit(workspace, actor, action, detail)
 
     def audit_log(self, workspace, limit=200):
         with self._lock:
@@ -200,6 +202,8 @@ class PostgresWorkspaceStore:
             conn.execute("INSERT INTO valxel_workspace_audit (workspace, at, actor, action, detail, prev_hash, hash) "
                          "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)",
                          (workspace, row["at"], actor, action, json.dumps(row["detail"]), row["prev_hash"], row["hash"]))
+        if getattr(self, "on_audit", None):  # mirrored to the audit sink (valxel_sdlc.audit_events)
+            self.on_audit(workspace, actor, action, detail)
 
     _NEWEST = ("SELECT at, actor, action, detail, prev_hash, hash FROM valxel_workspace_audit WHERE workspace = %s "
                "ORDER BY id DESC LIMIT %s")

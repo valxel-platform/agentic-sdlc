@@ -42,6 +42,10 @@ x-tool: &tool
     VALXEL_COGNITO_ISSUER: ${VALXEL_COGNITO_ISSUER:-}
     VALXEL_CHECKPOINT_ARCHIVE_BUCKET: ${VALXEL_CHECKPOINT_ARCHIVE_BUCKET:-}
     VALXEL_LLM_GATEWAY_URL: http://llm-gateway:8080
+    # The tool's own audit records, through Kafka to the audit sink beside the gateway's (T-113).
+    VALXEL_AUDIT_SINK: kafka
+    VALXEL_AUDIT_KAFKA_BOOTSTRAP: kafka:9092
+    VALXEL_AUDIT_TOPIC: audit.v1
     VALXEL_SESSION_EXECUTOR: docker
     VALXEL_SESSION_RUNTIME: runsc
     VALXEL_SESSION_LAUNCHER_URL: http://session-launcher:8083

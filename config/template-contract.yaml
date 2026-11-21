@@ -126,6 +126,7 @@ audit_event:
   repos:
     valxel-shared-services/ss-audit-sink: src/audit_sink/records.py
     valxel-shared-services/ss-llm-gateway: src/llm_gateway/audit.py
+    valxel-platform/agentic-sdlc: src/valxel_sdlc/audit_events.py   # the tool's own audit trail (T-113)
     valxel-platform/template-agent: src/agent/audit.py
     valxel-platform/template-bff: src/main/java/com/valxel/bff/SignInAudit.java
     valxel-platform/template-channel: src/channel/audit.py

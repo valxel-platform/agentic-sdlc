@@ -205,9 +205,12 @@ class WithReceipts:
     def __init__(self, log_, receipts: ServiceNowReceipts) -> None:
         self._log = log_
         self.receipts = receipts
+        self.on_record = None  # set by the engine: each new record, to the audit trail
 
     def record(self, rec: dict) -> dict:
         stored = self._log.record(rec)
+        if self.on_record is not None and stored.get("at") == rec.get("at"):  # new, not an earlier one's
+            self.on_record(stored)
         if self.receipts.wants(rec["product_id"]) and not self.receipts.store.get([stored["id"]]):
             try:
                 self.receipts.send(stored)

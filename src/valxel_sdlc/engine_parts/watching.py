@@ -157,6 +157,7 @@ class WatchingMixin:
 
         return [
             Job("recover_stranded", self.recover_stranded, 60),  # threads a replica dropped (recovery.py)
+            Job("publish_audit", self.services.audit.relay, 0, stale_hours=1),  # the outbox, to the audit sink
             Job("snapshot_inventories", self.snapshot_inventories, DAILY),  # one inventory snapshot a day
             Job("collect_outcomes", self.collect_outcomes, DAILY),  # readouts and goal trends move daily
             Job("sweep_change_set_envs", self.sweep_change_set_envs, 900),  # environments left behind

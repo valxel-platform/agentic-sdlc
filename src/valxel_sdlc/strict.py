@@ -61,6 +61,9 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("VALXEL_LLM_GATEWAY_URL is not set: agent sessions hold the tool's own model key rather than a "
                    "short-lived gateway token (valxel_sdlc.gateway_sessions)")
 
+    if str(env.get("VALXEL_AUDIT_SINK", "log")).lower() != "kafka":
+        out.append("VALXEL_AUDIT_SINK is not kafka: the tool's own audit records stay in its database, which it "
+                   "can write to, instead of reaching the audit sink (valxel_sdlc.audit_events)")
     if s.database_url and not enforced(env):
         out.append("VALXEL_TENANCY is not rls: every workspace's rows are open to any query that forgets to "
                    "filter (valxel_sdlc.tenancy)")

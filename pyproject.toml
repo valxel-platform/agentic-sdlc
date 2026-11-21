@@ -22,7 +22,9 @@ dependencies = [
 
 [project.optional-dependencies]
 live = ["anthropic>=0.70", "claude-agent-sdk>=0.2", "httpx>=0.27",
-        "opentelemetry-sdk>=1.27", "opentelemetry-exporter-otlp-proto-http>=1.27"]
+        "opentelemetry-sdk>=1.27", "opentelemetry-exporter-otlp-proto-http>=1.27", "confluent-kafka>=2.4"]
+# The tool's audit records to the audit sink's Kafka topic (valxel_sdlc.audit_events); live includes it.
+audit = ["confluent-kafka>=2.4"]
 # Traces of agents' work (valxel_sdlc.telemetry); live includes it.
 telemetry = ["opentelemetry-sdk>=1.27", "opentelemetry-exporter-otlp-proto-http>=1.27"]
 github = ["pyjwt[crypto]>=2.8"]

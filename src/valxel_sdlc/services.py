@@ -79,6 +79,7 @@ class Services:
     alarms: object = None  # valxel_sdlc.ops.alarms board: every CloudWatch alarm's current state
     pager: object = None  # valxel_sdlc.ops.paging.Pager: pages on-call when an incident opens
     changes: object = None  # valxel_sdlc.ops.changes.ChangeLog: every production change, hash-chained
+    audit: object = None  # valxel_sdlc.audit_events.Auditor: the tool's own audit trail, to the audit sink
     inventory_snapshots: object = None  # valxel_sdlc.ops.inventory snapshots: counts per day, for the trend
     aws_tags: object = None  # valxel_sdlc.ops.inventory.AwsTags, when VALXEL_AWS_INVENTORY_ROLE is set
     agents: object = None  # valxel_sdlc.integrations.openchoreo_agents: OpenChoreo's SRE and FinOps agents

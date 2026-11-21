@@ -111,6 +111,9 @@ def _create_engine_from_env() -> tuple[FeatureEngine, Any]:
         from ..workspaces import PostgresWorkspaceStore, Workspaces
 
         services.workspaces = Workspaces(PostgresWorkspaceStore(pool), services.settings.registry)
+        from ..audit_events import Auditor, PostgresOutbox, sink_from_env
+
+        services.audit = Auditor(PostgresOutbox(pool), sink_from_env())
         from ..services import make_connections
 
         services.connections = make_connections(services)
@@ -219,6 +222,39 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                      if who is not None else tenancy.PLATFORM)
         with tenancy.bound(scope, who.login if who is not None else ""):
             return await call_next(request)
+    @app.middleware("http")
+    async def audit_requests(request: Request, call_next):
+        """Every request that changes something, and how it went, to the audit trail
+        (valxel_sdlc.audit_events): refused attempts too. Sign-in records its own."""
+        path = request.url.path
+        if (request.method in ("GET", "HEAD", "OPTIONS") or not path.startswith("/api/")
+                or path.startswith("/api/auth/") or state["engine"] is None):
+            return await call_next(request)
+        response = await call_next(request)
+        from fastapi.concurrency import run_in_threadpool
+
+        try:
+            await run_in_threadpool(_audit_request, request, response.status_code)
+        except Exception:  # done already: say it went unrecorded, loudly, rather than report a failure
+            log.exception("audit record for %s %s not written", request.method, path)
+        return response
+
+    def _audit_request(request: Request, status: int) -> None:
+        from .. import tenancy
+
+        with tenancy.bound(tenancy.PLATFORM):
+            who = ctx.signed_in(request)
+        route = getattr(request.scope.get("route"), "path", "") or request.url.path
+        params = {k: str(v) for k, v in (request.scope.get("path_params") or {}).items()}
+        rtype = route.removeprefix("/api/").split("/", 1)[0] or "api"
+        webhook = route.startswith(("/api/signals", "/api/webhooks", "/api/github"))
+        outcome = "success" if status < 400 else "denied" if status in (401, 403) else "failure"
+        state["engine"].services.audit.record(
+            f"api.{request.method.lower()}", actor=who.login if who else ("webhook" if webhook else "anonymous"),
+            actor_type="user" if who else "service", resource=(rtype, list(params.values()) or [route]),
+            outcome=outcome, workspace=params.get("workspace", ""), product=params.get("product_id", ""),
+            details={"route": route, "status": status})
+
     @app.middleware("http")
     async def trace_requests(request: Request, call_next):
         """Each API request is a server span, continuing the browser's trace (its traceparent header);
