@@ -122,6 +122,35 @@ def _admin_github(settings):
     return GitHubRest(tokens, api=settings.github_api)
 
 
+def _verify_audit(store=None, log=None) -> int:
+    """Exit 0 when every workspace's audit log and the change log chain intact, 1 when one was altered."""
+    from .workspaces import verify_chain
+
+    if store is None:
+        url = _database_url()
+        if not url:
+            print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
+            return 2
+        from psycopg.rows import dict_row
+
+        from .ops.changes import PostgresChangeLog
+        from .tenancy import make_pool
+        from .workspaces import PostgresWorkspaceStore
+
+        pool = make_pool(url, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
+        store, log = PostgresWorkspaceStore(pool), PostgresChangeLog(pool)
+    bad = 0
+    for ws in sorted({w.get("id", "") for w in store.list("workspace")} - {""}):
+        out = verify_chain(store.audit_chain(ws))
+        note = f", {out['unchained']} from before the chain" if out["unchained"] else ""
+        if out["ok"]:
+            print(f"workspace {ws}: {out['entries']} entries intact{note}")
+        else:
+            bad += 1
+            print(f"workspace {ws}: ALTERED at entry {out['broken_at'] + 1} of {out['entries']}")
+    return max(bad and 1, _verify_changes(log))
+
+
 def _verify_changes(log=None) -> int:
     """Exit 0 when every record chains to the one before it, 1 when the log was altered."""
     from .ops.changes import PostgresChangeLog, verify
@@ -474,6 +503,9 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     st.add_argument("name", help="The product id or the 12-digit AWS account")
     c = sub.add_parser("changes", help="Check the production change log's hash chain (DATABASE_URL)")
     c.add_argument("action", choices=["verify"])
+    au = sub.add_parser("audit", help="Check the hash chains of every workspace's audit log and of the production "
+                                      "change log (DATABASE_URL)")
+    au.add_argument("action", choices=["verify"])
     from .laptop import add_parser as _add_dev
     _add_dev(sub)
     from .vm import add_parser as _add_vm
@@ -662,6 +694,8 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
         return _usage_context(args)
     if args.cmd == "changes":
         return _verify_changes()
+    if args.cmd == "audit":
+        return _verify_audit()
     if args.cmd == "glitchtip-token":
         from .ops.error_tracking import token_for
 

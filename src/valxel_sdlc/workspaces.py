@@ -27,6 +27,8 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Protocol
 
+from . import append_only
+
 ROLES = ("viewer", "member", "approver", "admin", "owner")
 GATES = ("g0", "g1", "g2", "g3", "g4", "g5", "g6", "security", "oncall")
 DEFAULT_GROUPS = ("Product", "Design", "Architecture", "Security", "Release", "On-call")
@@ -39,6 +41,41 @@ class WorkspaceError(ValueError):
 
 def now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+# --- the audit log's hash chain: one per workspace, each entry carrying the hash of the one before ---
+
+GENESIS = "0" * 64
+_CHAINED = ("workspace", "at", "actor", "action", "detail")
+
+
+def stamp(at) -> str:
+    return at.astimezone(UTC).isoformat() if hasattr(at, "astimezone") else str(at)
+
+
+def digest(prev: str, entry: dict) -> str:
+    body = json.dumps({k: entry.get(k) for k in _CHAINED}, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256((prev + body).encode()).hexdigest()
+
+
+def chained(prev: str, entry: dict) -> dict:
+    return {**entry, "prev_hash": prev, "hash": digest(prev, entry)}
+
+
+def verify_chain(entries: list[dict]) -> dict:
+    """Oldest first. {"ok", "entries", "unchained" (written before the chain), "broken_at" (index)}.
+    Unchained entries may only come before the first chained one."""
+    prev, unchained = GENESIS, 0
+    for i, e in enumerate(entries):
+        if e.get("hash") is None:
+            if prev != GENESIS:
+                return {"ok": False, "entries": len(entries), "unchained": unchained, "broken_at": i}
+            unchained += 1
+            continue
+        if e.get("prev_hash") != prev or e["hash"] != digest(prev, e):
+            return {"ok": False, "entries": len(entries), "unchained": unchained, "broken_at": i}
+        prev = e["hash"]
+    return {"ok": True, "entries": len(entries), "unchained": unchained, "broken_at": None}
 
 
 def slug(name: str) -> str:
@@ -62,7 +99,8 @@ class WorkspaceStore(Protocol):
     def delete(self, kind: str, workspace: str, key: str) -> None: ...
     def list(self, kind: str, workspace: str | None = None) -> list[dict]: ...
     def audit(self, workspace: str, actor: str, action: str, detail: dict) -> None: ...
-    def audit_log(self, workspace: str, limit: int = 200) -> list[dict]: ...
+    def audit_log(self, workspace: str, limit: int = 200) -> list[dict]: ...  # newest first
+    def audit_chain(self, workspace: str) -> list[dict]: ...  # oldest first, for verify_chain
 
 
 class InMemoryWorkspaceStore:
@@ -91,12 +129,18 @@ class InMemoryWorkspaceStore:
 
     def audit(self, workspace, actor, action, detail):
         with self._lock:
-            self._audit.append({"workspace": workspace, "at": now(), "actor": actor, "action": action,
-                                "detail": json.loads(json.dumps(detail))})
+            mine = [a for a in self._audit if a["workspace"] == workspace]
+            self._audit.append(chained(mine[-1]["hash"] if mine else GENESIS, {
+                "workspace": workspace, "at": now(), "actor": actor, "action": action,
+                "detail": json.loads(json.dumps(detail))}))
 
     def audit_log(self, workspace, limit=200):
         with self._lock:
-            return [a for a in reversed(self._audit) if a["workspace"] == workspace][:limit]
+            return [dict(a) for a in reversed(self._audit) if a["workspace"] == workspace][:limit]
+
+    def audit_chain(self, workspace):
+        with self._lock:
+            return [dict(a) for a in self._audit if a["workspace"] == workspace]
 
 
 class PostgresWorkspaceStore:
@@ -108,6 +152,10 @@ class PostgresWorkspaceStore:
              id BIGSERIAL PRIMARY KEY, workspace TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now(),
              actor TEXT NOT NULL, action TEXT NOT NULL, detail JSONB NOT NULL)""",
         "CREATE INDEX IF NOT EXISTS valxel_workspace_audit_ws ON valxel_workspace_audit (workspace, id)",
+        # Rows written before the chain (T-114) have none; verify reports them as unchained.
+        "ALTER TABLE valxel_workspace_audit ADD COLUMN IF NOT EXISTS prev_hash TEXT",
+        "ALTER TABLE valxel_workspace_audit ADD COLUMN IF NOT EXISTS hash TEXT",
+        *append_only.statements("valxel_workspace_audit"),
     )
 
     def __init__(self, pool) -> None:
@@ -141,16 +189,31 @@ class PostgresWorkspaceStore:
                 {"kind": kind, "ws": workspace}).fetchall()]
 
     def audit(self, workspace, actor, action, detail):
+        with self.pool.connection() as conn, conn.transaction():
+            # One writer per workspace at a time keeps its chain linear across replicas.
+            conn.execute("SELECT pg_advisory_xact_lock(hashtext('valxel_workspace_audit:' || %s))", (workspace,))
+            last = conn.execute("SELECT hash FROM valxel_workspace_audit WHERE workspace = %s AND hash IS NOT NULL "
+                                "ORDER BY id DESC LIMIT 1", (workspace,)).fetchone()
+            row = chained(last["hash"] if last else GENESIS, {
+                "workspace": workspace, "at": now(), "actor": actor, "action": action,
+                "detail": json.loads(json.dumps(detail))})
+            conn.execute("INSERT INTO valxel_workspace_audit (workspace, at, actor, action, detail, prev_hash, hash) "
+                         "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)",
+                         (workspace, row["at"], actor, action, json.dumps(row["detail"]), row["prev_hash"], row["hash"]))
+
+    def _rows(self, workspace, order, limit=None):
+        q = ("SELECT at, actor, action, detail, prev_hash, hash FROM valxel_workspace_audit WHERE workspace = %s "
+             f"ORDER BY id {order}" + (" LIMIT %s" if limit else ""))
         with self.pool.connection() as conn:
-            conn.execute("INSERT INTO valxel_workspace_audit (workspace, actor, action, detail) VALUES (%s, %s, %s, %s::jsonb)",
-                         (workspace, actor, action, json.dumps(detail)))
+            rows = conn.execute(q, (workspace, limit) if limit else (workspace,)).fetchall()
+        return [{"workspace": workspace, "at": stamp(r["at"]), "actor": r["actor"], "action": r["action"],
+                 "detail": r["detail"], "prev_hash": r["prev_hash"], "hash": r["hash"]} for r in rows]
 
     def audit_log(self, workspace, limit=200):
-        with self.pool.connection() as conn:
-            rows = conn.execute("SELECT at, actor, action, detail FROM valxel_workspace_audit WHERE workspace = %s "
-                                "ORDER BY id DESC LIMIT %s", (workspace, limit)).fetchall()
-        return [{"workspace": workspace, "at": r["at"].isoformat(), "actor": r["actor"], "action": r["action"],
-                 "detail": r["detail"]} for r in rows]
+        return self._rows(workspace, "DESC", limit)
+
+    def audit_chain(self, workspace):
+        return self._rows(workspace, "ASC")
 
 
 class Workspaces:

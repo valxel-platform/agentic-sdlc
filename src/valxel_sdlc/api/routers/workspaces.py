@@ -303,4 +303,12 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         admin_of(user, workspace)
         return wsx().store.audit_log(workspace, max(1, min(limit, 1000)))
 
+    @api.get("/workspaces/{workspace}/audit/verify")
+    def verify_workspace_audit(workspace: str, user: User = Depends(current_user)) -> dict:
+        """Whether every entry still chains to the one before it (valxel_sdlc.workspaces.verify_chain)."""
+        from ...workspaces import verify_chain
+
+        admin_of(user, workspace)
+        return verify_chain(wsx().store.audit_chain(workspace))
+
     return api

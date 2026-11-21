@@ -231,8 +231,13 @@ def test_the_change_log_chains_in_postgres_and_shows_tampering():
         log.link("CHG-1", "CLN-INC-1", "again")
         assert [(x["change_id"], x["incident_id"], x["product_id"]) for x in log.links("CLN")] == [
             ("CHG-1", "CLN-INC-1", "CLN")]
-        with pool.connection() as conn:
-            conn.execute("UPDATE valxel_changes SET data = jsonb_set(data, '{summary}', '\"edited\"') WHERE id = 'CHG-1'")
+        edit = "UPDATE valxel_changes SET data = jsonb_set(data, '{summary}', '\"edited\"') WHERE id = 'CHG-1'"
+        with pool.connection() as conn, pytest.raises(Exception, match="append-only"):
+            conn.execute(edit)  # the table refuses (valxel_sdlc.append_only)
+        with pool.connection() as conn:  # someone who can drop the trigger: the chain still shows it
+            conn.execute("ALTER TABLE valxel_changes DISABLE TRIGGER valxel_changes_append_only")
+            conn.execute(edit)
+            conn.execute("ALTER TABLE valxel_changes ENABLE TRIGGER valxel_changes_append_only")
         assert changes.verify(log.all()) == {"ok": False, "records": 2, "broken_at": "CHG-1"}
 
         snaps = PostgresSnapshots(pool)

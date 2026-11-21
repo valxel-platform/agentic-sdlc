@@ -105,7 +105,8 @@ export function ActivityPage({ me }: { me: Me }) {
         <p className="small muted pad">The workspace audit log is only visible to workspace admins.</p>
       )}
       <p className="sealed-note">
-        Sealed history: entries are hash-chained and cannot be edited or deleted, including by admins.
+        Sealed history: entries are hash-chained, and the database refuses edits and deletions, including by
+        admins.
       </p>
     </>
   );

@@ -31,6 +31,8 @@ import threading
 from datetime import datetime, timezone
 from typing import Protocol
 
+from .. import append_only
+
 KINDS = ("release", "flag", "rollback", "policy", "external")
 TYPES = ("standard", "emergency", "automatic")
 GENESIS = "0" * 64
@@ -121,8 +123,8 @@ class InMemoryChangeLog:
 
 
 class PostgresChangeLog:
-    """Append-only in Postgres. Grant the tool's role INSERT and SELECT only on these tables so
-    nothing it runs can rewrite history; the hash chain shows it if anything else does."""
+    """Append-only in Postgres: a trigger refuses UPDATE, DELETE and TRUNCATE (valxel_sdlc.append_only),
+    and the hash chain shows it if anything gets past that."""
 
     DDL = (
         """CREATE TABLE IF NOT EXISTS valxel_changes (
@@ -133,6 +135,8 @@ class PostgresChangeLog:
         """CREATE TABLE IF NOT EXISTS valxel_change_incidents (
              change_id TEXT NOT NULL, incident_id TEXT NOT NULL, product_id TEXT NOT NULL, why TEXT NOT NULL,
              at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (change_id, incident_id))""",
+        *append_only.statements("valxel_changes"),
+        *append_only.statements("valxel_change_incidents"),
     )
 
     def __init__(self, pool) -> None:
