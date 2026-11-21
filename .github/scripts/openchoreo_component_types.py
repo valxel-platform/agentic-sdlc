@@ -53,6 +53,10 @@ SPREAD = [{"maxSkew": 1, "topologyKey": "topology.kubernetes.io/zone", "whenUnsa
 POD_SECURITY = {"runAsNonRoot": True, "runAsUser": 10001, "seccompProfile": {"type": "RuntimeDefault"}}
 CONTAINER_SECURITY = {"readOnlyRootFilesystem": True, "allowPrivilegeEscalation": False,
                       "capabilities": {"drop": ["ALL"]}}
+# Every other type: non-root (the image's own numeric user), nothing to gain, the default seccomp
+# profile. Not a read-only root: a web server writes its caches.
+POD_BASELINE = {"runAsNonRoot": True, "seccompProfile": {"type": "RuntimeDefault"}}
+CONTAINER_BASELINE = {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}}
 LABELS = '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
 
 
@@ -69,8 +73,7 @@ def container(*, env_extra="", mounts_extra="", probes=None, hardened=False):
         "volumeMounts": "${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()"
                         + (f" + {mounts_extra}" if mounts_extra else "") + "}",
     }
-    if hardened:
-        c["securityContext"] = CONTAINER_SECURITY
+    c["securityContext"] = CONTAINER_SECURITY if hardened else CONTAINER_BASELINE
     if probes:
         ready, live = probes
         c["readinessProbe"] = {"httpGet": {"path": ready, "port": 8080}, "periodSeconds": 5}
@@ -86,8 +89,7 @@ def deployment(*, c, volumes_extra="", grace=30, hardened=False, token=True, run
         pod["serviceAccountName"] = sa
     if runtime:
         pod["runtimeClassName"] = runtime
-    if hardened:
-        pod["securityContext"] = POD_SECURITY
+    pod["securityContext"] = POD_SECURITY if hardened else POD_BASELINE
     pod["terminationGracePeriodSeconds"] = grace
     pod["topologySpreadConstraints"] = SPREAD
     if prestop:

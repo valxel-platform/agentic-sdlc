@@ -57,6 +57,23 @@ def test_types_follow_1_3s_workload_model():
         assert "service" in {r["id"] for r in TYPES[name]["spec"]["resources"]}, name
 
 
+def test_no_type_runs_as_root_or_gains_privileges():
+    for name, t in TYPES.items():
+        pod = _pod(t)["spec"]
+        c = pod["containers"][0]
+        assert pod["securityContext"]["runAsNonRoot"] is True, name
+        assert pod["securityContext"]["seccompProfile"] == {"type": "RuntimeDefault"}, name
+        assert c["securityContext"]["allowPrivilegeEscalation"] is False, name
+        assert c["securityContext"]["capabilities"] == {"drop": ["ALL"]}, name
+
+
+def test_build_parameters_reach_scripts_as_variables_never_spliced_in():
+    for tpl in FLOW["spec"]["runTemplate"]["spec"]["templates"][1:]:
+        c = tpl.get("container") or {}
+        if c.get("command") == ["sh", "-c"]:
+            assert "{{" not in " ".join(c.get("args") or []), tpl["name"]
+
+
 def test_the_platforms_additions_are_kept():
     for name in ("service", "web-app", "worker", "agent", "code-sandbox", "connector"):
         dep = next(r for r in TYPES[name]["spec"]["resources"] if r["id"] == "deployment")["template"]["spec"]

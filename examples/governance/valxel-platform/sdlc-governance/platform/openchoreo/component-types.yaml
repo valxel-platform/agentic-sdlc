@@ -111,6 +111,10 @@ spec:
           metadata:
             labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
           spec:
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
             terminationGracePeriodSeconds: 30
             topologySpreadConstraints:
             - maxSkew: 1
@@ -132,6 +136,11 @@ spec:
               env: ${dependencies.toContainerEnvs()}
               envFrom: ${configurations.toContainerEnvFrom()}
               volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
               readinessProbe:
                 httpGet:
                   path: /health/ready
@@ -414,6 +423,10 @@ spec:
           metadata:
             labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
           spec:
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
             terminationGracePeriodSeconds: 30
             topologySpreadConstraints:
             - maxSkew: 1
@@ -435,6 +448,11 @@ spec:
               env: ${dependencies.toContainerEnvs()}
               envFrom: ${configurations.toContainerEnvFrom()}
               volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
               lifecycle:
                 preStop:
                   exec:
@@ -670,6 +688,10 @@ spec:
           metadata:
             labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
           spec:
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
             terminationGracePeriodSeconds: 30
             topologySpreadConstraints:
             - maxSkew: 1
@@ -691,6 +713,11 @@ spec:
               env: ${dependencies.toContainerEnvs()}
               envFrom: ${configurations.toContainerEnvFrom()}
               volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                  - ALL
               lifecycle:
                 preStop:
                   exec:
