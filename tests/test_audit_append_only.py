@@ -1,6 +1,7 @@
 """T-114: the workspace audit log and the change log can't be rewritten, and tampering shows."""
 
 import os
+import uuid
 
 import pytest
 
@@ -50,32 +51,33 @@ def test_postgres_refuses_to_change_delete_or_truncate_audit_and_change_rows():
     from valxel_sdlc.workspaces import PostgresWorkspaceStore
 
     with ConnectionPool(DB, kwargs={"autocommit": True, "row_factory": dict_row}, open=True) as pool:
+        ws = f"t114-{uuid.uuid4().hex[:8]}"  # a database a previous run left rows in
         store = PostgresWorkspaceStore(pool)
         PostgresWorkspaceStore(pool)  # a second start installs nothing twice
         log = changes.PostgresChangeLog(pool)
-        store.audit("t114", "ann", "member.add", {"member": "m1", "n": 1.5})
-        store.audit("t114", "ann", "member.remove", {"member": "m1"})
-        log.record(changes.new(key="t114-1", product_id="p", kind="flag", type="standard", action="off",
+        store.audit(ws, "ann", "member.add", {"member": "m1", "n": 1.5})
+        store.audit(ws, "ann", "member.remove", {"member": "m1"})
+        log.record(changes.new(key=ws, product_id="p", kind="flag", type="standard", action="off",
                                summary="off", targets=[]))
-        assert verify_chain(store.audit_chain("t114"))["ok"]
-        assert store.audit_log("t114", 1)[0]["action"] == "member.remove"
-        for sql in ("UPDATE valxel_workspace_audit SET actor = 'mallory' WHERE workspace = 't114'",
-                    "DELETE FROM valxel_workspace_audit WHERE workspace = 't114'",
+        assert verify_chain(store.audit_chain(ws))["ok"]
+        assert store.audit_log(ws, 1)[0]["action"] == "member.remove"
+        for sql in ("UPDATE valxel_workspace_audit SET actor = 'mallory' WHERE workspace = %s",
+                    "DELETE FROM valxel_workspace_audit WHERE workspace = %s",
                     "TRUNCATE valxel_workspace_audit",
                     "UPDATE valxel_changes SET data = '{}'::jsonb",
                     "DELETE FROM valxel_changes",
                     "TRUNCATE valxel_changes CASCADE"):
             with pool.connection() as conn, pytest.raises(psycopg.errors.InsufficientPrivilege, match="append-only"):
-                conn.execute(sql)
-        assert len(store.audit_chain("t114")) == 2
+                conn.execute(sql, (ws,) if "%s" in sql else None)
+        assert len(store.audit_chain(ws)) == 2
         # Past the trigger (its owner dropped it): the chain still shows the edit.
         with pool.connection() as conn:
             conn.execute("ALTER TABLE valxel_workspace_audit DISABLE TRIGGER valxel_workspace_audit_append_only")
             try:
-                conn.execute("UPDATE valxel_workspace_audit SET actor = 'mallory' WHERE workspace = 't114'")
+                conn.execute("UPDATE valxel_workspace_audit SET actor = 'mallory' WHERE workspace = %s", (ws,))
             finally:
                 conn.execute("ALTER TABLE valxel_workspace_audit ENABLE TRIGGER valxel_workspace_audit_append_only")
-        assert verify_chain(store.audit_chain("t114"))["broken_at"] == 0
+        assert verify_chain(store.audit_chain(ws))["broken_at"] == 0
 
 
 def test_the_cli_reports_each_workspace_and_fails_on_an_altered_one(capsys):
