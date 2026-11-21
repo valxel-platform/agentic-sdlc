@@ -201,19 +201,23 @@ class PostgresWorkspaceStore:
                          "VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)",
                          (workspace, row["at"], actor, action, json.dumps(row["detail"]), row["prev_hash"], row["hash"]))
 
-    def _rows(self, workspace, order, limit=None):
-        q = ("SELECT at, actor, action, detail, prev_hash, hash FROM valxel_workspace_audit WHERE workspace = %s "
-             f"ORDER BY id {order}" + (" LIMIT %s" if limit else ""))
+    _NEWEST = ("SELECT at, actor, action, detail, prev_hash, hash FROM valxel_workspace_audit WHERE workspace = %s "
+               "ORDER BY id DESC LIMIT %s")
+    _OLDEST = ("SELECT at, actor, action, detail, prev_hash, hash FROM valxel_workspace_audit WHERE workspace = %s "
+               "ORDER BY id ASC LIMIT %s")
+
+    def _rows(self, workspace, newest_first, limit=None):
         with self.pool.connection() as conn:
-            rows = conn.execute(q, (workspace, limit) if limit else (workspace,)).fetchall()
+            rows = conn.execute(self._NEWEST if newest_first else self._OLDEST,
+                                (workspace, limit or 10_000_000)).fetchall()
         return [{"workspace": workspace, "at": stamp(r["at"]), "actor": r["actor"], "action": r["action"],
                  "detail": r["detail"], "prev_hash": r["prev_hash"], "hash": r["hash"]} for r in rows]
 
     def audit_log(self, workspace, limit=200):
-        return self._rows(workspace, "DESC", limit)
+        return self._rows(workspace, True, limit)
 
     def audit_chain(self, workspace):
-        return self._rows(workspace, "ASC")
+        return self._rows(workspace, False)
 
 
 class Workspaces:
