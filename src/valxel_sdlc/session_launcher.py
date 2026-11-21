@@ -157,6 +157,51 @@ class Launcher:
         return self._runtime
 
     def run(self, spec: dict) -> dict:
+        """The session's outcome (its steps, if streamed, are dropped: see stream())."""
+        from .agent_steps import read
+
+        return read(self.stream({**spec, "stream": True}), None) if spec.get("stream") else self._run(spec)
+
+    def stream(self, spec: dict):
+        """The container's streamed /run, line by line: its steps, then the outcome. The container is
+        removed when the stream ends, however it ends."""
+        import httpx
+
+        from .agent_steps import line
+
+        if not self.slots.acquire(timeout=min(self.s.wait_s, 600)):
+            yield line({"outcome": {"ok": False, "error": "Unavailable", "transient": True}})
+            return
+        sid = str(spec.get("id") or uuid.uuid4().hex[:16])
+        cid = ""
+        try:
+            cid = self.docker.create(f"valxel-session-{sid}", container_body(self.s, self.runtime(), sid))
+            self.docker.start(cid)
+            host = self._address(cid)
+            http = self.http or httpx.Client(follow_redirects=False, trust_env=False)
+            self._healthy(http, host)
+            req = http.build_request("POST", f"http://{host}:{RUNNER_PORT}/run", json={**spec, "stream": True},
+                                     timeout=float(spec.get("timeout_s", 3600)) + 60)
+            resp = http.send(req, stream=True)
+            try:
+                if resp.status_code != 200:
+                    raise Unavailable(f"the session's container answered {resp.status_code}")
+                for raw in resp.iter_lines():
+                    if raw.strip():
+                        yield (raw + "\n").encode()
+            finally:
+                resp.close()
+        except (Unavailable, httpx.HTTPError) as exc:
+            yield line({"outcome": {"ok": False, "error": type(exc).__name__, "transient": True}})
+        finally:
+            if cid:
+                try:
+                    self.docker.remove(cid)
+                except Exception:  # noqa: BLE001 - the sweep removes it
+                    log.warning("session container %s not removed", cid[:12])
+            self.slots.release()
+
+    def _run(self, spec: dict) -> dict:
         import httpx
 
         wait = min(self.s.wait_s, 600)
@@ -231,11 +276,15 @@ def make_app(launcher: Launcher):
         return {"ok": True, "runtime": launcher.runtime()}
 
     @app.post("/sessions")
-    def sessions(spec: dict, authorization: str = Header(default="")) -> dict:
+    def sessions(spec: dict, authorization: str = Header(default="")):
         want = launcher.s.token
         got = authorization.removeprefix("Bearer ").strip()
         if not want or not hmac.compare_digest(got.encode(), want.encode()):
             raise HTTPException(401, "a valid launcher token is required")
+        if spec.get("stream"):  # the session's steps as they come, then its outcome
+            from fastapi.responses import StreamingResponse
+
+            return StreamingResponse(launcher.stream(spec), media_type="application/x-ndjson")
         try:
             return launcher.run(spec)
         except Unavailable as exc:
@@ -274,20 +323,28 @@ class DockerExecutor:
     def __init__(self, *, url: str, token: str, http: Any = None) -> None:
         self.url, self.token, self.http = url.rstrip("/"), token, http
 
-    def run(self, spec: dict) -> dict:
+    def run(self, spec: dict, on_step=None) -> dict:
         import httpx
 
+        from .agent_steps import read
         from .session_runner import Unavailable as SessionUnavailable
 
         http = self.http or httpx.Client(follow_redirects=False, trust_env=False)
+        body = {**spec, "stream": True} if on_step else spec
         try:
-            resp = http.post(f"{self.url}/sessions", json=spec, headers={"Authorization": f"Bearer {self.token}"},
-                             timeout=float(spec.get("timeout_s", 3600)) + 300)
+            req = http.build_request("POST", f"{self.url}/sessions", json=body,
+                                     headers={"Authorization": f"Bearer {self.token}"},
+                                     timeout=float(spec.get("timeout_s", 3600)) + 300)
+            resp = http.send(req, stream=bool(on_step))
+            try:
+                if resp.status_code != 200:
+                    resp.read()
+                    raise SessionUnavailable(f"the session launcher answered {resp.status_code}: {resp.text[:200]}")
+                return read(resp.iter_lines(), on_step) if on_step else resp.json()
+            finally:
+                resp.close()
         except httpx.HTTPError as exc:
             raise SessionUnavailable(f"the session launcher couldn't be reached ({type(exc).__name__})") from exc
-        if resp.status_code != 200:
-            raise SessionUnavailable(f"the session launcher answered {resp.status_code}: {resp.text[:200]}")
-        return resp.json()
 
 
 def executor_from_env(env=None) -> DockerExecutor:

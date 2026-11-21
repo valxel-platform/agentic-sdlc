@@ -40,17 +40,23 @@ export function closeLive() {
   connected = false;
 }
 
-/** Call `refresh` (debounced) whenever a live event matches `filter`. */
-export function useLive(refresh: () => void, filter: (e: LiveEvent) => boolean = () => true) {
-  const ref = useRef({ refresh, filter });
+/** Call `refresh` (debounced) whenever a live event matches `filter`. An agent's steps
+ * ("feature.progress", many a minute) reach only a listener that asks for them with `steps`. */
+export function useLive(
+  refresh: () => void,
+  filter: (e: LiveEvent) => boolean = () => true,
+  opts: { steps?: boolean } = {},
+) {
+  const ref = useRef({ refresh, filter, steps: !!opts.steps });
   // Keep the latest callbacks in the ref after render, not during it.
   useEffect(() => {
-    ref.current = { refresh, filter };
+    ref.current = { refresh, filter, steps: !!opts.steps };
   });
   useEffect(() => {
     ensure();
     let t: number | undefined;
     const fn: Listener = (e) => {
+      if ((e.type === "feature.progress") !== ref.current.steps) return;
       if (!ref.current.filter(e)) return;
       window.clearTimeout(t);
       t = window.setTimeout(() => ref.current.refresh(), 250);

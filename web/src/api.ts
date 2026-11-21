@@ -1110,6 +1110,14 @@ export interface UnmatchedSignal {
   reason: string;
   received_at: string;
 }
+/** One thing an agent did on a feature, as it did it (T-112). */
+export interface AgentStep {
+  phase: string;
+  role: string;
+  repo: string;
+  step: string;
+  at: string;
+}
 /** Starting an initiative's features: started now, queued one at a time, or waiting on what they need. */
 export interface StartResult {
   started: string[];
@@ -1665,6 +1673,8 @@ export const api = {
     request<{ accepted: boolean }>("POST", `/features/${encodeURIComponent(id)}/resume`, {}),
   syncWork: (id: string) => request<unknown>("POST", `/features/${encodeURIComponent(id)}/sync`, {}),
   feature: (id: string) => request<Feature>("GET", `/features/${encodeURIComponent(id)}`),
+  agentSteps: (id: string) =>
+    request<{ steps: AgentStep[] }>("GET", `/features/${encodeURIComponent(id)}/steps`),
   setShip: (id: string, releaseId: string) =>
     request<Ship>("PUT", `/features/${encodeURIComponent(id)}/ship`, { release_id: releaseId }),
   initiative: (id: string) => request<InitiativeView>("GET", `/features/${encodeURIComponent(id)}`),

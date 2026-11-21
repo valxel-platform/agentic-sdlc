@@ -359,6 +359,17 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         return HTMLResponse(page, headers={"Content-Security-Policy": sketch.CSP, "X-Content-Type-Options": "nosniff",
                                            "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
+    @api.get("/features/{feature_id}/steps")
+    def agent_steps(feature_id: str, user: User = Depends(current_user)) -> dict:
+        """What the feature's agents are doing, step by step, as they do it (T-112)."""
+        try:
+            state = eng()._state(feature_id)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if state.get("product_id") not in lanes_for(user):
+            raise HTTPException(403, f"You aren't a member of {state.get('product_id')}'s organization")
+        return {"steps": eng().agent_steps(feature_id)}
+
     @api.get("/features/{feature_id}/prototype", response_class=HTMLResponse)
     def prototype_page(feature_id: str, user: User = Depends(current_user)) -> HTMLResponse:
         """The G3 prototype, for a sandboxed frame: only the tool's own runtime runs in it (its hash

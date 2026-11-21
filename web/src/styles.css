@@ -3806,3 +3806,34 @@ table.quality tfoot td {
     margin-left: 0;
   }
 }
+
+/* What the agents are doing, as they do it (T-112) */
+.agent-steps {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+.agent-steps li {
+  padding: 1px 0;
+}
+.agent-steps li.now {
+  color: var(--ink-2);
+}
+.agent-steps .who {
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .agent-steps li.now {
+    animation: step-in 160ms ease-out;
+  }
+}
+@keyframes step-in {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 1;
+  }
+}

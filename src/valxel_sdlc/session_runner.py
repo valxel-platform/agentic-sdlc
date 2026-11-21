@@ -32,6 +32,7 @@ in live mode.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -109,7 +110,7 @@ def _inside(base: Path, rel: str) -> Path:
     return Path(full)
 
 
-def run_spec(spec: dict, root: Path | None = None, *, query=None) -> dict:
+def run_spec(spec: dict, root: Path | None = None, *, query=None, on_step=None) -> dict:
     """Run one session from its spec, in `root` (the sandbox's work area): the outcome, with the
     transcript when asked. `query` stands in for the SDK in tests."""
     from . import sessions
@@ -143,7 +144,12 @@ def run_spec(spec: dict, root: Path | None = None, *, query=None) -> dict:
                "env": {**(spec.get("env") or {}), "HOME": str(home), "TMPDIR": str(home / "tmp"), **NO_SCRIPTS},
                "plugins": [{"type": "local", "path": p} for p in
                            (plugin_dirs_from(os.environ.get("VALXEL_SKILLS_DIR")) if spec.get("plugins") else [])]}
-    ask = query or _sdk_query
+    base = query or _sdk_query
+    if on_step and "on_step" in inspect.signature(base).parameters:
+        def ask(prompt, opts):
+            return base(prompt, opts, on_step=on_step)
+    else:
+        ask = base
     resumed, mode = False, spec["fallback"]["session_mode"]
     out = None
     r = spec.get("resume") or {}
@@ -241,10 +247,14 @@ def make_app(work: Path = Path("/work"), query=None):
         return {"ok": True, "used": state["used"]}
 
     @app.post("/run")
-    def run(spec: dict) -> dict:
+    def run(spec: dict):
         if state["used"]:  # one session per sandbox
             raise HTTPException(409, "this sandbox has run its session")
         state["used"] = True
+        if spec.get("stream"):  # its steps line by line as it goes, then the outcome (agent_steps)
+            from fastapi.responses import StreamingResponse
+
+            return StreamingResponse(_streamed(spec, work, query), media_type="application/x-ndjson")
         try:
             return {"ok": True, **run_spec(spec, work, query=query)}
         except Exception as exc:  # the tool reports it as the session's error; details stay in this log
@@ -252,6 +262,34 @@ def make_app(work: Path = Path("/work"), query=None):
             return _failed(exc)
 
     return app
+
+
+def _streamed(spec: dict, work: Path, query):
+    """The session in a thread; its steps and then its outcome, one JSON line each."""
+    import queue as _queue
+    import threading
+
+    from .agent_steps import line
+
+    q: _queue.Queue = _queue.Queue()
+
+    def go() -> None:
+        try:
+            q.put({"outcome": {"ok": True, **run_spec(spec, work, query=query, on_step=lambda s: q.put({"step": s}))}})
+        except Exception as exc:  # reported as the session's error; details stay in this log
+            log.exception("session failed")
+            q.put({"outcome": _failed(exc)})
+
+    threading.Thread(target=go, name="session", daemon=True).start()
+    while True:
+        try:
+            msg = q.get(timeout=15)
+        except _queue.Empty:
+            yield b"\n"  # keeps the connection alive through quiet stretches
+            continue
+        yield line(msg)
+        if "outcome" in msg:
+            return
 
 
 def _failed(exc: Exception) -> dict:
@@ -264,7 +302,15 @@ def _failed(exc: Exception) -> dict:
 # --------------------------------------------------------------------------- executors
 
 class Executor(Protocol):
-    def run(self, spec: dict) -> dict: ...
+    def run(self, spec: dict, on_step=None) -> dict: ...
+
+
+def run_with_steps(spec: dict, on_step) -> dict:
+    """executor().run, passing the session's steps on when the executor can stream them."""
+    ex = executor()
+    if on_step and "on_step" in inspect.signature(ex.run).parameters:
+        return ex.run(spec, on_step=on_step)
+    return ex.run(spec)
 
 
 class LocalExecutor:
@@ -273,10 +319,10 @@ class LocalExecutor:
     def __init__(self, query=None) -> None:
         self.query = query
 
-    def run(self, spec: dict) -> dict:
+    def run(self, spec: dict, on_step=None) -> dict:
         root = Path(tempfile.mkdtemp(prefix="valxel-run-"))
         try:
-            return {"ok": True, **run_spec(spec, root, query=self.query)}
+            return {"ok": True, **run_spec(spec, root, query=self.query, on_step=on_step)}
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
@@ -293,7 +339,7 @@ class KubernetesExecutor:
         self.http = http
         self.sleep, self.clock, self.now = sleep, clock, now
 
-    def run(self, spec: dict) -> dict:
+    def run(self, spec: dict, on_step=None) -> dict:
         import httpx
         from datetime import datetime, timezone
 
@@ -308,10 +354,19 @@ class KubernetesExecutor:
         http = self.http or httpx.Client(follow_redirects=False, trust_env=False)
         try:
             host = self._ready(name)
-            resp = self._post(http, f"http://{host}:{self.port}/run", spec)
-            if resp.status_code != 200:
-                raise Unavailable(f"the session's sandbox answered {resp.status_code}")
-            return resp.json()
+            resp = self._post(http, f"http://{host}:{self.port}/run", {**spec, "stream": True} if on_step else spec,
+                              stream=bool(on_step))
+            try:
+                if resp.status_code != 200:
+                    raise Unavailable(f"the session's sandbox answered {resp.status_code}")
+                if on_step:  # its steps as they come, then the outcome (agent_steps)
+                    from .agent_steps import read
+
+                    return read(resp.iter_lines(), on_step)
+                return resp.json()
+            finally:
+                if hasattr(resp, "close"):
+                    resp.close()
         except httpx.HTTPError as exc:
             raise Unavailable(f"the session's sandbox couldn't be reached ({type(exc).__name__})") from exc
         finally:
@@ -320,7 +375,7 @@ class KubernetesExecutor:
             except Exception:  # noqa: BLE001 - the claim's TTL removes it anyway
                 log.warning("session sandbox claim %s not deleted", name)
 
-    def _post(self, http, url: str, spec: dict):
+    def _post(self, http, url: str, spec: dict, stream: bool = False):
         """A new sandbox's name may not resolve yet, nor its runner listen: retry connecting for a
         little while. Once connected, the session runs once: nothing is sent twice."""
         import httpx
@@ -328,7 +383,10 @@ class KubernetesExecutor:
         deadline = self.clock() + min(self.ready_s, 30.0)
         while True:
             try:
-                return http.post(url, json=spec, timeout=spec.get("timeout_s", 3600) + 60)
+                if not stream:
+                    return http.post(url, json=spec, timeout=spec.get("timeout_s", 3600) + 60)
+                req = http.build_request("POST", url, json=spec, timeout=spec.get("timeout_s", 3600) + 60)
+                return http.send(req, stream=True)
             except httpx.ConnectError:
                 if self.clock() >= deadline:
                     raise

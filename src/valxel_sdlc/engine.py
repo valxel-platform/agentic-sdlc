@@ -3,40 +3,38 @@
 from __future__ import annotations
 
 import logging
-
 import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-
 from langgraph.types import Command
 
 from .cluster import Busy, Cluster, LeaseLost, MemoryCluster, Notes
-from .events import EventBus
-from .graph import build_pipeline
-from .graph.pipeline import normalize
-from .gateway import summarize
-from .services import Services
-from .waits import WaitChecker
-from .worksync import InMemoryLinkStore, WorkSync
 from .engine_parts.base import (  # noqa: F401 - importable from valxel_sdlc.engine as before
+    EXPEDITED,
     KINDS,
-    kind_of,
+    RAIL,
+    WAIT_STATION,
     FeatureIndex,
     InMemoryIndex,
     PostgresIndex,
+    kind_of,
     openchoreo_auth,
-    RAIL,
-    WAIT_STATION,
-    EXPEDITED,
     rail,
 )
-from .engine_parts.watching import WatchingMixin
-from .engine_parts.roadmap import RoadmapMixin
-from .engine_parts.operations import OperationsMixin
 from .engine_parts.costs import CostsMixin
+from .engine_parts.operations import OperationsMixin
 from .engine_parts.recovery import RecoveryMixin
+from .engine_parts.roadmap import RoadmapMixin
+from .engine_parts.watching import WatchingMixin
+from .events import EventBus
+from .gateway import summarize
+from .graph import build_pipeline
+from .graph.pipeline import normalize
+from .services import Services
+from .waits import WaitChecker
+from .worksync import InMemoryLinkStore, WorkSync
 
 log = logging.getLogger(__name__)
 
@@ -50,12 +48,11 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         self.queue = queue
         # Several replicas: thread locks, the watcher's leadership and shared notes (cluster.py).
         self.cluster: Cluster = cluster or MemoryCluster()
+        from .inception.graph import build_inception_graph
         from .ops.incident import build_incident_graph
         from .ops.signals import InMemorySignalStore
-        from .inception.graph import build_inception_graph
         from .outcomes.review import build_review_graph
         from .roadmap.graphs import build_initiative_graph, build_release_graph
-
         from .tenancy import thread_bound
 
         # Writes LangGraph commits from its own worker threads carry no scope: they belong to the
@@ -180,6 +177,11 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
 
             services.pager = from_env(os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080")
         self.bus = bus or EventBus()
+        from . import (
+            agent_steps,  # what agents are doing, live on the feature's page (T-112)
+        )
+
+        agent_steps.configure(self.bus.publish, keep=lambda fid, steps: self.cluster.put(f"steps:{fid}", steps))
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="feature")
         self.running: set[str] = set()  # queued or running on this replica
         self.errors = Notes(self.cluster, "error")  # a thread's last error, whichever replica ran it
@@ -561,6 +563,12 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         """Create a feature and run it until its first human gate (synchronous)."""
         return self.view(self.create(**kwargs))
 
+    def agent_steps(self, feature_id: str) -> list[dict]:
+        """The last steps an agent took on this feature, from whichever process ran it (T-112)."""
+        from . import agent_steps
+
+        return list(self.cluster.get(f"steps:{feature_id}") or []) or agent_steps.recent(feature_id)
+
     def pending(self, feature_id: str) -> list[dict]:
         snap = self._g(feature_id).get_state(self._config(feature_id))
         out = [{"interrupt_id": i.id, **i.value} for i in snap.interrupts]
@@ -598,7 +606,8 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             raise InvalidDecision("Accepting a security risk needs a reason")
         asked = self.services.effort.asked_at(feature_id, interrupt_id)
         if asked:  # how long the question waited for a person
-            from .pilot import minutes_between, now as _now
+            from .pilot import minutes_between
+            from .pilot import now as _now
 
             d["waited_minutes"] = round(minutes_between(asked, _now()), 2)
         if kind_of(feature_id) == "incident":  # on-call's work counts in the product's pilot totals

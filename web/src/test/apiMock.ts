@@ -29,6 +29,7 @@ function prefs(over: Record<string, unknown> = {}) {
 }
 
 function applyDefaults() {
+  apiMock.agentSteps.mockResolvedValue({ steps: [] });
   apiMock.changes.mockResolvedValue([]);
   apiMock.verifyChanges.mockResolvedValue({ ok: true, records: 0, broken_at: null });
   apiMock.lookback.mockResolvedValue({
@@ -155,6 +156,7 @@ export const apiMock = {
   resume: vi.fn(),
   syncWork: vi.fn(),
   feature: vi.fn(),
+  agentSteps: vi.fn(),
   initiative: vi.fn(),
   inception: vi.fn(),
   inceptions: vi.fn(),

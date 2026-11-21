@@ -5,6 +5,7 @@ import {
   ApiError,
   PROFILE_HELP,
   PROFILE_LABEL,
+  type AgentStep,
   type Feature,
   type FeatureCost,
   type FeatureEvent,
@@ -272,6 +273,34 @@ function ShipLine({ f, onChanged }: { f: Feature; onChanged: () => void }) {
   );
 }
 
+/** What the agents are doing right now: the last few steps, as they happen (T-112). */
+export function AgentSteps({ id }: { id: string }) {
+  const [steps, setSteps] = useState<AgentStep[]>([]);
+  const load = useCallback(() => {
+    api
+      .agentSteps(id)
+      .then((r) => setSteps(r.steps))
+      .catch(() => undefined);
+  }, [id]);
+  useEffect(load, [load]);
+  useLive(load, (e) => e.feature_id === id, { steps: true });
+  const recent = steps.slice(-6);
+  if (recent.length === 0) return null;
+  return (
+    <ol className="agent-steps" aria-label="What the agents are doing" aria-live="polite">
+      {recent.map((s, i) => (
+        <li key={`${s.at}-${i}`} className={i === recent.length - 1 ? "now" : undefined}>
+          <span className="who">
+            {s.role}
+            {s.repo ? ` in ${s.repo}` : ""}:
+          </span>{" "}
+          {s.step}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export function FeaturePage({ canSync }: { canSync: (productId: string) => boolean }) {
   const { id = "" } = useParams();
   const [f, setF] = useState<Feature | null>(null);
@@ -459,6 +488,7 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
                 <li className="current">
                   <span className="tick" aria-hidden="true" />
                   <div className="muted">Agents working…</div>
+                  <AgentSteps id={f.feature_id} />
                 </li>
               )}
             </ol>

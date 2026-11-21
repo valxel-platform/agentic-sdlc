@@ -185,7 +185,7 @@ class ClaudeCodeRuntime:
                                        fallback_prompt=task.fresh_tail or task.layers.tail,
                                        fallback_mode="handoff" if task.fresh_tail else task.session_mode,
                                        plugins_on=bool(self.plugins_for(task.role)))
-        out = session_runner.executor().run(spec)
+        out = session_runner.run_with_steps(spec, steps_for(task))
         if not out.get("ok"):
             if out.get("transient"):
                 raise ProviderUnavailable(f"claude_code: the session's provider was unavailable ({out.get('error')})")
@@ -205,7 +205,8 @@ class ClaudeCodeRuntime:
         return res
 
     async def _query(self, task: AgentTask, model: str, options, session_mode: str = "fresh") -> AgentResult:
-        return self._finish(task, model, await run_query(task.layers.tail, options), session_mode)
+        return self._finish(task, model, await run_query(task.layers.tail, options, on_step=steps_for(task)),
+                            session_mode)
 
     def _finish(self, task: AgentTask, model: str, out: dict, session_mode: str) -> AgentResult:
         """A session's outcome (run_query, here or in its sandbox) into the ledger and a result."""
@@ -246,15 +247,30 @@ class ClaudeCodeRuntime:
         )
 
 
-async def run_query(prompt: str, options) -> dict:
+def steps_for(task: AgentTask):
+    """Where this session's steps go: the feature's page (valxel_sdlc.agent_steps)."""
+    from ..agent_steps import reporter
+
+    box = task.sandbox or {}
+    repo = ((box.get("checkout") or {}).get("repo") or "") if isinstance(box.get("checkout"), dict) else ""
+    return reporter(task.tags.feature_id, task.phase, task.role, repo)
+
+
+async def run_query(prompt: str, options, on_step=None) -> dict:
     """One Claude Code session through the SDK, as a plain outcome: what the tool needs of it.
-    The same here and in a session's sandbox (valxel_sdlc.session_runner)."""
+    The same here and in a session's sandbox (valxel_sdlc.session_runner). on_step hears what it's
+    doing as it goes (valxel_sdlc.agent_steps)."""
     from claude_agent_sdk import ResultMessage, query  # lazy import
 
+    from ..agent_steps import Reader
+
+    steps = Reader(on_step) if on_step else None
     text, result, loaded, errors = "", None, set(), []
     peak, session_id = 0, ""  # the largest prompt of any one call, and the session (valxel_sdlc.context)
     started = time.monotonic()
     async for message in query(prompt=prompt, options=options):
+        if steps:
+            steps.feed(message)
         loaded |= skills_used(message)
         peak = max(peak, prompt_tokens(getattr(message, "usage", None)) if not isinstance(message, ResultMessage) else 0)
         session_id = getattr(message, "session_id", None) or session_id
