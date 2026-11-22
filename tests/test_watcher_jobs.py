@@ -129,8 +129,8 @@ def test_an_alert_channel_failure_never_stops_the_watcher(caplog):
 
 def test_the_engine_runs_every_job_through_the_health_runner(engine):
     names = [j.name for j in engine.watcher_jobs()]
-    assert len(names) == len(set(names)) == 19
-    assert {"snapshot_inventories", "collect_outcomes", "upkeep_sweep", "collect_costs", "tool_health", "drift_evals", "remove_drafts", "warn_release_dates", "check_backups", "publish_audit", "check_tool_metrics"} <= set(names)
+    assert len(names) == len(set(names)) == 20
+    assert {"snapshot_inventories", "collect_outcomes", "upkeep_sweep", "collect_costs", "tool_health", "drift_evals", "remove_drafts", "warn_release_dates", "check_backups", "publish_audit", "check_tool_metrics", "anchor_audit_chains"} <= set(names)
 
 
 def test_monitoring_sees_stale_jobs(engine):

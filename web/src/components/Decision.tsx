@@ -1023,6 +1023,8 @@ export function DecisionPanel({
         </p>
       )}
 
+      {item.separation && <p className="small">{item.separation}</p>}
+
       <h3 className="decision-sec">Checks that passed</h3>
       {item.traceability && <ReleaseTrace t={item.traceability} />}
 

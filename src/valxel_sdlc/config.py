@@ -159,6 +159,10 @@ class Limits:
     # can't be sent back again: a person takes it over (edits the document and hands it back) or stops it.
     takeover_after_revisions: int = 2
     max_gate_revisions: int = 3
+    # Separation of duties (valxel_sdlc.separation): the gates where whoever wrote the work can't
+    # approve it, and the data classes where that holds at every gate.
+    separation_of_duties_gates: tuple[str, ...] = ("g5", "g6")
+    separation_of_duties_data_classes: tuple[str, ...] = ("phi", "payments")
 
 
 @dataclass(frozen=True)
@@ -369,6 +373,9 @@ def load_settings(
             required_gates=tuple(lim.get("required_gates", Limits.required_gates)),
             takeover_after_revisions=int(lim.get("takeover_after_revisions", 2)),
             max_gate_revisions=int(lim.get("max_gate_revisions", 3)),
+            separation_of_duties_gates=tuple(lim.get("separation_of_duties_gates", Limits.separation_of_duties_gates)),
+            separation_of_duties_data_classes=tuple(
+                lim.get("separation_of_duties_data_classes", Limits.separation_of_duties_data_classes)),
         ),
         registry=registry,
         roles={name: RoleConfig(**spec) for name, spec in models_raw["roles"].items()},

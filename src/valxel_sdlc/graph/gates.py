@@ -8,7 +8,7 @@ from langgraph.types import Command, interrupt
 from ..agents import GATE_APPROVE_TARGET, GATE_PHASE, NEXT_AFTER_PHASE, PHASE_SPECS
 from ..agents.parse import parse_affected_repos, parse_cases, parse_tasks
 from ..state import FeatureState
-from .. import lessons, profiles
+from .. import lessons, profiles, separation
 from .phase import capability_id, design_knowledge, event, gates_status, now, touched_lanes
 from .briefs import hotfix_approvers
 from .infra import _alarms_firing, _apply_capacity, _build_cost, _capacity_change, aws_plan, aws_summary, bind_resource, env_for, oc_target
@@ -288,12 +288,22 @@ def make_gate(gate: str, services):
                 said = {**hb, "feedback": hb["feedback"] or d["feedback"], "reason": hb.get("reason") or d.get("reason"),
                         "remember": hb.get("remember") or d.get("remember"), "lesson": hb.get("lesson") or d.get("lesson")}
                 mine = hb.get("artifact_content")
+                d = {**hb, "decision": "abort" if hb["decision"] == "abort" else "approve"}
                 if hb["decision"] == "handback" and mine and mine.strip() != draft.strip():
                     taken.append((said, draft, mine))
                     human = mine
+                    if separation.applies(limits, snap.product.data_class, gate):
+                        # Their own version doesn't approve itself (valxel_sdlc.separation): another
+                        # approver reads it and approves it or stops the feature. The engine refuses
+                        # the rewriter here, and remembers them for later rounds of this phase.
+                        d = normalize(interrupt({
+                            **packet, "rewritten_by": hb["approver"], "preview": mine[:2000],
+                            "allowed": ["approve", "abort"],
+                            "separation": f"{hb['approver']} rewrote this document: another approver approves it.",
+                        }), ("approve", "abort"))
+                        records.append(_record(gate, phase, d, lane_id))
                 else:
                     corrections.append(correction(state, gate, phase, "takeover", said, len(records)))
-                d = {**hb, "decision": "abort" if hb["decision"] == "abort" else "approve"}
             elif d["decision"] in ("revise", "abort"):
                 corrections.append(correction(state, gate, phase, d["decision"], d, len(records)))
             if d["decision"] != "approve":

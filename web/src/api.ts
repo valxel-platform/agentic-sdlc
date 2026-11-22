@@ -261,6 +261,9 @@ export interface PendingItem {
   agent_sessions?: AgentSession[] | null;
   // Why the last decision was refused (asked again).
   refused?: string;
+  // Separation of duties: whose rewritten document this approval is for; they can't approve it.
+  separation?: string;
+  rewritten_by?: string;
   // At G6: CloudWatch alarms firing before production on what the feature touches.
   alarms_firing?: {
     env: string;

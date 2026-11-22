@@ -623,6 +623,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             self.services.effort.add({"feature_id": feature_id, "product_id": item.get("product_id", ""),
                                       "kind": "incident_decision", "who": d.get("approver", ""),
                                       "ref": interrupt_id, "minutes": d["active_minutes"]})
+        self._separation(feature_id, item, d)
         self._audit_decision(feature_id, interrupt_id, item, d)
         cmd = Command(resume={interrupt_id: d}, update=update) if update else Command(resume={interrupt_id: d})
         if background:
@@ -631,12 +632,27 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         self._run(feature_id, cmd)
         return self.view(feature_id)
 
+    def _separation(self, feature_id: str, item: dict, d: dict) -> None:
+        """Whoever wrote the work doesn't approve it (valxel_sdlc.separation): every way a decision
+        arrives comes through here. Recorded on the decision when the rule applied."""
+        if item.get("type") not in ("gate", "handback") or kind_of(feature_id) != "feature":
+            return
+        from . import separation
+
+        state = self._state(feature_id)
+        data_class = self.services.feature_snapshot(state).product.data_class
+        if separation.check(state, item, d, data_class, self.services.settings.limits):
+            d["separation"] = "checked"
+        if item.get("rewritten_by"):
+            d["rewritten_by"] = item["rewritten_by"]
+
     def _audit_decision(self, feature_id: str, interrupt_id: str, item: dict, d: dict) -> None:
         """A person's answer, before it takes effect: if it can't be recorded, it doesn't happen."""
         gate = str(item.get("gate") or item.get("kind") or item.get("type") or "")
         details = {"decision": d["decision"], "gate": gate, "question": interrupt_id,
                    "budget_usd": d.get("budget_usd"), "override": bool(d.get("override_reason")),
                    "accepted_risk": d["decision"] == "accept_risk", "via": d.get("via"),
+                   "separation": d.get("separation"), "rewritten_by": d.get("rewritten_by"),
                    "active_minutes": d.get("active_minutes")}
         self.services.audit.record("gate.decide", actor=str(d.get("approver") or "unknown"),
                                    resource=(kind_of(feature_id), [feature_id]), workspace=self._cached_workspace(feature_id),

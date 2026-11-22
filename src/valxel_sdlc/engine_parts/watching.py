@@ -169,6 +169,7 @@ class WatchingMixin:
             Job("recover_stranded", self.recover_stranded, 60),  # threads a replica dropped (recovery.py)
             Job("publish_audit", self.services.audit.relay, 0, stale_hours=1),  # the outbox, to the audit sink
             Job("check_tool_metrics", self._metrics_checker().run, 300, stale_hours=1),  # alerts (metrics.py)
+            Job("anchor_audit_chains", self._audit_anchorer().run, 3600, stale_hours=3),  # (audit_anchors.py)
             Job("snapshot_inventories", self.snapshot_inventories, DAILY),  # one inventory snapshot a day
             Job("collect_outcomes", self.collect_outcomes, DAILY),  # readouts and goal trends move daily
             Job("sweep_change_set_envs", self.sweep_change_set_envs, 900),  # environments left behind
@@ -195,6 +196,14 @@ class WatchingMixin:
         if self.services.evals is None:
             return None
         return drift.run(self.services, self.cluster)
+
+    def _audit_anchorer(self):
+        if getattr(self, "_anchorer", None) is None:
+            from ..audit_anchors import Anchorer, S3Anchors
+
+            self._anchorer = Anchorer(S3Anchors.from_env(), getattr(self.services, "workspaces", None),
+                                      self.services.changes, self.services.audit)
+        return self._anchorer
 
     def _metrics_checker(self):
         if getattr(self, "_metrics_check", None) is None:

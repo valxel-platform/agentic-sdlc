@@ -33,6 +33,11 @@ limits:
   max_initiative_budget_usd: 5000  # ceiling on an initiative's envelope (all its features)
   required_gates: [g1, g2, g3, g4, g5, g6]   # every gate needs named approvers (VX-1)
   takeover_after_revisions: 2      # a gate sent back this often suggests a person takes the phase over
+  # Separation of duties (valxel_sdlc.separation): whoever started the feature or rewrote a phase's
+  # document can't approve it at these gates, and at every gate for these data classes. A
+  # one-person pilot sets the gates to []; the data classes stay.
+  separation_of_duties_gates: [g5, g6]
+  separation_of_duties_data_classes: [phi, payments]
   max_gate_revisions: 3            # then it can't be sent back again: take it over, or stop
 
 # kind: product  owns its runtime (OpenChoreo project and environments) and deploys services.

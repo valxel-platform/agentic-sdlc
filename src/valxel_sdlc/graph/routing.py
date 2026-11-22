@@ -52,6 +52,10 @@ def _record(gate: str, phase: str, d: dict, lane: str = "") -> GateDecision:
         rec["viewed_s"] = round(float(d["viewed_s"]), 1)
     if d.get("batch"):
         rec["batch"] = True
+    if d.get("separation"):  # the separation-of-duties rule applied and the decider passed it
+        rec["separation"] = str(d["separation"])
+    if d.get("rewritten_by"):  # a second approval: whose rewritten document it approved
+        rec["rewritten_by"] = str(d["rewritten_by"])
     return rec
 
 

@@ -122,7 +122,7 @@ def _admin_github(settings):
     return GitHubRest(tokens, api=settings.github_api)
 
 
-def _verify_audit(store=None, log=None) -> int:
+def _verify_audit(store=None, log=None, anchors=None) -> int:
     """Exit 0 when every workspace's audit log and the change log chain intact, 1 when one was altered."""
     from .workspaces import verify_chain
 
@@ -148,7 +148,25 @@ def _verify_audit(store=None, log=None) -> int:
         else:
             bad += 1
             print(f"workspace {ws}: ALTERED at entry {out['broken_at'] + 1} of {out['entries']}")
-    return max(bad and 1, _verify_changes(log))
+    bad = max(bad and 1, _verify_changes(log))
+    return max(bad, _verify_anchors(store, log, anchors))
+
+
+def _verify_anchors(store, log, anchors=None) -> int:
+    """Each chain against the heads anchored under Object Lock (audit_anchors.py), when there are."""
+    from . import audit_anchors
+
+    anchors = anchors or audit_anchors.S3Anchors.from_env()
+    if anchors is None:
+        print("anchors: none configured (VALXEL_AUDIT_ANCHOR_BUCKET): the chains were checked only against themselves")
+        return 0
+    bad = 0
+    for chain, problems in audit_anchors.verify(anchors, type("W", (), {"store": store})(), log).items():
+        for p in problems:
+            bad = 1
+            print(f"{chain}: CONTRADICTS ITS ANCHORS: {p}")
+    print("anchors: every chain agrees with its anchors" if not bad else "anchors: tampering found")
+    return bad
 
 
 def _verify_changes(log=None) -> int:

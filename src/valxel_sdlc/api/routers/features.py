@@ -270,10 +270,11 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                               "viewed_s": seconds, "batch": True,
                               "feedback": f"Approved with {len(body.items)} low-risk decisions"}, background=True)
                 approved.append(ref.feature_id)
-            except (KeyError, RuntimeError, InvalidDecision) as exc:
+            except (KeyError, RuntimeError, InvalidDecision, PermissionError) as exc:
                 # A fixed reason per kind of failure: the exception's text stays in the log.
                 log.info("batch approval skipped %s: %s", ref.feature_id, exc)
                 why = ("no longer waiting for a decision" if isinstance(exc, KeyError)
+                       else "you wrote this work: another approver decides it" if isinstance(exc, PermissionError)
                        else "doesn't take this decision" if isinstance(exc, InvalidDecision)
                        else "running right now: try again in a moment")
                 skipped.append({"feature_id": ref.feature_id, "why": why})
@@ -319,10 +320,10 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             decision["feedback"] = with_comments(decision.get("feedback", ""), decision.pop("comments"))
         try:
             return eng().decide(feature_id, interrupt_id, decision, background=True)
-        except InvalidDecision as exc:
-            raise HTTPException(422, str(exc)) from exc
-        except RuntimeError as exc:
-            raise HTTPException(409, str(exc)) from exc
+        except (PermissionError, InvalidDecision, RuntimeError) as exc:
+            # 403: separation of duties (valxel_sdlc.separation); 422: not a decision it takes; 409: busy
+            code = 403 if isinstance(exc, PermissionError) else 422 if isinstance(exc, InvalidDecision) else 409
+            raise HTTPException(code, str(exc)) from exc
 
     @api.get("/features/{feature_id}/mockups/{sid}", response_class=HTMLResponse)
     def mockup(feature_id: str, sid: str, user: User = Depends(current_user)) -> HTMLResponse:
