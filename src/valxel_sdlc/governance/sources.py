@@ -51,7 +51,7 @@ class LocalSource:
 
     def resolve(self, org: str, repo: str, ref: str) -> str:
         tree = self._tree(org, repo)
-        digest = hashlib.sha1(json.dumps(tree, sort_keys=True).encode()).hexdigest()
+        digest = hashlib.sha1(json.dumps(tree, sort_keys=True).encode(), usedforsecurity=False).hexdigest()
         with self._lock:
             self._snapshots.setdefault((org, repo, digest), tree)
         return digest

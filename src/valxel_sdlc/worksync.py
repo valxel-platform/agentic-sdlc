@@ -234,7 +234,7 @@ class WorkSync:
         cfg, tracker = self.config(s)
         if not cfg or tracker is None:
             return {"drift": [], "block": False}
-        fid, have, drift = s["feature_id"], self.links.get(s["feature_id"]), []
+        have, drift = self.links.get(s["feature_id"]), []
         names = {"todo": "open", "in_progress": "in progress", "done": "done", "cancelled": "cancelled"}
         for d in self.desired(s, cfg):
             row = have.get(d.key)

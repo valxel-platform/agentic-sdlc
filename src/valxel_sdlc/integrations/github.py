@@ -184,10 +184,10 @@ class StubGitHub:
                     pr["pushes"] = pr.get("pushes", 0) + 1
                     pr["labels"] = list(dict.fromkeys(list(pr.get("labels") or []) + list(labels)))  # labels add up, as on GitHub
                     pr.update(title=title, body=body, head_sha=hashlib.sha1(
-                        f"{repo}#{pr['number']}:{body}:{pr['pushes']}".encode()).hexdigest())
+                        f"{repo}#{pr['number']}:{body}:{pr['pushes']}".encode(), usedforsecurity=False).hexdigest())
                     return {k: v for k, v in pr.items() if k != "pushes"}
             number = next(self._seq)
-            sha = hashlib.sha1(f"{repo}#{number}:{body}".encode()).hexdigest()
+            sha = hashlib.sha1(f"{repo}#{number}:{body}".encode(), usedforsecurity=False).hexdigest()
             pr = {"repo": repo, "number": number, "branch": branch, "base": "main", "title": title, "body": body,
                   "files": list(files), "labels": list(labels), "state": "open", "head_sha": sha,
                   "url": f"https://github.com/{repo}/pull/{number}"}
@@ -203,7 +203,7 @@ class StubGitHub:
                 raise GitHubError(f"{repo}#{number}: head branch was modified since {sha[:7]}", 409)
             if pr["state"] != "merged":
                 pr.update(state="merged", merged_by=actor,
-                          merge_sha=hashlib.sha1(f"merge:{repo}#{number}".encode()).hexdigest())
+                          merge_sha=hashlib.sha1(f"merge:{repo}#{number}".encode(), usedforsecurity=False).hexdigest())
                 branch = pr.get("branch") or pr.get("head") or ""
                 for (r, b, p), v in list(self.files.items()):  # like GitHub: the branch's files land on main
                     if r == repo and b == branch and branch:
@@ -214,13 +214,13 @@ class StubGitHub:
         with self._lock:
             self.files[(repo, branch, path)] = content
         return {"repo": repo, "branch": branch, "path": path, "message": message,
-                "sha": hashlib.sha1(content.encode()).hexdigest()}
+                "sha": hashlib.sha1(content.encode(), usedforsecurity=False).hexdigest()}
 
     def put_bytes(self, *, repo, branch, path, content, message) -> dict:
         with self._lock:
             self.files[(repo, branch, path)] = content
         return {"repo": repo, "branch": branch, "path": path, "message": message,
-                "sha": hashlib.sha1(content).hexdigest()}
+                "sha": hashlib.sha1(content, usedforsecurity=False).hexdigest()}
 
     def delete_file(self, *, repo, branch, path, message) -> bool:
         with self._lock:
@@ -332,7 +332,7 @@ class StubGitHub:
         return v.encode() if isinstance(v, str) else v
 
     def head_sha(self, *, repo) -> str:
-        return hashlib.sha1(f"{repo}@main".encode()).hexdigest()
+        return hashlib.sha1(f"{repo}@main".encode(), usedforsecurity=False).hexdigest()
 
     def create_repo(self, *, repo, template, private, description) -> str:
         r = self._repo(repo, "create_repo")

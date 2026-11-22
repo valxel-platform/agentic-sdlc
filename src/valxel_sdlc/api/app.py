@@ -226,6 +226,23 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                      if who is not None else tenancy.PLATFORM)
         with tenancy.bound(scope, who.login if who is not None else ""):
             return await call_next(request)
+    https = (auth.public_url or os.environ.get("VALXEL_PUBLIC_URL", "")).startswith("https://")
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        """On every response (review finding 15): no other site may frame the app (clickjacking), no
+        plugins or base-tag tricks, no MIME sniffing, and over https, HSTS. The app's own pages
+        frame mockups and previews, so the policy limits who frames it, not what it frames."""
+        response = await call_next(request)
+        h = response.headers
+        h.setdefault("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'self'; object-src 'none'")
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        if https:
+            h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
+
     @app.middleware("http")
     async def meter_requests(request: Request, call_next):
         """Each API request counted and timed by route template (valxel_sdlc.metrics)."""

@@ -104,6 +104,23 @@ jobs:
       - run: pip install -r requirements.lock && pip install -e ".[dev]"
       - run: pytest tests/smoke -v
 
+  # Lint and types as a ratchet (scripts/lint_ratchet.py): no file may gain a ruff or mypy finding
+  # over config/lint-baseline.json, so the code only gets cleaner. Pinned tools (.[lint]) and the
+  # image's pinned dependencies, so findings don't move under the baseline on their own.
+  lint:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.lock && pip install -e ".[dev,lint]"
+      - run: python scripts/lint_ratchet.py
+
   test:
     needs: [changes, test-shard]
     # Runs whenever the shares ran, so a failed share fails this check; skipped with them otherwise.

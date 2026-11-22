@@ -135,7 +135,7 @@ def plant(diff: str, seed: str) -> tuple[str, str] | None:
         kinds.append("secret")
     if not kinds:
         return None
-    kind = kinds[int(hashlib.sha1(seed.encode()).hexdigest(), 16) % len(kinds)]
+    kind = kinds[int(hashlib.sha1(seed.encode(), usedforsecurity=False).hexdigest(), 16) % len(kinds)]
     out = list(lines)
     if kind == "flip":
         i, p, ln = next((i, p, ln) for i, p, ln in src if _flip(ln))
@@ -156,7 +156,7 @@ def plant(diff: str, seed: str) -> tuple[str, str] | None:
         what = f"{p}: skipped a test"
     else:
         i, p, _ln = src[0]
-        key = "sk_live_" + hashlib.sha1(seed.encode()).hexdigest()[:24]
+        key = "sk_live_" + hashlib.sha1(seed.encode(), usedforsecurity=False).hexdigest()[:24]
         out[i + 1:i + 1] = [f'+API_KEY = "{key}"' if p.endswith(".py") else f'+const API_KEY = "{key}";']
         what = f"{p}: put an API key in the code"
     return "\n".join(out) + ("\n" if diff.endswith("\n") else ""), what

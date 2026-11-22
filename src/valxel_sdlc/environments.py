@@ -122,8 +122,7 @@ def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: st
     """The product's clusters (a pull request) and its OpenChoreo project, environments and
     pipeline (when its data planes are registered). Returns the steps, like inception setup."""
     steps: list[dict] = []
-    n = names(product_id)
-    gh, oc = services.github, services.openchoreo
+    gh = services.github
     infra_repo = infra_repo if infra_repo is not None else os.environ.get("VALXEL_INFRA_REPO", "")
 
     def step(name: str, fn) -> None:

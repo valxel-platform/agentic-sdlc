@@ -33,6 +33,8 @@ integrations = ["mcp>=1.10"]
 # Cost reviews from AWS Cost Explorer.
 aws = ["boto3>=1.35"]
 dev = ["pytest>=8", "pytest-cov>=6", "pytest-xdist>=3.6", "httpx>=0.27", "pyjwt[crypto]>=2.8", "mcp>=1.10", "opentelemetry-sdk>=1.27"]
+# The lint gate (scripts/lint_ratchet.py): pinned, since a new version's new findings would fail it.
+lint = ["ruff==0.16.9", "mypy==2.3.1"]
 
 [project.scripts]
 valxel = "valxel_sdlc.cli:main"
@@ -43,3 +45,31 @@ packages = ["src/valxel_sdlc"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+# Lint and types: CI fails on any finding not in config/lint-baseline.json (scripts/lint_ratchet.py),
+# so the code can only get cleaner. Engineering review finding 11.
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["web", "examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "S", "UP", "I", "SIM", "RUF", "DTZ", "BLE", "C90", "PL"]
+ignore = [
+    "PLC0415",  # imports inside functions: how the seams stay apart and start-up stays light (ADR 0005)
+    "B008",     # FastAPI's Depends() in defaults
+    "PLR0913", "PLR0917",  # argument counts: keyword-only arguments carry most of them
+    "PLR2004",  # magic values: status codes and limits read better inline
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S108", "S603", "S607", "S311", "PLW0108", "C901", "PLR0912", "PLR0915"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = false

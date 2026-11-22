@@ -261,7 +261,7 @@ def people_approved(case: EvalCase) -> bool | None:
 
 def _pairwise_order(case_id: str) -> bool:
     """True: the new document is A. Fixed per case, so positions don't favour one config."""
-    return int(hashlib.sha1(case_id.encode()).hexdigest(), 16) % 2 == 0
+    return int(hashlib.sha1(case_id.encode(), usedforsecurity=False).hexdigest(), 16) % 2 == 0
 
 
 def triage_score(proposed_text: str, label: dict, component: str = "") -> tuple[bool | None, bool | None]:

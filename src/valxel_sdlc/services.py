@@ -113,7 +113,7 @@ class Services:
         c = self.canary
         if c is None or not c.percent or track == "hotfix" or data_class not in c.data_classes:
             return ""
-        return "canary" if int(hashlib.sha1(feature_id.encode()).hexdigest(), 16) % 100 < c.percent else ""
+        return "canary" if int(hashlib.sha1(feature_id.encode(), usedforsecurity=False).hexdigest(), 16) % 100 < c.percent else ""
 
     def runtime_for(self, role: str, variant: str = "") -> AgentRuntime:
         stack = self._stack(variant)

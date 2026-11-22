@@ -37,9 +37,12 @@ def test_the_card_says_who_they_are_and_how_to_sign_in(client):
     assert flows["authorizationCode"]["tokenUrl"] == f"https://{DOMAIN}/oauth2/token"
 
 
-@pytest.mark.parametrize("tok", [token(username=None, scope="valxel/agents"), token(client_id="someone-elses")])
-def test_only_a_person_gets_in(client, tok):
-    r = call(client, "SendMessage", say("hello"), tok)
+# The claims, not the tokens: a token made at import differs by worker (the time in it), and pytest
+# names a test by its parameters, so parallel workers would collect different tests (review #10).
+@pytest.mark.parametrize("claims", [{"username": None, "scope": "valxel/agents"}, {"client_id": "someone-elses"}],
+                         ids=["client-credentials", "another-apps-client"])
+def test_only_a_person_gets_in(client, claims):
+    r = call(client, "SendMessage", say("hello"), token(**claims))
     assert r.status_code == 401 and "Bearer" in r.headers["www-authenticate"]
     assert client.post("/a2a", json={"jsonrpc": "2.0", "id": 1, "method": "SendMessage"}).status_code == 401
 

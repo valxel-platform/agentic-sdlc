@@ -40,7 +40,7 @@ def config_version(settings) -> str:
     critic decides and retries revise. Every ledger row carries it, so results trace to settings."""
     roles = {k: [v.runtime, v.model] for k, v in sorted(settings.roles.items())}
     blob = json.dumps({"roles": roles, "critic": "checklist", "retry": "revise"}, sort_keys=True)
-    return hashlib.sha1(blob.encode()).hexdigest()[:10]
+    return hashlib.sha1(blob.encode(), usedforsecurity=False).hexdigest()[:10]
 
 
 def now() -> str:

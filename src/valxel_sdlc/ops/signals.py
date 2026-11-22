@@ -88,7 +88,7 @@ def from_ticket(payload: dict) -> list[dict]:
     title = str(payload.get("title") or "").strip()
     if not title:
         return []
-    key = payload.get("id") or hashlib.sha1(f"{title}{payload.get('description', '')}".encode()).hexdigest()[:12]
+    key = payload.get("id") or hashlib.sha1(f"{title}{payload.get('description', '')}".encode(), usedforsecurity=False).hexdigest()[:12]
     return [{
         "source": "ticket", "status": "resolved" if payload.get("status") == "resolved" else "firing",
         "product_id": str(payload.get("product_id") or ""), "component": str(payload.get("component") or ""),

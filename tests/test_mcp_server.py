@@ -96,17 +96,21 @@ def test_it_tells_clients_where_to_sign_in(client):
     assert meta["resource"] == "https://testserver/mcp" and meta["authorization_servers"] == [ISSUER]
 
 
-@pytest.mark.parametrize("why, tok", [
+# The claims, not the tokens: a token made at import differs by worker (the time in it), and pytest
+# names a test by its parameters, so parallel workers would collect different tests (review #10).
+@pytest.mark.parametrize("why, claims", [
     # A client-credentials token: an agent or a service, no person behind it.
-    ("client credentials", token(username=None, scope="valxel/agents")),
-    ("no openid scope", token(scope="email")),
-    ("another app's client", token(client_id="someone-elses")),
-    ("an ID token", token(token_use="id")),
-    ("another issuer", token(iss="https://cognito-idp.us-east-1.amazonaws.com/us-east-1_OTHER")),
-    ("expired", token(exp=int(time.time()) - 3600)),
-])
-def test_only_a_persons_token_gets_in(client, why, tok):
-    assert rpc(client, "tools/list", tok=tok).status_code == 401, why
+    ("client credentials", {"username": None, "scope": "valxel/agents"}),
+    ("no openid scope", {"scope": "email"}),
+    ("another app's client", {"client_id": "someone-elses"}),
+    ("an ID token", {"token_use": "id"}),
+    ("another issuer", {"iss": "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_OTHER"}),
+    ("expired", {"exp": -3600}),  # relative to now, made when the test runs
+], ids=["client-credentials", "no-openid-scope", "another-apps-client", "id-token", "another-issuer", "expired"])
+def test_only_a_persons_token_gets_in(client, why, claims):
+    if "exp" in claims:
+        claims = {**claims, "exp": int(time.time()) + claims["exp"]}
+    assert rpc(client, "tools/list", tok=token(**claims)).status_code == 401, why
 
 
 def test_tools_act_as_the_person(client, pool):
