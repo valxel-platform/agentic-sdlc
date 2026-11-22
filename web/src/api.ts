@@ -1657,6 +1657,7 @@ export const api = {
   devLogin: (login: string, teams: string[], orgs: string[], email = "") =>
     request<Me>("POST", "/auth/dev-login", { login, teams, orgs, email }),
   logout: () => request<{ ok: boolean }>("POST", "/auth/logout", {}),
+  logoutEverywhere: () => request<{ ok: boolean }>("POST", "/auth/logout-everywhere", {}),
   me: () => request<Me>("GET", "/me"),
   features: () => request<FeatureSummary[]>("GET", "/features"),
   products: () =>
@@ -1837,6 +1838,12 @@ export const api = {
     request<{ invite_url: string; emailed: boolean }>(
       "POST",
       `/workspaces/${encodeURIComponent(ws)}/members/${encodeURIComponent(id)}/resend`,
+      {},
+    ),
+  signMemberOut: (ws: string, id: string) =>
+    request<{ signed_out: string[] }>(
+      "POST",
+      `/workspaces/${encodeURIComponent(ws)}/members/${encodeURIComponent(id)}/sign-out`,
       {},
     ),
   updateMember: (ws: string, id: string, body: { role?: Role; products?: string[]; status?: string }) =>

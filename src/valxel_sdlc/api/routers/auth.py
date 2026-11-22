@@ -169,7 +169,20 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     def logout(request: Request) -> JSONResponse:
         session = signer.loads(request.cookies.get(SESSION_COOKIE)) or {}
         if isinstance(session, dict) and session.get("login"):
+            # Revoked on the server too: a copy of the cookie stops working (web/sessions.py).
+            ctx.stores["sessions"].revoke(str(session.get("sid") or ""), str(session["login"]),
+                                          by=str(session["login"]), reason="signed out")
             _signin("signout", "success", str(session.get("idp") or ""), str(session["login"]))
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(SESSION_COOKIE, path="/")
+        return resp
+
+    @api.post("/auth/logout-everywhere")
+    def logout_everywhere(user: User = Depends(current_user)) -> JSONResponse:
+        """Every session of yours, on every device, including this one: for a lost laptop or a
+        session you don't recognise."""
+        ctx.stores["sessions"].revoke_login(user.login, by=user.login, reason="signed out everywhere")
+        _signin("signout", "success", user.idp, user.login, reason="everywhere")
         resp = JSONResponse({"ok": True})
         resp.delete_cookie(SESSION_COOKIE, path="/")
         return resp

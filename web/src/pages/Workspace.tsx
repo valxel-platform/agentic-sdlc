@@ -333,6 +333,15 @@ function People({ w, me, admin, run }: { w: WorkspaceView; me: Me; admin: boolea
                               {m.status === "suspended" ? "Reactivate" : "Suspend"}
                             </button>
                           )}
+                          {editable && !self && m.status === "active" && (
+                            <button
+                              className="small-btn"
+                              title="Ends their sessions on every device; they can sign in again"
+                              onClick={() => run(() => api.signMemberOut(w.id, m.id))}
+                            >
+                              Sign out
+                            </button>
+                          )}
                           {editable && !self && (
                             <button
                               className="small-btn"

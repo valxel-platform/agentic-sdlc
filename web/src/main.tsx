@@ -318,6 +318,18 @@ function Account({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
         >
           Sign out
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            close();
+            api
+              .logoutEverywhere()
+              .catch(() => {})
+              .finally(onSignOut);
+          }}
+        >
+          Sign out on every device
+        </button>
       </div>
     </details>
   );

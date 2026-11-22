@@ -60,7 +60,7 @@
  "src/valxel_sdlc/api/routers/events.py UP041": 1,
  "src/valxel_sdlc/api/routers/features.py BLE001": 4,
  "src/valxel_sdlc/api/routers/features.py C901": 2,
- "src/valxel_sdlc/api/routers/features.py E501": 4,
+ "src/valxel_sdlc/api/routers/features.py E501": 3,
  "src/valxel_sdlc/api/routers/features.py I001": 1,
  "src/valxel_sdlc/api/routers/features.py PLR0915": 1,
  "src/valxel_sdlc/api/routers/features.py S110": 2,

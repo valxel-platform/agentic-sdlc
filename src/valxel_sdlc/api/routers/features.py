@@ -34,6 +34,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     lanes_for = ctx.lanes_for
     may_start = ctx.may_start
     item_approvers = ctx.item_approvers
+    confirm_decider = ctx.confirm_decider
     decorate = ctx.decorate
     member_of = ctx.member_of
 
@@ -263,8 +264,14 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                 pid = eng().view(ref.feature_id)["product_id"]
                 item = {**item, "safe_mode": safe_mode.get(eng().cluster, pid)}
                 ok, why = low_risk(item, eng().services.snapshot(pid).product.data_class)
-                if ok and not can_decide(user, {"approvers": item_approvers(ref.feature_id, {**item, "product_id": pid})}):
+                who = item_approvers(ref.feature_id, {**item, "product_id": pid})
+                if ok and not can_decide(user, {"approvers": who}):
                     ok, why = False, "not yours to decide"
+                if ok:
+                    try:
+                        confirm_decider(user, who)
+                    except HTTPException as exc:  # an old sign-in, or GitHub no longer lists the team
+                        ok, why = False, str(exc.detail)
                 seconds = read_s(ref.interrupt_id, user.login)
                 if ok:
                     ok, why = batch_ready(item, seconds)
@@ -296,6 +303,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         if not can_decide(user, {"approvers": approvers}):
             raise HTTPException(403, PASSKEY_NEEDED if needs_passkey(user, approvers)
                                 else f"Only {', '.join(approvers) or 'the listed approvers'} can decide this")
+        confirm_decider(user, approvers)  # a recent sign-in, and GitHub still lists their team
         trace = item.get("traceability") or {}
         if body.override_reason and not trace.get("blocks"):
             raise HTTPException(422, "Nothing to override: the traceability matrix is complete")
@@ -308,6 +316,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             if not can_decide(user, {"approvers": who}):
                 raise HTTPException(403, f"Only {', '.join(who) or 'the traceability approvers'} can release "
                                     "with traceability gaps")
+            confirm_decider(user, who)
         decision = body.model_dump(exclude_none=True) | {"approver": user.login,
                                                           "viewed_s": read_s(interrupt_id, user.login)}
         if item.get("type") == "gate" and decision.get("decision") == "approve":

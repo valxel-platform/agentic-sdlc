@@ -25,6 +25,7 @@ from ..web.auth import (
     user_from_payload,
 )
 
+TEAM_RECHECK_S = 300  # how long GitHub's "still a member" holds before a decision asks again
 CONNECT_COOKIE = "valxel_connect"  # an OAuth tool connection's state, between Valxel and the vendor
 
 
@@ -34,7 +35,11 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
     auth = auth or AuthConfig.from_env()
     signer = SessionSigner(auth.ring())
     oauth = oauth or GitHubOAuth(auth)
-    stores: dict[str, Any] = {"intakes": IntakeStore()}  # Postgres once the engine has a database
+    from ..web.sessions import MemorySessions
+
+    # Postgres once the engine has a database (api/app.py): intake chats, and revoked sessions.
+    stores: dict[str, Any] = {"intakes": IntakeStore(), "sessions": MemorySessions()}
+    team_seen: dict[tuple[str, str], float] = {}  # (team, login) -> until when GitHub's "yes" holds
 
     def eng() -> FeatureEngine:
         return state["engine"]
@@ -51,13 +56,21 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
         user.groups = ws.groups_of({m["id"] for m in mine}, set(user.roles))
         return user
 
+    def session(request: Request) -> dict | None:
+        """The cookie's payload, unless it was revoked (web/sessions.py): signed out, signed out
+        everywhere, or by an admin."""
+        payload = signer.loads(request.cookies.get(SESSION_COOKIE))
+        if payload and stores["sessions"].revoked(payload):
+            return None
+        return payload
+
     def signed_in(request: Request) -> User | None:
         """Who sent this request, with their memberships, or None: no checks beyond the session."""
-        user = user_from_payload(signer.loads(request.cookies.get(SESSION_COOKIE)))
+        user = user_from_payload(session(request))
         return with_memberships(user) if user is not None else None
 
     def current_user(request: Request) -> User:
-        user = user_from_payload(signer.loads(request.cookies.get(SESSION_COOKIE)))
+        user = user_from_payload(session(request))
         if user is None:
             raise HTTPException(401, "Sign in to continue")
         user = with_memberships(user)
@@ -72,6 +85,43 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
             # file upload, a DELETE) carries X-Valxel-Client instead, which a cross-site form can't send.
             raise HTTPException(415, "Send JSON")
         return user
+
+    def confirm_decider(user: User, approvers: list[str]) -> None:
+        """Before a decision by someone can_decide already let through (review finding 5):
+
+        - their sign-in is less than 4 hours old, whoever they are (a GitHub team approver has no
+          workspace role, so current_user's check didn't cover them);
+        - a team they decide through still has them: teams are read at sign-in and kept in the
+          cookie, so GitHub is asked now. A "yes" holds for TEAM_RECHECK_S; a "no" isn't kept, so
+          being added back works at once. If GitHub can't say, the decision waits (fail closed).
+        Deciding through their own login or a workspace group (read on every request) needs no call."""
+        if time.time() - (user.signed_in_at or 0) > PRIVILEGED_TTL:
+            raise HTTPException(401, "Deciding needs a sign-in from the last 4 hours: sign in again")
+        via = [a.strip().lstrip("@") for a in approvers if user.matches(a)]
+        if not via or any(not a.lower().startswith("group:") and "/" not in a for a in via):
+            return  # their own login
+        if any(a.lower().startswith("group:") for a in via) and user.strong:
+            return  # a workspace group, read on every request
+        gh = eng().services.github
+        from ..integrations.github import StubGitHub
+
+        if user.idp == "dev" and not isinstance(gh, StubGitHub):
+            return  # dev sign-in's teams are made up: a live GitHub doesn't know them
+        unknown = False
+        now = time.time()
+        for team in (a for a in via if "/" in a and not a.lower().startswith("group:")):
+            key = (team.lower(), user.login.lower())
+            if team_seen.get(key, 0) > now:
+                return
+            org, slug = team.split("/", 1)
+            member = gh.team_member(org=org, team=slug, login=user.login)
+            if member:
+                team_seen[key] = now + TEAM_RECHECK_S
+                return
+            unknown = unknown or member is None
+        if unknown:
+            raise HTTPException(503, "GitHub can't confirm your team membership right now; try again shortly")
+        raise HTTPException(403, f"GitHub says you're no longer in {', '.join(via)}: you can't decide this")
 
     def lanes_for(user: User) -> list[str]:
         """Products the person may see: their GitHub org's (as before), and their workspaces' (all, or
@@ -166,4 +216,4 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
                 raise HTTPException(404, f"Unknown product {product_id}")
             raise HTTPException(403, f"You aren't a member of {product_id}'s organization")
 
-    return SimpleNamespace(state=state, auth=auth, signer=signer, oauth=oauth, stores=stores, eng=eng, with_memberships=with_memberships, signed_in=signed_in, current_user=current_user, lanes_for=lanes_for, role_in=role_in, may_start=may_start, founder_of=founder_of, admin_of=admin_of, item_approvers=item_approvers, decorate=decorate, local_path=local_path, config_gate=config_gate, wsx=wsx, member_of=member_of)
+    return SimpleNamespace(state=state, auth=auth, signer=signer, oauth=oauth, stores=stores, eng=eng, with_memberships=with_memberships, signed_in=signed_in, session=session, confirm_decider=confirm_decider, current_user=current_user, lanes_for=lanes_for, role_in=role_in, may_start=may_start, founder_of=founder_of, admin_of=admin_of, item_approvers=item_approvers, decorate=decorate, local_path=local_path, config_gate=config_gate, wsx=wsx, member_of=member_of)

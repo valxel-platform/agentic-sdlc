@@ -137,6 +137,9 @@ class GitHub(Protocol):
     def update_repo(self, *, repo: str, merge: dict, default_branch: str, description: str) -> None: ...
     def enable_security(self, *, repo: str, **features: bool) -> None: ...
     def grant_team(self, *, org: str, team: str, repo: str, permission: str) -> None: ...
+    # Is the person an active member of the team now? None: GitHub couldn't say (the app lacks the
+    # organization's Members permission, or GitHub didn't answer).
+    def team_member(self, *, org: str, team: str, login: str) -> bool | None: ...
     def set_topics(self, *, repo: str, topics: list[str]) -> None: ...
     def set_properties(self, *, repo: str, properties: dict[str, str]) -> None: ...
     def upsert_ruleset(self, *, repo: str, branch: str, spec: dict) -> str: ...
@@ -173,6 +176,11 @@ class StubGitHub:
         # Actions runs for the cost ledger: (repo, branch | sha | event) -> runs. Unset, a PR's branch
         # has one five-minute Linux run.
         self.actions: dict[tuple[str, str], list[dict]] = {}
+        # Team membership (valxel_sdlc.web.auth live checks): "org/team" -> logins removed from it, or
+        # None for a GitHub that can't answer. Unset, everyone their sign-in names is still a member.
+        self.removed_from_team: dict[str, set[str]] = {}
+        self.teams_unknown = False
+        self.team_checks: list[tuple[str, str, str]] = []
         self._seq = itertools.count(100)
         self._lock = threading.Lock()
 
@@ -361,6 +369,12 @@ class StubGitHub:
 
     def grant_team(self, *, org, team, repo, permission) -> None:
         self._repo(repo, "grant_team").setdefault("teams", {})[team] = permission
+
+    def team_member(self, *, org, team, login) -> bool | None:
+        self.team_checks.append((org, team, login))
+        if self.teams_unknown:
+            return None
+        return login.lower() not in {x.lower() for x in self.removed_from_team.get(f"{org}/{team}".lower(), set())}
 
     def set_topics(self, *, repo, topics) -> None:
         self._repo(repo, "set_topics")["topics"] = list(topics)
@@ -684,6 +698,15 @@ class GitHubRest:
 
     def grant_team(self, *, org, team, repo, permission) -> None:
         self._abs("PUT", org, f"/orgs/{quote(org)}/teams/{quote(team)}/repos/{repo}", {"permission": permission})
+
+    def team_member(self, *, org, team, login) -> bool | None:
+        """GET /orgs/{org}/teams/{team}/memberships/{login}: active means a member; 404 means not.
+        Needs the app's organization permission Members: read."""
+        try:
+            m = self._abs("GET", org, f"/orgs/{quote(org)}/teams/{quote(team)}/memberships/{quote(login)}", ok404=True)
+        except (GitHubError, OSError, KeyError, RuntimeError, ValueError):
+            return None  # no token for that org, no permission, GitHub down: it couldn't say
+        return bool(m) and m.get("state") == "active"
 
     def set_topics(self, *, repo, topics) -> None:
         self._call("PUT", repo, "/topics", {"names": topics})

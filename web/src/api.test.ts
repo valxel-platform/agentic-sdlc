@@ -558,6 +558,20 @@ const cases: Case[] = [
     body: { name: "Ada", email: "a@example.com", github_login: "ada", role: "member", products: [] },
   },
   {
+    name: "logoutEverywhere posts an empty object",
+    call: () => api.logoutEverywhere(),
+    method: "POST",
+    path: "/auth/logout-everywhere",
+    body: {},
+  },
+  {
+    name: "signMemberOut posts an empty object",
+    call: () => api.signMemberOut("ws1", "m1"),
+    method: "POST",
+    path: "/workspaces/ws1/members/m1/sign-out",
+    body: {},
+  },
+  {
     name: "resendInvite posts an empty object",
     call: () => api.resendInvite("ws1", "m1"),
     method: "POST",

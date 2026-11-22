@@ -46,6 +46,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     current_user = ctx.current_user
     config_gate = ctx.config_gate
     member_of = ctx.member_of
+    confirm_decider = ctx.confirm_decider
 
     # --- production signals ---
 
@@ -144,8 +145,10 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         from ...ops.incident import oncall_approvers
 
         member_of(user, product_id)
-        if not can_decide(user, {"approvers": oncall_approvers(eng().services.snapshot(product_id).product)}):
+        who = oncall_approvers(eng().services.snapshot(product_id).product)
+        if not can_decide(user, {"approvers": who}):
             raise HTTPException(403, "Only the product's on-call can merge or split incidents")
+        confirm_decider(user, who)
 
     @api.get("/signals/unmatched")
     def unmatched_signals(limit: int = 100, user: User = Depends(current_user)) -> dict:

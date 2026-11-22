@@ -130,10 +130,12 @@ class SessionSigner:
 IDENTITY = ("login", "name", "avatar_url", "orgs", "teams", "email", "idp", "strong", "signed_in_at")  # the cookie's
 
 
-def session_payload(user: User) -> dict:
+def session_payload(user: User, sid: str = "") -> dict:
+    """The cookie's contents. `sid` names this session so it can be revoked (web/sessions.py)."""
     d = asdict(user)
     now = int(time.time())
-    return {**{k: d[k] for k in IDENTITY}, "signed_in_at": d["signed_in_at"] or now, "exp": now + SESSION_TTL}
+    return {**{k: d[k] for k in IDENTITY}, "signed_in_at": d["signed_in_at"] or now, "exp": now + SESSION_TTL,
+            "sid": sid or secrets.token_urlsafe(16)}
 
 
 def user_from_payload(payload: dict | None) -> User | None:

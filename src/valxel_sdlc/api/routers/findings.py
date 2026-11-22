@@ -19,6 +19,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     current_user = ctx.current_user
     lanes_for = ctx.lanes_for
     member_of = ctx.member_of
+    confirm_decider = ctx.confirm_decider
 
     @api.get("/incidents")
     def incidents(user: User = Depends(current_user), product_id: str | None = None) -> list[dict]:
@@ -65,8 +66,10 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         pid = rec["product_id"]
         member_of(user, pid)
         lane = eng().services.snapshot(pid).product
-        if not can_decide(user, {"approvers": list(lane.approvers.get("security") or lane.approvers.get("g5") or [])}):
+        security = list(lane.approvers.get("security") or lane.approvers.get("g5") or [])
+        if not can_decide(user, {"approvers": security}):
             raise HTTPException(403, "Only the product's security approvers can accept a finding's risk")
+        confirm_decider(user, security)
         try:
             return eng().upkeep.accept(finding_id, approver=user.login, reason=str(body.get("reason") or ""),
                                        days=int(body.get("days") or 0))

@@ -122,6 +122,26 @@ def _admin_github(settings):
     return GitHubRest(tokens, api=settings.github_api)
 
 
+def _revoke_sessions(login: str, sessions=None) -> int:
+    """End every session `login` has now, on every replica (web/sessions.py)."""
+    if sessions is None:
+        url = _database_url()
+        if not url:
+            print("Set DATABASE_URL to the tool's database.", file=sys.stderr)
+            return 2
+        from psycopg.rows import dict_row
+
+        from .tenancy import PLATFORM, bound, make_pool
+        from .web.sessions import PostgresSessions
+
+        with bound(PLATFORM):
+            sessions = PostgresSessions(make_pool(url, kwargs={"autocommit": True, "prepare_threshold": 0,
+                                                               "row_factory": dict_row}))
+    sessions.revoke_login(login, by="operator", reason="valxel sessions revoke")
+    print(f"Signed {login} out everywhere: their sessions from before now no longer work.")
+    return 0
+
+
 def _verify_audit(store=None, log=None, anchors=None) -> int:
     """Exit 0 when every workspace's audit log and the change log chain intact, 1 when one was altered."""
     from .workspaces import verify_chain
@@ -524,6 +544,10 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     au = sub.add_parser("audit", help="Check the hash chains of every workspace's audit log and of the production "
                                       "change log (DATABASE_URL)")
     au.add_argument("action", choices=["verify"])
+    se = sub.add_parser("sessions", help="End every session someone has now (DATABASE_URL): a stolen laptop, "
+                                         "someone who left")
+    se.add_argument("action", choices=["revoke"])
+    se.add_argument("login", help="Their GitHub login, or the email they sign in with")
     from .laptop import add_parser as _add_dev
     _add_dev(sub)
     from .vm import add_parser as _add_vm
@@ -714,6 +738,8 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
         return _verify_changes()
     if args.cmd == "audit":
         return _verify_audit()
+    if args.cmd == "sessions":
+        return _revoke_sessions(args.login)
     if args.cmd == "glitchtip-token":
         from .ops.error_tracking import token_for
 

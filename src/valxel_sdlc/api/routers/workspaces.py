@@ -133,6 +133,21 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         ws_call(wsx().remove_member, workspace, member_id, actor=user.login, actor_role=role)
         return Response(status_code=204)
 
+    @api.post("/workspaces/{workspace}/members/{member_id}/sign-out")
+    def sign_member_out(workspace: str, member_id: str, user: User = Depends(current_user)) -> dict:
+        """Ends every session the member has now, on every device (web/sessions.py): for a stolen
+        laptop, or alongside removing or suspending them. They can sign in again unless removed."""
+        admin_of(user, workspace)
+        m = wsx().member(workspace, member_id)
+        if m is None:
+            raise HTTPException(404, f"No member {member_id} in {workspace}")
+        logins = {x for x in (m.get("github_login"), m.get("email")) if x}
+        for login in logins:
+            ctx.stores["sessions"].revoke_login(login, by=user.login, reason=f"signed out by an admin of {workspace}")
+        eng().services.audit.record("session.revoke", actor=user.login, resource=("person", sorted(logins)),
+                                    workspace=workspace, details={"member": member_id})
+        return {"signed_out": sorted(logins)}
+
     @api.post("/workspaces/{workspace}/groups", status_code=201)
     def create_group(workspace: str, body: GroupIn, user: User = Depends(current_user)) -> dict:
         admin_of(user, workspace)

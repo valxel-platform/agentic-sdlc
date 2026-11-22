@@ -152,6 +152,9 @@ def prepare(engine: FeatureEngine, pool: Any, *, auth_mode: str) -> None:
         from ..intake import PostgresIntakeStore
 
         PostgresIntakeStore(pool)  # its table, so the policies below cover it
+        from ..web.sessions import PostgresSessions
+
+        PostgresSessions(pool)  # revoked sessions: the platform's, not a workspace's
         # Every table exists now: turn row-level security on (VALXEL_TENANCY=rls) or off.
         tenancy.apply(pool, engine.services.settings.registry)
         if tenancy.enforced():
@@ -194,9 +197,11 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
             if state["pool"] is not None:
                 from ..intake import PostgresIntakeStore
                 from ..tenancy import PLATFORM, bound
+                from ..web.sessions import PostgresSessions
 
                 with bound(PLATFORM):
                     stores["intakes"] = PostgresIntakeStore(state["pool"])
+                    stores["sessions"] = PostgresSessions(state["pool"])
             # Polls CI and OpenChoreo for features waiting on them; webhooks make it immediate. With a
             # run queue, API processes leave that to the workers (valxel worker): they run no agents.
             if os.environ.get("VALXEL_PROCESS", "").lower() != "api":
