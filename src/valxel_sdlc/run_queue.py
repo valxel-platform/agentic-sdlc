@@ -16,6 +16,10 @@ thread pool of its own, as it always has. With VALXEL_RUN_QUEUE=postgres:
   120), at most VALXEL_RUN_QUEUE_MAX_ATTEMPTS times (default 3), then dropped with an error note.
 - **One thread at a time.** A row whose thread another worker is running waits a few seconds and
   is tried again.
+- **Run once.** A claim that ran out while its worker was still running (a stalled process, a
+  database blink) can be claimed by a second worker, which waits on the thread's lock. So a run
+  takes its row off the queue (`finish`) before it lets the lock go, and a worker that gets the lock
+  first checks the row is still its own (`owns`): the second worker then finds it gone and skips it.
 
 Rows carry their workspace, so row-level security applies to them (tenancy.BY_WORKSPACE): a person's
 request queues only work in its own workspace; workers claim as the platform.
@@ -67,6 +71,8 @@ returning id, thread_id, workspace, payload_type, payload, attempts, traceparent
 _RENEW = ("update valxel_run_queue set claimed_until = now() + make_interval(secs => %(lease)s) "
           "where id = any(%(ids)s) and claimed_by = %(me)s")
 _DONE = "delete from valxel_run_queue where id = %(id)s and claimed_by = %(me)s"
+_FINISH = "delete from valxel_run_queue where id = %(id)s"  # by the run holding the thread's lock
+_OWNS = "select 1 from valxel_run_queue where id = %(id)s and claimed_by = %(me)s"
 _LATER = ("update valxel_run_queue set claimed_by = null, claimed_until = null, attempts = attempts - 1, "
           "available_at = now() + make_interval(secs => %(delay)s) where id = %(id)s and claimed_by = %(me)s")
 _QUEUED = "select distinct thread_id from valxel_run_queue where thread_id = any(%(ids)s)"
@@ -102,6 +108,25 @@ def decode(kind: str, data: bytes) -> Any:
 
 # --------------------------------------------------------------------------- the queue
 
+class Claim:
+    """A worker's hold on one job, as the engine sees it while it runs (engine.run_job)."""
+
+    def __init__(self, queue: RunQueue, me: str, job_id: int) -> None:
+        self.queue, self.me, self.job_id = queue, me, job_id
+
+    def still_ours(self) -> bool:
+        from .tenancy import PLATFORM, bound
+
+        with bound(PLATFORM):
+            return self.queue.owns(self.me, self.job_id)
+
+    def finished(self) -> None:
+        from .tenancy import PLATFORM, bound
+
+        with bound(PLATFORM):
+            self.queue.finish(self.job_id)
+
+
 @dataclass
 class Job:
     id: int
@@ -118,6 +143,8 @@ class RunQueue(Protocol):
     def renew(self, me: str, ids: list[int], lease_s: float) -> None: ...
     def done(self, me: str, job_id: int) -> None: ...
     def later(self, me: str, job_id: int, delay_s: float) -> None: ...
+    def owns(self, me: str, job_id: int) -> bool: ...
+    def finish(self, job_id: int) -> None: ...
     def queued_among(self, threads: list[str]) -> set[str]: ...
     def depth(self) -> dict: ...
 
@@ -157,6 +184,14 @@ class PostgresRunQueue:
     def later(self, me: str, job_id: int, delay_s: float) -> None:
         with self.pool.connection() as conn:
             conn.execute(_LATER, {"me": me, "id": job_id, "delay": float(delay_s)})
+
+    def owns(self, me: str, job_id: int) -> bool:
+        with self.pool.connection() as conn:
+            return conn.execute(_OWNS, {"me": me, "id": job_id}).fetchone() is not None
+
+    def finish(self, job_id: int) -> None:
+        with self.pool.connection() as conn:
+            conn.execute(_FINISH, {"id": job_id})
 
     def queued_among(self, threads: list[str]) -> set[str]:
         if not threads:
@@ -217,6 +252,14 @@ class MemoryRunQueue:
             r = self.rows.get(job_id)
             if r and r["by"] == me:
                 r.update(by=None, until=0.0, attempts=r["attempts"] - 1, available=self.clock() + delay_s)
+
+    def owns(self, me: str, job_id: int) -> bool:
+        with self._lock:
+            return self.rows.get(job_id, {}).get("by") == me
+
+    def finish(self, job_id: int) -> None:
+        with self._lock:
+            self.rows.pop(job_id, None)
 
     def queued_among(self, threads: list[str]) -> set[str]:
         with self._lock:
@@ -303,7 +346,7 @@ class Worker:
                 return
             try:
                 with joined(job.traceparent):  # the run continues the trace that queued it
-                    self.engine.run_job(job.thread_id, job.payload)
+                    self.engine.run_job(job.thread_id, job.payload, Claim(self.queue, self.me, job.id))
             except (Busy, LeaseLost):  # another worker has the thread now: try again shortly
                 with bound(PLATFORM):
                     self.queue.later(self.me, job.id, self.busy_delay_s)

@@ -112,7 +112,7 @@ def test_stopping_hands_back_what_is_still_running(queued):
     fid = engine.create(product_id="FARM", title="Harvest log")
     started, release = threading.Event(), threading.Event()
 
-    def slow(thread_id, payload):
+    def slow(thread_id, payload, claim=None):
         started.set()
         release.wait(5)
 

@@ -39,6 +39,25 @@ from .worksync import InMemoryLinkStore, WorkSync
 log = logging.getLogger(__name__)
 
 
+def _taken(claim, feature_id: str) -> bool:
+    """A queued run that's no longer this worker's (run_queue.Claim): another ran it meanwhile."""
+    if claim is None or claim.still_ours():
+        return False
+    log.warning("%s: a queued run another worker finished was skipped", feature_id)
+    return True
+
+
+def _finish(claim, feature_id: str, lease) -> None:
+    """Take a queued run that ended off the queue (run_queue.Claim), while this replica still holds
+    the thread's lock. Lost it (LeaseLost): the run goes back for another worker instead."""
+    if claim is None or not lease.alive():
+        return
+    try:
+        claim.finished()
+    except Exception:  # the worker's own done() tries again
+        log.exception("%s: couldn't take the finished run off the queue", feature_id)
+
+
 class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, RecoveryMixin):
     def __init__(self, services: Services, checkpointer, index: FeatureIndex | None = None,
                  bus: EventBus | None = None, workers: int = 4, work: WorkSync | None = None,
@@ -229,9 +248,11 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         out = (self.running & set(threads)) | self.cluster.busy_among(threads)
         return out | (self.queue.queued_among(threads) if self.queue is not None else set())
 
-    def run_job(self, thread_id: str, payload) -> None:
-        """A worker's run of a queued job (run_queue.Worker)."""
-        self._execute(thread_id, payload)
+    def run_job(self, thread_id: str, payload, claim=None) -> None:
+        """A worker's run of a queued job (run_queue.Worker). `claim` fences it: once this replica
+        holds the thread's lock, a job that's no longer the worker's (another ran it) is skipped, and
+        a run that ends takes its job off the queue before the lock is let go."""
+        self._execute(thread_id, payload, claim)
 
     def _run(self, thread_id: str, payload) -> None:
         """Run it now, here, or with a run queue, queue it for a worker: an API process runs no agents."""
@@ -240,7 +261,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         else:
             self._execute(thread_id, payload)
 
-    def _execute(self, feature_id: str, payload) -> None:
+    def _execute(self, feature_id: str, payload, claim=None) -> None:
         """Run the thread until it finishes or waits on a human, publishing each node as it ends.
         Only one replica runs a thread at a time: the one holding its lock. It runs in its own
         workspace's scope, whoever started it (valxel_sdlc.tenancy); a thread of the platform's own,
@@ -248,14 +269,17 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         from .tenancy import PLATFORM, bound
 
         with bound(self.workspace_of(feature_id) or PLATFORM):
-            return self._execute_scoped(feature_id, payload)
+            return self._execute_scoped(feature_id, payload, claim)
 
-    def _execute_scoped(self, feature_id: str, payload) -> None:
+    def _execute_scoped(self, feature_id: str, payload, claim=None) -> None:
         lease = self.cluster.lock(feature_id)
         self.queued.pop(feature_id, None)  # started, or refused: either way no longer waiting here
         if lease is None:
             self.running.discard(feature_id)
             raise Busy(f"{feature_id} is running on another replica")
+        if _taken(claim, feature_id):
+            lease.release()  # its claim ran out and another worker already ran it: don't run it twice
+            return
         try:
             self.running.add(feature_id)
             self.errors.pop(feature_id, None)
@@ -279,6 +303,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
                 self.errors[feature_id] = f"{type(exc).__name__}: {exc}"
                 raise
             finally:
+                _finish(claim, feature_id, lease)  # off the queue while the lock still holds others out
                 self.running.discard(feature_id)
                 lease.release()
                 self._note_asked(feature_id)

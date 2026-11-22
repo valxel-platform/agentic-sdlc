@@ -60,7 +60,7 @@ def test_a_queued_run_continues_the_trace_that_queued_it():
         def __init__(self):
             self.errors = {}
 
-        def run_job(self, thread, payload):
+        def run_job(self, thread, payload, claim=None):
             seen.append(current_ids()[0])
 
     w = Worker(Engine(), q, concurrency=1)
