@@ -379,3 +379,16 @@ def parse_threats(hld: str) -> dict:
         else:
             out["bad"].append(line)
     return out
+
+
+def hld_adrs(hld: str) -> list[dict]:
+    """The HLD's own ADR lines as {id, title, supersedes}."""
+    import re
+
+    out = []
+    for line in bullets(section(hld, "ADRs")):
+        m = re.match(r"(ADR-[A-Za-z0-9-]+):\s*(.*)", line)
+        if m:
+            sup = re.search(r"[Ss]upersedes\s+(ADR-[A-Z0-9-]+)", line)
+            out.append({"id": m.group(1), "title": m.group(2).strip(), "supersedes": sup.group(1) if sup else ""})
+    return out

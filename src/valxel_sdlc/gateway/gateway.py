@@ -65,7 +65,7 @@ class ModelGateway:
         self.settings = settings
         self.ledger = ledger
         self.providers = providers
-        from ..pilot import config_version
+        from ..config import config_version
 
         self.config_version = config_version(settings)
 

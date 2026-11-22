@@ -6,7 +6,7 @@ from langgraph.graph import END
 from langgraph.types import Command, interrupt
 
 from ..agents import GATE_APPROVE_TARGET, GATE_PHASE, NEXT_AFTER_PHASE, PHASE_SPECS
-from ..agents.parse import parse_affected_repos, parse_cases, parse_tasks
+from ..agents.parse import hld_adrs, parse_affected_repos, parse_cases, parse_tasks
 from ..state import FeatureState
 from .. import lessons, profiles, separation
 from .phase import capability_id, design_knowledge, event, gates_status, now, touched_lanes
@@ -654,19 +654,7 @@ def design_review_for(services, snap, ref, state: FeatureState) -> dict | None:
     return design_review(services.artifacts.load(ref), pack, state["feature_id"])
 
 
-def _hld_adrs(hld: str) -> list[dict]:
-    """The HLD's own ADR lines as {id, title, supersedes}."""
-    import re
-
-    from ..agents.parse import bullets, section
-
-    out = []
-    for line in bullets(section(hld, "ADRs")):
-        m = re.match(r"(ADR-[A-Za-z0-9-]+):\s*(.*)", line)
-        if m:
-            sup = re.search(r"[Ss]upersedes\s+(ADR-[A-Z0-9-]+)", line)
-            out.append({"id": m.group(1), "title": m.group(2).strip(), "supersedes": sup.group(1) if sup else ""})
-    return out
+_hld_adrs = hld_adrs  # moved to agents.parse (the core): knowledge.writeback reads it too
 
 
 def _design_entry(state: FeatureState, design: dict) -> dict:

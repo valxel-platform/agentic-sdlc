@@ -1,8 +1,8 @@
 # Architecture
 
-How the tool fits together, at a high level. The [README](../README.md) has the detail for each
-part; [How the design maps to code](../README.md#how-the-design-maps-to-code) and
-[Layout](../README.md#layout) list the modules.
+How the tool fits together, at a high level. The guides for [operators](operators.md), [product teams](product-teams.md) and [contributors](contributors.md) have the detail for each
+part; [How the design maps to code](contributors.md#how-the-design-maps-to-code) and
+[Layout](contributors.md#layout) list the modules.
 
 The tool is one Python service with one Postgres database. Agents do the work, people decide at
 gates, and each product's own governance repo sets the rules the tool must follow. Everything

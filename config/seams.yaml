@@ -4,81 +4,76 @@
 # root wires them together and may use any of them.
 seams:
   intake: [intake, duplicates, inception, attachments]
-  roadmap: [roadmap, outcomes]
+  roadmap: [roadmap, outcomes.read, outcomes.readouts, outcomes.review]  # reading and reviewing goals' metrics
   delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env, environments, acceptance,
              records, drafts, traceability, design_record, fit, mockups, sketch, prototype, preview, current_screens, screens, scaffolding, sandboxes, jobs,
-             template_contract, dependencies, quality, standard_files, agent_tools, performance, capacity,
-             resources, waits, reconcile, pilot, confidence]
+             dependencies, quality, standard_files, agent_tools, performance, capacity,
+             waits, reconcile, pilot, confidence]
   ops: [ops, finops, upkeep]
+# Shared definitions several seams read, which use no seam themselves: the core's, though their
+# files sit with the seam that first needed them. (Moving the files is churn for no change in what
+# depends on what.) Only add a module here if it imports nothing from a seam.
+core: [template_contract, resources, outcomes, inception.formats, roadmap.record, ops.changes, ops.alert_rules]
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # and the tool's health, which measures every seam's agents on real work.
 root: [engine, engine_parts, api, web, cli, services, strict, worksync, run_queue, watcher_jobs, checkpoint_archive,
        lite, evals, code_evals, code_eval_runner, coder_injection, injection, health, drift, what_changed]
+# The burn-down: at most this many known breaks by each date (one target a sprint, about ten fewer
+# each). tests/test_seams.py fails once a date has come and the count is still above it: fix breaks
+# to meet it (move the shared piece into the core, or pass it in from the root); don't move the target.
+targets:
+  - {by: 2026-12-06, at_most: 55}
+  - {by: 2026-12-20, at_most: 45}
+  - {by: 2027-01-03, at_most: 35}
+  - {by: 2027-01-17, at_most: 25}
+  - {by: 2027-01-31, at_most: 15}
+  - {by: 2027-02-14, at_most: 5}
+  - {by: 2027-02-28, at_most: 0}
 # Imports that break the rules today: known debt. tests/test_seams.py fails on a new one, and on one
 # listed here that's gone (delete its line). Fix one by moving the shared piece into the core, or
 # by passing it in from the root (services.py) instead of importing it.
 known_breaks:
   - "agents.templates -> acceptance"  # core -> delivery
-  - "capacity -> inception.formats"  # delivery -> intake
   - "config -> provisioning"  # core -> delivery
   - "config -> quality"  # core -> delivery
   - "design_record -> roadmap"  # delivery -> roadmap
-  - "documents -> resources"  # core -> delivery
   - "evaluators.checks -> acceptance"  # core -> delivery
   - "evaluators.checks -> agent_tools"  # core -> delivery
   - "evaluators.checks -> design_record"  # core -> delivery
   - "evaluators.checks -> jobs"  # core -> delivery
-  - "evaluators.checks -> outcomes.instrumentation"  # core -> roadmap
   - "evaluators.checks -> provisioning"  # core -> delivery
   - "evaluators.checks -> repo_standards"  # core -> delivery
-  - "evaluators.checks -> resources"  # core -> delivery
   - "evaluators.checks -> sandboxes"  # core -> delivery
-  - "evaluators.checks -> template_contract"  # core -> delivery
-  - "gateway.gateway -> pilot"  # core -> delivery
   - "governance.loader -> capacity"  # core -> delivery
-  - "governance.loader -> ops.alert_rules"  # core -> ops
   - "governance.loader -> ops.error_tracking"  # core -> ops
   - "governance.loader -> ops.remediation"  # core -> ops
-  - "governance.loader -> resources"  # core -> delivery
-  - "governance.manifest -> outcomes"  # core -> roadmap
   - "governance.manifest -> performance"  # core -> delivery
   - "governance.manifest -> provisioning"  # core -> delivery
   - "governance.manifest -> quality"  # core -> delivery
   - "governance.manifest -> upkeep"  # core -> ops
-  - "graph.delivery -> outcomes.instrumentation"  # delivery -> roadmap
-  - "graph.gates -> ops.changes"  # delivery -> ops
   - "graph.gates -> ops.cost"  # delivery -> ops
   - "graph.gates -> ops.rollout"  # delivery -> ops
   - "graph.infra -> finops.views"  # delivery -> ops
   - "graph.infra -> ops.alarms"  # delivery -> ops
-  - "graph.infra -> ops.alert_rules"  # delivery -> ops
   - "graph.merge_train -> code_evals"  # delivery -> root
   - "graph.phase -> code_evals"  # delivery -> root
   - "graph.phase -> evals"  # delivery -> root
   - "graph.phase -> roadmap"  # delivery -> roadmap
-  - "graph.rollout -> ops.changes"  # delivery -> ops
   - "graph.rollout -> ops.cohorts"  # delivery -> ops
   - "graph.rollout -> ops.remediation"  # delivery -> ops
   - "graph.rollout -> ops.rollout"  # delivery -> ops
-  - "graph.rollout -> outcomes.instrumentation"  # delivery -> roadmap
   - "inception.checks -> capacity"  # intake -> delivery
-  - "inception.checks -> resources"  # intake -> delivery
   - "inception.graph -> graph.pipeline"  # intake -> delivery
   - "inception.run -> capacity"  # intake -> delivery
   - "inception.run -> graph.phase"  # intake -> delivery
-  - "inception.run -> resources"  # intake -> delivery
   - "inception.setup -> capacity"  # intake -> delivery
   - "inception.setup -> design_record"  # intake -> delivery
   - "inception.setup -> environments"  # intake -> delivery
-  - "inception.setup -> outcomes"  # intake -> roadmap
   - "inception.setup -> repo_standards"  # intake -> delivery
-  - "inception.setup -> roadmap.record"  # intake -> roadmap
   - "inception.templates -> capacity"  # intake -> delivery
   - "intake -> evals"  # intake -> root
-  - "integrations.openchoreo -> ops.alert_rules"  # core -> ops
   - "knowledge -> design_record"  # core -> delivery
   - "knowledge.sources -> roadmap"  # core -> roadmap
-  - "knowledge.writeback -> graph.pipeline"  # core -> delivery
   - "lessons -> graph.phase"  # core -> delivery
   - "ops.incident -> evals"  # ops -> root
   - "ops.incident -> graph"  # ops -> delivery
@@ -88,9 +83,7 @@ known_breaks:
   - "outcomes.review -> graph.pipeline"  # roadmap -> delivery
   - "provision_queue -> inception.setup"  # delivery -> intake
   - "quality -> upkeep"  # delivery -> ops
-  - "reconcile -> outcomes.instrumentation"  # delivery -> roadmap
   - "roadmap.graphs -> graph.pipeline"  # roadmap -> delivery
-  - "roadmap.graphs -> ops.changes"  # roadmap -> ops
   - "roadmap.graphs -> ops.cohorts"  # roadmap -> ops
   - "roadmap.graphs -> ops.remediation"  # roadmap -> ops
   - "roadmap.graphs -> ops.rollout"  # roadmap -> ops

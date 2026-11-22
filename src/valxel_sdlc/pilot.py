@@ -18,12 +18,13 @@ time with an agent's, which isn't the same unit of work; the report shows the co
 
 from __future__ import annotations
 
-import hashlib
 import json
 import threading
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Protocol
+
+from .config import config_version  # noqa: F401 - in the core; read here and by the ledger's readers
 
 # Standard estimates for effort the tool can count but not time.
 ESTIMATED_MINUTES = {"pr_review": 10.0, "pr_comment": 2.0}
@@ -33,14 +34,6 @@ REVISE_REASONS = ("missing_requirement", "wrong_scope", "wrong_approach", "uncle
 TARGET_HUMAN_SHARE = 0.15
 # Gates the shadow auto-approval looks at: G1 (worth doing) and G6 (production) stay with people.
 SHADOW_GATES = ("g2", "g3", "g4")
-
-
-def config_version(settings) -> str:
-    """A short fingerprint of what shapes agents' work: role models and runtimes, and how the
-    critic decides and retries revise. Every ledger row carries it, so results trace to settings."""
-    roles = {k: [v.runtime, v.model] for k, v in sorted(settings.roles.items())}
-    blob = json.dumps({"roles": roles, "critic": "checklist", "retry": "revise"}, sort_keys=True)
-    return hashlib.sha1(blob.encode(), usedforsecurity=False).hexdigest()[:10]
 
 
 def now() -> str:

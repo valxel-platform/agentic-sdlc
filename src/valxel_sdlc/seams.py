@@ -12,8 +12,13 @@ that could one day run on their own, and a shared core:
 and a composition root (the engine, the API, the CLI) that wires them together and may use any.
 
 The rules: a seam uses the core and itself; the core uses no seam; a seam doesn't use another
-seam. config/seams.yaml says which modules make up each seam, and lists every import that breaks
-the rules today, as known debt. `tests/test_seams.py` fails on any new one, and on a listed one
+seam. A module that several seams read and that uses no seam itself (a shared definition, a parser,
+a record format) belongs to the core, wherever its file sits: config/seams.yaml's `core` says so.
+The known breaks burn down to dated targets (`targets`, one per sprint), and the test fails once a
+target's date has come and the count is still above it.
+
+config/seams.yaml says which modules make up each seam, and lists every import that breaks the
+rules today, as known debt. `tests/test_seams.py` fails on any new one, and on a listed one
 that no longer exists (so the list only shrinks). `python -m valxel_sdlc.seams` prints the
 current breaks, by pair of seams.
 """
@@ -38,7 +43,7 @@ def load(path: Path = CONFIG) -> dict:
 def seam_of(module: str, cfg: dict) -> str:
     """The seam a module (dotted, under valxel_sdlc) belongs to: by its longest matching prefix."""
     best, owner = -1, "core"
-    for seam, prefixes in {**cfg["seams"], "root": cfg["root"]}.items():
+    for seam, prefixes in {**cfg["seams"], "root": cfg["root"], "core": cfg.get("core") or []}.items():
         for p in prefixes:
             if (module == p or module.startswith(p + ".")) and len(p) > best:
                 best, owner = len(p), seam
@@ -91,6 +96,16 @@ def breaks(cfg: dict, pairs: set[tuple[str, str]] | None = None) -> set[str]:
     return out
 
 
+def over_target(cfg: dict, count: int, today: str) -> dict | None:
+    """The burn-down target in force today (config/seams.yaml `targets`) that `count` misses, if any:
+    the latest one whose date has come."""
+    due = [t for t in cfg.get("targets") or [] if str(t["by"]) <= today]
+    if not due:
+        return None
+    current = max(due, key=lambda t: str(t["by"]))
+    return current if count > int(current["at_most"]) else None
+
+
 def check(cfg: dict | None = None) -> tuple[list[str], list[str]]:
     """(new breaks, listed breaks that are gone)."""
     cfg = cfg or load()
@@ -105,6 +120,10 @@ def main() -> int:
     for pair, n in sorted(by_pair.items()):
         print(f"{pair:24} {n}")
     print(f"{len(found)} imports cross a seam the wrong way")
+    ahead = [t for t in cfg.get("targets") or [] if int(t["at_most"]) < len(found)]
+    if ahead:
+        nxt = min(ahead, key=lambda t: str(t["by"]))
+        print(f"next target: at most {nxt['at_most']} by {nxt['by']} ({len(found) - int(nxt['at_most'])} to go)")
     return 0
 
 

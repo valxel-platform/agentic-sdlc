@@ -337,7 +337,7 @@ def build_services(
 
 def default_telemetry(settings: Settings):
     """Agent sessions as OpenTelemetry spans when VALXEL_OTEL_ENDPOINT is set (config/telemetry.yaml)."""
-    from .pilot import config_version
+    from .config import config_version
     from .telemetry import Telemetry, load_config
 
     return Telemetry(load_config(settings.config_dir), config_version=config_version(settings))

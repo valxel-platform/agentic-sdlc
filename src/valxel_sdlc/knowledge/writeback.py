@@ -28,7 +28,7 @@ def propose_record_update(services, state: dict, hld: str, design: dict) -> dict
     """Writes ADR files (accepted), marks superseded ones and logs the change in the overview, on
     one branch per feature; returns the pull request, or None when there is nothing to record."""
     from ..agents.parse import parse_affected_repos
-    from ..graph.pipeline import _hld_adrs
+    from ..agents.parse import hld_adrs as _hld_adrs
 
     from ..datasets import load, parse_hld
 

@@ -425,3 +425,14 @@ def _load_quality(path: Path):
     from .quality import load_quality
 
     return load_quality(path)
+
+
+def config_version(settings) -> str:
+    """A short fingerprint of what shapes agents' work: role models and runtimes, and how the
+    critic decides and retries revise. Every ledger row carries it, so results trace to settings."""
+    import hashlib
+    import json
+
+    roles = {k: [v.runtime, v.model] for k, v in sorted(settings.roles.items())}
+    blob = json.dumps({"roles": roles, "critic": "checklist", "retry": "revise"}, sort_keys=True)
+    return hashlib.sha1(blob.encode(), usedforsecurity=False).hexdigest()[:10]

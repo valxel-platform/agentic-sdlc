@@ -184,7 +184,7 @@ def assess(services: Any, state: dict, gate: str, phase: str) -> dict | None:
     """What the approver sees at the gate, and what's kept with the decision."""
     if gate not in GATES or getattr(services, "gate_outcomes", None) is None:
         return None
-    from .pilot import config_version
+    from .config import config_version
 
     snap = services.feature_snapshot(state)
     data_class = snap.product.data_class
