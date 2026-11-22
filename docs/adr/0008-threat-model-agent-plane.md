@@ -48,7 +48,7 @@ Status: **in place**, **new** (with the review fixes), or **gap** (tracker item)
 | Agent reaches another sandbox, the node, the API server or instance metadata | gVisor per session, Cilium deny rules, no service-account token, read-only root | in place |
 | Agent overspends | Session budget in the gateway; unpriced models refused for every caller | new (T-127); hard cap gap (T-137) |
 | Stolen approver session | 4-hour re-sign-in for workspace approvers; passkeys for workspace groups | in place; GitHub-team approvers and revocation are a gap (T-134) |
-| One person approves their own work | Separation of duties: the feature's starter and a phase's rewriter can't approve it at G5, G6, and at every gate for PHI and payments (`separation.py`) | new (T-133) |
+| One person approves their own work | Separation of duties: the feature's starter and a phase's rewriter can't approve it at G5, G6, and at every gate for PHI and payments (`separation.py`). A team with one approver turns on the waiver: the author approves with a written reason, recorded as `waived` and listed at `/api/waivers` for review afterwards | new (T-133, T-143) |
 | Insider rewrites the decision record | Append-only tables with hash chains; chain heads anchored hourly under S3 Object Lock and sent to the audit sink (`audit_anchors.py`); the tool's records in the sink's locked archive | new (T-114, T-113, T-135) |
 | Audit records lost or quietly dropped | Outbox in the request, relayed to Kafka at least once; a decision that can't be recorded doesn't happen | in place (T-113) |
 | Outside attacker through the web app | Sign-in on every route, workspace roles re-read per request, JSON-only writes, frame-ancestors none, HSTS | in place (headers new, T-142) |
@@ -68,7 +68,10 @@ Status: **in place**, **new** (with the review fixes), or **gap** (tracker item)
 ## Consequences
 
 - Reviews compare against this list instead of rediscovering it.
-- Some controls cost convenience: a one-person pilot must turn separation of duties off for G5 and
-  G6 (`separation_of_duties_gates: []`), and that choice is visible in its registry.
+- Some controls cost convenience: a team with one approver (a solo founder) can't have real
+  separation of duties. It turns on `separation_of_duties_waiver` rather than emptying the gate
+  lists: each self-approval then carries a reason, says `waived` in the decision and the audit
+  event, and is listed for someone (an advisor, a later hire) to review. That is a compensating
+  control, not the control; it ends when a second approver joins.
 - Open gaps stay listed until closed: T-134, T-136, T-137, the hosted cluster's tenant isolation,
   and T-121.

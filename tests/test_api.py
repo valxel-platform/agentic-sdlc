@@ -295,3 +295,23 @@ def test_tampered_session_cookies_are_rejected(client):
         # domain, and some httpx versions send the original one.
         client.cookies.clear()
         assert client.get("/api/me", headers={"Cookie": f"valxel_session={forged}"}).status_code == 401
+
+
+def test_a_solo_founder_waives_separation_through_the_api_and_it_is_listed(client, engine):
+    import dataclasses
+
+    s = engine.services.settings
+    engine.services.settings = dataclasses.replace(
+        s, limits=dataclasses.replace(s.limits, separation_of_duties_waiver=True))
+    sign_in(client, "lena", teams=CLN_TEAMS)  # the only product owner: CLN holds PHI
+    fid = client.post("/api/features", json={"product_id": "CLN", "title": "Consent check"}).json()["feature_id"]
+    wait_idle(engine, fid)
+    [item] = client.get("/api/inbox?mine=true").json()
+    assert item["separation"] and item["waiver_allowed"] is True
+    url = f"/api/features/{fid}/decisions/{item['interrupt_id']}"
+    assert client.post(url, json={"decision": "approve"}).status_code == 403
+    reason = "Only product owner until the first hire; reviewed weekly by our advisor"
+    assert client.post(url, json={"decision": "approve", "waiver_reason": reason}).status_code == 202
+    wait_idle(engine, fid)
+    [w] = client.get("/api/waivers").json()
+    assert (w["feature_id"], w["approver"], w["reason"]) == (fid, "lena", reason)

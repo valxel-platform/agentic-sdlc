@@ -96,3 +96,47 @@ def test_the_api_says_why(engine):
         [g1] = engine.pending(fid)
         r = c.post(f"/api/features/{fid}/decisions/{g1['interrupt_id']}", json={"decision": "approve"})
     assert r.status_code == 403 and "didn't write the work" in r.text
+
+
+def waiver(engine, on=True):
+    s = engine.services.settings
+    engine.services.settings = dataclasses.replace(
+        s, limits=dataclasses.replace(s.limits, separation_of_duties_waiver=on))
+
+
+def test_a_solo_founder_approves_with_a_reason_and_the_waiver_is_recorded_and_listed(engine):
+    gates(engine, "g1")
+    waiver(engine)
+    fid = engine.start(product_id="FARM", title="Pest report", created_by="ann")["feature_id"]
+    [g1] = engine.pending(fid)
+    with pytest.raises(separation.SeparationOfDuties, match="say why no one else can"):
+        engine.decide(fid, g1["interrupt_id"], {"decision": "approve", "approver": "ann", "waiver_reason": "ok"})
+    reason = "I'm the only approver until our first hire; the advisor reviews waivers weekly"
+    v = engine.decide(fid, g1["interrupt_id"], {"decision": "approve", "approver": "ann", "waiver_reason": reason})
+    rec = [r for r in v["gate_decisions"] if r["gate"] == "g1"][-1]
+    assert rec["separation"] == "waived" and rec["waiver_reason"] == reason
+    [w] = engine.waivers()
+    assert (w["feature_id"], w["gate"], w["approver"], w["reason"]) == (fid, "g1", "ann", reason)
+    assert engine.waivers(since="9999-01-01") == []
+    events = [e["data"] for e in engine.services.audit.outbox.events() if e["data"]["action"] == "gate.decide"]
+    assert events[-1]["details"]["separation"] == "waived" and events[-1]["details"]["waiver_reason"] == reason
+
+
+def test_a_reason_from_someone_else_is_not_a_waiver(engine):
+    gates(engine, "g1")
+    waiver(engine)
+    fid = engine.start(product_id="FARM", title="Pest report", created_by="ann")["feature_id"]
+    [g1] = engine.pending(fid)
+    v = engine.decide(fid, g1["interrupt_id"], {"decision": "approve", "approver": "po",
+                                                "waiver_reason": "not needed, but sent anyway by the client"})
+    rec = [r for r in v["gate_decisions"] if r["gate"] == "g1"][-1]
+    assert rec["separation"] == "checked" and "waiver_reason" not in rec
+    assert engine.waivers() == []
+
+
+def test_without_the_waiver_a_reason_changes_nothing():
+    lim = dataclasses.replace(Limits(), separation_of_duties_gates=("g1",))
+    state, item = {"created_by": "ann"}, {"type": "gate", "gate": "g1"}
+    with pytest.raises(separation.SeparationOfDuties, match="Another approver decides"):
+        separation.check(state, item, {"decision": "approve", "approver": "ann", "waiver_reason": "x" * 40},
+                         "general", lim)

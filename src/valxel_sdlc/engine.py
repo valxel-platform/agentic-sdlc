@@ -636,13 +636,19 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         """Whoever wrote the work doesn't approve it (valxel_sdlc.separation): every way a decision
         arrives comes through here. Recorded on the decision when the rule applied."""
         if item.get("type") not in ("gate", "handback") or kind_of(feature_id) != "feature":
+            d.pop("waiver_reason", None)
             return
         from . import separation
 
         state = self._state(feature_id)
         data_class = self.services.feature_snapshot(state).product.data_class
-        if separation.check(state, item, d, data_class, self.services.settings.limits):
-            d["separation"] = "checked"
+        result = separation.check(state, item, d, data_class, self.services.settings.limits)
+        if result:
+            d["separation"] = result
+        if result == "waived":
+            d["waiver_reason"] = str(d["waiver_reason"]).strip()[:1000]
+        else:  # a reason with nothing waived would read as an exception that never happened
+            d.pop("waiver_reason", None)
         if item.get("rewritten_by"):
             d["rewritten_by"] = item["rewritten_by"]
 
@@ -662,6 +668,25 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             return str(e)
         return ""
 
+    def waivers(self, since: str = "") -> list[dict]:
+        """Approvals where the author waived separation of duties (valxel_sdlc.separation), newest
+        first, for someone to review afterwards. `since`: an ISO date; earlier ones are left out."""
+        out = []
+        for r in self.index.all():
+            if r.get("kind", "feature") != "feature":
+                continue
+            try:
+                state = self._state(r["feature_id"])
+            except KeyError:
+                continue
+            for g in state.get("gate_decisions") or []:
+                if g.get("separation") == "waived" and str(g.get("at", "")) >= since:
+                    out.append({"feature_id": r["feature_id"], "product_id": r.get("product_id", ""),
+                                "title": r.get("title", ""), "gate": g.get("gate", ""),
+                                "approver": g.get("approver", ""),
+                                "at": g.get("at", ""), "reason": g.get("waiver_reason", "")})
+        return sorted(out, key=lambda w: str(w["at"]), reverse=True)
+
     def _audit_decision(self, feature_id: str, interrupt_id: str, item: dict, d: dict) -> None:
         """A person's answer, before it takes effect: if it can't be recorded, it doesn't happen."""
         gate = str(item.get("gate") or item.get("kind") or item.get("type") or "")
@@ -669,6 +694,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
                    "budget_usd": d.get("budget_usd"), "override": bool(d.get("override_reason")),
                    "accepted_risk": d["decision"] == "accept_risk", "via": d.get("via"),
                    "separation": d.get("separation"), "rewritten_by": d.get("rewritten_by"),
+                   "waiver_reason": d.get("waiver_reason"),
                    "active_minutes": d.get("active_minutes")}
         self.services.audit.record("gate.decide", actor=str(d.get("approver") or "unknown"),
                                    resource=(kind_of(feature_id), [feature_id]), workspace=self._cached_workspace(feature_id),

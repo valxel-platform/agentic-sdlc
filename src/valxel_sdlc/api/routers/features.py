@@ -212,6 +212,12 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         eng().cluster.put(key, r)
         return {"seconds": r["seconds"]}
 
+    @api.get("/waivers")
+    def waivers(since: str = "", user: User = Depends(current_user)) -> list[dict]:
+        """Approvals where the author waived separation of duties, newest first: for a reviewer to
+        go through afterwards (weekly, say). `since`: an ISO date."""
+        return eng().waivers(since)
+
     @api.get("/inbox")
     def inbox(user: User = Depends(current_user), mine: bool = False, product_id: str | None = None) -> list[dict]:
         from ... import safe_mode

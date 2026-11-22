@@ -56,6 +56,8 @@ def _record(gate: str, phase: str, d: dict, lane: str = "") -> GateDecision:
         rec["separation"] = str(d["separation"])
     if d.get("rewritten_by"):  # a second approval: whose rewritten document it approved
         rec["rewritten_by"] = str(d["rewritten_by"])
+    if d.get("waiver_reason"):  # separation waived: why the author approved their own work
+        rec["waiver_reason"] = str(d["waiver_reason"])
     return rec
 
 

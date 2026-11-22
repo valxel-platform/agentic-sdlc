@@ -163,6 +163,10 @@ class Limits:
     # approve it, and the data classes where that holds at every gate.
     separation_of_duties_gates: tuple[str, ...] = ("g5", "g6")
     separation_of_duties_data_classes: tuple[str, ...] = ("phi", "payments")
+    # A team with one approver (a solo founder): the author may approve their own work where the rule
+    # applies, after saying why no one else can. Recorded as "waived", not "checked", and listed for
+    # review (GET /api/waivers). Off: the author can't approve; the rule has no silent off switch.
+    separation_of_duties_waiver: bool = False
 
 
 @dataclass(frozen=True)
@@ -376,6 +380,7 @@ def load_settings(
             separation_of_duties_gates=tuple(lim.get("separation_of_duties_gates", Limits.separation_of_duties_gates)),
             separation_of_duties_data_classes=tuple(
                 lim.get("separation_of_duties_data_classes", Limits.separation_of_duties_data_classes)),
+            separation_of_duties_waiver=bool(lim.get("separation_of_duties_waiver", False)),
         ),
         registry=registry,
         roles={name: RoleConfig(**spec) for name, spec in models_raw["roles"].items()},

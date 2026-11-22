@@ -57,7 +57,8 @@ class GateDecision(TypedDict, total=False):
     via: str  # how the person decided when not in the web app: mcp (their assistant, api/mcp.py)
     viewed_s: float  # how long the approver had the decision open and in view, as the web app reported
     batch: bool  # approved with other low-risk decisions at once
-    separation: str  # "checked": the separation-of-duties rule applied and the decider passed it
+    separation: str  # "checked": the rule applied and the decider passed it; "waived": the author approved
+    waiver_reason: str  # with "waived": why no one else could approve it
     rewritten_by: str  # a second approval: whose rewritten document it approved
 
 

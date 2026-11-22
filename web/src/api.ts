@@ -263,6 +263,7 @@ export interface PendingItem {
   refused?: string;
   // Separation of duties: whose rewritten document this approval is for; they can't approve it.
   separation?: string;
+  waiver_allowed?: boolean;
   rewritten_by?: string;
   // At G6: CloudWatch alarms firing before production on what the feature touches.
   alarms_firing?: {

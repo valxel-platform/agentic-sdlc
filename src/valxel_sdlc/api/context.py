@@ -134,10 +134,12 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
         approvers = item_approvers(fid, item)
         out = {**item, "approvers": approvers, "can_decide": can_decide(user, {"approvers": approvers}),
                "needs_passkey": needs_passkey(user, approvers)}
-        if out["can_decide"] and not item.get("separation"):
+        if out["can_decide"]:
             why = eng().separation_for(fid, item, user.login)
             if why:  # they may still send it back or stop it; approving goes to another approver
-                out["separation"] = why
+                out["separation"] = item.get("separation") or why
+                if eng().services.settings.limits.separation_of_duties_waiver:
+                    out["waiver_allowed"] = True  # or they approve it themselves, with a reason
         return out
 
     def local_path(path: str) -> str:

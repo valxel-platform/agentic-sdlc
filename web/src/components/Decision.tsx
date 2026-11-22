@@ -302,6 +302,7 @@ export function DecisionPanel({
   const [nextReview, setNextReview] = useState("");
   const [reason, setReason] = useState("");
   const [override, setOverride] = useState("");
+  const [waiver, setWaiver] = useState("");
   const [remember, setRemember] = useState(false);
   const [lesson, setLesson] = useState("");
   const [comments, setComments] = useState<LineComment[]>([]);
@@ -1024,6 +1025,13 @@ export function DecisionPanel({
       )}
 
       {item.separation && <p className="small">{item.separation}</p>}
+      {item.separation && item.waiver_allowed && (
+        <label className="field" style={{ width: "100%" }}>
+          Approve it yourself: why no one else can (at least 20 characters; recorded with the decision and
+          listed for review)
+          <textarea id="waiver-reason" value={waiver} onChange={(e) => setWaiver(e.target.value)} />
+        </label>
+      )}
 
       <h3 className="decision-sec">Checks that passed</h3>
       {item.traceability && <ReleaseTrace t={item.traceability} />}
@@ -1573,12 +1581,13 @@ export function DecisionPanel({
                   disabled={
                     busy ||
                     (item.gate === "incident" && chosen.length === 0) ||
-                    (!!item.traceability?.blocks && !override.trim())
+                    (!!item.traceability?.blocks && !override.trim()) ||
+                    (!!item.separation && !(item.waiver_allowed && waiver.trim().length >= 20))
                   }
                   onClick={() =>
-                    send(
-                      "approve",
-                      item.gate === "incident"
+                    send("approve", {
+                      ...(item.separation && item.waiver_allowed ? { waiver_reason: waiver.trim() } : {}),
+                      ...(item.gate === "incident"
                         ? { action_ids: chosen }
                         : item.traceability?.blocks
                           ? { override_reason: override.trim() }
@@ -1595,8 +1604,8 @@ export function DecisionPanel({
                                     ...(must ? { must } : {}),
                                   }
                                 : {}),
-                            },
-                    )
+                            }),
+                    })
                   }
                 >
                   {item.gate === "incident"

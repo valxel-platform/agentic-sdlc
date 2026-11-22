@@ -34,10 +34,13 @@ limits:
   required_gates: [g1, g2, g3, g4, g5, g6]   # every gate needs named approvers (VX-1)
   takeover_after_revisions: 2      # a gate sent back this often suggests a person takes the phase over
   # Separation of duties (valxel_sdlc.separation): whoever started the feature or rewrote a phase's
-  # document can't approve it at these gates, and at every gate for these data classes. A
-  # one-person pilot sets the gates to []; the data classes stay.
+  # document can't approve it at these gates, and at every gate for these data classes.
   separation_of_duties_gates: [g5, g6]
   separation_of_duties_data_classes: [phi, payments]
+  # One approver (a solo founder): turn this on rather than emptying the lists above. The author
+  # may then approve with a written reason; the decision says "waived" and GET /api/waivers lists it
+  # for someone to review afterwards.
+  separation_of_duties_waiver: false
   max_gate_revisions: 3            # then it can't be sent back again: take it over, or stop
 
 # kind: product  owns its runtime (OpenChoreo project and environments) and deploys services.

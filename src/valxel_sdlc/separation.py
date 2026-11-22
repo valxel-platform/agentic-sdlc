@@ -11,15 +11,22 @@ Whoever wrote the work doesn't approve it. Two kinds of author:
 Where it applies (registry.yaml limits): every gate of a product whose data class is in
 `separation_of_duties_data_classes` (PHI and payments by default), and the gates in
 `separation_of_duties_gates` for every product (G5 and G6 by default: code review and production).
-A one-person pilot sets the second list empty; regulated products keep theirs.
+
+With one approver (a solo founder), `separation_of_duties_waiver` lets the author approve anyway after
+writing why no one else can (`waiver_reason`, at least WAIVER_MIN characters). That is a recorded
+exception, not the control: the decision says `separation: waived` with the reason, the audit event
+carries both, and GET /api/waivers lists them for someone to review afterwards. Emptying the lists
+above turns the rule off with nothing recorded; prefer the waiver.
 
 The engine checks it for every decision, however it arrives (web, bulk approval, MCP, A2A), and the
-decision records `separation: checked` so an audit can see the rule ran.
+decision records `separation: checked` (or `waived`) so an audit can see the rule ran.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
+
+WAIVER_MIN = 20  # characters: a reason, not "ok"
 
 
 class SeparationOfDuties(PermissionError):
@@ -62,6 +69,12 @@ def check(state: dict, item: dict, decision: dict, data_class: str, limits) -> s
     if approving and who and who in authors(state, item):
         rewrote = who == _norm(item.get("rewritten_by", "")) or who in _rewriters(state, item)
         why = "you rewrote this document" if rewrote else "you started this feature"
+        if getattr(limits, "separation_of_duties_waiver", False):
+            if len((decision.get("waiver_reason") or "").strip()) >= WAIVER_MIN:
+                return "waived"
+            raise SeparationOfDuties(
+                f"{gate.upper()} needs an approver who didn't write the work: {why}. To approve it yourself, "
+                "say why no one else can (a waiver: recorded with the decision and listed for review).")
         raise SeparationOfDuties(
             f"{gate.upper()} needs an approver who didn't write the work: {why}. Another approver decides "
             "this one; you can still send it back or stop it.")
