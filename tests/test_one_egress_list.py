@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_the_shell_sandbox_and_the_egress_proxy_use_config_egress_yaml(tmp_path, monkeypatch):
     listed = sandbox.egress(str(ROOT / "config/egress.yaml"))
-    assert "downloads.gradle.org" in listed  # Gradle's wrapper downloads from here
+    assert {"downloads.gradle.org", "services.gradle.org"} <= set(listed)  # Gradle's wrapper needs both
     assert ep.allow_list({}, str(ROOT / "config/egress.yaml")) == tuple(listed)
     custom = tmp_path / "egress.yaml"
     custom.write_text("allowed:\n  - Artifacts.Acme.com\n")
