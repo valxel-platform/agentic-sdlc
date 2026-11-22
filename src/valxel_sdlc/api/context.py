@@ -132,8 +132,13 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
         if item["type"] == "external":  # CI or OpenChoreo, not a person
             return {**item, "approvers": [], "can_decide": False}
         approvers = item_approvers(fid, item)
-        return {**item, "approvers": approvers, "can_decide": can_decide(user, {"approvers": approvers}),
-                "needs_passkey": needs_passkey(user, approvers)}
+        out = {**item, "approvers": approvers, "can_decide": can_decide(user, {"approvers": approvers}),
+               "needs_passkey": needs_passkey(user, approvers)}
+        if out["can_decide"] and not item.get("separation"):
+            why = eng().separation_for(fid, item, user.login)
+            if why:  # they may still send it back or stop it; approving goes to another approver
+                out["separation"] = why
+        return out
 
     def local_path(path: str) -> str:
         """A page of this app to return to after sign-in, or "/": never another site."""

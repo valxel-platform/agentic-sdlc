@@ -646,6 +646,22 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         if item.get("rewritten_by"):
             d["rewritten_by"] = item["rewritten_by"]
 
+    def separation_for(self, feature_id: str, item: dict, who: str) -> str:
+        """Why `who` may not approve this item (separation of duties), or '' when they may: so the
+        inbox says so before they try, rather than only refusing the decision."""
+        if item.get("type") not in ("gate", "handback") or kind_of(feature_id) != "feature":
+            return ""
+        from . import separation
+
+        state = self._state(feature_id)
+        data_class = self.services.feature_snapshot(state).product.data_class
+        try:
+            separation.check(state, item, {"decision": "approve", "approver": who}, data_class,
+                             self.services.settings.limits)
+        except separation.SeparationOfDuties as e:
+            return str(e)
+        return ""
+
     def _audit_decision(self, feature_id: str, interrupt_id: str, item: dict, d: dict) -> None:
         """A person's answer, before it takes effect: if it can't be recorded, it doesn't happen."""
         gate = str(item.get("gate") or item.get("kind") or item.get("type") or "")

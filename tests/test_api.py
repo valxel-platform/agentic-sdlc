@@ -47,14 +47,20 @@ def test_api_requires_sign_in(client):
 
 
 def test_only_listed_approvers_can_decide_and_decisions_record_the_signed_in_user(client, engine):
-    sign_in(client, "maria", teams=CLN_TEAMS)
+    sign_in(client, "lena", teams=CLN_TEAMS)  # CLN holds PHI: whoever starts it doesn't approve it
     r = client.post("/api/features", json={"product_id": "CLN", "title": "Consent check on intake"})
     assert r.status_code == 201
     fid = r.json()["feature_id"]
     wait_idle(engine, fid)
+    [mine] = client.get("/api/inbox?mine=true").json()
+    assert "you started this feature" in mine["separation"]  # told before trying, not only refused
+    refused = client.post(f"/api/features/{fid}/decisions/{mine['interrupt_id']}", json={"decision": "approve"})
+    assert refused.status_code == 403
 
+    sign_in(client, "maria", teams=CLN_TEAMS)
     [item] = client.get("/api/inbox?mine=true").json()
     assert item["gate"] == "g1" and item["can_decide"] and item["approvers"] == ["acme-clinic/product-owners"]
+    assert "separation" not in item
 
     sign_in(client, "dev-without-teams", orgs=["acme-clinic"])
     assert client.get("/api/inbox?mine=true").json() == []

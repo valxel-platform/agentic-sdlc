@@ -145,11 +145,13 @@ def test_the_server_works_end_to_end_with_row_level_security_on(tenant_dsn, tmp_
         raise AssertionError(f"{fid} never stopped at a gate")
 
     with TestClient(create_app(auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None)) as c:
-        c.post("/api/auth/dev-login", json={"login": "maria", "teams": teams, "orgs": ["acme-clinic"]})
+        c.post("/api/auth/dev-login", json={"login": "lena", "teams": teams, "orgs": ["acme-clinic"]})
         r = c.post("/api/features", json={"product_id": "CLN", "title": "Consent check on intake"})
         assert r.status_code == 201, r.text
         fid = r.json()["feature_id"]
         assert pending(c, fid) == ["g1"]
+        # Another product owner approves: CLN holds PHI, so its author may not.
+        c.post("/api/auth/dev-login", json={"login": "maria", "teams": teams, "orgs": ["acme-clinic"]})
         [item] = [i for i in c.get("/api/inbox?mine=true").json() if i["feature_id"] == fid]
         r = c.post(f"/api/features/{fid}/decisions/{item['interrupt_id']}", json={"decision": "approve"})
         assert r.status_code == 202, r.text
