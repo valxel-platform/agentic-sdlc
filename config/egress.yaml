@@ -1,7 +1,10 @@
-# Where an agent session's shell may connect (valxel_sdlc.sandbox): Claude Code's sandbox lets
-# every Bash command reach only these domains. The session's own model calls are the runtime's,
-# not the shell's, and aren't listed here. Adding a registry is a config change, reviewed like any
-# other: keep it to package registries and GitHub.
+# Where an agent session may connect: the one list behind Claude Code's shell sandbox
+# (valxel_sdlc.sandbox), the VM tier's egress proxy (egress_proxy.py) and the cluster's network
+# policy, which platform-foundation generates from a byte-for-byte copy of this file
+# (gitops/apps/agent-sessions/egress.yaml; `valxel repos check` reports a copy that drifts).
+# Change it here, then copy it there and run its scripts/egress-policy.py. A session's own model
+# calls go through the LLM gateway and aren't listed here. Adding a registry is a config change,
+# reviewed like any other: keep it to package registries and GitHub.
 allowed:
   - registry.npmjs.org
   - pypi.org

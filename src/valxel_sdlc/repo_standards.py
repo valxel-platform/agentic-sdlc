@@ -43,7 +43,7 @@ class Target:
 
 @dataclass
 class Drift:
-    area: str  # settings | security | ruleset | tags | teams | topics | properties | files | workflows | visibility | repo
+    area: str  # settings | security | ruleset | tags | teams | topics | properties | files | workflows | visibility | repo | copies
     item: str
     want: object
     have: object
@@ -68,7 +68,7 @@ class Report:
     @property
     def ok(self) -> bool:
         # A template missing a capability needs code, not an apply, but still fails the check.
-        return (self.exists and not [d for d in self.drift if d.fix == "apply" or d.area == "capabilities"]
+        return (self.exists and not [d for d in self.drift if d.fix == "apply" or d.area in ("capabilities", "copies")]
                 and not self.errors)
 
     def as_dict(self) -> dict:
@@ -447,7 +447,22 @@ def reconcile(gh, t: Target, *, apply: bool) -> Report:
 
 
 def run(services, gh, *, apply: bool, only: list[str] | None = None) -> list[Report]:
-    return [reconcile(gh, t, apply=apply) for t in targets(services, only)]
+    reports = [reconcile(gh, t, apply=apply) for t in targets(services, only)]
+    return reports + copy_reports(gh, only)
+
+
+def copy_reports(gh, only: list[str] | None = None) -> list[Report]:
+    """Copies other repos keep of the platform's files (template-contract.yaml shared_copies), one
+    report per repo with a copy that drifted. Fixed by hand: the copy's repo regenerates from it."""
+    from .template_contract import shared_copy_check
+
+    by: dict[str, Report] = {}
+    for f in shared_copy_check(gh):
+        if only and f["repo"] not in only:
+            continue
+        rep = by.setdefault(f["repo"], Report(f["repo"], "copy"))
+        rep.drift.append(Drift("copies", f["capability"], f["says"], f["problem"], fix="manual"))
+    return list(by.values())
 
 
 def summary(reports: list[Report]) -> str:

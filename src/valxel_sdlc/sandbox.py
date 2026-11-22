@@ -59,20 +59,19 @@ NO_SCRIPTS = {"npm_config_ignore_scripts": "true", "YARN_ENABLE_SCRIPTS": "false
               "GIT_TERMINAL_PROMPT": "0"}
 # Never readable from a session (absolute paths; Claude Code's '//' form is added when rendered).
 DENY_READ = ("/app", "/data", "/run/secrets", "/var/run/secrets", "/etc/valxel", "/proc")
-DEFAULT_EGRESS = ("registry.npmjs.org", "pypi.org", "files.pythonhosted.org", "repo.maven.apache.org",
-                  "repo1.maven.org", "plugins.gradle.org", "services.gradle.org", "github.com",
-                  "codeload.github.com", "objects.githubusercontent.com")
-
-
 def egress(path: str | None = None) -> list[str]:
-    """The domains a session's shell may reach (config/egress.yaml `allowed`)."""
+    """The domains a session may reach (config/egress.yaml `allowed`): the one list behind the shell
+    sandbox here, the VM tier's egress proxy (egress_proxy.py) and the cluster's network policy
+    (platform-foundation generates it from a copy of this file, which `valxel repos check`
+    compares). No built-in fallback: a second list is how they drifted (engineering review,
+    finding 4). Without the file a session may reach nothing, and the error says why."""
     p = Path(path or os.environ.get("VALXEL_EGRESS_CONFIG") or Path(os.environ.get("VALXEL_ROOT", ".")) / "config/egress.yaml")
     try:
         doc = yaml.safe_load(p.read_text()) or {}
-        allowed = [str(d) for d in doc.get("allowed") or []]
-        return allowed or list(DEFAULT_EGRESS)
     except OSError:
-        return list(DEFAULT_EGRESS)
+        log.error("no egress list at %s (VALXEL_EGRESS_CONFIG or VALXEL_ROOT): sessions may reach nothing", p)
+        return []
+    return [str(d).strip().lower() for d in doc.get("allowed") or [] if str(d).strip()]
 
 
 def secret_paths() -> list[str]:

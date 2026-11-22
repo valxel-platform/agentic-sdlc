@@ -60,7 +60,12 @@ def parse(text: str) -> dict:
                    "schema": {k: str(schema[k]) for k in ("repo", "path", "copy")} if schema else {}}
     if audit_event["type"] and "audit" in caps and not re.search(caps["audit"]["marker"], audit_event["type"]):
         raise ContractError(f"audit: marker doesn't match audit_event.type {audit_event['type']}")
-    return {"capabilities": caps, "groups": groups, "audit_event": audit_event}
+    copies = []
+    for i, e in enumerate(raw.get("shared_copies") or []):
+        if not all(":" in str(e.get(k) or "") for k in ("source", "copy")):
+            raise ContractError(f"shared_copies[{i}]: source and copy are each <owner>/<repo>:<path>")
+        copies.append({"source": str(e["source"]), "copy": str(e["copy"]), "says": str(e.get("says") or "")})
+    return {"capabilities": caps, "groups": groups, "audit_event": audit_event, "shared_copies": copies}
 
 
 @cache
@@ -153,6 +158,27 @@ def audit_schema_check(gh, repo: str, c: dict | None = None) -> list[dict]:
         return [{"capability": "audit-event-schema", "area": "audit", "says": says,
                  "problem": f"{s['copy']} differs from {s['repo']}'s {s['path']}: copy it from there"}]
     return []
+
+
+def shared_copy_check(gh, c: dict | None = None) -> list[dict]:
+    """Each copy under shared_copies must be its source, byte for byte: a rule generated from a
+    stale copy (the cluster's egress policy) allows something else than the tool does."""
+    c = c or contract()
+    out = []
+    for entry in c.get("shared_copies") or []:
+        (src_repo, src_path), (repo, path) = (entry[k].split(":", 1) for k in ("source", "copy"))
+        found = {"repo": repo, "capability": f"copy of {src_repo}:{src_path}", "area": "copies",
+                 "says": entry.get("says", "")}
+        want = gh.get_file(repo=src_repo, path=src_path, ref="")
+        if want is None:
+            out.append({**found, "problem": f"{src_repo} has no {src_path} to compare with"})
+            continue
+        have = gh.get_file(repo=repo, path=path, ref="")
+        if have is None:
+            out.append({**found, "problem": f"{path} doesn't exist"})
+        elif have != want:
+            out.append({**found, "problem": f"{path} differs from {src_repo}'s {src_path}: copy it from there"})
+    return out
 
 
 def matrix(gh, templates: dict[str, str], c: dict | None = None) -> dict[str, dict[str, str]]:

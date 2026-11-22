@@ -138,3 +138,11 @@ audit_event:
     valxel-platform/template-mcp-server: src/mcp_server/audit.py
     valxel-platform/template-reporting: src/reporting/audit.py
     valxel-platform/template-service: src/main/java/com/valxel/service/audit/Auditor.java
+
+# Files another repo keeps a copy of, byte for byte, because a rule there is generated from it.
+# `valxel repos check` reports a copy that differs from its source (RC1 of the engineering review:
+# the same rule kept by hand in two places drifts).
+shared_copies:
+  - source: valxel-platform/agentic-sdlc:config/egress.yaml
+    copy: valxel-platform/platform-foundation:gitops/apps/agent-sessions/egress.yaml
+    says: "the agent sessions' network policy allows what the tool's shell sandbox and egress proxy allow (scripts/egress-policy.py)"

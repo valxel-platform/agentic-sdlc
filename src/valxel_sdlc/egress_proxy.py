@@ -6,7 +6,9 @@ and the outside one, accepts CONNECT to the hosts allowed, the way the cluster's
 allows sessions only GitHub, the package registries and the model gateway. Plain-HTTP requests
 are refused: everything a session needs is HTTPS.
 
-VALXEL_EGRESS_ALLOW adds hosts (comma-separated; '*.example.com' allows its subdomains).
+The hosts are config/egress.yaml's (sandbox.egress), the same list as the shell sandbox's and the
+cluster's network policy; VALXEL_EGRESS_ALLOW adds a deployment's own (comma-separated;
+'*.example.com' allows its subdomains).
 
 Refusals are kept per session for the audit trail (T-115): the launcher gives each session a proxy
 URL naming it (http://<session>@egress-proxy:3128, sent as Proxy-Authorization), and when the
@@ -28,20 +30,14 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-# GitHub, and the registries a coder installs packages from.
-DEFAULT_ALLOW = (
-    "github.com", "api.github.com", "codeload.github.com", "*.githubusercontent.com", "ghcr.io",
-    "pypi.org", "files.pythonhosted.org", "registry.npmjs.org", "registry.yarnpkg.com",
-    "repo.maven.apache.org", "repo1.maven.org", "plugins.gradle.org", "services.gradle.org",
-    "proxy.golang.org", "sum.golang.org", "crates.io", "static.crates.io", "index.crates.io",
-    "rubygems.org", "api.nuget.org",
-)
+def allow_list(env=None, path: str | None = None) -> tuple[str, ...]:
+    """config/egress.yaml, the list the shell sandbox and the cluster's network policy use too
+    (sandbox.egress), plus VALXEL_EGRESS_ALLOW for a deployment's own hosts."""
+    from .sandbox import egress
 
-
-def allow_list(env=None) -> tuple[str, ...]:
     e = env if env is not None else os.environ
     extra = tuple(h.strip().lower() for h in (e.get("VALXEL_EGRESS_ALLOW") or "").split(",") if h.strip())
-    return DEFAULT_ALLOW + extra
+    return tuple(egress(path)) + extra
 
 
 def allowed(host: str, port: int, allow: tuple[str, ...]) -> bool:
