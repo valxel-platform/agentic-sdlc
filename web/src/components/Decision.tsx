@@ -12,6 +12,7 @@ import {
   type ReleaseTraceability,
 } from "../api";
 import { CommentableDoc, DecisionBrief } from "./DecisionBrief";
+import { IndependentReviews } from "./IndependentReviews";
 import { Mockups } from "./Mockups";
 import { Readiness } from "./Readiness";
 import { ScreensBuilt } from "./ScreensBuilt";
@@ -1150,6 +1151,10 @@ export function DecisionPanel({
             ))}
           </ul>
         </div>
+      )}
+
+      {item.type === "gate" && item.independent_reviews && item.independent_reviews.length > 0 && (
+        <IndependentReviews reviews={item.independent_reviews} />
       )}
 
       {item.type === "gate" && item.try_it && (

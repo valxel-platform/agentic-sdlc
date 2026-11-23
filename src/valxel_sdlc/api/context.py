@@ -204,6 +204,14 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
             stores["config_gate"] = ConfigGate.from_env(eng().services, eng().services.github)
         return stores["config_gate"]
 
+    def independent_review():
+        """Reviews every product PR with an agent that has none of its author's context (T-144)."""
+        if "independent_review" not in stores:
+            from ..independent_review import IndependentReview
+
+            stores["independent_review"] = IndependentReview(eng().services, eng().services.github)
+        return stores["independent_review"]
+
     def wsx():
         ws = eng().services.workspaces
         if ws is None:
@@ -216,4 +224,4 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
                 raise HTTPException(404, f"Unknown product {product_id}")
             raise HTTPException(403, f"You aren't a member of {product_id}'s organization")
 
-    return SimpleNamespace(state=state, auth=auth, signer=signer, oauth=oauth, stores=stores, eng=eng, with_memberships=with_memberships, signed_in=signed_in, session=session, confirm_decider=confirm_decider, current_user=current_user, lanes_for=lanes_for, role_in=role_in, may_start=may_start, founder_of=founder_of, admin_of=admin_of, item_approvers=item_approvers, decorate=decorate, local_path=local_path, config_gate=config_gate, wsx=wsx, member_of=member_of)
+    return SimpleNamespace(state=state, auth=auth, signer=signer, oauth=oauth, stores=stores, eng=eng, with_memberships=with_memberships, signed_in=signed_in, session=session, confirm_decider=confirm_decider, current_user=current_user, lanes_for=lanes_for, role_in=role_in, may_start=may_start, founder_of=founder_of, admin_of=admin_of, item_approvers=item_approvers, decorate=decorate, local_path=local_path, config_gate=config_gate, independent_review=independent_review, wsx=wsx, member_of=member_of)

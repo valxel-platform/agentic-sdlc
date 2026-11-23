@@ -760,6 +760,7 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             raise KeyError(f"Unknown feature {feature_id}")
         records = self.services.ledger.records(feature_id)
         human = sum(g.get("active_minutes", 0.0) for g in s.get("gate_decisions", []))
+        from .independent_review import for_feature as independent_reviews
         from .telemetry import sessions as agent_sessions
         pending = [{"interrupt_id": i.id, **i.value} for i in snap.interrupts]
         return {
@@ -796,6 +797,8 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
             "lanes_touched": s.get("lanes_touched", []),
             "artifacts": {k: v["id"] for k, v in s.get("artifacts", {}).items()},
             "pull_requests": s.get("pull_requests", {}),
+            # Each PR's independent review: an agent with none of the feature's context (T-144).
+            "independent_reviews": independent_reviews(self.services, feature_id),
             "change_set": s.get("change_set", {}),
             "release": {**(s.get("release") or {}),
                         **({"flag_on": self._flag_on(s)} if (s.get("release") or {}).get("flag") else {}),

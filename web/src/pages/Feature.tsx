@@ -649,6 +649,14 @@ export function FeaturePage({ canSync }: { canSync: (productId: string) => boole
                     <dd>
                       {pr.state === "merged" ? `Merged by ${pr.merged_by}` : "Open"}
                       {pr.review_score != null ? `, review ${pr.review_score.toFixed(2)}` : ""}
+                      {(() => {
+                        const ir = (f.independent_reviews ?? []).find(
+                          (r) => r.repo === pr.repo && r.number === pr.number,
+                        );
+                        return ir
+                          ? `, independent review ${ir.state === "success" ? "approved" : "asked for changes"}`
+                          : "";
+                      })()}
                     </dd>
                   </div>
                 ))}

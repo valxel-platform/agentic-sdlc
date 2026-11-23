@@ -225,6 +225,8 @@ export interface PendingItem {
   mockups?: MockupSet | null;
   /** G5: the change set's environment, to use the change as built before it merges. */
   try_it?: Preview | null;
+  /** G5: each PR's independent review (T-144). */
+  independent_reviews?: IndependentReview[] | null;
   /** G1: a rough sketch of the main screens the brief implies (valxel_sdlc.sketch). */
   sketch?: { version: number; findings: string[] } | null;
   screens?: ScreensAtRelease | null;
@@ -612,6 +614,8 @@ export interface Feature extends FeatureSummary {
   track?: string;
   constitution_version: string;
   artifacts: Record<string, string>;
+  /** Each PR's independent review: an agent with none of the feature's context (T-144). */
+  independent_reviews?: IndependentReview[];
   pull_requests: Record<
     string,
     {
@@ -1921,4 +1925,22 @@ export interface InstrumentationCheck {
   missing: string[];
   events: { event: string; goals: string[]; repo: string }[];
   why?: string;
+}
+
+/** An independent review of one pull request (valxel_sdlc.independent_review). */
+export interface IndependentReview {
+  repo: string;
+  number: number;
+  head_sha: string;
+  state: "success" | "failure";
+  description: string;
+  at: string;
+  product_id: string;
+  summary: string;
+  findings: {
+    severity: "blocking" | "major" | "minor" | "nit";
+    file: string;
+    line?: number | null;
+    issue: string;
+  }[];
 }

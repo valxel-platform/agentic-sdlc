@@ -9,6 +9,7 @@ from ..agents import GATE_APPROVE_TARGET, GATE_PHASE, NEXT_AFTER_PHASE, PHASE_SP
 from ..agents.parse import hld_adrs, parse_affected_repos, parse_cases, parse_tasks
 from ..state import FeatureState
 from .. import lessons, profiles, separation
+from ..independent_review import for_feature as independent_reviews
 from .phase import capability_id, design_knowledge, event, gates_status, now, touched_lanes
 from .briefs import hotfix_approvers
 from .infra import _alarms_firing, _apply_capacity, _build_cost, _capacity_change, aws_plan, aws_summary, bind_resource, env_for, oc_target
@@ -197,6 +198,8 @@ def make_gate(gate: str, services):
                 "mockups": (state.get("mockups") or None) if gate == "g3" else None,
                 "sketch": (state.get("sketch") or None) if gate == "g1" else None,
                 "try_it": preview.for_feature(services, state) if gate == "g5" else None,
+                # G5 sees each PR's independent review beside the build reviewer's (T-144).
+                "independent_reviews": (independent_reviews(services, state["feature_id"]) if gate == "g5" else None),
                 # How it ships (T-96): with a release, or on its own; the approval can change it.
                 "ship": ship_options(services, state) if gate == "g1" else None,
                 # A launch ships its features dark: one without a flag would wait like a train (T-97).

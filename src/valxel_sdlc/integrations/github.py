@@ -129,6 +129,13 @@ class GitHub(Protocol):
     def open_pull_requests(self, *, repo: str) -> list[dict]: ...
     # A pull request's files: {path, status (added|modified|removed|renamed), additions}; None if unknown.
     def pr_files(self, *, repo: str, number: int) -> list[dict] | None: ...
+    # One pull request: {number, title, body, author, branch, head_sha, base_sha, draft, state, fork};
+    # None if there's no such pull request (independent_review.py).
+    def pull_request(self, *, repo: str, number: int) -> dict | None: ...
+    # Its files with their patches: {path, status, patch} (patch "" for a binary or too-large file).
+    def pr_patches(self, *, repo: str, number: int) -> list[dict] | None: ...
+    # The pull request's one comment that starts with `marker`: made, or rewritten in place.
+    def upsert_comment(self, *, repo: str, number: int, marker: str, body: str) -> None: ...
     # Provisioning new repositories (see valxel_sdlc.provisioning); each call is idempotent.
     def get_file(self, *, repo: str, path: str, ref: str) -> str | None: ...  # ref '' = default branch
     def get_bytes(self, *, repo: str, path: str, ref: str) -> bytes | None: ...  # a binary file (a screenshot)
@@ -178,6 +185,7 @@ class StubGitHub:
         self.actions: dict[tuple[str, str], list[dict]] = {}
         # Team membership (valxel_sdlc.web.auth live checks): "org/team" -> logins removed from it, or
         # None for a GitHub that can't answer. Unset, everyone their sign-in names is still a member.
+        self.comments: dict[str, list[str]] = {}  # "repo#number" -> comment bodies (upsert_comment)
         self.removed_from_team: dict[str, set[str]] = {}
         self.teams_unknown = False
         self.team_checks: list[tuple[str, str, str]] = []
@@ -280,6 +288,36 @@ class StubGitHub:
             content = self.files.get((repo, pr["branch"], path), "")
             out.append({"path": path, "status": "added", "additions": len(content.splitlines()) or 1})
         return out
+
+    def pull_request(self, *, repo, number):
+        pr = self.prs.get(f"{repo}#{number}")
+        if pr is None:
+            return None
+        return {"number": pr["number"], "title": pr["title"], "body": pr["body"],
+                "author": pr.get("author", "valxel[bot]"),
+                "branch": pr["branch"], "head_sha": pr["head_sha"], "base_sha": pr.get("base_sha", "base"),
+                "draft": bool(pr.get("draft")), "state": pr["state"], "fork": bool(pr.get("fork"))}
+
+    def pr_patches(self, *, repo, number):
+        pr = self.prs.get(f"{repo}#{number}")
+        if pr is None:
+            return None
+        out = []
+        for path in pr["files"]:
+            content = self.files.get((repo, pr["branch"], path), "")
+            patch = "".join(f"+{line}\n" for line in content.splitlines())
+            hunk = f"@@ -0,0 +1,{len(content.splitlines())} @@\n{patch}"
+            out.append({"path": path, "status": "added", "patch": hunk})
+        return out
+
+    def upsert_comment(self, *, repo, number, marker, body):
+        with self._lock:
+            comments = self.comments.setdefault(f"{repo}#{number}", [])
+            for i, c in enumerate(comments):
+                if c.startswith(marker):
+                    comments[i] = body
+                    return
+            comments.append(body)
 
     def open_pull_requests(self, *, repo):
         with self._lock:
@@ -603,6 +641,41 @@ class GitHubRest:
 
     def dependabot_alerts(self, *, repo):
         return self._maybe(repo, "/dependabot/alerts?state=open&per_page=100")
+
+    def pull_request(self, *, repo, number):
+        p = self._call("GET", repo, f"/pulls/{int(number)}", ok404=True)
+        if p is None:
+            return None
+        head, base = p.get("head") or {}, p.get("base") or {}
+        return {"number": p["number"], "title": p.get("title") or "", "body": p.get("body") or "",
+                "author": (p.get("user") or {}).get("login", ""), "branch": head.get("ref", ""),
+                "head_sha": head.get("sha", ""), "base_sha": base.get("sha", ""), "draft": bool(p.get("draft")),
+                "state": p.get("state", ""),
+                "fork": (head.get("repo") or {}).get("full_name", repo) != repo}
+
+    def pr_patches(self, *, repo, number):
+        out: list[dict] = []
+        for page in range(1, 31):
+            rows = self._call("GET", repo, f"/pulls/{int(number)}/files?per_page=100&page={page}", ok404=True)
+            if rows is None:
+                return None
+            out += [{"path": f["filename"], "status": f.get("status", "modified"), "patch": f.get("patch") or ""}
+                    for f in rows]
+            if len(rows) < 100:
+                break
+        return out
+
+    def upsert_comment(self, *, repo, number, marker, body):
+        found = None
+        for page in range(1, 11):
+            rows = self._call("GET", repo, f"/issues/{int(number)}/comments?per_page=100&page={page}") or []
+            found = next((c["id"] for c in rows if (c.get("body") or "").startswith(marker)), found)
+            if len(rows) < 100:
+                break
+        if found is not None:
+            self._call("PATCH", repo, f"/issues/comments/{found}", {"body": body})
+        else:
+            self._call("POST", repo, f"/issues/{int(number)}/comments", {"body": body})
 
     def pr_files(self, *, repo, number):
         out: list[dict] = []

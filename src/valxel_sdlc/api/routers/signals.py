@@ -45,6 +45,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     eng = ctx.eng
     current_user = ctx.current_user
     config_gate = ctx.config_gate
+    independent_review = ctx.independent_review
     member_of = ctx.member_of
     confirm_decider = ctx.confirm_decider
 
@@ -363,6 +364,15 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                              requested_by=(pr.get("user") or {}).get("login", ""))
             return {"event": "pull_request", "eval_run": run["id"]}
         kind = request.headers.get("x-github-event", "")
+        reviewed = None
+        repo_name = (event.get("repository") or {}).get("full_name", "")
+        if (kind == "pull_request" and event.get("action") in ("opened", "synchronize", "reopened", "ready_for_review")
+                and pr.get("number")):
+            # Every PR in a product's repos, whoever opened it (T-144). The event only names the PR:
+            # what's reviewed is read back from GitHub with the tool's own App.
+            pid = eng().upkeep.repos().get(repo_name)
+            if pid:
+                reviewed = await run_in_threadpool(independent_review().start, repo_name, int(pr["number"]), pid)
         from ...upkeep.alerts import EVENTS as ALERT_EVENTS
 
         if kind in ALERT_EVENTS:  # a security alert on a default branch (valxel_sdlc.upkeep)
@@ -377,6 +387,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         record_review_effort(eng(), kind, event)
         waiting = set(eng().waiting_on_external())
         poked = [fid for fid in sorted(features & waiting if features else waiting) if eng().poke(fid)]
-        return {"event": request.headers.get("x-github-event", ""), "resumed": poked}
+        return {"event": request.headers.get("x-github-event", ""), "resumed": poked,
+                **({"independent_review": reviewed} if reviewed else {})}
 
     return api

@@ -26,6 +26,9 @@ roles:
                 fallback: [coder_codex, coder_open] }
   reviewer:   { runtime: claude_code, model: anthropic/claude-opus-5-5, max_turns: 30, max_call_usd: 6,
                 fallback: [reviewer_open], second_opinion: [reviewer_second, reviewer_open] }
+  # Every pull request in a product repo, whoever opened it, with none of its author's context
+  # (valxel_sdlc.independent_review): one gateway call, the diff and base files in the prompt.
+  independent_reviewer: { runtime: generic, model: anthropic/claude-sonnet-5-5 }
   release:    { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
   ops:        { runtime: generic,     model: anthropic/claude-sonnet-5-5 }
   critic:     { runtime: generic,     model: anthropic/claude-opus-5-5 }

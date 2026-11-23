@@ -17,6 +17,7 @@ Back to the [README](../README.md).
 - [The template contract: what every template brings](#the-template-contract-what-every-template-brings)
 - [Keeping repos on the standards](#keeping-repos-on-the-standards)
 - [Delivery: GitHub and OpenChoreo](#delivery-github-and-openchoreo)
+- [Independent review of every pull request](#independent-review-of-every-pull-request)
 - [Tests and security scans](#tests-and-security-scans)
 - [One incident per failure](#one-incident-per-failure)
 - [Error tracking: Sentry or self-hosted GlitchTip](#error-tracking-sentry-or-self-hosted-glitchtip)
@@ -1173,6 +1174,25 @@ runtime:
 
 The adapters match tool and argument names against OpenChoreo's published tool schemas, and
 the startup check names any missing setting.
+
+## Independent review of every pull request
+
+Every pull request in a product's repos gets a second review from an agent that has none of its
+author's context (`valxel_sdlc.independent_review`, T-144), whoever opened it: the tool's coder, a
+developer, a hotfix, Renovate. The build reviewer checks a coder's change against the feature's
+design; this one sees only the diff, the base branch's copy of each changed file and the product's
+constitution, so a design that missed something doesn't take it along.
+
+- The tool's GitHub App starts it from the pull-request webhook; nothing is installed in the repo
+  and the customer gives no model key. The call goes through the LLM gateway under the product's
+  data-class rule, and its cost is in the product's spend (role `independent_reviewer`, Sonnet).
+- The verdict is the commit status `independent-review` on the PR's head, plus one comment. It
+  fails on any blocking finding, and on any major one when the change touches high-risk paths (the
+  defaults, plus the product's `high_risk_paths`). Require it in the product's ruleset to make it
+  a merge gate.
+- Everything from the PR goes in as untrusted text; a fork's PR isn't reviewed by the agent and
+  asks for a maintainer.
+- The feature page shows each PR's review, and G5 shows them beside the build reviewer's.
 
 ## Tests and security scans
 

@@ -8,7 +8,7 @@ seams:
   delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env, environments, acceptance,
              records, drafts, traceability, design_record, fit, mockups, sketch, prototype, preview, current_screens, screens, scaffolding, sandboxes, jobs,
              dependencies, quality, standard_files, agent_tools, performance, capacity,
-             waits, reconcile, pilot, confidence]
+             waits, reconcile, pilot, confidence, independent_review]
   ops: [ops, finops, upkeep]
 # Shared definitions several seams read, which use no seam themselves: the core's, though their
 # files sit with the seam that first needed them. (Moving the files is churn for no change in what
