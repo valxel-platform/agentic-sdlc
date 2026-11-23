@@ -166,7 +166,6 @@ We list these rather than wait to be asked. Each has a tracker item.
 - **Sign-in:** GitHub or Cognito only. Generic OIDC (Okta, Entra ID) is not yet supported.
 - **Install rehearsal (T-123):** the chart is tested in CI but has not yet been installed end to
   end on a real cluster.
-- **Support:** the [support policy](releases.md#support) is proposed, not yet committed.
 
 ## Reporting a vulnerability
 
