@@ -103,7 +103,7 @@ def test_admins_can_check_the_chain(engine):
 
     with TestClient(create_app(engine, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None)) as c:
         c.post("/api/auth/dev-login", json={"login": "founder", "email": "f@t114.example", "orgs": ["x"]})
-        assert c.post("/api/workspaces", json={"id": "t114-ws", "name": "T114", "plan": "lite"}).status_code == 201
+        assert c.post("/api/workspaces", json={"id": "t114-ws", "name": "T114"}).status_code == 201
         r = c.get("/api/workspaces/t114-ws/audit/verify")
         assert r.status_code == 200 and r.json()["ok"] is True and r.json()["entries"] >= 1
         c.post("/api/auth/dev-login", json={"login": "stranger", "email": "s@else.example", "orgs": ["x"]})

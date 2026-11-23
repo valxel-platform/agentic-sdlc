@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, type Billing, type Me, type Plan, type Plans, type ToolRow } from "../api";
 
-/** The sign-up wizard (the sign-in design, A9): choose a plan, name the workspace, connect GitHub
- * (both Apps, or a guided account first), then describe the first product. A founder reaches the
+/** The sign-up wizard (the sign-in design, A9): name the workspace, connect GitHub (both Apps, or a
+ * guided account first), then describe the first product. A plan step comes first only when more
+ * than one plan is offered (VALXEL_PLANS; by default only the free self-hosted plan is). A founder reaches the
  * product gate in about 10 minutes. Each step is safe to repeat: the wizard reads where things
  * stand from the server each time it opens, so coming back from GitHub lands on the next step. */
 export function StartPage({ onChanged }: { me: Me; onChanged: () => void }) {
@@ -13,17 +14,20 @@ export function StartPage({ onChanged }: { me: Me; onChanged: () => void }) {
 
 const STEPS = ["Plan", "Workspace", "GitHub", "First product"];
 
-function Steps({ at }: { at: number }) {
+/** The steps, with `at` counted over all four; without a plan step, the first is dropped. */
+function Steps({ at, withPlan = true }: { at: number; withPlan?: boolean }) {
+  const steps = withPlan ? STEPS : STEPS.slice(1);
+  const here = withPlan ? at : at - 1;
   return (
     <ol className="wizard-steps" aria-label="Sign-up steps">
-      {STEPS.map((s, i) => (
+      {steps.map((s, i) => (
         <li
           key={s}
-          className={i < at ? "done" : i === at ? "current" : ""}
-          aria-current={i === at ? "step" : undefined}
+          className={i < here ? "done" : i === here ? "current" : ""}
+          aria-current={i === here ? "step" : undefined}
         >
           <span className="n" aria-hidden="true">
-            {i < at ? "✓" : i + 1}
+            {i < here ? "✓" : i + 1}
           </span>{" "}
           {s}
         </li>
@@ -47,12 +51,18 @@ function ChoosePlan({ onChanged }: { onChanged: () => void }) {
       .catch((e) => setErr(e.message));
   }, []);
 
+  // One plan offered (the default: self-hosted only): no plan step; this install is where the
+  // workspace lives. With several, self-hosted means "install it yourself" and makes no workspace.
+  const only = plans?.plans.length === 1 ? plans.plans[0].id : "";
+  const chosen = only || plan;
+  const makesWorkspace = !!chosen && (!!only || chosen !== "self-hosted");
+
   async function create(e: React.FormEvent) {
     e.preventDefault();
-    if (!plan || plan === "self-hosted") return;
+    if (!makesWorkspace) return;
     setBusy(true);
     try {
-      const w = await api.createWorkspace({ ...form, plan });
+      const w = await api.createWorkspace({ ...form, plan: chosen as Plan["id"] });
       onChanged();
       nav(`/start/${w.id}`);
     } catch (ex) {
@@ -67,46 +77,52 @@ function ChoosePlan({ onChanged }: { onChanged: () => void }) {
       <div className="page-head">
         <div>
           <h1>Set up Valxel</h1>
-          <p className="muted">About 10 minutes: a plan, a name, GitHub, then your first product.</p>
+          <p className="muted">
+            {only
+              ? "About 10 minutes: a name, GitHub, then your first product."
+              : "About 10 minutes: a plan, a name, GitHub, then your first product."}
+          </p>
         </div>
       </div>
-      <Steps at={plan && plan !== "self-hosted" ? 1 : 0} />
+      <Steps at={makesWorkspace ? 1 : 0} withPlan={!only} />
       {err && (
         <p className="error-note" role="alert">
           {err}
         </p>
       )}
-      <section className="panel" aria-labelledby="h-plan">
-        <h2 id="h-plan" className="section-title">
-          Choose a plan
-        </h2>
-        <p className="small muted pad">
-          You can change between Lite and Full later. A card is asked for only when the plan first costs
-          something.
-        </p>
-        <div className="plan-grid pad" role="radiogroup" aria-labelledby="h-plan">
-          {plans?.plans.map((p) => (
-            <label key={p.id} className={`plan-card ${plan === p.id ? "picked" : ""}`}>
-              <input
-                type="radio"
-                name="plan"
-                value={p.id}
-                checked={plan === p.id}
-                onChange={() => setPlan(p.id)}
-              />
-              <strong>{p.name}</strong>
-              <span className="small">{p.for_whom}</span>
-              <span>{p.price}</span>
-              <span className="small muted">
-                Card: {p.card_when}. Sign in with {p.sign_in}.
-              </span>
-              <span className="small muted">{p.runs_on}.</span>
-            </label>
-          ))}
-        </div>
-      </section>
+      {plans && !only && (
+        <section className="panel" aria-labelledby="h-plan">
+          <h2 id="h-plan" className="section-title">
+            Choose a plan
+          </h2>
+          <p className="small muted pad">
+            You can change between Lite and Full later. A card is asked for only when the plan first costs
+            something.
+          </p>
+          <div className="plan-grid pad" role="radiogroup" aria-labelledby="h-plan">
+            {plans?.plans.map((p) => (
+              <label key={p.id} className={`plan-card ${plan === p.id ? "picked" : ""}`}>
+                <input
+                  type="radio"
+                  name="plan"
+                  value={p.id}
+                  checked={plan === p.id}
+                  onChange={() => setPlan(p.id)}
+                />
+                <strong>{p.name}</strong>
+                <span className="small">{p.for_whom}</span>
+                <span>{p.price}</span>
+                <span className="small muted">
+                  Card: {p.card_when}. Sign in with {p.sign_in}.
+                </span>
+                <span className="small muted">{p.runs_on}.</span>
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
 
-      {plan === "self-hosted" && plans && (
+      {!only && plan === "self-hosted" && plans && (
         <section className="panel" aria-labelledby="h-self">
           <h2 id="h-self" className="section-title">
             Self-hosted
@@ -135,14 +151,16 @@ function ChoosePlan({ onChanged }: { onChanged: () => void }) {
         </section>
       )}
 
-      {plan && plan !== "self-hosted" && (
+      {makesWorkspace && (
         <section className="panel form-panel" aria-labelledby="h-ws">
           <h2 id="h-ws" className="section-title">
             Name your workspace
           </h2>
           <p className="small muted pad">
             A workspace holds your team's products, its people and who approves each gate.
-            {plan === "lite" && plans ? ` Hosted dev and staging are free for ${plans.trial_days} days.` : ""}
+            {chosen === "lite" && plans
+              ? ` Hosted dev and staging are free for ${plans.trial_days} days.`
+              : ""}
           </p>
           <form className="stack pad" onSubmit={create}>
             <label className="field">
@@ -244,7 +262,7 @@ function Setup({ ws }: { ws: string }) {
           </p>
         </div>
       </div>
-      <Steps at={at} />
+      <Steps at={at} withPlan={!!billing?.plan.hosted} />
       {(err || message) && (
         <p className={q.get("error") || err ? "error-note" : "note"} role="alert">
           {err || message}

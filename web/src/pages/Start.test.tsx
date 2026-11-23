@@ -136,6 +136,26 @@ beforeEach(() => {
 });
 
 describe("ChoosePlan", () => {
+  it("with only the self-hosted plan offered, skips the plan step and makes the workspace here", async () => {
+    const user = userEvent.setup();
+    apiMock.plans.mockResolvedValue({ ...plansFixture, plans: [plansFixture.plans[0]] });
+    renderStart("/start");
+    expect(await screen.findByRole("heading", { name: "Name your workspace" })).toBeInTheDocument();
+    const steps = screen.getByRole("list", { name: "Sign-up steps" });
+    expect(within(steps).queryByText("Plan")).not.toBeInTheDocument();
+    expect(within(steps).getByText("Workspace").closest("li")).toHaveAttribute("aria-current", "step");
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open the install guide" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/free for 14 days/)).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Acme Farms"), "Acme Farms");
+    await user.click(screen.getByRole("button", { name: "Create workspace" }));
+    expect(apiMock.createWorkspace).toHaveBeenCalledWith({
+      id: "acme-farms",
+      name: "Acme Farms",
+      plan: "self-hosted",
+    });
+  });
+
   it("renders the plan cards from plans()", async () => {
     renderStart("/start");
     expect(await screen.findByRole("radio", { name: /Self-hosted/ })).toBeInTheDocument();

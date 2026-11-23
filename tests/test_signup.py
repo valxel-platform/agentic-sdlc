@@ -29,6 +29,12 @@ def sign_in(client, login):
     assert r.status_code == 200
 
 
+@pytest.fixture(autouse=True)
+def _paid_plans_offered(monkeypatch):
+    """These tests cover the paid plans, which are hidden unless VALXEL_PLANS lists them."""
+    monkeypatch.setenv("VALXEL_PLANS", "self-hosted,lite,full")
+
+
 @pytest.fixture
 def client(engine):
     svc = engine.services
@@ -142,3 +148,23 @@ def test_with_a_payment_provider_going_live_waits_for_a_card():
     assert billing.status(ws, Card(False), live=True)["card_needed"] is True
     with pytest.raises(ValueError, match="no payment provider is built in"):
         billing.provider_for({"VALXEL_BILLING": "stripe"})
+
+
+def test_only_the_self_hosted_plan_is_offered_by_default(engine, monkeypatch):
+    monkeypatch.delenv("VALXEL_PLANS")
+    assert billing.offered({}) == ["self-hosted"] and billing.offered({"VALXEL_PLANS": "lite, bogus"}) == [
+        "self-hosted", "lite"]
+    svc = engine.services
+    svc.connections = Connections(svc.workspaces, github=GitHubInstalls(APPS, opener=FakeGitHub()))
+    with TestClient(create_app(engine, auth=AuthConfig(mode="dev", secret=SECRET), web_dist=None)) as c:
+        sign_in(c, "lee")
+        assert [p["id"] for p in c.get("/api/plans").json()["plans"]] == ["self-hosted"]
+        assert c.post("/api/workspaces", json={"id": "lee-lite", "name": "Lee", "plan": "lite"}).status_code == 400
+        # Sign-up in an install makes the workspace on the self-hosted plan, ready to connect its tools.
+        r = c.post("/api/workspaces", json={"id": "lee-farms", "name": "Lee Farms"})
+        assert r.status_code == 201, r.text
+        ws = engine.services.workspaces.get("lee-farms")
+        assert ws["plan"] == "self-hosted" and ws["self_serve"] is True
+        b = c.get("/api/workspaces/lee-farms/billing").json()
+        assert b["plan"]["id"] == "self-hosted" and b["note"] == "" and b["trial_ends"] == ""
+        assert c.put("/api/workspaces/lee-farms/plan", json={"plan": "full"}).status_code == 400
