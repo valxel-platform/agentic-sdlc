@@ -299,8 +299,10 @@ class PostgresCluster:
             if value is None:
                 conn.execute("delete from valxel_notes where key = %s", (key,))
             else:
+                from .secret_scrub import scrub  # notes keep what agents and builds wrote: never a secret
+
                 conn.execute("insert into valxel_notes (key, value) values (%s, %s) on conflict (key)"
-                             " do update set value = excluded.value, at = now()", (key, json.dumps(value)))
+                             " do update set value = excluded.value, at = now()", (key, scrub(json.dumps(value))))
 
 
     def prune(self, days: int = 30) -> int:

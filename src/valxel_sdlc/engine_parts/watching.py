@@ -87,6 +87,23 @@ class WatchingMixin:
             log.info("Deleted %d session transcripts older than a day", gone)
         return gone
 
+    def sweep_sandboxes(self) -> int:
+        """Session folders and checkouts left behind: customer code nothing will use again."""
+        from ..sandbox import sweep
+
+        gone = sweep()
+        if gone:
+            log.info("Deleted %d session folders and checkouts left behind", gone)
+        return gone
+
+    def prune_eval_cases(self) -> int:
+        """Eval cases keep agents' output (documents, a PR's title and body): kept for their window only."""
+        store = getattr(getattr(self, "services", None), "evals", None)
+        gone = store.prune() if store is not None and hasattr(store, "prune") else 0
+        if gone:
+            log.info("Deleted %d eval cases past their retention", gone)
+        return gone
+
     def check_backups(self, now: float | None = None) -> str:
         """The VM tier's nightly backup (VALXEL_BACKUP_MARKER, written by the bundle's backup service)
         happened in the last 26 hours. Nothing to check where it isn't set."""
@@ -181,6 +198,8 @@ class WatchingMixin:
             Job("collect_costs", self.collect_costs, 3600),  # cost data moves daily; hourly is plenty
             Job("review_costs", self.review_costs, 3600),
             Job("expire_transcripts", self.expire_transcripts, 3600),
+            Job("sweep_sandboxes", self.sweep_sandboxes, 3600),  # folders a crashed worker left (T-121)
+            Job("prune_eval_cases", self.prune_eval_cases, DAILY),  # past their retention (T-121)
             Job("remove_drafts", self.remove_drafts, DAILY),  # finished features' drafts (drafts.py)
             Job("warn_release_dates", self.warn_release_dates, DAILY),  # a week before a release's date
             # VM tier: fails while the last backup is over 26 hours old, so it alerts within two (T-69).

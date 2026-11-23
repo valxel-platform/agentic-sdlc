@@ -58,16 +58,18 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
 from .eval_case import EvalCase  # in the core: delivery's agents keep cases too
+from .secret_scrub import scrub
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +81,7 @@ _DROP = ("feedback", "prior_findings", "simulate_faults", "budget_remaining_usd"
 
 
 def now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 
@@ -133,6 +135,20 @@ def _apply_label(cases: list[EvalCase], label: dict, reference: str) -> None:
             c.reference = c.reference or reference
 
 
+def retention_days(env: dict | None = None) -> tuple[int, int]:
+    """How long eval cases are kept (T-121): unlabeled ones VALXEL_EVAL_CASE_RETENTION_DAYS (90),
+    labeled ones, the product's eval set, VALXEL_EVAL_LABELED_RETENTION_DAYS (730)."""
+    e = env if env is not None else os.environ
+    return (max(1, int(e.get("VALXEL_EVAL_CASE_RETENTION_DAYS", "90"))),
+            max(1, int(e.get("VALXEL_EVAL_LABELED_RETENTION_DAYS", "730"))))
+
+
+def _expired(c: EvalCase, now: datetime, days: tuple[int, int]) -> bool:
+    at = datetime.fromisoformat(str(c.at))
+    at = at if at.tzinfo else at.replace(tzinfo=UTC)
+    return now - at > timedelta(days=days[1] if c.label else days[0])
+
+
 class InMemoryEvalStore:
     def __init__(self) -> None:
         self._cases: dict[str, EvalCase] = {}
@@ -147,6 +163,16 @@ class InMemoryEvalStore:
             mine = sorted((c for c in self._cases.values() if c.feature_id == feature_id and c.phase == phase),
                           key=lambda c: c.at)
             _apply_label(mine, label, reference)
+
+    def prune(self, days: tuple[int, int] | None = None, now: datetime | None = None,
+              product_id: str | None = None) -> int:
+        days, now = days or retention_days(), now or datetime.now(UTC)
+        with self._lock:
+            old = [k for k, c in self._cases.items()
+                   if (not product_id or c.product_id == product_id) and _expired(c, now, days)]
+            for k in old:
+                del self._cases[k]
+        return len(old)
 
     def cases(self, *, product_id=None, phases=(), data_classes=(), labeled=True, limit_per_phase=None):
         with self._lock:
@@ -169,7 +195,8 @@ class PostgresEvalStore:
     def _put(self, conn, c: EvalCase) -> None:
         conn.execute("INSERT INTO valxel_eval_cases (id, product_id, feature_id, phase, data_class, at, data) "
                      "VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data",
-                     (c.id, c.product_id, c.feature_id, c.phase, c.data_class, c.at, json.dumps(c.as_dict(), default=str)))
+                     (c.id, c.product_id, c.feature_id, c.phase, c.data_class, c.at,
+                      scrub(json.dumps(c.as_dict(), default=str))))  # cases keep agents' output: never a secret
 
     def capture(self, case: EvalCase) -> None:
         with self.pool.connection() as conn:
@@ -183,6 +210,19 @@ class PostgresEvalStore:
             _apply_label(mine, label, reference)
             for c in mine:
                 self._put(conn, c)
+
+    def prune(self, days: tuple[int, int] | None = None, now: datetime | None = None,
+              product_id: str | None = None) -> int:
+        """Delete cases past their retention: unlabeled after the first window, labeled after the second."""
+        (open_days, labeled_days), now = days or retention_days(), now or datetime.now(UTC)
+        with self.pool.connection() as conn:
+            cur = conn.execute("DELETE FROM valxel_eval_cases WHERE (data->'label' IS NULL OR data->'label' = 'null'"
+                               " OR data->'label' = '{}') AND at < %s AND (%s::text IS NULL OR product_id = %s)",
+                               (now - timedelta(days=open_days), product_id, product_id))
+            n = cur.rowcount or 0
+            cur = conn.execute("DELETE FROM valxel_eval_cases WHERE at < %s AND (%s::text IS NULL OR product_id = %s)",
+                               (now - timedelta(days=labeled_days), product_id, product_id))
+            return n + (cur.rowcount or 0)
 
     def cases(self, *, product_id=None, phases=(), data_classes=(), labeled=True, limit_per_phase=None):
         sql, args = "SELECT data FROM valxel_eval_cases", []

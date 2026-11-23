@@ -171,6 +171,36 @@ def _root() -> Path:
     return Path(os.environ.get("VALXEL_SANDBOX_DIR") or Path(tempfile.gettempdir()) / "valxel-sandboxes")
 
 
+def sweep(*, older_than_s: float = 6 * 3600, now: float | None = None) -> int:
+    """Delete session folders and read-only checkouts a crashed worker left behind (T-121): a
+    session ends its own (`session`, `workspace.release`), so anything still here hours later is
+    customer code, and maybe a repo token, that nothing will use again. Sessions are capped at an
+    hour (VALXEL_SESSION_TIMEOUT_S); six hours leaves room for any that run long."""
+    import time
+
+    now = time.time() if now is None else now
+    root, gone = _root(), 0
+    if not root.is_dir():
+        return 0
+    folders = [p for p in root.iterdir() if p.is_dir() and p.name != "checkouts"]
+    if (root / "checkouts").is_dir():
+        folders += [p for p in (root / "checkouts").iterdir() if p.is_dir()]
+    for folder in folders:
+        try:
+            if now - folder.stat().st_mtime < older_than_s:
+                continue
+        except FileNotFoundError:
+            continue
+
+        def fix(func, path, _exc):
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+            func(path)
+
+        shutil.rmtree(folder, onerror=fix)
+        gone += 1
+    return gone
+
+
 def _askpass(folder: Path, token: str) -> Path:
     """git asks this script for the password: the token, from a file only the session's folder holds."""
     (folder / ".token").write_text(token)

@@ -13,6 +13,7 @@ Back to the [README](../README.md).
 - [Models: more than one vendor](#models-more-than-one-vendor)
 - [Modes](#modes)
 - [Replacing the stubs](#replacing-the-stubs)
+- [Where customer code or secrets may be kept](code-and-secrets.md)
 
 ## Web interface
 

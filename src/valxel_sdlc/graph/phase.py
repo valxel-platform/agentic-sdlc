@@ -1144,7 +1144,8 @@ def build_build_subgraph(services):
                   "tests_passed": bool(reply and reply.tests.passed),
                   # Each planned test case: is a test with its name on the branch (traceability.py)?
                   "cases": found,
-                  "summary": reply.summary if reply else res.text,
+                  # Unparseable: the start of what it said, not all of it (it can be a whole file).
+                  "summary": reply.summary if reply else (res.text or "")[:2000],
                   "notes": diary.entries(list(reply.notes)) if reply else [],
                   "tests": reply.tests.model_dump() if reply else {"passed": False, "failed": [],
                                                                     "error": f"no structured result: {error}"}}
