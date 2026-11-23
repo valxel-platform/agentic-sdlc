@@ -1,0 +1,28 @@
+# Made-up values that render every part of the chart (tests/test_helm_chart.py). Not for a real install.
+image:
+  digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+publicUrl: https://sdlc.example.test
+route:
+  gatewayApi:
+    parentRefs: [{name: gateway-default, namespace: openchoreo-control-plane, sectionName: https}]
+auth:
+  githubOAuthClientId: Iv1.example
+github:
+  appId: "1001"
+  appKmsKeyId: arn:aws:kms:us-east-1:111122223333:key/delivery
+  provisionerAppId: "1002"
+  provisionerKmsKeyId: arn:aws:kms:us-east-1:111122223333:key/provisioner
+awsRegion: us-east-1
+artifacts:
+  storageClassName: efs-shared
+archives:
+  checkpointBucket: example-checkpoints
+  auditAnchorBucket: example-anchors
+  auditArchiveBucket: example-audit
+gateway:
+  image:
+    digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  toolKeySha256: 3333333333333333333333333333333333333333333333333333333333333333
+auditSink:
+  image:
+    digest: sha256:4444444444444444444444444444444444444444444444444444444444444444

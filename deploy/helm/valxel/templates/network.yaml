@@ -1,0 +1,245 @@
+{{- $ns := .Values.sessions.namespace -}}
+{{- $rel := .Release.Namespace -}}
+{{- $inst := .Release.Name -}}
+{{- if eq .Values.networkPolicy.flavor "cilium" }}
+# What a session may reach: the names in sessions.egress (package registries and GitHub), the LLM
+# gateway (sessions hold a gateway token, not a model key), and DNS for those names only. Nothing
+# else: not the cluster's API, not the tool, not another sandbox, not the instance metadata endpoint.
+# Deny rules win over every allow, here or in any policy added later.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: agent-session
+  namespace: {{ $ns }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: agent-session
+  ingressDeny:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $ns }}
+  egressDeny:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $ns }}
+    - toEntities: [kube-apiserver, host, remote-node]
+    - toCIDR: [169.254.169.254/32, fd00:ec2::254/128]
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $rel }}
+            app: valxel-sdlc
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $rel }}
+            app: valxel-sdlc-worker
+      toPorts:
+        - ports:
+            - {port: "8081", protocol: TCP}
+            - {port: "15008", protocol: TCP}   # the mesh's tunnel, when the mesh is on
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .Values.networkPolicy.dnsNamespace }}
+            {{- range $k, $v := .Values.networkPolicy.dnsSelector }}
+            {{ $k }}: {{ $v }}
+            {{- end }}
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              {{- range .Values.sessions.egress }}
+              - matchName: {{ . }}
+              {{- end }}
+              - matchName: {{ include "valxel.gateway" . }}.{{ $rel }}.svc.cluster.local
+    - toFQDNs:
+        {{- range .Values.sessions.egress }}
+        - matchName: {{ . }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $rel }}
+            app: llm-gateway
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+            - {port: "15008", protocol: TCP}
+---
+# The gateway: in, the tool and its sessions; out, the model providers, its database, Kafka, DNS.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "valxel.gateway" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $inst }}
+      app: llm-gateway
+  ingress:
+    - fromEndpoints:
+        - matchLabels: {app: valxel-sdlc}
+        - matchLabels: {app: valxel-sdlc-worker}
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $ns }}
+            app: agent-session
+      toPorts:
+        - ports:
+            - {port: "8080", protocol: TCP}
+            - {port: "15008", protocol: TCP}
+    - fromEntities: [host]      # the kubelet's probes
+  egressDeny:
+    - toCIDR: [169.254.169.254/32, fd00:ec2::254/128]
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .Values.networkPolicy.dnsNamespace }}
+            {{- range $k, $v := .Values.networkPolicy.dnsSelector }}
+            {{ $k }}: {{ $v }}
+            {{- end }}
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: api.anthropic.com
+        {{- if .Values.gateway.openai }}
+        - matchName: api.openai.com
+        {{- end }}
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
+    # Its database and Kafka: wherever the customer runs them (inside or outside the cluster).
+    - toPorts:
+        - ports:
+            - {port: "5432", protocol: TCP}
+            - {port: "9094", protocol: TCP}
+{{- else }}
+# Portable NetworkPolicy: it can't name hosts, so a session may reach any public address on 443
+# (and nothing private: not the cluster, not the metadata endpoint). Prefer flavor: cilium.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agent-session
+  namespace: {{ $ns }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app: agent-session
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $rel }}}
+          podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [valxel-sdlc, valxel-sdlc-worker]}
+      ports:
+        - {port: 8081, protocol: TCP}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace }}}
+          podSelector:
+            matchLabels: {{- toYaml .Values.networkPolicy.dnsSelector | nindent 14 }}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $rel }}}
+          podSelector:
+            matchLabels: {app: llm-gateway}
+      ports:
+        - {port: 8080, protocol: TCP}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+      ports:
+        - {port: 443, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "valxel.gateway" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $inst }}
+      app: llm-gateway
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - {key: app, operator: In, values: [valxel-sdlc, valxel-sdlc-worker]}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $ns }}}
+          podSelector:
+            matchLabels: {app: agent-session}
+      ports:
+        - {port: 8080, protocol: TCP}
+{{- end }}
+{{- if .Values.mesh.istioAmbient }}
+---
+# Mesh: only the tool's identity may open a session's runner; only the tool and sessions may call
+# the gateway. Mutual TLS throughout.
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: {{ $ns }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  mtls:
+    mode: STRICT
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: agent-session
+  namespace: {{ $ns }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {app: agent-session}
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/{{ $rel }}/sa/{{ include "valxel.name" . }}"]
+      to:
+        - operation:
+            ports: ["8081"]
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "valxel.gateway" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $inst }}
+      app: llm-gateway
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - "cluster.local/ns/{{ $rel }}/sa/{{ include "valxel.name" . }}"
+              - "cluster.local/ns/{{ $ns }}/sa/{{ include "valxel.sessionSA" . }}"
+      to:
+        - operation:
+            ports: ["8080"]
+{{- end }}

@@ -1,0 +1,239 @@
+{{- $name := include "valxel.name" . -}}
+{{- define "valxel.toolPod" -}}
+{{- $root := .root -}}
+{{- $name := include "valxel.name" $root -}}
+metadata:
+  labels:
+    {{- include "valxel.labels" $root | nindent 4 }}
+    app: {{ .app }}
+    {{- if $root.Values.mesh.istioAmbient }}
+    istio.io/dataplane-mode: ambient
+    {{- end }}
+  annotations:
+    checksum/settings: {{ include (print $root.Template.BasePath "/settings.yaml") $root | sha256sum }}
+spec:
+  serviceAccountName: {{ .sa | default $name }}
+  {{- with $root.Values.imagePullSecrets }}
+  imagePullSecrets: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  terminationGracePeriodSeconds: {{ .grace }}
+  securityContext: {{- include "valxel.podSecurity" $root | nindent 4 }}
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/instance: {{ $root.Release.Name }}
+          app: {{ .app }}
+  containers:
+    - name: tool
+      image: {{ include "valxel.image" $root }}
+      imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+      {{- with .command }}
+      command: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .port }}
+      ports:
+        - name: http
+          containerPort: {{ .port }}
+      {{- end }}
+      envFrom:
+        - configMapRef:
+            name: {{ $name }}-settings
+      env:
+        - name: VALXEL_PROCESS
+          value: {{ .process }}
+        {{- range $k, $v := .env }}
+        - name: {{ $k }}
+          value: {{ $v | quote }}
+        {{- end }}
+      volumeMounts:
+        - name: secrets
+          mountPath: /var/run/valxel-secrets
+          readOnly: true
+        - name: kafka-ca
+          mountPath: /etc/audit-kafka
+          readOnly: true
+        - name: artifacts
+          mountPath: /app/.artifacts
+        - name: tmp
+          mountPath: /tmp
+      {{- if .health }}
+      readinessProbe:
+        httpGet: {path: {{ .health }}, port: http}
+        periodSeconds: 10
+      livenessProbe:
+        httpGet: {path: {{ .health }}, port: http}
+        periodSeconds: 20
+        failureThreshold: 6
+      {{- end }}
+      resources: {{- toYaml .resources | nindent 8 }}
+      securityContext: {{- include "valxel.containerSecurity" $root | nindent 8 }}
+  volumes:
+    - name: secrets
+      projected:
+        defaultMode: 0440
+        sources:
+          - secret:
+              name: {{ .secret | default $root.Values.secrets.tool }}
+          # The tool's Kafka password, as the file the secret store reads it from.
+          - secret:
+              name: {{ include "valxel.kafkaUser" (dict "root" $root "user" "tool") }}
+              items:
+                - key: password
+                  path: VALXEL_AUDIT_KAFKA_PASSWORD
+    - name: kafka-ca
+      secret:
+        secretName: {{ include "valxel.kafkaCa" $root }}
+        items:
+          - key: ca.crt
+            path: ca.crt
+    - name: artifacts
+      persistentVolumeClaim:
+        claimName: {{ $root.Values.artifacts.existingClaim | default (printf "%s-artifacts" $name) }}
+    - name: tmp
+      emptyDir: {}
+{{- end -}}
+# The tool's identity: reads cost data, signs with the delivery App's KMS key, writes the archive
+# buckets (through the role in tool.serviceAccountAnnotations), and claims session sandboxes.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+  {{- with .Values.tool.serviceAccountAnnotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+# The API: serves people and webhooks, queues work, runs no agents.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "valxel.api" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.tool.replicas }}
+  strategy:
+    rollingUpdate: {maxUnavailable: 0}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: valxel-sdlc
+  template:
+    {{- include "valxel.toolPod" (dict "root" . "app" "valxel-sdlc" "process" "api" "port" 8080 "health" "/api/healthz" "grace" 30 "resources" .Values.tool.resources.api) | nindent 4 }}
+---
+# Workers: run what the API queues, and the watcher. On SIGTERM a worker stops claiming, lets runs
+# finish for 25s, then hands back the rest.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "valxel.worker" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.tool.workers }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: valxel-sdlc-worker
+  template:
+    {{- include "valxel.toolPod" (dict "root" . "app" "valxel-sdlc-worker" "process" "worker" "port" 8082 "health" "/healthz" "grace" 40 "command" (list "valxel" "worker") "env" (dict "VALXEL_WORKER_CONCURRENCY" (toString .Values.tool.workerConcurrency)) "resources" .Values.tool.resources.worker) | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "valxel.api" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app: valxel-sdlc
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "valxel.api" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: valxel-sdlc
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "valxel.worker" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: valxel-sdlc-worker
+{{- if not .Values.artifacts.existingClaim }}
+---
+# Feature documents, transcripts and attachments, mounted by every API and worker pod.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}-artifacts
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep     # uninstalling never deletes the artifacts
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: {{ required "artifacts.storageClassName: a ReadWriteMany storage class (EFS, Filestore, Azure Files...)" .Values.artifacts.storageClassName | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.artifacts.size }}
+{{- end }}
+{{- if .Values.route.gatewayApi.enabled }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "valxel.api" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  parentRefs: {{- required "route.gatewayApi.parentRefs: the Gateway (and its https listener) to attach to" .Values.route.gatewayApi.parentRefs | toYaml | nindent 4 }}
+  hostnames:
+    - {{ .Values.publicUrl | trimPrefix "https://" | trimSuffix "/" | quote }}
+  rules:
+    - backendRefs:
+        - name: {{ include "valxel.api" . }}
+          port: 8080
+{{- end }}
+{{- if .Values.route.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "valxel.api" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+  {{- with .Values.route.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.route.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  tls:
+    - hosts: [{{ .Values.publicUrl | trimPrefix "https://" | trimSuffix "/" | quote }}]
+      secretName: {{ required "route.ingress.tlsSecretName" .Values.route.ingress.tlsSecretName }}
+  rules:
+    - host: {{ .Values.publicUrl | trimPrefix "https://" | trimSuffix "/" | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "valxel.api" . }}
+                port: {number: 8080}
+{{- end }}

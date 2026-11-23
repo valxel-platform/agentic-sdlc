@@ -1,0 +1,77 @@
+{{- include "valxel.validate" . -}}
+# The tool's settings, shared by its API, workers and provisioning worker. Nothing secret: secrets
+# are files (VALXEL_SECRET_STORE=files) from secrets.tool and secrets.provisioner.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "valxel.name" . }}-settings
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+data:
+  # Production: strict mode refuses to start while anything below would quietly fall back.
+  VALXEL_STRICT: "1"
+  VALXEL_TIER: cluster
+  VALXEL_MODE: live
+  VALXEL_DELIVERY: live
+  VALXEL_GOVERNANCE_SOURCE: github
+  VALXEL_PUBLIC_URL: {{ .Values.publicUrl | trimSuffix "/" | quote }}
+  HOME: /tmp
+  AWS_REGION: {{ .Values.awsRegion | quote }}
+  # Sign-in.
+  VALXEL_AUTH: {{ .Values.auth.mode | quote }}
+  {{- if eq .Values.auth.mode "github" }}
+  VALXEL_GITHUB_OAUTH_CLIENT_ID: {{ required "auth.githubOAuthClientId: the tool's GitHub OAuth app" .Values.auth.githubOAuthClientId | quote }}
+  {{- else }}
+  VALXEL_COGNITO_DOMAIN: {{ required "auth.cognito.domain" .Values.auth.cognito.domain | quote }}
+  VALXEL_COGNITO_CLIENT_ID: {{ required "auth.cognito.clientId" .Values.auth.cognito.clientId | quote }}
+  VALXEL_COGNITO_ISSUER: {{ required "auth.cognito.issuer" .Values.auth.cognito.issuer | quote }}
+  VALXEL_COGNITO_GOOGLE: {{ .Values.auth.cognito.google | toString | quote }}
+  {{- end }}
+  # The delivery GitHub App signs through KMS: no key material in the process.
+  VALXEL_GITHUB_APP_ID: {{ required "github.appId: the delivery GitHub App's id" .Values.github.appId | quote }}
+  VALXEL_GITHUB_APP_KMS_KEY_ID: {{ required "github.appKmsKeyId: the App's private key as a sign-only KMS key" .Values.github.appKmsKeyId | quote }}
+  # Repos are created by the provisioning worker alone, with its own App (provisioner.yaml).
+  VALXEL_PROVISIONING: queue
+  # Secrets: one file per name.
+  VALXEL_SECRET_STORE: files
+  VALXEL_SECRETS_DIR: /var/run/valxel-secrets
+  # Work: queued in Postgres, run by the workers; every workspace's rows behind row-level security.
+  VALXEL_RUN_QUEUE: postgres
+  VALXEL_TENANCY: rls
+  VALXEL_SIGNALS_TOKENS: scoped
+  VALXEL_ARTIFACT_DIR: /app/.artifacts
+  # Agent sessions: a sandbox each, claimed from the warm pool in the sessions namespace.
+  VALXEL_SESSION_EXECUTOR: kubernetes
+  VALXEL_SESSION_NAMESPACE: {{ .Values.sessions.namespace | quote }}
+  VALXEL_SESSION_POOL: agent-session
+  # Model calls through the gateway: the tool and its sessions hold gateway keys, never a model key.
+  VALXEL_LLM_GATEWAY_URL: {{ include "valxel.gatewayUrl" . | quote }}
+  # The tool's own audit records go to Kafka beside the gateway's; the sink keeps both.
+  VALXEL_AUDIT_SINK: kafka
+  VALXEL_AUDIT_KAFKA_BOOTSTRAP: {{ include "valxel.kafkaBootstrap" . | quote }}
+  VALXEL_AUDIT_TOPIC: {{ .Values.kafka.topic | quote }}
+  # The password is a secret file (VALXEL_AUDIT_KAFKA_PASSWORD), never in this config.
+  VALXEL_AUDIT_KAFKA_CONFIG: {{ dict "security.protocol" "SASL_SSL" "sasl.mechanisms" "SCRAM-SHA-512" "sasl.username" (include "valxel.kafkaUsername" (dict "root" . "user" "tool")) "ssl.ca.location" "/etc/audit-kafka/ca.crt" | toJson | quote }}
+  VALXEL_AUDIT_ANCHOR_BUCKET: {{ required "archives.auditAnchorBucket: an Object Lock bucket for the audit chains' heads" .Values.archives.auditAnchorBucket | quote }}
+  VALXEL_CHECKPOINT_ARCHIVE_BUCKET: {{ required "archives.checkpointBucket: an Object Lock bucket for regulated lanes' history" .Values.archives.checkpointBucket | quote }}
+  VALXEL_CHECKPOINT_ARCHIVE_RETENTION_DAYS: {{ .Values.archives.checkpointRetentionDays | quote }}
+  {{- with .Values.tool.governanceRepo }}
+  VALXEL_GOVERNANCE_REPO: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.tool.configRepo }}
+  VALXEL_CONFIG_REPO: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.tool.openchoreo.tokenUrl }}
+  VALXEL_OPENCHOREO_TOKEN_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.tool.openchoreo.consoleUrl }}
+  VALXEL_OPENCHOREO_CONSOLE_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.tool.otelEndpoint }}
+  VALXEL_OTEL_ENDPOINT: {{ . | quote }}
+  {{- end }}
+  {{- range $k, $v := .Values.tool.extraSettings }}
+  {{- if regexMatch "_(SECRET|PASSWORD|API_KEY|TOKEN|PRIVATE_KEY)$" $k }}
+  {{- fail (printf "tool.extraSettings.%s looks like a secret: put it in the %s Secret instead" $k $.Values.secrets.tool) }}
+  {{- end }}
+  {{ $k }}: {{ $v | toString | quote }}
+  {{- end }}

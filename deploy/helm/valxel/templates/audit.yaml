@@ -1,0 +1,196 @@
+{{- $sink := include "valxel.sink" . -}}
+{{- $kafka := include "valxel.kafka" . -}}
+{{- if eq .Values.kafka.mode "strimzi" }}
+# The audit Kafka, run by Strimzi (its operator must watch this namespace): three KRaft nodes, SCRAM
+# over TLS, no auto-created topics. It carries only audit records, which the gateway must get
+# acknowledged before it calls a model, so one node can go without stopping the agents.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: dual
+  labels:
+    {{- include "valxel.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ $kafka }}
+spec:
+  replicas: {{ .Values.kafka.strimzi.replicas }}
+  roles: [controller, broker]
+  storage:
+    type: persistent-claim
+    size: {{ .Values.kafka.strimzi.size }}
+    {{- with .Values.kafka.strimzi.storageClass }}
+    class: {{ . }}
+    {{- end }}
+    deleteClaim: false
+  resources:
+    requests: {cpu: 100m, memory: 768Mi}
+    limits: {memory: 768Mi}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: {{ $kafka }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  kafka:
+    listeners:
+      - name: scram
+        port: 9094
+        type: internal
+        tls: true
+        authentication:
+          type: scram-sha-512
+    authorization:
+      type: simple
+    config:
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+      auto.create.topics.enable: false
+  entityOperator:
+    topicOperator: {}
+    userOperator: {}
+---
+# Seven days: longer than either of the sink's destinations should ever be down.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: {{ .Values.kafka.topic | replace "." "-" }}
+  labels:
+    {{- include "valxel.labels" . | nindent 4 }}
+    strimzi.io/cluster: {{ $kafka }}
+spec:
+  topicName: {{ .Values.kafka.topic }}
+  partitions: 3
+  replicas: 3
+  config:
+    retention.ms: "604800000"
+    min.insync.replicas: "2"
+{{- range $user, $ops := dict "gateway" (list "Write" "Describe") "tool" (list "Write" "Describe") "sink" (list "Read" "Describe") }}
+---
+# {{ $user }}: {{ if eq $user "sink" }}may only read audit records, in its own consumer groups{{ else }}may only publish audit records{{ end }}.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: {{ include "valxel.name" $ }}-{{ $user }}
+  labels:
+    {{- include "valxel.labels" $ | nindent 4 }}
+    strimzi.io/cluster: {{ $kafka }}
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource: {type: topic, name: {{ $.Values.kafka.topic }}, patternType: literal}
+        operations: {{ toJson $ops }}
+      {{- if eq $user "sink" }}
+      - resource: {type: group, name: audit-sink-, patternType: prefix}
+        operations: [Read]
+      {{- end }}
+{{- end }}
+---
+{{- end }}
+# ss-audit-sink: reads the audit topic and keeps two copies: the audit database, hash-chained and
+# append-only (its tables belong to the owner, used only by the setup container; the sink runs as
+# audit_writer, which may only add rows), and the archive bucket, each file under Object Lock.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sink }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+  {{- with .Values.auditSink.serviceAccountAnnotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $sink }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  # One process, both destinations: each has its own consumer group and commits only what it wrote.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: audit-sink
+  template:
+    metadata:
+      labels:
+        {{- include "valxel.labels" . | nindent 8 }}
+        app: audit-sink
+    spec:
+      serviceAccountName: {{ $sink }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- include "valxel.podSecurity" . | nindent 8 }}
+      initContainers:
+        # As the owner: tables, triggers, and the writer role with only what it needs.
+        - name: setup
+          image: {{ include "valxel.digest" (dict "what" "auditSink.image" "image" .Values.auditSink.image) }}
+          args: ["audit-sink", "setup", "--grant-to", "audit_writer"]
+          env:
+            - name: AUDIT_SINK_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.auditSink.existingSecret }}, key: OWNER_URL}
+            - name: AUDIT_SINK_WRITER_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.auditSink.existingSecret }}, key: WRITER_PASSWORD}
+          securityContext: {{- include "valxel.containerSecurity" . | nindent 12 }}
+      containers:
+        - name: sink
+          image: {{ include "valxel.digest" (dict "what" "auditSink.image" "image" .Values.auditSink.image) }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: AUDIT_SINK_SETUP
+              value: "false"
+            - name: AUDIT_SINK_KAFKA_BOOTSTRAP
+              value: {{ include "valxel.kafkaBootstrap" . | quote }}
+            - name: AUDIT_SINK_TOPICS
+              value: {{ list .Values.kafka.topic | toJson | quote }}
+            - name: AUDIT_SINK_GROUP_PREFIX
+              value: audit-sink
+            - name: AUDIT_SINK_ARCHIVE_BUCKET
+              value: {{ required "archives.auditArchiveBucket: an Object Lock bucket for the audit sink's locked copy" .Values.archives.auditArchiveBucket | quote }}
+            - name: AUDIT_SINK_ARCHIVE_REGION
+              value: {{ .Values.awsRegion | quote }}
+            - name: AUDIT_SINK_ARCHIVE_RETENTION_DAYS   # must match the bucket's own retention
+              value: {{ .Values.archives.auditArchiveRetentionDays | quote }}
+            - name: AUDIT_SINK_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.auditSink.existingSecret }}, key: WRITER_URL}
+            - name: AUDIT_KAFKA_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ include "valxel.kafkaUser" (dict "root" . "user" "sink") }}, key: password}
+            - name: AUDIT_SINK_KAFKA_CONFIG
+              value: {{ printf "{\"security.protocol\": \"SASL_SSL\", \"sasl.mechanisms\": \"SCRAM-SHA-512\", \"sasl.username\": %q, \"sasl.password\": \"$(AUDIT_KAFKA_PASSWORD)\", \"ssl.ca.location\": \"/etc/audit-kafka/ca.crt\"}" (include "valxel.kafkaUsername" (dict "root" . "user" "sink")) | quote }}
+          volumeMounts:
+            - name: kafka-ca
+              mountPath: /etc/audit-kafka
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+          resources: {{- toYaml .Values.auditSink.resources | nindent 12 }}
+          securityContext: {{- include "valxel.containerSecurity" . | nindent 12 }}
+      volumes:
+        - name: kafka-ca
+          secret:
+            secretName: {{ include "valxel.kafkaCa" . }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: tmp
+          emptyDir: {}

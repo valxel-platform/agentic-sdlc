@@ -1,0 +1,182 @@
+{{- $gw := include "valxel.gateway" . -}}
+# The LLM gateway (ss-llm-gateway): every model call the tool and its sessions make goes through it.
+# It alone holds the model key (gateway.existingSecret); the tool has a gateway key, whose hash is in
+# the policy below, and each session a short-lived token with its own budget. Spend, reservations
+# and session tokens are in its database, so replicas share one budget.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $gw }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $gw }}-policy
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+data:
+  policy.yaml: |
+    product: valxel-sdlc
+    data_class: general
+    providers:
+      anthropic:
+        type: anthropic
+        base_url: https://api.anthropic.com
+        api_key_env: ANTHROPIC_API_KEY
+        # Whether a BAA covers this model account: PHI work is refused until it does.
+        baa: {{ .Values.gateway.baa }}
+        models: ["claude-*"]
+      {{- if .Values.gateway.openai }}
+      openai:
+        type: openai
+        base_url: https://api.openai.com
+        api_key_env: OPENAI_API_KEY
+        baa: false
+        models: ["gpt-*"]
+        operations: [responses]
+      {{- end }}
+    data_classes:
+      phi:      { require_baa: true, redaction: "off" }
+      payments: { require_baa: false, redaction: redact, detectors: [card_number, secret, us_ssn] }
+      general:  { require_baa: false, redaction: redact, detectors: [secret, card_number, us_ssn] }
+    callers:
+      sdlc-tool:
+        key_sha256: {{ .Values.gateway.toolKeySha256 | quote }}
+        budget_usd_per_day: {{ .Values.gateway.budgetUsdPerDay }}
+        models: ["claude-*"{{ if .Values.gateway.openai }}, "gpt-*"{{ end }}]
+        max_tokens: 128000
+        data_classes: [payments, phi]
+        sessions: { max_budget_usd: {{ .Values.gateway.sessionMaxBudgetUsd }}, max_ttl_s: 7800, max_open: 50 }
+    pricing:
+      "claude-opus-*":   { input: 4.0, output: 20.0, cache_read: 0.2 }
+      "claude-sonnet-*": { input: 2.0, output: 10.0, cache_read: 0.1 }
+      "claude-haiku-*":  { input: 0.1, output: 0.5, cache_read: 0.01 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $gw }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gateway.replicas }}
+  strategy:
+    rollingUpdate: {maxUnavailable: 0, maxSurge: 1}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: llm-gateway
+  template:
+    metadata:
+      labels:
+        {{- include "valxel.labels" . | nindent 8 }}
+        app: llm-gateway
+        {{- if .Values.mesh.istioAmbient }}
+        istio.io/dataplane-mode: ambient
+        {{- end }}
+      annotations:
+        checksum/policy: {{ .Values.gateway | toJson | sha256sum }}
+    spec:
+      serviceAccountName: {{ $gw }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- include "valxel.podSecurity" . | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app: llm-gateway
+      containers:
+        - name: gateway
+          image: {{ include "valxel.digest" (dict "what" "gateway.image" "image" .Values.gateway.image) }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: GATEWAY_POLICY
+              value: /etc/llm-gateway/policy.yaml
+            - name: GATEWAY_ENVIRONMENT
+              value: {{ .Release.Name | quote }}
+            - name: GATEWAY_DATABASE_URL
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.gateway.existingSecret }}, key: GATEWAY_DATABASE_URL}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.gateway.existingSecret }}, key: ANTHROPIC_API_KEY}
+            {{- if .Values.gateway.openai }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.gateway.existingSecret }}, key: OPENAI_API_KEY}
+            {{- end }}
+            # Audit records to Kafka; a record Kafka doesn't acknowledge refuses the request.
+            - name: GATEWAY_AUDIT_SINK
+              value: kafka
+            - name: GATEWAY_AUDIT_KAFKA_BOOTSTRAP
+              value: {{ include "valxel.kafkaBootstrap" . | quote }}
+            - name: GATEWAY_AUDIT_TOPIC
+              value: {{ .Values.kafka.topic | quote }}
+            - name: AUDIT_KAFKA_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ include "valxel.kafkaUser" (dict "root" . "user" "gateway") }}, key: password}
+            - name: GATEWAY_AUDIT_KAFKA_CONFIG
+              value: {{ printf "{\"security.protocol\": \"SASL_SSL\", \"sasl.mechanisms\": \"SCRAM-SHA-512\", \"sasl.username\": %q, \"sasl.password\": \"$(AUDIT_KAFKA_PASSWORD)\", \"ssl.ca.location\": \"/etc/audit-kafka/ca.crt\"}" (include "valxel.kafkaUsername" (dict "root" . "user" "gateway")) | quote }}
+          volumeMounts:
+            - name: policy
+              mountPath: /etc/llm-gateway
+              readOnly: true
+            - name: kafka-ca
+              mountPath: /etc/audit-kafka
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 20
+          resources: {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext: {{- include "valxel.containerSecurity" . | nindent 12 }}
+      volumes:
+        - name: policy
+          configMap:
+            name: {{ $gw }}-policy
+        - name: kafka-ca
+          secret:
+            secretName: {{ include "valxel.kafkaCa" . }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $gw }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app: llm-gateway
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $gw }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: llm-gateway

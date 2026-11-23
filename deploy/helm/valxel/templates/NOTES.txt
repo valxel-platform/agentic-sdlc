@@ -1,0 +1,10 @@
+Valxel is installed in {{ .Release.Namespace }}, with agent sessions in {{ .Values.sessions.namespace }}.
+
+Strict mode is on: if something it needs is missing, the API refuses to start and says what. Check:
+
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "valxel.api" . }} | grep -i strict
+  kubectl -n {{ .Release.Namespace }} get pods
+
+Then open {{ .Values.publicUrl }} and sign in.
+
+deploy/helm/valxel/README.md in agentic-sdlc lists what the cluster needs and every value.

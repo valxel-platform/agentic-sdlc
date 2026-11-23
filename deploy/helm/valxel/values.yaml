@@ -1,0 +1,185 @@
+# The Valxel tool, self-hosted (T-122). The same layout as Valxel's hosted cluster
+# (platform-foundation gitops/apps), with one tenant, on the customer's Kubernetes beside their
+# OpenChoreo control plane. README.md beside this file lists what the customer provides.
+#
+# Everything starts in strict mode: the tool refuses to start while anything required is missing
+# (agentic-sdlc strict.py), so a missing value shows up as a clear refusal, not a quiet stand-in.
+
+# --- Images: always by digest, never by tag (each release lists its digests, signatures and SBOMs).
+image:
+  repository: ghcr.io/valxel-platform/agentic-sdlc
+  digest: ""          # required: sha256:...
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# --- Where people reach the tool.
+publicUrl: ""         # required: https://sdlc.example.com (TLS only)
+route:
+  # Gateway API (OpenChoreo's own gateway, or any): an HTTPRoute to the API.
+  gatewayApi:
+    enabled: true
+    parentRefs: []    # e.g. [{name: gateway-default, namespace: openchoreo-control-plane, sectionName: https}]
+  # Or a plain Ingress (TLS terminated by the controller).
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    tlsSecretName: ""
+
+# --- Sign-in: GitHub (with the tool's OAuth app) or Cognito.
+auth:
+  mode: github        # github | cognito
+  githubOAuthClientId: ""
+  cognito:
+    domain: ""
+    clientId: ""
+    issuer: ""
+    google: false
+
+# --- The GitHub Apps. Delivery acts in product orgs; the Provisioning App creates repos and only the
+# provisioning worker may sign for it. Both private keys are sign-only KMS keys (strict mode refuses
+# key material in the process).
+github:
+  appId: ""
+  appKmsKeyId: ""
+  provisionerAppId: ""
+  provisionerKmsKeyId: ""
+awsRegion: ""
+
+# --- The tool's secrets, one file per name (VALXEL_SECRET_STORE=files). An existing Secret with at
+# least DATABASE_URL, VALXEL_SESSION_SECRET, VALXEL_GITHUB_WEBHOOK_SECRET,
+# VALXEL_LLM_GATEWAY_API_KEY and the sign-in client secret (VALXEL_GITHUB_OAUTH_CLIENT_SECRET or
+# VALXEL_COGNITO_CLIENT_SECRET). DATABASE_URL must be a login that is not a superuser and does not
+# own the tables' row-level security bypass (VALXEL_TENANCY=rls). externalSecrets below can make it.
+secrets:
+  tool: valxel-tool                 # Secret name
+  provisioner: valxel-provisioner   # Secret name: DATABASE_URL only (its App key is in KMS)
+
+# --- Settings the tool reads, beyond those the chart sets. Nothing secret here.
+tool:
+  replicas: 2
+  workers: 2
+  workerConcurrency: 4
+  governanceRepo: ""                # VALXEL_GOVERNANCE_REPO, if not the default
+  configRepo: ""                    # VALXEL_CONFIG_REPO: config changes replayed against past work
+  openchoreo:
+    tokenUrl: ""                    # their Thunder/IdP token endpoint
+    consoleUrl: ""
+  otelEndpoint: ""                  # traces of agent sessions (optional)
+  extraSettings: {}                 # any other VALXEL_* setting, by name
+  resources:
+    api: {requests: {cpu: 500m, memory: 1Gi}, limits: {memory: 2Gi}}
+    worker: {requests: {cpu: "1", memory: 2Gi}, limits: {memory: 6Gi}}
+    provisioner: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 512Mi}}
+  # Pod Identity / IRSA: the role that reads cost data, signs with the App's KMS key and writes the
+  # archive buckets. Annotations go on the tool's service account.
+  serviceAccountAnnotations: {}
+  provisionerServiceAccountAnnotations: {}
+
+# --- Feature documents, transcripts (24 hours) and attachments, on a file system every API and
+# worker pod mounts (ReadWriteMany: EFS, Filestore, Azure Files, CephFS...).
+artifacts:
+  storageClassName: ""              # required
+  size: 100Gi
+  existingClaim: ""
+
+# --- Object storage with Object Lock (compliance mode).
+archives:
+  checkpointBucket: ""              # regulated lanes' checkpoint history (6 years)
+  checkpointRetentionDays: 2190
+  auditAnchorBucket: ""             # audit hash-chain heads
+  auditArchiveBucket: ""            # the audit sink's locked copy
+  auditArchiveRetentionDays: 2190
+
+# --- Agent sessions: each one a sandbox (Agent Sandbox) under gVisor, in a namespace of its own.
+sessions:
+  namespace: valxel-sessions
+  createNamespace: true
+  runtimeClassName: gvisor
+  warmPool: 2
+  nodeSelector: {}                  # e.g. the gVisor node pool's label
+  tolerations: []
+  resources: {requests: {cpu: "1", memory: 2Gi, ephemeral-storage: 4Gi}, limits: {memory: 6Gi, ephemeral-storage: 24Gi}}
+  workSize: 20Gi
+  # Where a session may connect: package registries and GitHub. A copy of agentic-sdlc's
+  # config/egress.yaml (tests/test_helm_chart.py keeps them the same); add the customer's own
+  # registry proxy here instead of the public registries if they have one.
+  egress:
+    - registry.npmjs.org
+    - pypi.org
+    - files.pythonhosted.org
+    - repo.maven.apache.org
+    - repo1.maven.org
+    - plugins.gradle.org
+    - services.gradle.org
+    - downloads.gradle.org
+    - github.com
+    - codeload.github.com
+    - objects.githubusercontent.com
+
+# --- Network policy. cilium: sessions may reach only the names above (FQDN rules), nothing in the
+# cluster but the gateway, never the metadata endpoint. kubernetes: portable NetworkPolicy, which
+# can't name hosts, so sessions may reach any public address on 443; use it only where Cilium isn't.
+networkPolicy:
+  flavor: cilium                    # cilium | kubernetes
+  dnsSelector: {k8s-app: kube-dns}
+  dnsNamespace: kube-system
+
+# --- Istio ambient mesh: workload identity and mutual TLS between the tool, sessions and gateway.
+mesh:
+  istioAmbient: false
+
+# --- The LLM gateway (ss-llm-gateway): every model call goes through it; it alone holds the model key.
+gateway:
+  image:
+    repository: ghcr.io/valxel-shared-services/ss-llm-gateway
+    digest: ""                      # required
+  replicas: 2
+  # Secret with ANTHROPIC_API_KEY (the customer's own key; for PHI, under their own BAA),
+  # optionally OPENAI_API_KEY, and GATEWAY_DATABASE_URL (spend, reservations, session tokens).
+  existingSecret: valxel-llm-gateway
+  # The SHA-256 of the tool's gateway key (VALXEL_LLM_GATEWAY_API_KEY in secrets.tool), in hex:
+  # printf %s "$KEY" | sha256sum. Only the hash is in the policy.
+  toolKeySha256: ""                 # required
+  baa: false                        # true once a BAA covers the model account: PHI work needs it
+  openai: false                     # Codex through the gateway (needs OPENAI_API_KEY)
+  budgetUsdPerDay: 500
+  sessionMaxBudgetUsd: 25
+  resources: {requests: {cpu: 250m, memory: 256Mi}, limits: {memory: 1Gi}}
+
+# --- Kafka for audit records: the gateway and the tool publish, the sink reads.
+kafka:
+  # strimzi: the chart creates the Kafka, topic and users with Strimzi (the operator must watch this
+  # namespace). external: the customer's Kafka; give its bootstrap and each user's password Secret.
+  mode: strimzi                     # strimzi | external
+  bootstrap: ""                     # external only, e.g. kafka.example:9094
+  topic: audit.v1
+  caSecret: ""                      # external: Secret with ca.crt (strimzi: <release>-audit-cluster-ca-cert)
+  users:                            # external: Secret names, each with a `password` key
+    gateway: ""
+    sink: ""
+    tool: ""
+  strimzi:
+    replicas: 3
+    storageClass: ""
+    size: 10Gi
+
+# --- The audit sink (ss-audit-sink): a hash-chained, append-only copy in Postgres and a locked copy
+# in the archive bucket.
+auditSink:
+  image:
+    repository: ghcr.io/valxel-shared-services/ss-audit-sink
+    digest: ""                      # required
+  # Secret with OWNER_URL (the database's owner, used only to set up), WRITER_URL and
+  # WRITER_PASSWORD (audit_writer, which may only add rows).
+  existingSecret: valxel-audit-database
+  serviceAccountAnnotations: {}     # the role that writes the archive bucket
+  resources: {requests: {cpu: 100m, memory: 256Mi}, limits: {memory: 512Mi}}
+
+# --- Optional: make the Secrets above from the customer's secret store with External Secrets.
+# Each entry: the Secret to make and the store key (a JSON object whose properties become its keys).
+externalSecrets:
+  enabled: false
+  storeRef: {kind: ClusterSecretStore, name: default}
+  refreshInterval: 1h
+  items: []                         # e.g. [{secret: valxel-tool, key: valxel/sdlc/tool}]

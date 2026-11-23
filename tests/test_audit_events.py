@@ -153,3 +153,23 @@ def test_the_postgres_outbox_is_append_only_and_the_cursor_moves():
         assert a.relay() >= 1 and box.cursor(name) > start
         with pool.connection() as conn, pytest.raises(psycopg.errors.InsufficientPrivilege):
             conn.execute("DELETE FROM valxel_audit_outbox")
+
+
+def test_the_kafka_password_comes_from_the_secret_store(tmp_path, monkeypatch):
+    """The chart (deploy/helm) mounts the tool's Kafka password as a file: it is never in the environment."""
+    seen = {}
+
+    class Producer:
+        def __init__(self, config):
+            seen.update(config)
+
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "confluent_kafka", types.SimpleNamespace(Producer=Producer))
+    (tmp_path / "VALXEL_AUDIT_KAFKA_PASSWORD").write_text("s3cret-from-file")
+    env = {"VALXEL_AUDIT_SINK": "kafka", "VALXEL_AUDIT_KAFKA_BOOTSTRAP": "kafka:9094",
+           "VALXEL_AUDIT_KAFKA_CONFIG": '{"security.protocol": "SASL_SSL", "sasl.username": "valxel-sdlc"}',
+           "VALXEL_SECRET_STORE": "files", "VALXEL_SECRETS_DIR": str(tmp_path)}
+    assert isinstance(ae.sink_from_env(env), ae.KafkaSink)
+    assert seen["sasl.password"] == "s3cret-from-file" and seen["sasl.username"] == "valxel-sdlc"

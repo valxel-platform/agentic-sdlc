@@ -1,0 +1,17 @@
+apiVersion: v2
+name: valxel
+description: >-
+  The Valxel SDLC tool, self-hosted: API, workers, the provisioning worker, agent sessions in gVisor
+  sandboxes, the LLM gateway and the audit sink, installed beside the customer's OpenChoreo control
+  plane on their own Kubernetes.
+type: application
+# The chart's own version. appVersion is the tool's release it was made for; images are still
+# deployed by digest (values: image.digest and friends), never by this tag.
+version: 0.1.0
+appVersion: "0.2.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/valxel-platform/agentic-sdlc
+sources:
+  - https://github.com/valxel-platform/agentic-sdlc
+  - https://github.com/valxel-shared-services/ss-llm-gateway
+  - https://github.com/valxel-shared-services/ss-audit-sink

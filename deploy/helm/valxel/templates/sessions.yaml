@@ -1,0 +1,134 @@
+{{- $ns := .Values.sessions.namespace -}}
+{{- if .Values.sessions.createNamespace }}
+# Where agent sessions run, one sandbox each. Restricted pod security.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- include "valxel.labels" . | nindent 4 }}
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    {{- if .Values.mesh.istioAmbient }}
+    istio.io/dataplane-mode: ambient
+    {{- end }}
+---
+{{- end }}
+# A session's identity (for the mesh); no token is mounted in the sandbox.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "valxel.sessionSA" . }}
+  namespace: {{ $ns }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# One agent session per sandbox: the tool's own image as `valxel session-runner`, under gVisor, no
+# service account token, a read-only root, and its work (checkout, home, caches) in emptyDirs that go
+# with the pod. The tool claims one from the warm pool and deletes the claim when the session ends.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: agent-session
+  namespace: {{ $ns }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  networkPolicyManagement: Unmanaged    # network.yaml says where a session may connect
+  podTemplate:
+    metadata:
+      labels:
+        app: agent-session
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      runtimeClassName: {{ .Values.sessions.runtimeClassName }}
+      serviceAccountName: {{ include "valxel.sessionSA" . }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.sessions.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.sessions.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Names with a dot are looked up as they are, not first with the cluster's search domains: the
+      # network policy lets a session look up only the names it may reach.
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "1"
+      securityContext: {{- include "valxel.podSecurity" . | nindent 8 }}
+      containers:
+        - name: runner
+          image: {{ include "valxel.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["valxel", "session-runner", "--port", "8081"]
+          ports:
+            - name: runner
+              containerPort: 8081
+          env:
+            - name: HOME
+              value: /work/home
+            - name: TMPDIR
+              value: /tmp
+            # Claude Code's own Bash sandbox, inside gVisor's: user namespaces may not be there.
+            - name: VALXEL_AGENT_SANDBOX_WEAKER
+              value: "1"
+          readinessProbe:
+            httpGet: {path: /healthz, port: runner}
+            periodSeconds: 5
+          resources: {{- toYaml .Values.sessions.resources | nindent 12 }}
+          securityContext: {{- include "valxel.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - name: work
+              mountPath: /work
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: work
+          emptyDir:
+            sizeLimit: {{ .Values.sessions.workSize }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
+---
+# Sandboxes started ahead of demand, so a session doesn't wait for a pod.
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: agent-session
+  namespace: {{ $ns }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.sessions.warmPool }}
+  sandboxTemplateRef:
+    name: agent-session
+---
+# The tool claims sandboxes here and nothing else: no pods, secrets or templates.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "valxel.name" . }}-claim-sessions
+  namespace: {{ $ns }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["extensions.agents.x-k8s.io"]
+    resources: ["sandboxclaims"]
+    verbs: ["create", "get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "valxel.name" . }}-claim-sessions
+  namespace: {{ $ns }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "valxel.name" . }}-claim-sessions
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "valxel.name" . }}
+    namespace: {{ .Release.Namespace }}

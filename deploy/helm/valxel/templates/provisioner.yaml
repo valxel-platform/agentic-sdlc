@@ -1,0 +1,28 @@
+{{- $name := include "valxel.name" . -}}
+# The provisioning worker: creates product repos with the Provisioning GitHub App, after checking each
+# against governance. It alone can sign for that App: its KMS key is granted only to this service
+# account's role, and the API and workers have neither its id nor its key (security S4).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "valxel.provisioner" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+  {{- with .Values.tool.provisionerServiceAccountAnnotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "valxel.provisioner" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: valxel-provisioner
+  template:
+    {{- include "valxel.toolPod" (dict "root" . "app" "valxel-provisioner" "process" "provisioner" "grace" 30 "sa" (include "valxel.provisioner" .) "secret" .Values.secrets.provisioner "command" (list "valxel" "provisioner") "env" (dict "VALXEL_GITHUB_PROVISIONER_APP_ID" (required "github.provisionerAppId: the Provisioning GitHub App's id" .Values.github.provisionerAppId) "VALXEL_GITHUB_PROVISIONER_APP_KMS_KEY_ID" (required "github.provisionerKmsKeyId: the Provisioning App's key as a sign-only KMS key" .Values.github.provisionerKmsKeyId)) "resources" .Values.tool.resources.provisioner) | nindent 4 }}

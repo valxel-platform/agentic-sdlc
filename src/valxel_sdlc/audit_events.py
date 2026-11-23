@@ -275,6 +275,10 @@ def sink_from_env(env=None) -> Sink | None:
         if not bootstrap:
             raise RuntimeError("VALXEL_AUDIT_SINK is kafka: set VALXEL_AUDIT_KAFKA_BOOTSTRAP")
         config = json.loads(env.get("VALXEL_AUDIT_KAFKA_CONFIG") or "{}")  # security.protocol, sasl.* ...
+        if config.get("sasl.username") and not config.get("sasl.password"):
+            from .secret_ring import current  # the password from the secret store, never the environment
+
+            config["sasl.password"] = current("VALXEL_AUDIT_KAFKA_PASSWORD", env)
         return KafkaSink(bootstrap, env.get("VALXEL_AUDIT_TOPIC") or "audit.v1", config)
     raise RuntimeError(f"VALXEL_AUDIT_SINK is {kind!r}: use kafka, log or off")
 
