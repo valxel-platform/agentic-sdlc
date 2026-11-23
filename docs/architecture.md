@@ -18,6 +18,9 @@ with GitHub Pages to view it in a browser.
 The GitHub Pages site also has a branded [high-level design](hld.html) and the
 [full architecture diagram](architecture-diagram.html), starting from [index.html](index.html).
 
+Where the parts run, on a laptop and in a customer's cluster, and what each may reach:
+[deployment diagrams](architecture/README.md).
+
 ## How work moves through it
 
 **Idea to production**: one feature thread, across every repo it touches.
@@ -81,4 +84,5 @@ The GitHub Pages site also has a branded [high-level design](hld.html) and the
 ## Keeping this current
 
 Update this page, `architecture.svg` and `architecture.html` in the same pull request as any change
-that adds, removes or moves a part of the tool shown here.
+that adds, removes or moves a part of the tool shown here. The [deployment diagrams](architecture/README.md) follow the
+same rule for changes to the Compose bundles, the Helm chart or the network policy.
