@@ -26,6 +26,11 @@ app answers when it's up and where its metrics are. In conformance.yaml, env val
 values the app reads from a folder, as it reads its mounted secrets when deployed), and in later steps any value an earlier step saved (save: {name: "header:<name>"
 | "json:<field>"}).
 
+A step may sign its request as a vendor signs a webhook (`sign: {secret, header, timestamp_header}`):
+HMAC-SHA256, in hex, over "<timestamp>.<the exact body sent>" with `files[secret]`, the timestamp
+being now (seconds), put in `timestamp_header`; `prefix` goes before the hex (e.g. "sha256=") and
+`message` changes what is signed ("{timestamp}.{body}" by default).
+
 A repo whose app needs a database, Redis or Kafka says so (`postgres: <image>`, `redis: <image>`,
 `kafka: <image>`):
 with `image` they run as containers too, and {postgres} (and {postgres_jdbc} with {postgres_password} for a JVM), {redis} and {kafka} name them
@@ -271,18 +276,39 @@ class App:
                 self.proc.kill()
 
 
+def _encode(body: Any = None, form: dict[str, str] | None = None) -> tuple[bytes | None, str]:
+    """The bytes a step sends, and their content type: JSON, or a form when `form`."""
+    from urllib.parse import urlencode
+
+    if form is not None:
+        return urlencode(form).encode(), "application/x-www-form-urlencoded"
+    return (json.dumps(body).encode() if body is not None else None), "application/json"
+
+
+def signed(sign: dict, files: dict, data: bytes | None, now: float | None = None) -> dict[str, str]:
+    """The headers of a vendor's signature over this request (a step's `sign`)."""
+    import hashlib
+    import hmac
+
+    name = str(sign.get("secret", ""))
+    if name not in files:
+        raise ValueError(f"sign: secret {name!r} isn't one of conformance.yaml's files")
+    stamp = str(int(now if now is not None else time.time()))
+    message = str(sign.get("message", "{timestamp}.{body}"))
+    head, _, tail = message.partition("{body}")
+    payload = head.replace("{timestamp}", stamp).encode() + (data or b"") + tail.replace("{timestamp}", stamp).encode()
+    digest = hmac.new(str(files[name]).encode(), payload, hashlib.sha256).hexdigest()
+    return {str(sign.get("timestamp_header", "X-Timestamp")): stamp,
+            str(sign.get("header", "X-Signature")): str(sign.get("prefix", "")) + digest}
+
+
 def _http(method: str, url: str, body: Any = None, headers: dict[str, str] | None = None,
           form: dict[str, str] | None = None) -> tuple[int, str, dict[str, str]]:
     """A request to the app under test: http to this machine only. JSON, or a form when `form`."""
-    from urllib.parse import urlencode
-
     u = urlsplit(url)
     if u.scheme != "http" or u.hostname not in ("127.0.0.1", "localhost"):
         return 0, f"the suite only calls the app on this machine, not {u.scheme}://{u.hostname}", {}
-    if form is not None:
-        data, ctype = urlencode(form).encode(), "application/x-www-form-urlencoded"
-    else:
-        data, ctype = (json.dumps(body).encode() if body is not None else None), "application/json"
+    data, ctype = _encode(body, form)
     conn = http.client.HTTPConnection(u.hostname, u.port or 80, timeout=30)
     try:
         conn.request(method, (u.path or "/") + (f"?{u.query}" if u.query else ""), body=data, headers={
@@ -510,6 +536,9 @@ def run(spec: dict, *, image: str = "", cmd: str = "", postgres: str = "", kafka
                 expect = step.get("expect", [200, 201, 202, 204])
                 deadline = time.time() + float(step.get("within_s", 0))
                 while True:
+                    if "sign" in step:  # a fresh timestamp each try, as a vendor's retry would have
+                        data, _ = _encode(step.get("json"), step.get("form"))
+                        headers.update(signed(step["sign"], spec.get("files") or {}, data))
                     status, text, got = _http(step.get("method", "GET"), base + step["path"], step.get("json"), headers,
                                               form=step.get("form"))
                     ok = status in (expect if isinstance(expect, list) else [expect]) and \
