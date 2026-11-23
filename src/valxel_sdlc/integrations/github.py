@@ -129,7 +129,7 @@ class GitHub(Protocol):
     def open_pull_requests(self, *, repo: str) -> list[dict]: ...
     # A pull request's files: {path, status (added|modified|removed|renamed), additions}; None if unknown.
     def pr_files(self, *, repo: str, number: int) -> list[dict] | None: ...
-    # One pull request: {number, title, body, author, branch, head_sha, base_sha, draft, state, fork};
+    # One pull request: {number, title, body, author, branch, head_sha, base_sha, draft, state, merged, fork};
     # None if there's no such pull request (independent_review.py).
     def pull_request(self, *, repo: str, number: int) -> dict | None: ...
     # Its files with their patches: {path, status, patch} (patch "" for a binary or too-large file).
@@ -296,7 +296,8 @@ class StubGitHub:
         return {"number": pr["number"], "title": pr["title"], "body": pr["body"],
                 "author": pr.get("author", "valxel[bot]"),
                 "branch": pr["branch"], "head_sha": pr["head_sha"], "base_sha": pr.get("base_sha", "base"),
-                "draft": bool(pr.get("draft")), "state": pr["state"], "fork": bool(pr.get("fork"))}
+                "draft": bool(pr.get("draft")), "state": pr["state"], "fork": bool(pr.get("fork")),
+                "merged": pr["state"] == "merged"}
 
     def pr_patches(self, *, repo, number):
         pr = self.prs.get(f"{repo}#{number}")
@@ -650,7 +651,7 @@ class GitHubRest:
         return {"number": p["number"], "title": p.get("title") or "", "body": p.get("body") or "",
                 "author": (p.get("user") or {}).get("login", ""), "branch": head.get("ref", ""),
                 "head_sha": head.get("sha", ""), "base_sha": base.get("sha", ""), "draft": bool(p.get("draft")),
-                "state": p.get("state", ""),
+                "state": p.get("state", ""), "merged": bool(p.get("merged_at")),
                 "fork": (head.get("repo") or {}).get("full_name", repo) != repo}
 
     def pr_patches(self, *, repo, number):

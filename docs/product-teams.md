@@ -1194,6 +1194,23 @@ constitution, so a design that missed something doesn't take it along.
   asks for a maintainer.
 - The feature page shows each PR's review, and G5 shows them beside the build reviewer's.
 
+**Is it right?** Each PR's last review is kept as an eval case (where the change is and what the
+reviewer said, never the code), and what happens to the change labels it:
+
+| Outcome | When |
+|---|---|
+| catch | it asked for changes and the author fixed them before merging; or it was overridden and the change was then reverted or caused an incident |
+| miss | it approved, and the change was reverted (GitHub's "Reverts owner/repo#N") or its release caused an incident |
+| false alarm | it asked for changes, people merged anyway, and nothing went wrong in 14 days |
+| correct approval | it approved, and nothing went wrong in 14 days |
+
+A PR closed without merging isn't counted. The watcher settles labels daily (incidents are traced to
+the release they undid through the change log). `GET /api/independent-reviews/accuracy?product_id=`
+gives catch and false-alarm rates for the product, overall and by risk. A change to the reviewer's
+model or prompt replays these cases like any config change (`valxel eval`, the config gate): the
+catch rate mustn't drop and the false-alarm rate mustn't rise. Each replay also plants one bug in a
+change that was fine, which it must catch.
+
 ## Tests and security scans
 
 Testing and security are policy, not code. `config/quality.yaml` lists **suites** (what must be

@@ -96,6 +96,7 @@ class Services:
     available_roles: frozenset = frozenset()  # roles whose provider is configured, set by build_services
     telemetry: object = None  # valxel_sdlc.telemetry.Telemetry: each agent session as a span, set by build_services
     attachments: object = None  # valxel_sdlc.attachments.AttachmentStore: files attached at intake
+    pr_reader: object = None  # eval runs: GitHub, read-only, to re-read a reviewed PR (evals.services_for)
     evals: object = None  # valxel_sdlc.evals store: eval cases from finished document phases, labelled at the gates
     canary: object = None  # AgentStack: a candidate config a share of new features runs with (VALXEL_CANARY_*)
     # valxel_sdlc.workspaces.Workspaces: members, roles, approver groups and gate mappings (in memory

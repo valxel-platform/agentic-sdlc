@@ -172,6 +172,8 @@ class WatchingMixin:
             Job("anchor_audit_chains", self._audit_anchorer().run, 3600, stale_hours=3),  # (audit_anchors.py)
             Job("snapshot_inventories", self.snapshot_inventories, DAILY),  # one inventory snapshot a day
             Job("collect_outcomes", self.collect_outcomes, DAILY),  # readouts and goal trends move daily
+            # The independent reviewer's eval cases: incidents and settled merges label them (T-145).
+            Job("label_independent_reviews", self.label_independent_reviews, DAILY),  # type: ignore[attr-defined]
             Job("sweep_change_set_envs", self.sweep_change_set_envs, 900),  # environments left behind
             Job("upkeep_sweep", self.upkeep.sweep, DAILY),  # every repo's alerts, for missed webhooks
             Job("upkeep_tick", self.upkeep.tick, 900),  # deadlines, fixes, Dependabot updates

@@ -327,6 +327,32 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         with urlopen(f"https://sns.{region}.amazonaws.com/?{query}", timeout=15) as resp:  # noqa: S310
             resp.read()
 
+    def _on_pull_request(event: dict) -> str | None:
+        """Every PR in a product's repos, whoever opened it, gets the independent review (T-144); the
+        event only names the PR, and what's reviewed is read back with the tool's own App. Closing
+        one labels its review's eval case (T-145)."""
+        repo, number = (event.get("repository") or {}).get("full_name", ""), int(event["pull_request"]["number"])
+        pid = eng().upkeep.repos().get(repo)
+        if not pid:
+            return None
+        if event.get("action") in ("opened", "synchronize", "reopened", "ready_for_review"):
+            return independent_review().start(repo, number, pid)
+        if event.get("action") == "closed":
+            return _review_outcome(repo, number)
+        return None
+
+    def _review_outcome(repo: str, number: int) -> str:
+        from ...independent_review import closed, reverted_by, went_wrong
+
+        services = eng().services
+        got = services.github.pull_request(repo=repo, number=number) or {}
+        out = closed(services, repo, number, merged=bool(got.get("merged")))
+        if got.get("merged"):
+            for r, n in reverted_by(got.get("body", "")):
+                if eng().upkeep.repos().get(r):
+                    went_wrong(services, r, n, f"{repo}#{number} reverted it")
+        return out or "noted"
+
     @api.post("/webhooks/github", status_code=202)
     async def github_webhook(request: Request) -> dict:
         """CI and pull-request events from the product orgs' GitHub App. Verified with the app's
@@ -364,15 +390,8 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                              requested_by=(pr.get("user") or {}).get("login", ""))
             return {"event": "pull_request", "eval_run": run["id"]}
         kind = request.headers.get("x-github-event", "")
-        reviewed = None
-        repo_name = (event.get("repository") or {}).get("full_name", "")
-        if (kind == "pull_request" and event.get("action") in ("opened", "synchronize", "reopened", "ready_for_review")
-                and pr.get("number")):
-            # Every PR in a product's repos, whoever opened it (T-144). The event only names the PR:
-            # what's reviewed is read back from GitHub with the tool's own App.
-            pid = eng().upkeep.repos().get(repo_name)
-            if pid:
-                reviewed = await run_in_threadpool(independent_review().start, repo_name, int(pr["number"]), pid)
+        reviewed = (await run_in_threadpool(_on_pull_request, event) if kind == "pull_request" and pr.get("number")
+                    else None)
         from ...upkeep.alerts import EVENTS as ALERT_EVENTS
 
         if kind in ALERT_EVENTS:  # a security alert on a default branch (valxel_sdlc.upkeep)

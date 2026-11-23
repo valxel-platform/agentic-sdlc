@@ -5,6 +5,7 @@ import hmac
 import json
 from dataclasses import dataclass
 
+import pytest
 from fastapi.testclient import TestClient
 
 from valxel_sdlc.api.app import create_app
@@ -149,3 +150,142 @@ def test_the_feature_page_shows_its_prs_reviews(engine, services):
     fid = engine.create(product_id="FARM", title="Harvest log")
     services.cluster.put(f"independent_review:feature:{fid}", [{"repo": REPO, "number": 1, "state": "success"}])
     assert engine.view(fid)["independent_reviews"][0]["state"] == "success"
+
+
+# --------------------------------------------------------------------------- evals (T-145)
+
+from datetime import UTC, datetime, timedelta  # noqa: E402
+
+from valxel_sdlc import independent_review as ir  # noqa: E402
+
+
+def reviewed(services, monkeypatch, verdicts, branch="feature/FARM-FEAT-9", files=None):
+    """A PR reviewed once per verdict (a push each time), as the webhook would."""
+    number = open_pr(services, files or {"src/fields.py": "if a == b:\n    go()"}, branch=branch)
+    for v in verdicts:
+        answer(services, monkeypatch, {"verdict": v, "summary": "s", "findings": [] if v == "approve" else
+                                       [{"severity": "blocking", "file": "src/fields.py", "issue": "x"}]})
+        run(services, number)
+    return number
+
+
+def label(services, number):
+    c = ir._case(services, REPO, number)
+    return ir._outcome(c) if c else None
+
+
+def test_each_pr_is_one_case_with_every_verdict_and_no_code(services, monkeypatch):
+    number = reviewed(services, monkeypatch, ["request_changes", "approve"])
+    c = ir._case(services, REPO, number)
+    assert [v["state"] for v in c.ctx["verdicts"]] == ["failure", "success"] and c.label is None
+    ir.closed(services, REPO, number, merged=True)
+    assert ir._case(services, REPO, number).label["decision"] == "catch"  # final: a label the evals replay
+    assert "go()" not in json.dumps(c.ctx)  # where the change is, never the code itself
+
+
+def test_closing_labels_catches_pending_and_abandoned(services, monkeypatch):
+    fixed = reviewed(services, monkeypatch, ["request_changes", "approve"], branch="f1")
+    assert ir.closed(services, REPO, fixed, merged=True) == "catch"
+    clean = reviewed(services, monkeypatch, ["approve"], branch="f2")
+    assert ir.closed(services, REPO, clean, merged=True) == "approved"
+    assert ir._case(services, REPO, clean).label is None  # pending: not replayed until it settles
+    over = reviewed(services, monkeypatch, ["request_changes"], branch="f3")
+    assert ir.closed(services, REPO, over, merged=True) == "overridden"
+    gone = reviewed(services, monkeypatch, ["approve"], branch="f4")
+    assert ir.closed(services, REPO, gone, merged=False) == "abandoned"
+
+
+def test_a_revert_makes_an_approval_a_miss_and_an_override_a_catch(services, monkeypatch):
+    a = reviewed(services, monkeypatch, ["approve"], branch="r1")
+    ir.closed(services, REPO, a, merged=True)
+    assert ir.went_wrong(services, REPO, a, "reverted") == "miss"
+    b = reviewed(services, monkeypatch, ["request_changes"], branch="r2")
+    ir.closed(services, REPO, b, merged=True)
+    assert ir.went_wrong(services, REPO, b, "reverted") == "catch"
+    assert ir.reverted_by(f"Reverts {REPO}#{a}\n\nThis reverts commit abc.") == [(REPO, a)]
+
+
+def test_the_daily_pass_settles_quiet_merges_and_blames_incidents(services, monkeypatch):
+    quiet = reviewed(services, monkeypatch, ["approve"], branch="q1")
+    ir.closed(services, REPO, quiet, merged=True)
+    over = reviewed(services, monkeypatch, ["request_changes"], branch="q2")
+    ir.closed(services, REPO, over, merged=True)
+    bad = reviewed(services, monkeypatch, ["approve"], branch="feature/FARM-FEAT-77")
+    ir.closed(services, REPO, bad, merged=True)
+
+    class Log:
+        def list(self, product_id=None):
+            return [{"id": "CHG-1", "feature_id": "FARM-FEAT-77"}]
+
+        def links(self, product_id=None):
+            return [{"change_id": "CHG-1", "incident_id": "FARM-INC-1"}]
+
+    services.changes = Log()
+    assert ir.label_outcomes(services) == {"miss": 1}  # the others haven't settled yet
+    later = datetime.now(UTC) + timedelta(days=ir.SETTLE_DAYS + 1)
+    assert ir.label_outcomes(services, now=later) == {"correct_approval": 1, "false_alarm": 1}
+    assert [label(services, n) for n in (quiet, over, bad)] == ["correct_approval", "false_alarm", "miss"]
+    acc = ir.accuracy(services, "FARM")
+    assert acc["all"]["miss"] == 1 and acc["all"]["catch_rate"] == 0.0 and acc["all"]["false_alarm_rate"] == 0.5
+
+
+def test_replay_checks_the_label_and_a_planted_bug(services, monkeypatch):
+    from valxel_sdlc.code_evals import plant
+
+    good = reviewed(services, monkeypatch, ["approve"], branch="p1")
+    ir.closed(services, REPO, good, merged=True)
+    case = ir._case(services, REPO, good)
+    case.label = {"decision": "correct_approval"}
+    replies = iter([{"verdict": "approve", "summary": "s", "findings": []},
+                    {"verdict": "request_changes", "summary": "s",
+                     "findings": [{"severity": "blocking", "file": "x", "issue": "flipped"}]}])
+    seen: list = []
+    monkeypatch.setattr(services, "runtime_for", lambda role, variant="": Fake(json.dumps(next(replies)), seen))
+    out = ir.replay(services, case, plant=plant)
+    assert out["false_alarm"] is False and out["caught"] is True and out["passed"] is True and out["planted"]
+    assert seen[1].layers.tail != seen[0].layers.tail  # the second review read the diff with a bug planted
+    case.label = {"decision": "miss"}
+    answer(services, monkeypatch, {"verdict": "approve", "summary": "s", "findings": []})
+    out = ir.replay(services, case, plant=plant)
+    assert out["caught"] is False and out["passed"] is False  # it would miss it again
+    case.label = None
+    with pytest.raises(ValueError, match="no final label"):
+        ir.replay(services, case)
+
+
+def test_evals_replay_runs_these_cases_without_the_code_runner(services, monkeypatch):
+    from valxel_sdlc import evals
+
+    n = reviewed(services, monkeypatch, ["approve"], branch="e1")
+    case = ir._case(services, REPO, n)
+    case.label = {"decision": "correct_approval"}
+    monkeypatch.delenv("VALXEL_EVAL_RUNNER", raising=False)
+    result = evals.run(services, [case])
+    assert result["results"][0]["false_alarm"] is False
+    assert result["summary"]["phases"][ir.PHASE]["false_alarm_rate"] == 0.0
+
+
+def test_the_webhook_labels_a_closed_pr_and_the_pr_a_revert_undoes(monkeypatch, engine, services):
+    monkeypatch.setenv("VALXEL_GITHUB_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setattr(engine.upkeep, "repos", lambda refresh=False: {REPO: "FARM"})
+    services.cluster = engine.cluster
+    first = reviewed(services, monkeypatch, ["approve"], branch="w1")
+    gh = services.github
+    gh.prs[f"{REPO}#{first}"]["state"] = "merged"
+    revert = open_pr(services, {"src/undo.py": "x"}, branch="w2")
+    gh.prs[f"{REPO}#{revert}"].update(state="merged", body=f"Reverts {REPO}#{first}")
+    client = TestClient(create_app(engine=engine, auth=AuthConfig(mode="dev", secret="x" * 32), web_dist=None))
+
+    def closed_event(number):
+        body = json.dumps({"action": "closed", "repository": {"full_name": REPO},
+                           "pull_request": {"number": number}}).encode()
+        sig = "sha256=" + hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
+        return client.post("/api/webhooks/github", content=body,
+                           headers={"x-hub-signature-256": sig, "x-github-event": "pull_request"}).json()
+
+    assert closed_event(first)["independent_review"] == "approved"
+    closed_event(revert)
+    assert label(services, first) == "miss"
+    client.post("/api/auth/dev-login", json={"login": "po", "teams": ["acme-farm/product-owners"]})
+    r = client.get("/api/independent-reviews/accuracy", params={"product_id": "FARM"})
+    assert r.status_code == 200 and r.json()["all"]["miss"] == 1

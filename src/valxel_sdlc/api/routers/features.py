@@ -213,6 +213,15 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         eng().cluster.put(key, r)
         return {"seconds": r["seconds"]}
 
+    @api.get("/independent-reviews/accuracy")
+    def independent_review_accuracy(product_id: str, user: User = Depends(current_user)) -> dict:
+        """How right the independent reviewer has been on a product's PRs: catches, misses and false
+        alarms, judged by what happened to each change afterwards (T-145)."""
+        from ...independent_review import accuracy
+
+        member_of(user, product_id)
+        return accuracy(eng().services, product_id)
+
     @api.get("/waivers")
     def waivers(since: str = "", user: User = Depends(current_user)) -> list[dict]:
         """Approvals where the author waived separation of duties, newest first: for a reviewer to

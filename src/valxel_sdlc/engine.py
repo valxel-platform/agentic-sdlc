@@ -677,6 +677,12 @@ class FeatureEngine(WatchingMixin, RoadmapMixin, OperationsMixin, CostsMixin, Re
         if item.get("rewritten_by"):
             d["rewritten_by"] = item["rewritten_by"]
 
+    def label_independent_reviews(self) -> dict:
+        """The watcher's daily labels for the independent reviewer's eval cases (T-145)."""
+        from .independent_review import label_outcomes
+
+        return label_outcomes(self.services)
+
     def separation_for(self, feature_id: str, item: dict, who: str) -> str:
         """Why `who` may not approve this item (separation of duties), or '' when they may: so the
         inbox says so before they try, rather than only refusing the decision."""

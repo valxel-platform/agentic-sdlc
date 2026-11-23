@@ -63,10 +63,11 @@ import shutil
 import tempfile
 import threading
 import time
-from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
+
+from .eval_case import EvalCase  # in the core: delivery's agents keep cases too
 
 log = logging.getLogger(__name__)
 
@@ -80,30 +81,6 @@ _DROP = ("feedback", "prior_findings", "simulate_faults", "budget_remaining_usd"
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
-@dataclass
-class EvalCase:
-    id: str
-    product_id: str
-    feature_id: str
-    phase: str
-    data_class: str
-    at: str
-    config_version: str
-    ctx: dict
-    output: str
-    status: str  # passed | escalated
-    critic: dict = field(default_factory=dict)
-    # What people decided: {"decision", "reason", "feedback", "first_time"}; None until a gate decides.
-    label: dict | None = None
-    reference: str = ""  # the version people approved (artifact text), once there is one
-
-    def as_dict(self) -> dict:
-        return asdict(self)
-
-    @staticmethod
-    def from_dict(d: dict) -> "EvalCase":
-        return EvalCase(**{k: d.get(k) for k in EvalCase.__dataclass_fields__ if k in d})
 
 
 def case_from(state: dict, phase: str, ctx: dict, out: dict, *, config_version: str = "") -> EvalCase:
@@ -244,8 +221,41 @@ def services_for(base_settings, config_dir: str | Path | None = None):
                              governance_source=base_settings.governance_source,
                              governance_root=base_settings.governance_root)
     use_own_plugins(settings)  # a candidate that moves the plugin pin runs with the plugins it pins
-    return build_services(settings, ledger=InMemoryLedger(), github=StubGitHub(), openchoreo=StubOpenChoreo(),
-                          packages=StubPackageRegistry(), diagrams={}, trackers={})
+    svc = build_services(settings, ledger=InMemoryLedger(), github=StubGitHub(), openchoreo=StubOpenChoreo(),
+                         packages=StubPackageRegistry(), diagrams={}, trackers={})
+    svc.pr_reader = _pr_reader(base_settings)  # the independent reviewer's cases re-read their PR's diff
+    return svc
+
+
+class PullRequestReader:
+    """Reads a pull request and files, and nothing else: an eval run writes nothing to GitHub."""
+
+    def __init__(self, github) -> None:
+        self._gh = github
+
+    def pull_request(self, *, repo, number):
+        return self._gh.pull_request(repo=repo, number=number)
+
+    def pr_patches(self, *, repo, number):
+        return self._gh.pr_patches(repo=repo, number=number)
+
+    def get_file(self, *, repo, path, ref):
+        return self._gh.get_file(repo=repo, path=path, ref=ref)
+
+
+def _pr_reader(base_settings):
+    """Live GitHub, read-only, when the tool delivers live; None in stub mode (cases read the stub)."""
+    import os
+
+    if os.environ.get("VALXEL_DELIVERY", "stub").lower() != "live":
+        return None
+    try:
+        from .services import default_delivery
+
+        return PullRequestReader(default_delivery(base_settings)[0])
+    except Exception:  # no GitHub App here: the reviewer's cases are skipped with an error
+        log.warning("evals: no GitHub to re-read pull requests with", exc_info=True)
+        return None
 
 
 def people_approved(case: EvalCase) -> bool | None:
@@ -329,10 +339,13 @@ def replay(services, case: EvalCase, *, pairwise: bool = False) -> dict:
         from . import coder_injection
 
         return coder_injection.replay(services, case)
-    if case.phase in CODE_PHASES:
-        from . import code_evals
+    if case.phase in CODE_PHASES or case.phase == "independent_reviewer":
+        from . import code_evals, independent_review
 
-        return (code_evals.replay_coder if case.phase == "coder" else code_evals.replay_reviewer)(services, case)
+        replayer = {"coder": code_evals.replay_coder, "reviewer": code_evals.replay_reviewer,
+                    # reads a diff and runs nothing, so it needs no code runner
+                    "independent_reviewer": lambda s, c: independent_review.replay(s, c, plant=code_evals.plant)}
+        return replayer[case.phase](services, case)
     from .agents import PHASE_SPECS, templates
     from .evaluators import run_checks
     from .evaluators.critic import critique
