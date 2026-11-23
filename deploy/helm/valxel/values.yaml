@@ -81,6 +81,9 @@ tool:
     tokenUrl: ""                    # their Thunder/IdP token endpoint
     consoleUrl: ""
   otelEndpoint: ""                  # traces of agent sessions (optional)
+  # The independent review of every pull request in product repos, started by the GitHub App's
+  # webhook (an agent with none of the author's context, through the gateway). Off until switched on.
+  independentReview: false
   extraSettings: {}                 # any other VALXEL_* setting, by name
   resources:
     api: {requests: {cpu: 500m, memory: 1Gi}, limits: {memory: 2Gi}}

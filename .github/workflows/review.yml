@@ -1,5 +1,6 @@
 # The independent review on every pull request (.github/workflows/independent-review.yml, T-139).
-# Runs from the base branch, so a pull request can't change the review it gets.
+# Runs from the base branch, so a pull request can't change the review it gets. Off until the
+# INDEPENDENT_REVIEW variable (the org's or this repo's) is `on`: skipped, not failed, meanwhile.
 name: review
 on:
   pull_request_target:
@@ -10,6 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   independent:
+    if: ${{ vars.INDEPENDENT_REVIEW == 'on' }}
     uses: ./.github/workflows/independent-review.yml
     permissions:
       contents: read

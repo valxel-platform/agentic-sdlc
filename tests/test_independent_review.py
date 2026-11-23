@@ -134,6 +134,7 @@ def test_the_webhook_starts_it_for_a_product_repo_only(monkeypatch, engine, serv
     monkeypatch.setattr(engine.upkeep, "repos", lambda refresh=False: {REPO: "FARM"})
     client = TestClient(create_app(engine=engine, auth=AuthConfig(mode="dev", secret="x" * 32), web_dist=None))
     number = open_pr(services, {"a.py": "x"}, branch="b7")
+    monkeypatch.setenv("VALXEL_INDEPENDENT_REVIEW", "on")
 
     def send(repo):
         body = json.dumps({"action": "opened", "repository": {"full_name": repo},
@@ -144,6 +145,16 @@ def test_the_webhook_starts_it_for_a_product_repo_only(monkeypatch, engine, serv
 
     assert send(REPO)["independent_review"] == "started"
     assert "independent_review" not in send("valxel-platform/agentic-sdlc")  # not a product's repo
+    # Switched off (the default): no review starts, and no status is posted on the PR.
+    monkeypatch.delenv("VALXEL_INDEPENDENT_REVIEW")
+    before = len(services.github.statuses)
+    assert send(REPO)["independent_review"] == "off"
+    assert len(services.github.statuses) == before
+
+
+def test_it_is_off_unless_switched_on():
+    assert not ir.enabled({}) and not ir.enabled({"VALXEL_INDEPENDENT_REVIEW": "off"})
+    assert ir.enabled({"VALXEL_INDEPENDENT_REVIEW": "on"}) and ir.enabled({"VALXEL_INDEPENDENT_REVIEW": " True "})
 
 
 def test_the_feature_page_shows_its_prs_reviews(engine, services):

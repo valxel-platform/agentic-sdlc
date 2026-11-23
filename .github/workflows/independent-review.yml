@@ -13,6 +13,8 @@
 # - Model access: workload identity federation when the ANTHROPIC_FEDERATION_RULE_ID,
 #   ANTHROPIC_ORGANIZATION_ID and ANTHROPIC_SERVICE_ACCOUNT_ID variables are set (no stored key),
 #   else the ANTHROPIC_API_KEY secret. Neither: the check fails and says so.
+# - Callers run it only when the INDEPENDENT_REVIEW variable (org or repo) is `on`; until then the
+#   check is skipped. Turn it on once model access is set up.
 # - Pull requests from forks aren't reviewed here (no secrets for them): the check fails and asks
 #   for a maintainer's review.
 name: independent-review

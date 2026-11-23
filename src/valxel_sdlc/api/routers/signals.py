@@ -336,6 +336,10 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         if not pid:
             return None
         if event.get("action") in ("opened", "synchronize", "reopened", "ready_for_review"):
+            from ...independent_review import enabled
+
+            if not enabled():  # switched off (VALXEL_INDEPENDENT_REVIEW): no review, no status
+                return "off"
             return independent_review().start(repo, number, pid)
         if event.get("action") == "closed":
             return _review_outcome(repo, number)
