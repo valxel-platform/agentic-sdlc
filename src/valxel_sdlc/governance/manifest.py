@@ -212,7 +212,7 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
     problems += check_workflow(raw.get("workflow"), entry.data_class)
     standards = {}
     if standards_cfg is not None:
-        from ..provisioning import effective_standards
+        from ..repo_policy import effective_standards
 
         standards = effective_standards(standards_cfg, entry.data_class, raw.get("repo_standards") or {}, problems)
 
