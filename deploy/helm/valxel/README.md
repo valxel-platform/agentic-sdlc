@@ -1,8 +1,7 @@
 # Valxel, self-hosted: the Helm chart
 
 This chart installs the Valxel tool on a customer's own Kubernetes, beside their OpenChoreo
-control plane. It is the same layout Valxel runs for hosted customers (platform-foundation
-`gitops/apps`), with one tenant: the customer's code, secrets and audit records stay in their account.
+control plane. The customer's code, secrets and audit records stay in their account.
 
 It installs:
 

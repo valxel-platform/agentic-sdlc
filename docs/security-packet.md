@@ -1,8 +1,7 @@
 # Security packet
 
-For a customer's security and compliance reviewers. It describes how Valxel handles code,
-credentials and decisions, for both the hosted and self-hosted models. Each section links to the
-source of truth. Answers to a questionnaire should quote this page, not paraphrase it.
+For the security and compliance reviewers of a team that runs Valxel. It describes how Valxel
+handles code, credentials and decisions. Each section links to the source of truth. Answers to a questionnaire should quote this page, not paraphrase it.
 
 ## What Valxel is
 
@@ -16,18 +15,23 @@ Valxel runs a product's software delivery with AI agents:
 - release to production.
 
 People approve every step that matters at gates. Agents work in sandboxes and open pull requests
-in the customer's GitHub. They never hold production credentials, and they never promote to
+in the team's GitHub. They never hold production credentials, and they never promote to
 production.
 
-| | Hosted | Self-hosted |
-|---|---|---|
-| Where the tool runs | Valxel's AWS account, shared by customers | The customer's Kubernetes, one tenant ([install guide](self-hosted.md)) |
-| Where agents work on code | gVisor sandboxes in Valxel's account, while working only | gVisor sandboxes in the customer's account |
-| Model access | Valxel's model accounts, through Valxel's gateway | The customer's own model key, through a gateway in their account |
-| Audit records | Valxel's audit sink, exportable to the customer's SIEM | The customer's audit sink and buckets |
-| Products' running environments | The customer's account (OpenChoreo data planes) | The customer's account |
+Everything runs in the team's own cloud account ([install guide](self-hosted.md)):
 
-## Customer data: what is kept, where, and for how long
+| | Where |
+|---|---|
+| The tool | Their Kubernetes, beside their OpenChoreo |
+| Agents working on code | gVisor sandboxes in their cluster, while working only |
+| Model access | Their own model key, through a gateway in their cluster |
+| Audit records | Their audit sink and Object Lock buckets, exportable to their SIEM |
+| Products' running environments | Their OpenChoreo data planes |
+
+Code, secrets and audit records never leave their account, except the prompts sent to their
+chosen model provider.
+
+## Data: what is kept, where, and for how long
 
 The full inventory, with a deletion rule and evidence for each place, is
 [code and secrets](code-and-secrets.md). In short:
@@ -39,7 +43,7 @@ The full inventory, with a deletion rule and evidence for each place, is
   at most 20 lines per block and 4,000 characters per note. Secrets in them are masked. They stay
   with the feature as its record, and for regulated products in a six-year archive under Object
   Lock.
-- **Approved documents** go to the customer's own repositories. Agent transcripts, prompts and
+- **Approved documents** go to the team's own repositories. Agent transcripts, prompts and
   evaluator notes never do.
 - **Sample data** is synthetic. Agents never see real patient or cardholder data.
 - **Model providers** receive prompts and responses through the gateway, under each provider's
@@ -57,9 +61,9 @@ The full inventory, with a deletion rule and evidence for each place, is
     the LLM gateway, and DNS for those names only;
   - deny rules block other sandboxes, the Kubernetes API, the nodes and the cloud metadata
     endpoint, whatever an allow rule says (Cilium).
-- **Tenancy (hosted):** each workspace's rows are separated by Postgres row-level security,
-  enforced for the tool's own login (strict mode refuses a login that can bypass it). Sessions
-  have per-workspace network policy, and checkpoint archives are keyed and encrypted per workspace.
+- **Workspaces:** one install can hold several workspaces (teams or products). Each workspace's
+  rows are separated by Postgres row-level security, enforced for the tool's own login (strict
+  mode refuses a login that can bypass it), and checkpoint archives are keyed per workspace.
 
 ## Identity and access
 
@@ -105,7 +109,7 @@ The full inventory, with a deletion rule and evidence for each place, is
   - records also go through Kafka to a separate audit sink, which keeps its own hash-chained copy
     and a locked archive;
   - `valxel audit` and `audit-sink verify` recompute the chains against the anchors.
-- **SIEM:** the sink exports to the customer's security monitoring (Splunk, Sentinel and
+- **SIEM:** the sink exports to the team's security monitoring (Splunk, Sentinel and
   similar).
 
 ## Supply chain
@@ -142,15 +146,15 @@ possibly hostile once it has read anything written outside the tool.
 - **Quality drift:** decisions at the gates label evaluation cases. A model or prompt change must
   match or beat the current one on past cases before it ships.
 
-## Shared responsibility (self-hosted)
+## Shared responsibility
 
-| Valxel | The customer |
+| The Valxel project | The team running it |
 |---|---|
-| The tool's code, images, chart and their signatures; security patches within the [support window](releases.md#support-window) | Kubernetes, the gVisor node pool, Cilium, Agent Sandbox and OpenChoreo, patched and upgraded |
+| The tool's code, images, chart and their signatures; security patch releases as set out in [support](releases.md#support) | Kubernetes, the gVisor node pool, Cilium, Agent Sandbox and OpenChoreo, patched and upgraded |
 | Defaults that are safe: strict mode, digest pins, hardened pods, network policy | Postgres, Kafka, buckets and KMS: encryption at rest, backups, Object Lock retention |
-| Release notes, migration notes, the install and upgrade guide | Secrets and their rotation; the GitHub Apps; who may sign in and approve |
-| Vulnerability handling for reports made to Valxel | The model account and its terms (BAA for PHI) |
-| Access to an install only when the customer grants it | Monitoring, SIEM, incident response for their environment |
+| Release notes, migration notes, the install and upgrade guide | Upgrading to releases that get fixes; secrets and their rotation; the GitHub Apps; who may sign in and approve |
+| Handling vulnerabilities reported to the project | The model account and its terms (BAA for PHI) |
+| No access to anyone's install | Monitoring, SIEM, incident response for their environment |
 
 ## Known gaps
 
@@ -160,13 +164,9 @@ We list these rather than wait to be asked. Each has a tracker item.
   registries on the allowlist. A proxy with quarantine and age rules, which flags new dependencies
   for a person, isn't in place yet.
 - **Sign-in:** GitHub or Cognito only. Generic OIDC (Okta, Entra ID) is not yet supported.
-- **Self-hosted rehearsal (T-123):** the chart is tested in CI but has not yet been installed end
-  to end on a customer-like cluster.
-- **Hosted isolation (T-02, T-123, T-125):** per-customer isolation on the hosted shared non-prod
-  cluster is to be proven in the hosted rehearsal. Dedicated cells for regulated customers are an
-  open decision.
-- **Support window:** the [support window](releases.md#support-window) is proposed, not yet
-  committed.
+- **Install rehearsal (T-123):** the chart is tested in CI but has not yet been installed end to
+  end on a real cluster.
+- **Support:** the [support policy](releases.md#support) is proposed, not yet committed.
 
 ## Reporting a vulnerability
 

@@ -1,8 +1,7 @@
 # Releases and support
 
-What a Valxel release is, what comes with it, and how long each one is supported. It applies to
-self-hosted installs (the [install and upgrade guide](self-hosted.md)). The hosted cluster takes
-each release first.
+What a Valxel release is, what comes with it, and how long each one gets fixes. Installing and
+upgrading are in the [install and upgrade guide](self-hosted.md).
 
 ## What a release is
 
@@ -47,23 +46,24 @@ Every release has notes on its GitHub release page, with:
 - The tool applies its database changes when it starts. Take a snapshot first (the
   [upgrade steps](self-hosted.md#4-upgrade)).
 
-## Support window
+## Support
 
-> **Proposed, to confirm before the first self-hosted customer:** the numbers below are a
-> starting point, not yet a commitment.
+> **Proposed, to confirm before the first public release.** Valxel is open source, maintained on
+> a best-effort basis: these are the project's aims, not guarantees.
 
 | | |
 |---|---|
-| Supported releases | Each minor release, for **6 months** after it ships |
-| Critical vulnerabilities (CVSS 9 or above, or exploited) in a supported release | A patch within **7 days** of the fix being known |
-| High vulnerabilities (CVSS 7 to 8.9) | A patch within **30 days** |
-| Other bugs | Fixed in the next minor; patched into supported releases only if they lose data or block work |
-| Releases past their window | Not patched; upgrade to a supported release |
-| Kubernetes, OpenChoreo, Agent Sandbox, Cilium, Strimzi | The versions each release was tested with are in its notes; a release supports the versions current when it ships and one minor back |
+| Releases that get fixes | The latest minor release; the one before it for 3 months after a new minor ships, to give time to upgrade |
+| Critical vulnerabilities (CVSS 9 or above, or exploited) | A patch release, aiming for 7 days after the fix is known |
+| High vulnerabilities (CVSS 7 to 8.9) | A patch release, aiming for 30 days |
+| Other bugs | Fixed in the next release |
+| Older releases | No fixes; upgrade to a release that gets them |
+| Kubernetes, OpenChoreo, Agent Sandbox, Cilium, Strimzi | Each release's notes list the versions it was tested with |
 
-Valxel has no access to a self-hosted install unless the customer grants it. Support works from
-what the customer shares: logs, the output of the [checks](self-hosted.md#3-check), and the
-values file with its secrets removed.
+Questions and bug reports go to the repository's GitHub issues and discussions. There's no
+promised response time. The maintainers have no access to anyone's install; when asking for help,
+share logs, the output of the [checks](self-hosted.md#3-check), and the values file with secrets
+removed.
 
 ## Reporting a vulnerability
 
