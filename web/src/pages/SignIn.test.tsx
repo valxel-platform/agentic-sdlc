@@ -106,12 +106,38 @@ describe("provider sign-in (non-dev)", () => {
     expect(passkey).toHaveAttribute("href", "/api/auth/login?provider=passkey&next=%2Finbox");
   });
 
+  it("offers the team's own identity provider, beside GitHub or alone", async () => {
+    apiMock.authConfig.mockResolvedValue({
+      mode: "github",
+      providers: [
+        { id: "github", label: "Sign in with GitHub" },
+        { id: "oidc", label: "Sign in with Okta" },
+      ],
+    });
+    setPath("/inbox");
+    const { unmount } = render(<SignIn onSignedIn={() => {}} />);
+    const okta = await screen.findByRole("link", { name: "Sign in with Okta" });
+    expect(okta).toHaveAttribute("href", "/api/auth/login?provider=oidc&next=%2Finbox");
+    expect(okta).toHaveClass("secondary");
+    unmount();
+
+    apiMock.authConfig.mockResolvedValue({
+      mode: "oidc",
+      providers: [{ id: "oidc", label: "Sign in with Okta" }],
+    });
+    render(<SignIn onSignedIn={() => {}} />);
+    expect(await screen.findByRole("link", { name: "Sign in with Okta" })).not.toHaveClass("secondary");
+    expect(screen.queryByRole("link", { name: /GitHub/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Use a passkey" })).not.toBeInTheDocument();
+    expect(screen.getByText(/your company sign-in with multi-factor/)).toBeInTheDocument();
+  });
+
   it("shows the failure message for ?signin=failed", async () => {
     setPath("/?signin=failed");
     render(<SignIn onSignedIn={() => {}} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("GitHub sign-in was cancelled or failed. Try again.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Sign-in was cancelled or failed. Try again.");
     await screen.findByRole("link", { name: "Sign in with GitHub" });
-    expect(screen.getByRole("alert")).toHaveTextContent("GitHub sign-in was cancelled or failed. Try again.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Sign-in was cancelled or failed. Try again.");
   });
 
   it("shows no failure message without ?signin=failed", async () => {
