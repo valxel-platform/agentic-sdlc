@@ -47,6 +47,9 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
     executor = env.get("VALXEL_SESSION_EXECUTOR", "local").lower()
     tier = env.get("VALXEL_TIER", "cluster").lower()
     out += tier_checks(env, tier=tier, live=s.mode == "live")
+    from .cloud import strict_problems as cloud_problems
+
+    out += cloud_problems(env)
     if s.mode == "live" and executor not in ("kubernetes", "docker"):
         out.append("VALXEL_SESSION_EXECUTOR is local: agent sessions run in the tool's own container, beside its "
                    "keys and every workspace's work; use kubernetes (cluster) or docker (laptop, VM) "

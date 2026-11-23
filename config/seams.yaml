@@ -18,6 +18,24 @@ core: [template_contract, resources, outcomes, inception.formats, roadmap.record
 # and the tool's health, which measures every seam's agents on real work.
 root: [engine, engine_parts, api, web, cli, services, strict, worksync, run_queue, watcher_jobs, checkpoint_archive,
        lite, evals, code_evals, code_eval_runner, coder_injection, injection, health, drift, what_changed]
+# The cloud rule (ADR 0010): a cloud's SDK is imported only in cloud/<provider>/, that cloud's
+# adapters; the core reaches a cloud through valxel_sdlc.cloud.ports. `known` is today's debt, which
+# phase 1 of the cloud work moves into cloud/aws/ (tracker CP-101); tests/test_seams.py fails on a
+# new import and on a listed one that's gone (delete its line).
+cloud_sdk:
+  packages:
+    aws: [boto3, botocore, aioboto3, mypy_boto3]
+    gcp: [google.cloud, google.auth, google.api_core, googleapiclient]
+    azure: [azure]
+  known:
+    - "audit_anchors -> aws SDK"
+    - "checkpoint_archive -> aws SDK"
+    - "connections -> aws SDK"
+    - "oauth_connections -> aws SDK"
+    - "ops.cost -> aws SDK"
+    - "ops.inventory -> aws SDK"
+    - "secret_ring -> aws SDK"
+    - "signing -> aws SDK"
 # The burn-down: at most this many known breaks by each date (one target a sprint, about ten fewer
 # each). tests/test_seams.py fails once a date has come and the count is still above it: fix breaks
 # to meet it (move the shared piece into the core, or pass it in from the root); don't move the target.

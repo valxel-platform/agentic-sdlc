@@ -186,6 +186,21 @@ def test_registry_mirrors_are_used_and_allowed():
     (("tool.extraSettings.VALXEL_SMTP_PASSWORD=x",), "looks like a secret"),
     (("archives.checkpointBucket=",), "archives.checkpointBucket"),
     (("sessions.registryMirrors.npm=http://artifacts.acme.test/npm/",), "registryMirrors.npm must be https"),
+    (("cloud.provider=oracle",), "cloud.provider is aws, gcp or azure"),
 ])
 def test_it_refuses_what_production_would_refuse(sets, says):
     assert says in _render(*sets, ok=False)
+
+
+def _settings(*sets):
+    return next(d for d in _render(*sets)
+                if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "valxel-settings")["data"]
+
+
+def test_the_installation_names_its_cloud():
+    """ADR 0010: one cloud per installation. awsRegion still reads as cloud.region."""
+    data = _settings()
+    assert (data["VALXEL_CLOUD"], data["AWS_REGION"]) == ("aws", "us-east-1")
+    assert _settings("cloud.region=eu-west-1")["AWS_REGION"] == "eu-west-1"
+    gcp = _settings("cloud.provider=gcp", "cloud.region=us-central1")
+    assert gcp["VALXEL_CLOUD"] == "gcp" and "AWS_REGION" not in gcp

@@ -22,7 +22,8 @@ from __future__ import annotations
 import json
 import threading
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+
+from ..cloud.ports import CostSource  # noqa: F401 - the port (ADR 0010), re-exported
 
 CATEGORY = "cost"
 DAYS_PER_MONTH = 30.0
@@ -55,18 +56,6 @@ def released_at(state: dict) -> datetime | None:
 
 
 # --------------------------------------------------------------------------- where costs come from
-class CostSource(Protocol):
-    def component_costs(self, *, namespace: str, project: str, env: str, components: list[str],
-                        start: datetime, end: datetime) -> dict[str, float]: ...  # component -> USD
-    def aws_costs(self, *, product_id: str, feature_id: str, account: str,
-                  start: datetime, end: datetime) -> dict[str, float]: ...  # AWS service -> USD
-    # For the cost ledger (valxel_sdlc.finops): day by day, everything in a project or account.
-    def component_costs_daily(self, *, namespace: str, project: str, env: str, start: datetime,
-                              end: datetime) -> list[dict]: ...  # [{day, component, usd}]
-    def aws_costs_daily(self, *, product_id: str, account: str, start: datetime,
-                        end: datetime) -> list[dict]: ...  # [{day, service, feature_id ('' = untagged), usd}]
-
-
 def _days(start: datetime, end: datetime):
     d = start.date()
     while datetime(d.year, d.month, d.day, tzinfo=timezone.utc) < end:

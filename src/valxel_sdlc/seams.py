@@ -21,6 +21,11 @@ config/seams.yaml says which modules make up each seam, and lists every import t
 rules today, as known debt. `tests/test_seams.py` fails on any new one, and on a listed one
 that no longer exists (so the list only shrinks). `python -m valxel_sdlc.seams` prints the
 current breaks, by pair of seams.
+
+The cloud rule (ADR 0010): a cloud's SDK is imported only in that cloud's adapters,
+`cloud/<provider>/`. config/seams.yaml's `cloud_sdk` names each cloud's SDK packages and lists
+today's imports elsewhere as known debt, which only shrinks: `tests/test_seams.py` fails on a new
+one, and on a listed one that's gone.
 """
 
 from __future__ import annotations
@@ -113,6 +118,47 @@ def check(cfg: dict | None = None) -> tuple[list[str], list[str]]:
     return sorted(now - known), sorted(known - now)
 
 
+def _external(path: Path) -> set[str]:
+    """Every absolute, non-valxel module a file imports, anywhere in it (lazy imports included)."""
+    out = set()
+    for node in ast.walk(ast.parse(path.read_text(), str(path))):
+        if isinstance(node, ast.Import):
+            out |= {a.name for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            out.add(node.module)
+            out |= {f"{node.module}.{a.name}" for a in node.names}
+    return out
+
+
+def sdk_owner(name: str, sdks: dict[str, list[str]]) -> str:
+    """The cloud whose SDK `name` is part of, or ''."""
+    for cloud, packages in sdks.items():
+        if any(name == p or name.startswith(p + ".") for p in packages):
+            return cloud
+    return ""
+
+
+def cloud_sdk_imports(cfg: dict, root: Path = ROOT) -> set[str]:
+    """Imports of a cloud's SDK outside that cloud's adapters, as 'module -> <cloud> SDK'."""
+    sdks = (cfg.get("cloud_sdk") or {}).get("packages") or {}
+    out = set()
+    for path in root.rglob("*.py"):
+        mod = _module(path)
+        for name in _external(path):
+            cloud = sdk_owner(name, sdks)
+            if cloud and not (mod == f"cloud.{cloud}" or mod.startswith(f"cloud.{cloud}.")):
+                out.add(f"{mod} -> {cloud} SDK")
+    return out
+
+
+def check_cloud(cfg: dict | None = None, root: Path = ROOT) -> tuple[list[str], list[str]]:
+    """(new cloud SDK imports outside cloud/<provider>/, listed ones that are gone)."""
+    cfg = cfg or load()
+    now = cloud_sdk_imports(cfg, root)
+    known = set((cfg.get("cloud_sdk") or {}).get("known") or [])
+    return sorted(now - known), sorted(known - now)
+
+
 def main() -> int:
     cfg = load()
     found = breaks(cfg)
@@ -120,6 +166,7 @@ def main() -> int:
     for pair, n in sorted(by_pair.items()):
         print(f"{pair:24} {n}")
     print(f"{len(found)} imports cross a seam the wrong way")
+    print(f"{len(cloud_sdk_imports(cfg))} modules import a cloud's SDK outside cloud/<provider>/")
     ahead = [t for t in cfg.get("targets") or [] if int(t["at_most"]) < len(found)]
     if ahead:
         nxt = min(ahead, key=lambda t: str(t["by"]))

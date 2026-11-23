@@ -217,3 +217,12 @@ def test_production_sessions_reach_github_only_through_the_broker(services):
     assert not any("GIT_BROKER" in f for f in strict.stand_ins(services, auth_mode="github", env=LIVE))
     bad = strict.stand_ins(services, auth_mode="github", env={**LIVE, "VALXEL_GIT_BROKER_URL": "egress-proxy"})
     assert any("must be http(s)" in f for f in bad)
+
+
+def test_strict_mode_names_the_installations_cloud():
+    """ADR 0010: VALXEL_CLOUD is a known cloud with adapters; aws is the default."""
+    from valxel_sdlc.cloud import strict_problems
+
+    assert strict_problems({}) == [] and strict_problems({"VALXEL_CLOUD": "AWS"}) == []
+    assert "no adapters yet" in strict_problems({"VALXEL_CLOUD": "gcp"})[0]
+    assert "not 'oracle'" in strict_problems({"VALXEL_CLOUD": "oracle"})[0]

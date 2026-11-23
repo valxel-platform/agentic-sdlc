@@ -33,7 +33,8 @@ import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
-from typing import Protocol
+
+from .cloud.ports import SecretStore  # the port (ADR 0010)
 
 # Values published in this repository or its docs: never acceptable outside a laptop.
 PUBLISHED = frozenset({
@@ -60,10 +61,6 @@ _SECRET_SHAPE = re.compile(r"_(MCP_AUTH|API_KEY|CLIENT_SECRET|PASSWORD)$")
 def is_secret(name: str) -> bool:
     return (name in SECRET_NAMES or name.startswith(PER_PRODUCT) or name.startswith(PER_ORG)
             or bool(_SECRET_SHAPE.search(name)))
-
-
-class SecretStore(Protocol):
-    def versions(self, name: str) -> list[str]: ...  # [current] or [current, previous]; [] if unset
 
 
 class EnvStore:

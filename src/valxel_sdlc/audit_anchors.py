@@ -20,7 +20,9 @@ import logging
 import os
 import time
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any
+
+from .cloud.ports import AnchorStore  # the port (ADR 0010)
 
 log = logging.getLogger(__name__)
 GENESIS = "0" * 64
@@ -46,11 +48,6 @@ def check(entries: list[dict], anchors: list[dict]) -> list[str]:
         if have != a["hash"]:
             out.append(f"entry {n} no longer has the hash anchored at {a.get('at', '?')}: rewritten")
     return out
-
-
-class AnchorStore(Protocol):
-    def put(self, chain: str, h: dict) -> None: ...
-    def list(self, chain: str, limit: int = 0) -> list[dict]: ...  # newest last; limit 0 = all
 
 
 class MemoryAnchors:

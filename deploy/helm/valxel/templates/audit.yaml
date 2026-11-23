@@ -160,7 +160,7 @@ spec:
             - name: AUDIT_SINK_ARCHIVE_BUCKET
               value: {{ required "archives.auditArchiveBucket: an Object Lock bucket for the audit sink's locked copy" .Values.archives.auditArchiveBucket | quote }}
             - name: AUDIT_SINK_ARCHIVE_REGION
-              value: {{ .Values.awsRegion | quote }}
+              value: {{ include "valxel.cloudRegion" . | quote }}
             - name: AUDIT_SINK_ARCHIVE_RETENTION_DAYS   # must match the bucket's own retention
               value: {{ .Values.archives.auditArchiveRetentionDays | quote }}
             - name: AUDIT_SINK_DATABASE_URL
