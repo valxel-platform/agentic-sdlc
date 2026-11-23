@@ -16,6 +16,10 @@ the tool's, and everything from the PR goes in as untrusted text. A fork's PR is
 it fails and asks for a maintainer.
 
 The feature page shows the reviews of its PRs, and G5 shows them beside the build reviewer's.
+
+It runs only where it's switched on: VALXEL_INDEPENDENT_REVIEW=on (off by default). Off, a pull
+request gets no review and no `independent-review` status, so don't require that status in a
+product's ruleset until it's on.
 """
 
 from __future__ import annotations
@@ -70,6 +74,14 @@ class Outcome:
     body: str
     review: Review | None = None
     hits: list[str] = field(default_factory=list)  # the high-risk paths it touched
+
+
+def enabled(env=None) -> bool:
+    """Whether the GitHub App's pull-request webhook starts a review: VALXEL_INDEPENDENT_REVIEW."""
+    import os
+
+    value = (env if env is not None else os.environ).get("VALXEL_INDEPENDENT_REVIEW", "off")
+    return str(value).strip().lower() in ("on", "true", "1", "yes")
 
 
 def risk(paths: list[str], extra: list[str] | tuple[str, ...] = ()) -> list[str]:

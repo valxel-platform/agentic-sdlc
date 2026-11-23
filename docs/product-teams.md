@@ -1183,6 +1183,10 @@ developer, a hotfix, Renovate. The build reviewer checks a coder's change agains
 design; this one sees only the diff, the base branch's copy of each changed file and the product's
 constitution, so a design that missed something doesn't take it along.
 
+It's off until the tool's operator switches it on (`VALXEL_INDEPENDENT_REVIEW=on`, or
+`tool.independentReview: true` in the Helm chart). Off, pull requests get no review and no
+`independent-review` status, so don't make that status required in a ruleset until it's on.
+
 - The tool's GitHub App starts it from the pull-request webhook; nothing is installed in the repo
   and the customer gives no model key. The call goes through the LLM gateway under the product's
   data-class rule, and its cost is in the product's spend (role `independent_reviewer`, Sonnet).

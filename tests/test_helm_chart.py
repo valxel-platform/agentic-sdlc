@@ -90,6 +90,7 @@ def test_the_settings_are_productions():
     assert data["VALXEL_STRICT"] == "1" and data["VALXEL_TIER"] == "cluster" and data["VALXEL_MODE"] == "live"
     assert data["VALXEL_SESSION_EXECUTOR"] == "kubernetes" and data["VALXEL_TENANCY"] == "rls"
     assert data["VALXEL_SECRET_STORE"] == "files" and data["VALXEL_PROVISIONING"] == "queue"
+    assert data["VALXEL_INDEPENDENT_REVIEW"] == "off"  # until switched on (tool.independentReview)
     assert data["VALXEL_LLM_GATEWAY_URL"] == "http://valxel-llm-gateway.valxel.svc.cluster.local:8080"
     assert data["VALXEL_GIT_BROKER_URL"] == "http://valxel-egress-proxy.valxel.svc.cluster.local:3128"
     assert "sasl.password" not in data["VALXEL_AUDIT_KAFKA_CONFIG"]

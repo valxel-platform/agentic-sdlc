@@ -95,6 +95,7 @@ data:
   {{- with .Values.tool.openchoreo.consoleUrl }}
   VALXEL_OPENCHOREO_CONSOLE_URL: {{ . | quote }}
   {{- end }}
+  VALXEL_INDEPENDENT_REVIEW: {{ ternary "on" "off" .Values.tool.independentReview | quote }}
   {{- with .Values.tool.otelEndpoint }}
   VALXEL_OTEL_ENDPOINT: {{ . | quote }}
   {{- end }}
