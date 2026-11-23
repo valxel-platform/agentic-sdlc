@@ -219,7 +219,7 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     new = parse_new_repos(text)
     known = {r["name"] for r in ctx.get("repos", []) + ctx.get("dependency_repos", [])}
     if new:
-        from ..provisioning import check_proposal
+        from ..repo_policy import check_proposal
 
         if ctx.get("repo_policy"):
             out += check_proposal(ctx["repo_policy"], new, known)

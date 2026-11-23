@@ -7,13 +7,14 @@ seams:
   roadmap: [roadmap, outcomes.read, outcomes.readouts, outcomes.review]  # reading and reviewing goals' metrics
   delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env, environments, acceptance,
              records, drafts, traceability, design_record, fit, mockups, sketch, prototype, preview, current_screens, screens, scaffolding, sandboxes, jobs,
-             dependencies, quality, standard_files, agent_tools, performance, capacity,
+             dependencies, quality, standard_files, agent_tools, performance,
              waits, reconcile, pilot, confidence, independent_review]
   ops: [ops, finops, upkeep]
 # Shared definitions several seams read, which use no seam themselves: the core's, though their
 # files sit with the seam that first needed them. (Moving the files is churn for no change in what
 # depends on what.) Only add a module here if it imports nothing from a seam.
-core: [template_contract, resources, outcomes, inception.formats, roadmap.record, ops.changes, ops.alert_rules]
+core: [template_contract, resources, outcomes, inception.formats, roadmap.record, ops.changes, ops.alert_rules,
+       capacity, repo_policy]
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # and the tool's health, which measures every seam's agents on real work.
 root: [engine, engine_parts, api, web, cli, services, strict, worksync, run_queue, watcher_jobs, checkpoint_archive,
@@ -34,21 +35,17 @@ targets:
 # by passing it in from the root (services.py) instead of importing it.
 known_breaks:
   - "agents.templates -> acceptance"  # core -> delivery
-  - "config -> provisioning"  # core -> delivery
   - "config -> quality"  # core -> delivery
   - "design_record -> roadmap"  # delivery -> roadmap
   - "evaluators.checks -> acceptance"  # core -> delivery
   - "evaluators.checks -> agent_tools"  # core -> delivery
   - "evaluators.checks -> design_record"  # core -> delivery
   - "evaluators.checks -> jobs"  # core -> delivery
-  - "evaluators.checks -> provisioning"  # core -> delivery
   - "evaluators.checks -> repo_standards"  # core -> delivery
   - "evaluators.checks -> sandboxes"  # core -> delivery
-  - "governance.loader -> capacity"  # core -> delivery
   - "governance.loader -> ops.error_tracking"  # core -> ops
   - "governance.loader -> ops.remediation"  # core -> ops
   - "governance.manifest -> performance"  # core -> delivery
-  - "governance.manifest -> provisioning"  # core -> delivery
   - "governance.manifest -> quality"  # core -> delivery
   - "governance.manifest -> upkeep"  # core -> ops
   - "graph.gates -> ops.cost"  # delivery -> ops
@@ -62,15 +59,11 @@ known_breaks:
   - "graph.rollout -> ops.cohorts"  # delivery -> ops
   - "graph.rollout -> ops.remediation"  # delivery -> ops
   - "graph.rollout -> ops.rollout"  # delivery -> ops
-  - "inception.checks -> capacity"  # intake -> delivery
   - "inception.graph -> graph.pipeline"  # intake -> delivery
-  - "inception.run -> capacity"  # intake -> delivery
   - "inception.run -> graph.phase"  # intake -> delivery
-  - "inception.setup -> capacity"  # intake -> delivery
   - "inception.setup -> design_record"  # intake -> delivery
   - "inception.setup -> environments"  # intake -> delivery
   - "inception.setup -> repo_standards"  # intake -> delivery
-  - "inception.templates -> capacity"  # intake -> delivery
   - "intake -> evals"  # intake -> root
   - "knowledge -> design_record"  # core -> delivery
   - "knowledge.sources -> roadmap"  # core -> roadmap

@@ -404,7 +404,7 @@ def load_settings(
 
 
 def _load_repos(path: Path):
-    from .provisioning import load_standards
+    from .repo_policy import load_standards
 
     return load_standards(path)
 
