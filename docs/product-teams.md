@@ -1771,8 +1771,10 @@ with encryption, private access, backups and tags built in. People approve; agen
   reads, writes: farm-field-worker
 ```
 
-A product runs AWS from `runtime.aws` in its `product.yaml`: a region allowed for its data class
-and one account per environment. The pipeline never deletes a resource; changing a key or a
+A product names its cloud in `runtime.cloud` in its `product.yaml` (ADR 0010): `provider: aws`,
+a region allowed for its data class and one account per environment. It must be the cloud the
+installation runs on (`VALXEL_CLOUD`). The older `runtime.aws` (region and accounts) still reads as
+`provider: aws`. The pipeline never deletes a resource; changing a key or a
 queue's ordering replaces stored data, so the design check refuses it and a person does it.
 
 ## Store apps (VX-18)

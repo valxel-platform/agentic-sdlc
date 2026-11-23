@@ -117,10 +117,29 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
         for repo in components:
             if repo not in own:
                 problems.append(f"runtime.components maps {repo}, which is not one of this product's repos")
-        aws = runtime.get("aws")
+        # The product's cloud (ADR 0010): runtime.cloud {provider, region, accounts}. The older
+        # runtime.aws {region, accounts} still reads, as provider aws.
+        cloud, aws = runtime.get("cloud"), runtime.get("aws")
+        if cloud is not None and aws is not None:
+            problems.append("runtime.cloud and runtime.aws both set: keep runtime.cloud (provider: aws) only")
+            aws = None
         if aws is not None and not isinstance(aws, dict):
             problems.append("runtime.aws must be a mapping: {region, accounts: {<environment>: <account id>}}")
             aws = None
+        if cloud is None and aws is not None:
+            cloud = {"provider": "aws", **aws}
+        if cloud is not None:
+            from ..cloud import CLOUDS
+
+            if not isinstance(cloud, dict):
+                problems.append("runtime.cloud must be a mapping: {provider, region, accounts: {<environment>: <id>}}")
+                cloud = None
+            elif str(cloud.get("provider") or "") not in CLOUDS:
+                problems.append(f"runtime.cloud.provider is one of {', '.join(CLOUDS)}, not {cloud.get('provider')!r}")
+                cloud = None
+        cloud = ({"provider": str(cloud["provider"]), "region": str(cloud.get("region") or ""),
+                  "accounts": {str(k): str(v) for k, v in (cloud.get("accounts") or {}).items()}}
+                 if cloud else None)
         tracking = runtime.get("error_tracking")
         if tracking is not None and not isinstance(tracking, dict):
             problems.append("runtime.error_tracking must be a mapping: {provider, url, baa}")
@@ -176,11 +195,12 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
                    "calls": {str(k): [str(c) for c in (v or [])]
                              for k, v in (runtime.get("calls") or {}).items()}
                    if isinstance(runtime.get("calls"), dict) else {},
-                   # The product's AWS accounts, one per environment (VX-19); checked against the
-                   # platform catalog's regions when the snapshot is loaded.
-                   "aws": ({"region": str(aws.get("region") or ""),
-                            "accounts": {str(k): str(v) for k, v in (aws.get("accounts") or {}).items()}}
-                           if aws else None)}
+                   # The product's cloud and its accounts (or projects), one per environment
+                   # (VX-19); checked against the platform catalog's regions when the snapshot is
+                   # loaded. `aws` is the same for an AWS product, for the code that still reads it.
+                   "cloud": cloud,
+                   "aws": ({"region": cloud["region"], "accounts": dict(cloud["accounts"])}
+                           if cloud and cloud["provider"] == "aws" else None)}
 
     registry = registry or {}
     depends_on = [str(d) for d in raw.get("depends_on") or []]

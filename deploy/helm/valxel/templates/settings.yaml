@@ -15,7 +15,10 @@ data:
   VALXEL_GOVERNANCE_SOURCE: github
   VALXEL_PUBLIC_URL: {{ .Values.publicUrl | trimSuffix "/" | quote }}
   HOME: /tmp
-  AWS_REGION: {{ .Values.awsRegion | quote }}
+  VALXEL_CLOUD: {{ include "valxel.cloud" . | quote }}
+  {{- if eq (include "valxel.cloud" .) "aws" }}
+  AWS_REGION: {{ include "valxel.cloudRegion" . | quote }}
+  {{- end }}
   # Sign-in.
   VALXEL_AUTH: {{ .Values.auth.mode | quote }}
   {{- if eq .Values.auth.mode "github" }}

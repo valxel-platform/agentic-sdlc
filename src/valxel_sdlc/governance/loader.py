@@ -160,6 +160,16 @@ class GovernanceLoader:
             raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
         runtime = product.runtime or {}
         problems = check_aws(runtime.get("aws"), product.data_class, list(runtime.get("pipeline") or []), catalog)
+        from ..cloud import UnknownCloud, provider
+
+        own = (runtime.get("cloud") or {}).get("provider")
+        try:
+            here = provider()
+        except UnknownCloud:
+            here = ""  # strict mode says so; the product isn't the problem
+        if own and here and own != here:
+            problems.append(f"runtime.cloud.provider is {own}, but this installation runs on {here}: a product "
+                            "builds on its installation's cloud (ADR 0010)")
         problems += error_tracking.check(runtime, product.data_class, tracking)
         problems += remediation_mod.check(runtime)
         if problems:

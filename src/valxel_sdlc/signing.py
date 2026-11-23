@@ -25,11 +25,8 @@ import json
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Protocol
 
-
-class Signer(Protocol):
-    def sign(self, message: bytes) -> bytes: ...
+from .cloud.ports import Signer  # the port (ADR 0010)
 
 
 class RsaKeySigner:

@@ -59,6 +59,12 @@ github:
   appClientId: ""
   provisionerAppSlug: ""
   provisionerAppClientId: ""
+# The cloud this installation runs on (ADR 0010), and its region. One cloud per installation: the
+# products it builds use that cloud's services too. Only aws has adapters today.
+cloud:
+  provider: aws
+  region: ""
+# Deprecated: cloud.region. Still read when cloud.region is empty.
 awsRegion: ""
 
 # --- The tool's secrets, one file per name (VALXEL_SECRET_STORE=files). An existing Secret with at

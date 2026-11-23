@@ -77,6 +77,9 @@ capabilities:
 
 {{/* Checks that fail the install with a clear message, before anything is applied. */}}
 {{- define "valxel.validate" -}}
+{{- if not (has (include "valxel.cloud" .) (list "aws" "gcp" "azure")) -}}
+{{- fail (printf "cloud.provider is aws, gcp or azure, not %q" (include "valxel.cloud" .)) -}}
+{{- end -}}
 {{- if not (hasPrefix "https://" (required "publicUrl: the tool's address, https://..." .Values.publicUrl)) -}}
 {{- fail "publicUrl must be https://: the tool is served over TLS only" -}}
 {{- end -}}
@@ -94,3 +97,7 @@ capabilities:
 {{- fail "sessions.namespace must differ from the release's namespace: sessions are isolated in one of their own" -}}
 {{- end -}}
 {{- end -}}
+
+{{/* The installation's cloud and region (ADR 0010); awsRegion is the old name for cloud.region. */}}
+{{- define "valxel.cloud" -}}{{ (.Values.cloud | default dict).provider | default "aws" }}{{- end -}}
+{{- define "valxel.cloudRegion" -}}{{ (.Values.cloud | default dict).region | default .Values.awsRegion | default "" }}{{- end -}}

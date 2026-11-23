@@ -57,3 +57,28 @@ def test_the_rules():
     found = seams.breaks(cfg, {("ops.incident", "graph.phase"), ("ops.incident", "tenancy"),
                                ("tenancy", "ops.signals"), ("engine", "ops.incident"), ("graph.phase", "graph.gates")})
     assert found == {"ops.incident -> graph.phase", "tenancy -> ops.signals"}
+
+
+def test_cloud_sdks_stay_in_their_adapters():
+    new, gone = seams.check_cloud()
+    assert not new, ("These modules import a cloud's SDK outside cloud/<provider>/ (ADR 0010). Put the call in "
+                     "that cloud's adapter, behind a port in valxel_sdlc.cloud.ports:\n  " + "\n  ".join(new))
+    assert not gone, ("These are no longer cloud SDK imports: delete them from config/seams.yaml's "
+                      "cloud_sdk.known:\n  " + "\n  ".join(gone))
+
+
+def test_the_cloud_rule_sees_lazy_imports_and_allows_adapters(tmp_path):
+    pkg = tmp_path / "pkg"
+    (pkg / "cloud" / "gcp").mkdir(parents=True)
+    (pkg / "core.py").write_text("def f():\n    import boto3\n    from google.cloud import storage\n")
+    (pkg / "cloud" / "gcp" / "store.py").write_text("from google.cloud import storage\n")
+    (pkg / "cloud" / "gcp" / "bad.py").write_text("import azure.identity\n")
+    cfg = {"cloud_sdk": {"packages": {"aws": ["boto3"], "gcp": ["google.cloud"], "azure": ["azure"]}}}
+    seams_root = seams.ROOT
+    try:
+        seams.ROOT = pkg
+        found = seams.cloud_sdk_imports(cfg, pkg)
+    finally:
+        seams.ROOT = seams_root
+    assert found == {"core -> aws SDK", "core -> gcp SDK", "cloud.gcp.bad -> azure SDK"}
+    assert seams.sdk_owner("googleapis", {"gcp": ["google"]}) == ""
