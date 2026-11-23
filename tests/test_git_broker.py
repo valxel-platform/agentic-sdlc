@@ -82,9 +82,10 @@ def test_only_git_endpoints_are_brokered_and_push_is_a_write():
 
 def test_with_the_broker_on_github_itself_is_not_tunnelled():
     on = ep.allow_list({"VALXEL_GIT_BROKER_KEY": KEY.hex()})
-    assert "github.com" not in on and "codeload.github.com" in on and "registry.npmjs.org" in on
-    assert "github.com" in ep.allow_list({"VALXEL_GIT_BROKER_KEY": KEY.hex(), "VALXEL_EGRESS_GITHUB_DIRECT": "true"})
-    assert "github.com" in ep.allow_list({})
+    assert not ep.allowed("github.com", 443, on)
+    assert ep.allowed("codeload.github.com", 443, on) and ep.allowed("registry.npmjs.org", 443, on)
+    direct = ep.allow_list({"VALXEL_GIT_BROKER_KEY": KEY.hex(), "VALXEL_EGRESS_GITHUB_DIRECT": "true"})
+    assert ep.allowed("github.com", 443, direct) and ep.allowed("github.com", 443, ep.allow_list({}))
 
 
 def _basic(password):
