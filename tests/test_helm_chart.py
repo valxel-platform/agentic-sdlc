@@ -35,7 +35,7 @@ def _render(*sets: str, values=CI_VALUES, ok=True):
     args = [_helm(), "template", "valxel", str(CHART), "--namespace", "valxel", "-f", str(values)]
     for s in sets:
         args += ["--set", s]
-    run = subprocess.run(args, capture_output=True, text=True)
+    run = subprocess.run(args, capture_output=True, text=True, check=False)
     if not ok:
         assert run.returncode != 0, "expected helm to refuse these values"
         return run.stderr
@@ -53,7 +53,7 @@ def _pods(docs):
 
 def test_the_chart_lints():
     run = subprocess.run([_helm(), "lint", "--strict", str(CHART), "-f", str(CI_VALUES)],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, check=False)
     assert run.returncode == 0, run.stdout + run.stderr
 
 
@@ -84,7 +84,8 @@ def test_every_process_is_hardened_and_runs_images_by_digest(sets):
 
 
 def test_the_settings_are_productions():
-    settings = next(d for d in _render() if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "valxel-settings")
+    settings = next(d for d in _render()
+                    if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "valxel-settings")
     data = settings["data"]
     assert data["VALXEL_STRICT"] == "1" and data["VALXEL_TIER"] == "cluster" and data["VALXEL_MODE"] == "live"
     assert data["VALXEL_SESSION_EXECUTOR"] == "kubernetes" and data["VALXEL_TENANCY"] == "rls"
@@ -101,7 +102,8 @@ def test_only_the_provisioner_can_sign_for_the_provisioning_app():
     deployments = {d["metadata"]["name"]: d for d in docs if d["kind"] == "Deployment"}
 
     def env(name):
-        return {e["name"] for c in deployments[name]["spec"]["template"]["spec"]["containers"] for e in c.get("env", [])}
+        containers = deployments[name]["spec"]["template"]["spec"]["containers"]
+        return {e["name"] for c in containers for e in c.get("env", [])}
 
     assert "VALXEL_GITHUB_PROVISIONER_APP_KMS_KEY_ID" in env("valxel-provisioner")
     for other in ("valxel-api", "valxel-worker"):
@@ -111,7 +113,8 @@ def test_only_the_provisioner_can_sign_for_the_provisioning_app():
 
 
 def test_sessions_reach_only_the_egress_list_and_the_gateway():
-    policy = next(d for d in _render() if d["kind"] == "CiliumNetworkPolicy" and d["metadata"]["name"] == "agent-session")
+    policy = next(d for d in _render()
+                  if d["kind"] == "CiliumNetworkPolicy" and d["metadata"]["name"] == "agent-session")
     fqdns = [r["matchName"] for e in policy["spec"]["egress"] for r in e.get("toFQDNs", [])]
     assert fqdns == yaml.safe_load((ROOT / "config" / "egress.yaml").read_text())["allowed"]
     assert {"toCIDR": ["169.254.169.254/32", "fd00:ec2::254/128"]} in policy["spec"]["egressDeny"]
