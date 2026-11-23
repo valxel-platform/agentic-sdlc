@@ -101,3 +101,37 @@ def test_a_job_runs_once_with_its_files_mounted(repo):
 def test_requests_only_go_to_this_machine():
     status, text, _ = conformance._http("GET", "http://example.com/")
     assert status == 0 and "only calls the app on this machine" in text
+
+
+HOOK = r'''
+import hashlib, hmac, json, os, time
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200); self.end_headers(); self.wfile.write(b"ok")
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers["content-length"]))
+        stamp = self.headers.get("X-Timestamp", "")
+        want = "sha256=" + hmac.new(b"whsec", stamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+        fresh = stamp.isdigit() and abs(time.time() - int(stamp)) < 300
+        ok = fresh and hmac.compare_digest(want, self.headers.get("X-Signature", ""))
+        self.send_response(202 if ok else 401); self.end_headers(); self.wfile.write(b"{}")
+    def log_message(self, *a): pass
+HTTPServer(("127.0.0.1", int(os.environ["PORT"])), H).serve_forever()
+'''
+
+
+def test_a_step_signs_its_webhook_as_the_vendor_would(repo):
+    (repo / "hook.py").write_text(HOOK)
+    sign = {"secret": "signing", "header": "X-Signature", "timestamp_header": "X-Timestamp", "prefix": "sha256="}
+    step = {"method": "POST", "path": "/webhooks/x", "json": {"result": "x"}, "sign": sign, "expect": [202]}
+    spec = {"port": 18733, "env": {"PORT": "18733"}, "files": {"signing": "whsec"}, "settle_s": 0.2, "steps": [step]}
+    assert conformance.run(spec, cmd=f"{sys.executable} hook.py") == []
+    wrong = {**spec, "files": {"signing": "not-it"}}
+    problems = conformance.run(wrong, cmd=f"{sys.executable} hook.py")
+    assert problems[0].startswith("step 1 (POST /webhooks/x) answered 401")
+    assert conformance.signed(sign, {"signing": "k"}, b"{}", now=1700000000) == {
+        "X-Timestamp": "1700000000",
+        "X-Signature": "sha256=" + __import__("hmac").new(b"k", b"1700000000.{}", "sha256").hexdigest()}
+    with pytest.raises(ValueError, match=r"isn't one of conformance\.yaml's files"):
+        conformance.signed({"secret": "nope"}, {}, b"")
