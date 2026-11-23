@@ -7,4 +7,4 @@ Strict mode is on: if something it needs is missing, the API refuses to start an
 
 Then open {{ .Values.publicUrl }} and sign in.
 
-deploy/helm/valxel/README.md in agentic-sdlc lists what the cluster needs and every value.
+After an install or upgrade, run the checks in docs/self-hosted.md (section 3) in agentic-sdlc.

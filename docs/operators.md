@@ -14,6 +14,7 @@ Back to the [README](../README.md).
 - [Modes](#modes)
 - [Replacing the stubs](#replacing-the-stubs)
 - [Where customer code or secrets may be kept](code-and-secrets.md)
+- [Self-hosted: install and upgrade](self-hosted.md), [releases and support](releases.md), [security packet](security-packet.md)
 
 ## Web interface
 

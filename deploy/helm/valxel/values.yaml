@@ -44,6 +44,12 @@ github:
   appKmsKeyId: ""
   provisionerAppId: ""
   provisionerKmsKeyId: ""
+  # For the workspace's "connect GitHub" step (install the Apps on an org). Each App's OAuth client
+  # secret goes in secrets.tool: VALXEL_GITHUB_APP_CLIENT_SECRET, VALXEL_GITHUB_PROVISIONER_APP_CLIENT_SECRET.
+  appSlug: ""
+  appClientId: ""
+  provisionerAppSlug: ""
+  provisionerAppClientId: ""
 awsRegion: ""
 
 # --- The tool's secrets, one file per name (VALXEL_SECRET_STORE=files). An existing Secret with at

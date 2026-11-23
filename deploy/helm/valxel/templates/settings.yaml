@@ -29,6 +29,18 @@ data:
   # The delivery GitHub App signs through KMS: no key material in the process.
   VALXEL_GITHUB_APP_ID: {{ required "github.appId: the delivery GitHub App's id" .Values.github.appId | quote }}
   VALXEL_GITHUB_APP_KMS_KEY_ID: {{ required "github.appKmsKeyId: the App's private key as a sign-only KMS key" .Values.github.appKmsKeyId | quote }}
+  {{- with .Values.github.appSlug }}
+  VALXEL_GITHUB_APP_SLUG: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.github.appClientId }}
+  VALXEL_GITHUB_APP_CLIENT_ID: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.github.provisionerAppSlug }}
+  VALXEL_GITHUB_PROVISIONER_APP_SLUG: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.github.provisionerAppClientId }}
+  VALXEL_GITHUB_PROVISIONER_APP_CLIENT_ID: {{ . | quote }}
+  {{- end }}
   # Repos are created by the provisioning worker alone, with its own App (provisioner.yaml).
   VALXEL_PROVISIONING: queue
   # Secrets: one file per name.

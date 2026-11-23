@@ -12,6 +12,10 @@ github:
   appKmsKeyId: arn:aws:kms:us-east-1:111122223333:key/delivery
   provisionerAppId: "1002"
   provisionerKmsKeyId: arn:aws:kms:us-east-1:111122223333:key/provisioner
+  appSlug: example-valxel
+  appClientId: Iv1.delivery
+  provisionerAppSlug: example-valxel-provisioning
+  provisionerAppClientId: Iv1.provisioning
 awsRegion: us-east-1
 artifacts:
   storageClassName: efs-shared

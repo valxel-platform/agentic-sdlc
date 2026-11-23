@@ -54,7 +54,7 @@ Status: **in place**, **new** (with the review fixes), or **gap** (tracker item)
 | Outside attacker through the web app | Sign-in on every route, workspace roles re-read per request, JSON-only writes, frame-ancestors none, HSTS | in place (headers new, T-142) |
 | Assistants and agents acting for a person | MCP and A2A accept only a person's token; calls carry the client and are audited | in place (T-117) |
 | One customer sees another's data | Row-level security per workspace; per-workspace network policy for sessions; checkpoint archive keys by workspace | in place; the shared non-prod cluster's per-customer isolation is to be proven in the hosted rehearsal (T-123, T-125) |
-| Code kept longer than the work needs | Sandboxes deleted with the session; transcripts after 24 hours; trace content off by default | partly; inventory and deletion rules (T-121) |
+| Code kept longer than the work needs | Sandboxes deleted with the session, leftovers swept after 6 hours; transcripts after 24 hours; trace content off by default; agents' notes keep only short code excerpts, secrets masked; a deletion rule for every place ([code and secrets](../code-and-secrets.md)) | in place (T-121) |
 
 ## Decision
 
@@ -73,5 +73,5 @@ Status: **in place**, **new** (with the review fixes), or **gap** (tracker item)
   lists: each self-approval then carries a reason, says `waived` in the decision and the audit
   event, and is listed for someone (an advisor, a later hire) to review. That is a compensating
   control, not the control; it ends when a second approver joins.
-- Open gaps stay listed until closed: T-136, T-137, the hosted cluster's tenant isolation,
-  and T-121.
+- Open gaps stay listed until closed: T-136, T-137 and the hosted cluster's tenant isolation
+  (T-121 closed 2026-11-23).
