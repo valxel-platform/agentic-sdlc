@@ -48,10 +48,10 @@ Every release has notes on its GitHub release page, with:
 
 ## Support
 
-> **Proposed, to confirm before the first public release.** Valxel's source is public under the
-> Business Source License 1.1 ([LICENSE](../LICENSE), [ADR 0006](adr/0006-business-source-license.md)),
-> free for individuals, small businesses, schools and nonprofits. It is maintained on a
-> best-effort basis: these are the project's aims, not guarantees.
+Adopted 2026-11-23. Valxel's source is public under the Business Source License 1.1
+([LICENSE](../LICENSE), [ADR 0006](adr/0006-business-source-license.md)), free for individuals,
+small businesses, schools and nonprofits. It is maintained on a best-effort basis: these are the
+project's aims, not guarantees.
 
 | | |
 |---|---|

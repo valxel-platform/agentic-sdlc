@@ -1,7 +1,7 @@
 # 0006. The Business Source License 1.1
 
 Date: 2026-11-13
-Status: Accepted
+Status: Accepted (confirmed 2026-11-23, with Valxel offered self-hosted only)
 Deciders: Sunil Vallabhaneni
 
 ## Context
