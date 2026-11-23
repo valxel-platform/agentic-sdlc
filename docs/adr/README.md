@@ -15,6 +15,7 @@ dates are when the decision took effect.
 | [0006](0006-business-source-license.md) | The Business Source License 1.1 | Accepted |
 | [0007](0007-deployment-tiers.md) | Three ways to run the tool (laptop, single VM, cluster) from one image and one set of settings | Accepted |
 | [0008](0008-threat-model-agent-plane.md) | Threat model for the agent plane | Accepted |
+| [0009](0009-agent-harness.md) | The agent harness: Claude Code and Codex for code, measured against LangChain | Proposed |
 
 Write a new one from [the template](template.md): the context (what forces the choice), the
 decision, what else was considered, and what follows from it, good and bad. Link it from here.
