@@ -1,0 +1,32 @@
+# The independent review on every pull request (.github/workflows/independent-review.yml, T-139).
+# Runs from the base branch, so a pull request can't change the review it gets.
+name: review
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions: {}
+concurrency:
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  independent:
+    uses: ./.github/workflows/independent-review.yml
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    with:
+      # Beyond the defaults: what decides who may do what, and what the tool lets agents reach.
+      high_risk_paths: |
+        src/valxel_sdlc/web/*
+        src/valxel_sdlc/api/*
+        src/valxel_sdlc/separation.py
+        src/valxel_sdlc/strict.py
+        src/valxel_sdlc/session_launcher*
+        src/valxel_sdlc/session_runner.py
+        src/valxel_sdlc/gateway_sessions.py
+        config/egress.yaml
+        config/registry.yaml
+        config/template-contract.yaml
