@@ -8,3 +8,9 @@ description = "The fake SNS subscription token in the AWS Budgets signal test"
 condition = "AND"
 paths = ['''^tests/test_costs\.py$''']
 regexes = ['''2336412f37fb687f5d51e6e2425c464de''']
+
+[[allowlists]]
+description = "The made-up JWT and private key block the secret-scrub tests mask (T-121)"
+condition = "AND"
+paths = ['''^tests/test_secret_scrub\.py$''']
+regexes = ['''c2lnbmF0dXJlLXZhbHVlLWhlcmU''', '''MIIEpAIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun''']
