@@ -14,7 +14,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
   const [teams, setTeams] = useState<string[]>([]);
   const [err, setErr] = useState(
     new URLSearchParams(location.search).get("signin") === "failed"
-      ? "GitHub sign-in was cancelled or failed. Try again."
+      ? "Sign-in was cancelled or failed. Try again."
       : "",
   );
 
@@ -42,7 +42,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
         <Line />
         <p>
           Agents carry each feature from intent to production. You clear the signals: every gate waits for the
-          people your GitHub teams name.
+          people your teams name.
         </p>
       </section>
       <div className="card">
@@ -52,8 +52,9 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
             Ship software from idea to live — agents do the legwork, people make the calls.
           </p>
           <p className="muted" style={{ marginTop: 8 }}>
-            Your GitHub teams and your workspace groups decide which gates you can approve. Admins and group
-            approvers sign in with a passkey or GitHub to act.
+            Your teams and your workspace groups decide which gates you can approve. Admins and group
+            approvers sign in with two factors to act: GitHub, a passkey, or your company sign-in with
+            multi-factor.
           </p>
         </div>
         {err && (
@@ -79,8 +80,8 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
               </a>
             )}
             <p className="small faint">
-              Signing in takes you to Valxel&rsquo;s own sign-in for the method you pick. Valxel never sees
-              your password.
+              Signing in takes you to the sign-in page of the method you pick. Valxel never sees your
+              password.
             </p>
           </div>
         )}
