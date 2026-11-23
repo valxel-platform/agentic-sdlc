@@ -169,7 +169,7 @@ class DevLoginIn(BaseModel):
 class WorkspaceIn(BaseModel):
     id: str = Field(min_length=3, max_length=40, pattern=r"^[a-z0-9][a-z0-9-]+$")
     name: str = Field(min_length=1, max_length=80)
-    plan: str = Field(default="lite", pattern=r"^(self-hosted|lite|full)$")
+    plan: str = Field(default="self-hosted", pattern=r"^(self-hosted|lite|full)$")
 
 
 class PlanIn(BaseModel):

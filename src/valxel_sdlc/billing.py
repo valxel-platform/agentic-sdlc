@@ -1,7 +1,10 @@
-"""Plans, the hosted trial, and billing at the first charge (the sign-in design, A9).
+"""Plans and billing (the sign-in design, A9).
 
-A founder picks a plan while creating the workspace and can change it later. A card is asked for
-only when the plan first costs something:
+Only the free self-hosted plan is offered: a team installs Valxel and uses it under the license's
+free-use grant. The other plans below stay in the code but are hidden until there's a decision on
+them; VALXEL_PLANS lists the plans to offer (default `self-hosted`). With one plan, sign-up has no
+plan step and the workspace is made on it. With more, the founder picks one, and a card is asked
+for only when the plan first costs something:
 
     Self-hosted  $0, for organizations under 250 people and $10M revenue (the license's free-use
                  grant). No hosted workspace: Valxel shows the install guide instead. GitHub sign-in.
@@ -50,8 +53,14 @@ def _price(env_name: str, default: float | None) -> float | None:
 
 
 def plans() -> list[Plan]:
-    """The plans table. Monthly prices come from VALXEL_PRICE_LITE_USD and VALXEL_PRICE_FULL_USD once
-    they're set; until then the page says the price is still to be announced."""
+    """The plans sign-up offers (see offered)."""
+    keep = offered()
+    return [p for p in _all_plans() if p.id in keep]
+
+
+def _all_plans() -> list[Plan]:
+    """Every plan in the code, offered or not. Monthly prices come from VALXEL_PRICE_LITE_USD and
+    VALXEL_PRICE_FULL_USD once they're set; until then the page says the price is still to be announced."""
     lite, full = _price("VALXEL_PRICE_LITE_USD", None), _price("VALXEL_PRICE_FULL_USD", None)
     return [
         Plan("self-hosted", "Self-hosted", "Organizations under 250 people and $10M revenue (the license's free-use grant)",
@@ -69,9 +78,18 @@ def plans() -> list[Plan]:
     ]
 
 
+def offered(env=None) -> list[str]:
+    """The plans sign-up offers, in order: VALXEL_PLANS (comma-separated), default only the free
+    self-hosted plan. Unknown names are ignored; self-hosted is always offered."""
+    env = env if env is not None else os.environ
+    known = [p.id for p in _all_plans()]
+    names = [n.strip() for n in (env.get("VALXEL_PLANS") or "self-hosted").split(",") if n.strip() in known]
+    return [p for p in known if p in names or p == "self-hosted"]
+
+
 def plan_of(plan_id: str) -> Plan:
-    by_id = {p.id: p for p in plans()}
-    return by_id.get(plan_id, by_id["lite"])
+    by_id = {p.id: p for p in _all_plans()}
+    return by_id.get(plan_id, by_id["self-hosted"])
 
 
 class BillingProvider(Protocol):
@@ -110,7 +128,7 @@ def status(ws: dict, provider: BillingProvider, *, live: bool, today: datetime |
     """What a workspace's billing page shows: the plan, the trial, and whether a card is needed now.
     `live`: the workspace has gone live (an AWS account connected)."""
     today = today or datetime.now(UTC)
-    plan = plan_of(ws.get("plan", "lite"))
+    plan = plan_of(ws.get("plan", "self-hosted"))
     out = {"plan": asdict(plan), "provider": provider.name, "card_on_file": provider.has_card(ws["id"]),
            "trial_ends": "", "trial_days_left": None, "card_needed": False, "note": ""}
     if plan.id == "lite" and ws.get("created"):
@@ -118,7 +136,7 @@ def status(ws: dict, provider: BillingProvider, *, live: bool, today: datetime |
         out["trial_ends"] = ends.date().isoformat()
         out["trial_days_left"] = max(0, (ends - today).days)
     out["card_needed"] = plan.hosted and plan.id != "self-hosted" and live and not out["card_on_file"]
-    if provider.name == "none":
+    if provider.name == "none" and plan.hosted:
         out["note"] = ("Billing isn't switched on yet: nothing is charged. A card will be asked for "
                        + plan.card_when.lower() + ", once prices are set.")
         out["card_needed"] = False
@@ -129,7 +147,7 @@ def blocks_go_live(ws: dict, provider: BillingProvider) -> str:
     """Why connecting AWS (go-live) must wait for a card, or ""."""
     if provider.name == "none":
         return ""
-    plan = plan_of(ws.get("plan", "lite"))
+    plan = plan_of(ws.get("plan", "self-hosted"))
     if plan.hosted and not provider.has_card(ws["id"]):
         return f"Add a card before going live on the {plan.name} plan"
     return ""

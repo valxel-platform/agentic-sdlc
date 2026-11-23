@@ -54,15 +54,21 @@ def build(ctx: SimpleNamespace) -> APIRouter:
 
     @api.post("/workspaces", status_code=201)
     def create_workspace(body: WorkspaceIn, user: User = Depends(current_user)) -> dict:
-        """A new workspace, with the signed-in person as its owner, in every approver group."""
+        """A new workspace, with the signed-in person as its owner, in every approver group. Made by
+        sign-up, so its tools connect from its connections page (self_serve)."""
+        from ...billing import offered
+
+        if body.plan not in offered():
+            raise HTTPException(400, f"The {body.plan} plan isn't offered")
         return ws_call(wsx().create, body.id, name=body.name, actor=user.login, plan=body.plan,
                        owner={"name": user.name or user.login, "email": user.email,
                               "github_login": user.login if user.idp == "github" else ""},
-                       self_serve=body.plan != "self-hosted")
+                       self_serve=True)
 
     @api.get("/plans")
     def list_plans(user: User = Depends(current_user)) -> dict:
-        """The plans table for sign-up, and where the self-hosted install guide is (valxel_sdlc.billing)."""
+        """The plans sign-up offers (valxel_sdlc.billing: only the free self-hosted plan by default), and
+        where the install guide is."""
 
         from ...billing import INSTALL_GUIDE, TRIAL_DAYS, plans
 
@@ -82,9 +88,13 @@ def build(ctx: SimpleNamespace) -> APIRouter:
 
     @api.put("/workspaces/{workspace}/plan")
     def change_plan(workspace: str, body: PlanIn, user: User = Depends(current_user)) -> dict:
-        """Owners move a hosted workspace between Lite and Full."""
+        """Owners move a workspace between the offered paid plans (none are offered by default)."""
+        from ...billing import offered
+
         if role_in(user, workspace) != "owner":
             raise HTTPException(403, f"Only {workspace}'s owners change its plan")
+        if body.plan not in offered():
+            raise HTTPException(400, f"The {body.plan} plan isn't offered")
         admin_of(user, workspace)  # and from a strong sign-in
         return ws_call(wsx().set_plan, workspace, body.plan, actor=user.login)
 

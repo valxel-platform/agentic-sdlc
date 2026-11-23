@@ -243,34 +243,24 @@ DATABASE_URL=... valxel workspaces list
 #### Sign-up and plans
 
 Someone signed in with no workspace and no products lands on **Set up Valxel** (`/start`,
-`web/src/pages/Start.tsx`). It takes about 10 minutes, in four steps:
+`web/src/pages/Start.tsx`). It takes about 10 minutes, in three steps:
 
-1. **Plan.** The plans table comes from `src/valxel_sdlc/billing.py`:
-   - *Self-hosted:* $0 for organizations under 250 people and $10M revenue. One checkbox
-     confirms they qualify, and the wizard links to the install guide (`VALXEL_INSTALL_GUIDE_URL`).
-     No hosted workspace is made.
-   - *Lite:* hosted dev and staging free for 90 days.
-   - *Full:* a monthly price per product.
-2. **Workspace.** The founder names it and becomes its owner, in every approver group.
-3. **GitHub.** The founder installs the Delivery App, then the repo-creation App, or skips the
+1. **Workspace.** The founder names it and becomes its owner, in every approver group. It's made on
+   the free self-hosted plan (`src/valxel_sdlc/billing.py`), the only plan offered: other plans in
+   the code are hidden until there's a decision on them (`VALXEL_PLANS`, default `self-hosted`).
+2. **GitHub.** The founder installs the Delivery App, then the repo-creation App, or skips the
    second and creates repos by hand. Each install comes back to the wizard. Someone without a
    GitHub organization gets a guided step first: make a free personal account, then a free
    organization, then come back.
-4. **First product.** The founder describes the idea in the intake conversation. Its inception
+3. **First product.** The founder describes the idea in the intake conversation. Its inception
    runs as any other, but its gates go to the workspace's own Product group (`group:<workspace>/product`),
    which includes the founder, rather than the platform's product council. The registry line it
    proposes puts the product in that workspace. Only admins of a self-serve workspace start
    products this way. Elsewhere it stays the council's starters.
 
-Owners move a workspace between Lite and Full (`PUT /api/workspaces/<id>/plan`). Its billing
-(`GET /api/workspaces/<id>/billing`) shows the plan, the trial's days left, and when a card will be
-asked for: at go-live for both plans, or when extending Lite's hosting.
-
-**The payment provider and the Lite and Full prices are still to be chosen.** Until then nothing
-is charged and nothing waits for a card, and the billing view says so. To show prices, set
-`VALXEL_PRICE_LITE_USD` and `VALXEL_PRICE_FULL_USD`. A provider will implement `BillingProvider`
-in `billing.py` and be chosen with `VALXEL_BILLING`. Once one is set, connecting AWS for go-live
-waits until the workspace has a card on file.
+Nothing is charged: the free plan has no card, no trial and no billing note. The workspace's
+billing view (`GET /api/workspaces/<id>/billing`) shows its plan, and a plan that isn't offered
+can't be chosen or switched to.
 
 Anyone signed in can create a new workspace (`POST /api/workspaces`) and becomes its owner.
 Self-hosted deployments that use only GitHub teams work exactly as before: with no members,

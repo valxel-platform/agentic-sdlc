@@ -92,7 +92,7 @@ def test_gate_decisions_workspace_changes_and_requests_are_recorded(engine):
     out = engine.services.audit.outbox
     with TestClient(create_app(engine, auth=AuthConfig(mode="dev", secret="x" * 40), web_dist=None)) as c:
         c.post("/api/auth/dev-login", json={"login": "founder", "email": "f@t113.example", "orgs": ["x"]})
-        assert c.post("/api/workspaces", json={"id": "t113-ws", "name": "T113", "plan": "lite"}).status_code == 201
+        assert c.post("/api/workspaces", json={"id": "t113-ws", "name": "T113"}).status_code == 201
         c.post("/api/auth/dev-login", json={"login": "stranger", "email": "s@else.example", "orgs": ["x"]})
         c.post("/api/workspaces/t113-ws/members", json={"name": "x", "email": "x@x.example", "role": "member"})
         c.post("/api/auth/logout")

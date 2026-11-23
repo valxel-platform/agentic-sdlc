@@ -189,7 +189,7 @@ def test_viewers_see_but_dont_start_work(client, engine):
 
 def test_a_new_workspace_makes_its_creator_owner(client):
     login(client, "founder", "f@new.example")
-    r = client.post("/api/workspaces", json={"id": "acme-new", "name": "Acme New", "plan": "lite"})
+    r = client.post("/api/workspaces", json={"id": "acme-new", "name": "Acme New", "plan": "self-hosted"})
     assert r.status_code == 201
     v = client.get("/api/workspaces/acme-new").json()
     assert v["role"] == "owner" and v["members"][0]["email"] == "f@new.example" and v["products"] == []
