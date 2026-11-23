@@ -66,9 +66,9 @@ def _create_engine_from_env() -> tuple[FeatureEngine, Any]:
         # Each connection says whose rows it may see, from the scope it is checked out in.
         pool = make_pool(settings.database_url, max_size=10,
                          kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row})
-        from ..secret_scrub import ScrubbingSerde
+        from ..secret_scrub import ScrubbingSerde, keep_excerpts
 
-        saver = PostgresSaver(pool, serde=ScrubbingSerde())  # no secret reaches a feature's history
+        saver = keep_excerpts(PostgresSaver(pool, serde=ScrubbingSerde()))  # no secret reaches a feature's history
         saver.setup()
         from ..integrations.catalog import PostgresCatalog
         from ..ops.signals import PostgresSignalStore
@@ -137,10 +137,10 @@ def _create_engine_from_env() -> tuple[FeatureEngine, Any]:
                              cluster=PostgresCluster(pool, settings.database_url), queue=queue), pool
     from langgraph.checkpoint.memory import InMemorySaver
 
-    from ..secret_scrub import ScrubbingSerde
+    from ..secret_scrub import ScrubbingSerde, keep_excerpts
 
     services = build_services(settings, ledger=InMemoryLedger())
-    return FeatureEngine(services, InMemorySaver(serde=ScrubbingSerde()), InMemoryIndex()), None
+    return FeatureEngine(services, keep_excerpts(InMemorySaver(serde=ScrubbingSerde())), InMemoryIndex()), None
 
 
 def prepare(engine: FeatureEngine, pool: Any, *, auth_mode: str) -> None:

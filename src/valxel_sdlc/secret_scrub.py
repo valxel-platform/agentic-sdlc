@@ -77,3 +77,70 @@ class ScrubbingSerde:
 
     def __getattr__(self, name: str) -> Any:  # anything else the checkpointer asks of its serializer
         return getattr(self.inner, name)
+
+
+# ------------------------------------------------------------------------- code excerpts (T-121)
+# Agents' notes may quote code: a failing test's message, a finding that cites a line. A feature's
+# history keeps a short excerpt of it, never a whole file: each fenced block keeps its first
+# EXCERPT_LINES lines, and each note at most NOTE_CHARS characters. Documents are not notes and are
+# kept whole (they are what the product's record is made of).
+
+NOTE_CHANNELS = frozenset({"diaries", "findings", "escalations", "events", "ci_failures", "task_results",
+                           "reviews", "reason"})
+EXCERPT_LINES = 20
+NOTE_CHARS = 4000
+_FENCE = re.compile(r"```[^\n]*\n(.*?)(?:```|\Z)", re.DOTALL)
+
+
+def excerpt(text: str) -> str:
+    """The text with each fenced code block cut to its first EXCERPT_LINES lines, and the whole to NOTE_CHARS."""
+    def cut(m: re.Match) -> str:
+        lines = m.group(1).splitlines()
+        if len(lines) <= EXCERPT_LINES:
+            return m.group(0)
+        head = m.group(0)[: m.start(1) - m.start(0)]
+        return head + "\n".join(lines[:EXCERPT_LINES]) + f"\n… ({len(lines) - EXCERPT_LINES} more lines not kept)\n```"
+
+    out = _FENCE.sub(cut, text)
+    return out if len(out) <= NOTE_CHARS else out[:NOTE_CHARS] + f" … ({len(out) - NOTE_CHARS} characters not kept)"
+
+
+def _excerpts(value: Any) -> Any:
+    if isinstance(value, str):
+        return excerpt(value)
+    if isinstance(value, dict):
+        return {k: _excerpts(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(_excerpts(v) for v in value)
+    return value
+
+
+def _note(channel: str, value: Any) -> Any:
+    return _excerpts(value) if channel in NOTE_CHANNELS else value
+
+
+def keep_excerpts(saver: Any) -> Any:
+    """`saver`, storing only excerpts of code in agents' notes: checkpoints and pending writes alike."""
+    put, put_writes = saver.put, saver.put_writes
+    aput, aput_writes = getattr(saver, "aput", None), getattr(saver, "aput_writes", None)
+
+    def trimmed(checkpoint):
+        values = checkpoint.get("channel_values") or {}
+        return {**checkpoint, "channel_values": {k: _note(k, v) for k, v in values.items()}}
+
+    def put_(config, checkpoint, metadata, new_versions):
+        return put(config, trimmed(checkpoint), metadata, new_versions)
+
+    def put_writes_(config, writes, task_id, task_path=""):
+        return put_writes(config, [(c, _note(c, v)) for c, v in writes], task_id, task_path)
+
+    saver.put, saver.put_writes = put_, put_writes_
+    if aput is not None:
+        async def aput_(config, checkpoint, metadata, new_versions):
+            return await aput(config, trimmed(checkpoint), metadata, new_versions)
+        saver.aput = aput_
+    if aput_writes is not None:
+        async def aput_writes_(config, writes, task_id, task_path=""):
+            return await aput_writes(config, [(c, _note(c, v)) for c, v in writes], task_id, task_path)
+        saver.aput_writes = aput_writes_
+    return saver

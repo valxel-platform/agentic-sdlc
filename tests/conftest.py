@@ -57,7 +57,9 @@ def services(settings):
 
 @pytest.fixture
 def engine(services):
-    return FeatureEngine(services, InMemorySaver())
+    from valxel_sdlc.secret_scrub import ScrubbingSerde, keep_excerpts
+
+    return FeatureEngine(services, keep_excerpts(InMemorySaver(serde=ScrubbingSerde())))  # as production stores it
 
 
 def pending_of(engine, feature_id, kind=None):

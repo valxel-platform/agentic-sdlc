@@ -33,9 +33,9 @@ from .services import build_services
 
 def _demo(args: argparse.Namespace) -> int:
     settings = load_settings(mode="stub", artifact_dir=args.artifacts or tempfile.mkdtemp(prefix="valxel-"))
-    from .secret_scrub import ScrubbingSerde
+    from .secret_scrub import ScrubbingSerde, keep_excerpts
 
-    engine = FeatureEngine(build_services(settings), InMemorySaver(serde=ScrubbingSerde()))
+    engine = FeatureEngine(build_services(settings), keep_excerpts(InMemorySaver(serde=ScrubbingSerde())))
     faults = dict(f.split("=") for f in args.fault)
     view = engine.start(product_id=args.product, title=args.title, description=args.description,
                         simulate_faults={k: int(v) for k, v in faults.items()})

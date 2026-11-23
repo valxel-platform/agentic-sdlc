@@ -164,3 +164,35 @@ def test_eval_cases_in_postgres_are_deleted_after_their_window():
             left = {r["id"] for r in conn.execute("select id from valxel_eval_cases where id like %s", (f"{p}%",))}
             conn.execute("delete from valxel_eval_cases where id like %s", (f"{p}%",))
         assert left == {f"{p}-new", f"{p}-labeled"}
+
+
+def test_notes_keep_an_excerpt_of_code_never_the_whole_of_it():
+    from valxel_sdlc.secret_scrub import EXCERPT_LINES, NOTE_CHARS, excerpt
+
+    code = "\n".join(f"line_{i} = {i}" for i in range(100))
+    note = f"test_harvest failed:\n```python\n{code}\n```\nsee above"
+    short = excerpt(note)
+    assert "line_19 = 19" in short and "line_20 = 20" not in short
+    assert f"({100 - EXCERPT_LINES} more lines not kept)" in short and short.endswith("```\nsee above")
+    assert excerpt("```\na = 1\n```") == "```\na = 1\n```"  # a short block is kept as it is
+    assert len(excerpt("x" * 10_000)) < NOTE_CHARS + 60
+
+
+def test_a_features_history_keeps_excerpts_in_notes_and_documents_whole():
+    from langgraph.checkpoint.base import empty_checkpoint
+
+    from valxel_sdlc.secret_scrub import keep_excerpts
+
+    code = "```python\n" + "\n".join(f"line_{i} = {i}" for i in range(100)) + "\n```"
+    saver = keep_excerpts(InMemorySaver(serde=ScrubbingSerde()))
+    config = {"configurable": {"thread_id": "t121", "checkpoint_ns": ""}}
+    cp = empty_checkpoint()
+    cp["channel_values"] = {"findings": {"build": [code]}, "draft": {"content": code}}
+    cp["channel_versions"] = {"findings": 1, "draft": 1}
+    config = saver.put(config, cp, {}, {"findings": 1, "draft": 1})
+    saver.put_writes(config, [("ci_failures", [[code]]), ("draft", {"content": code})], "task-1")
+    got = saver.get_tuple(config)
+    assert "line_99" not in got.checkpoint["channel_values"]["findings"]["build"][0]
+    assert "line_99" in got.checkpoint["channel_values"]["draft"]["content"]
+    writes = {c: v for _, c, v in got.pending_writes}
+    assert "line_99" not in writes["ci_failures"][0][0] and "line_99" in writes["draft"]["content"]
