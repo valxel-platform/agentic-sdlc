@@ -36,8 +36,8 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
         out.append("VALXEL_MODE is not live: agents return canned output")
     if env.get("VALXEL_DELIVERY", "stub").lower() != "live":
         out.append("VALXEL_DELIVERY is not live: pull requests, builds and deployments stay in memory")
-    if auth_mode != "github":
-        out.append("VALXEL_AUTH is not github: anyone can sign in as anyone")
+    if auth_mode == "dev":
+        out.append("VALXEL_AUTH is dev: anyone can sign in as anyone")
     if s.governance_source != "github":
         out.append("VALXEL_GOVERNANCE_SOURCE is not github: governance is read from local files")
     if not s.database_url:

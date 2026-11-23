@@ -68,12 +68,14 @@ The full inventory, with a deletion rule and evidence for each place, is
 ## Identity and access
 
 - **Sign-in:**
-  - GitHub OAuth or Cognito, with signed, server-revocable session cookies;
+  - GitHub OAuth, Cognito, or the team's own OpenID Connect provider (Okta, Entra ID, Google
+    Workspace, Keycloak), with signed, server-revocable session cookies;
   - every decision needs a sign-in from the last 4 hours, and passkeys are available for approver
     groups;
   - "Sign out on every device" and admins can revoke sessions.
 - **Roles:** workspace roles are re-read on every request. A gate's approver team is checked with
-  GitHub at the moment of the decision.
+  GitHub at the moment of the decision. An identity provider's groups are read at sign-in, approve
+  only from a two-factor sign-in, and every decision needs a sign-in from the last 4 hours.
 - **Separation of duties:** whoever started a feature, or rewrote a phase, cannot approve it at
   the code and release gates (G5, G6), nor at any gate for PHI and payments products. A team with
   one approver can waive this only with a written reason. The waiver is recorded and listed for
@@ -163,7 +165,6 @@ We list these rather than wait to be asked. Each has a tracker item.
 - **Package registry proxy (T-136):** agents' package installs go straight to the public
   registries on the allowlist. A proxy with quarantine and age rules, which flags new dependencies
   for a person, isn't in place yet.
-- **Sign-in:** GitHub or Cognito only. Generic OIDC (Okta, Entra ID) is not yet supported.
 - **Install rehearsal (T-123):** the chart is tested in CI but has not yet been installed end to
   end on a real cluster.
 

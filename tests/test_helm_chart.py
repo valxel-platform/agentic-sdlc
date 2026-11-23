@@ -97,6 +97,17 @@ def test_the_settings_are_productions():
         assert data[name], name
 
 
+def test_sign_in_through_the_teams_own_identity_provider():
+    settings = next(d for d in _render("auth.mode=oidc", "auth.oidc.issuer=https://login.acme.example",
+                                       "auth.oidc.clientId=valxel", "auth.oidc.groupsClaim=groups",
+                                       "auth.oidc.strongAcr={a,b}")
+                    if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "valxel-settings")["data"]
+    assert settings["VALXEL_AUTH"] == "oidc" and settings["VALXEL_OIDC_ISSUER"] == "https://login.acme.example"
+    assert settings["VALXEL_OIDC_GROUPS_CLAIM"] == "groups" and settings["VALXEL_OIDC_STRONG_ACR"] == "a,b"
+    assert "VALXEL_GITHUB_OAUTH_CLIENT_ID" not in settings and "VALXEL_OIDC_CLIENT_SECRET" not in settings
+    assert "auth.oidc.issuer" in _render("auth.mode=oidc", ok=False)
+
+
 def test_only_the_provisioner_can_sign_for_the_provisioning_app():
     docs = _render()
     deployments = {d["metadata"]["name"]: d for d in docs if d["kind"] == "Deployment"}

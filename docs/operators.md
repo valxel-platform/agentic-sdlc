@@ -79,6 +79,36 @@ GitHub stays on its own OAuth app, since GitHub isn't a standard OpenID provider
 3. Choose `VALXEL_AUTH=github` (GitHub, plus Cognito when it's set) or `VALXEL_AUTH=cognito` (Cognito
    only, plus GitHub when its OAuth app is set).
 
+**The team's own identity provider** (Okta, Entra ID, Google Workspace, Keycloak, or any OpenID
+Connect provider) signs people in through `OIDCProvider` (`src/valxel_sdlc/web/identity.py`, T-148).
+
+1. Register a web application with the provider: the redirect URI is
+   `<VALXEL_PUBLIC_URL>/api/auth/oidc/callback`, scopes `openid email profile`, the authorization
+   code grant. To use its groups as approvers, add a `groups` claim to the ID token.
+2. Set `VALXEL_OIDC_ISSUER` (its `/.well-known/openid-configuration` must name the same issuer),
+   `VALXEL_OIDC_CLIENT_ID`, the secret as `VALXEL_OIDC_CLIENT_SECRET`, and optionally
+   `VALXEL_OIDC_LABEL` for the button.
+3. Choose `VALXEL_AUTH=oidc` (the provider only), or keep `github`: a provider that is set is
+   offered beside GitHub.
+
+The flow and checks are the same as Cognito's: the code flow with PKCE, a state and a nonce, and the
+ID token's signature (keys from the provider's `jwks_uri`), issuer, audience, expiry and nonce. Only
+a verified email signs anyone in. Entra ID sends no `email_verified`: set
+`VALXEL_OIDC_EMAIL_VERIFIED=issuer` only when the issuer is the team's own single tenant, so every
+address in it is one the team controls.
+
+**Two factors.** A sign-in counts as two factors when the token's `amr` says `mfa`, `hwk` or `swk`,
+or its `acr` is one listed in `VALXEL_OIDC_STRONG_ACR`. When someone must step up (a group approver
+or admin who signed in with one factor), the tool sends them back to the provider with
+`prompt=login`, asking for `VALXEL_OIDC_STEP_UP_ACR` if it's set (for example Okta's
+`urn:okta:loa:2fa:any`).
+
+**Groups as approvers.** With `VALXEL_OIDC_GROUPS_CLAIM=groups`, each group in the token becomes an
+approver a gate can name as `idp:<group>` (for example `idp:Release Managers`). Like a workspace
+group, it decides only from a two-factor sign-in. Groups are read at sign-in, and every decision
+needs a sign-in from the last 4 hours, so someone removed from a group in the provider loses it
+within that time. Entra ID sends group ids unless it's set to send names.
+
 **People's assistants over MCP.** With `VALXEL_MCP_CLIENT_IDS` set to the stack's `McpClientId`
 output, the tool serves MCP at `<VALXEL_PUBLIC_URL>/mcp` (`src/valxel_sdlc/api/mcp.py`). An assistant
 signs its person in through the same user pool (the client id is entered in the assistant), then

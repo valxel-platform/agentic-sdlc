@@ -107,7 +107,11 @@ Register two GitHub Apps in the customer's organization. Both are private to tha
 
 For both Apps, the callback URL is `https://<domain>/api/connections/github/callback`. Note each App's id, slug and client id, and generate a client secret.
 
-Sign-in uses either a GitHub OAuth app, with callback `https://<domain>/api/auth/callback`, or a Cognito user pool. Other OIDC providers aren't supported yet.
+Sign-in uses a GitHub OAuth app (callback `https://<domain>/api/auth/callback`), a Cognito user
+pool, or the team's own OpenID Connect provider: Okta, Entra ID, Google Workspace, Keycloak and
+others (`auth.mode: oidc`, redirect URI `https://<domain>/api/auth/oidc/callback`; the
+[operators guide](operators.md#sign-in-and-who-can-decide) has the details, including groups as
+approvers).
 
 ### Secrets
 
@@ -115,7 +119,7 @@ The chart reads these Secrets in its namespace. Make them by hand, or have Exter
 
 | Secret | Keys |
 |---|---|
-| `valxel-tool` | `DATABASE_URL` (the `valxel` login, `sslmode=require`); `VALXEL_SESSION_SECRET` (`openssl rand -hex 32`); `VALXEL_GITHUB_WEBHOOK_SECRET`; `VALXEL_LLM_GATEWAY_API_KEY` (`openssl rand -hex 32`); `VALXEL_GITHUB_OAUTH_CLIENT_SECRET` or `VALXEL_COGNITO_CLIENT_SECRET`; `VALXEL_GITHUB_APP_CLIENT_SECRET`; `VALXEL_GITHUB_PROVISIONER_APP_CLIENT_SECRET` |
+| `valxel-tool` | `DATABASE_URL` (the `valxel` login, `sslmode=require`); `VALXEL_SESSION_SECRET` (`openssl rand -hex 32`); `VALXEL_GITHUB_WEBHOOK_SECRET`; `VALXEL_LLM_GATEWAY_API_KEY` (`openssl rand -hex 32`); `VALXEL_GITHUB_OAUTH_CLIENT_SECRET`, `VALXEL_COGNITO_CLIENT_SECRET` or `VALXEL_OIDC_CLIENT_SECRET`; `VALXEL_GITHUB_APP_CLIENT_SECRET`; `VALXEL_GITHUB_PROVISIONER_APP_CLIENT_SECRET` |
 | `valxel-provisioner` | `DATABASE_URL` |
 | `valxel-llm-gateway` | `ANTHROPIC_API_KEY` (the customer's own key; for PHI, under their own BAA); `GATEWAY_DATABASE_URL`; optionally `OPENAI_API_KEY` |
 | `valxel-audit-database` | `OWNER_URL` (`audit_owner`); `WRITER_URL` (`audit_writer`, with a new password); `WRITER_PASSWORD` (that password) |

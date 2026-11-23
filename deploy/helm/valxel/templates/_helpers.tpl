@@ -67,7 +67,8 @@ capabilities:
 {{- if not (hasPrefix "https://" (required "publicUrl: the tool's address, https://..." .Values.publicUrl)) -}}
 {{- fail "publicUrl must be https://: the tool is served over TLS only" -}}
 {{- end -}}
-{{- if not (has .Values.auth.mode (list "github" "cognito")) -}}{{- fail "auth.mode is github or cognito" -}}{{- end -}}
+{{- if not (has .Values.auth.mode (list "github" "cognito" "oidc")) -}}{{- fail "auth.mode is github, cognito or oidc" -}}{{- end -}}
+{{- if not (has .Values.auth.oidc.emailVerified (list "claim" "issuer")) -}}{{- fail "auth.oidc.emailVerified is claim or issuer" -}}{{- end -}}
 {{- if not (has .Values.kafka.mode (list "strimzi" "external")) -}}{{- fail "kafka.mode is strimzi or external" -}}{{- end -}}
 {{- if not (has .Values.networkPolicy.flavor (list "cilium" "kubernetes")) -}}{{- fail "networkPolicy.flavor is cilium or kubernetes" -}}{{- end -}}
 {{- if not (regexMatch "^[a-f0-9]{64}$" (required "gateway.toolKeySha256: the SHA-256 of the tool's gateway key, in hex" .Values.gateway.toolKeySha256 | toString)) -}}

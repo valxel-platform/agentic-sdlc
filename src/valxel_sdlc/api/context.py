@@ -102,6 +102,8 @@ def make_context(engine: FeatureEngine | None, auth: AuthConfig | None, oauth: G
             return  # their own login
         if any(a.lower().startswith("group:") for a in via) and user.strong:
             return  # a workspace group, read on every request
+        if any(a.lower().startswith("idp:") for a in via) and user.strong:
+            return  # an identity provider's group, read at a sign-in from the last 4 hours
         gh = eng().services.github
         from ..integrations.github import StubGitHub
 

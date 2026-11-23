@@ -27,7 +27,7 @@ TYPES = {"provider": "service", "bff": "service", "event-worker": "service", "mc
 def owner_of(product) -> str:
     """The product owners' team as a Backstage group: the first G2 approver that is a team."""
     for who in (product.approvers or {}).get("g2") or []:
-        if "/" in who:
+        if "/" in who and not who.lower().startswith(("group:", "idp:")):  # a GitHub org/team
             return f"group:{who.split('/', 1)[1]}"
     return f"group:{product.product_id.lower()}"
 

@@ -38,12 +38,14 @@ def build(ctx: SimpleNamespace) -> APIRouter:
 
     # --- auth ---
     cognito = auth.cognito()
+    oidc = auth.oidc()  # the team's own identity provider (T-148)
 
     @api.get("/auth/config")
     def auth_config() -> dict:
         """How to sign in: the buttons the sign-in page shows."""
         providers = ([{"id": "github", "label": "Sign in with GitHub"}] if auth.github_enabled and auth.mode != "dev" else [])
         providers += cognito.options() if cognito and auth.mode != "dev" else []
+        providers += oidc.options() if oidc and auth.mode != "dev" else []
         out: dict = {"mode": auth.mode, "providers": providers}
         if auth.mode == "dev":  # offer the approver identities from governance as quick picks
             teams: set[str] = set()
@@ -69,7 +71,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
     @api.get("/auth/login")
     def login(next: str = "/", provider: str = "github", step_up: bool = False,  # noqa: A002 - query names
               hint: str = "") -> RedirectResponse:
-        if provider in ("google", "email", "passkey"):
+        if provider in ("google", "email", "passkey", "oidc"):
             return oidc_login(provider, local_path(next), step_up or provider == "passkey", hint)
         if auth.mode == "dev" or not auth.github_enabled:
             raise HTTPException(404, "GitHub sign-in is not enabled")
@@ -102,18 +104,32 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         _set_session(resp, user)
         return resp
 
+    def _provider_for(option: str):
+        """Which provider an option goes to: Cognito's Google, email and passkey; the team's own
+        provider's sign-in, and its step-up when Cognito isn't there to offer a passkey."""
+        if auth.mode == "dev":
+            return None, ""
+        if option == "oidc" or (option == "passkey" and cognito is None):
+            return oidc, "oidc"
+        return cognito, "cognito"
+
     def oidc_login(option: str, next_path: str, step_up: bool, hint: str) -> RedirectResponse:
-        if cognito is None or auth.mode == "dev":
-            raise HTTPException(404, "Google and email sign-in aren't enabled")
-        from ...web.identity import pkce
+        provider, idp = _provider_for(option)
+        if provider is None:
+            raise HTTPException(404, "That sign-in isn't enabled")
+        from ...web.identity import SignInError, pkce
 
         st, nonce = new_state(), new_state()
         verifier, _ = pkce()
-        resp = RedirectResponse(cognito.authorize_url(option="email" if option == "passkey" else option, state=st,
-                                                      nonce=nonce, verifier=verifier, step_up=step_up,
-                                                      hint=hint[:254]), status_code=302)
+        try:
+            url = provider.authorize_url(option="email" if option == "passkey" and idp == "cognito" else option,
+                                         state=st, nonce=nonce, verifier=verifier, step_up=step_up, hint=hint[:254])
+        except (SignInError, OSError) as exc:  # the provider's discovery document can't be read
+            _signin("signin", "failure", idp, reason=str(exc)[:100])
+            raise HTTPException(502, "The identity provider can't be reached; try again shortly") from exc
+        resp = RedirectResponse(url, status_code=302)
         # Signed, so the callback trusts its own values; short-lived, and only sent to /api/auth.
-        resp.set_cookie(OIDC_COOKIE, signer.dumps({"state": st, "nonce": nonce, "verifier": verifier,
+        resp.set_cookie(OIDC_COOKIE, signer.dumps({"state": st, "nonce": nonce, "verifier": verifier, "idp": idp,
                                                    "next": next_path, "exp": int(time.time()) + 600}),
                         max_age=600, httponly=True, samesite="lax", secure=auth.secure_cookies, path="/api/auth")
         return resp
@@ -123,24 +139,30 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         from ...web.identity import SignInError
 
         saved = signer.loads(request.cookies.get(OIDC_COOKIE))
+        idp = "oidc" if (saved or {}).get("idp") == "oidc" else "cognito"
+        provider = oidc if idp == "oidc" else cognito
         if error or not code:
-            _signin("signin", "failure", "cognito", reason=(error or "no code")[:100])
+            _signin("signin", "failure", idp, reason=(error or "no code")[:100])
             return RedirectResponse("/?signin=failed", status_code=302)
-        if cognito is None:
-            raise HTTPException(404, "Google and email sign-in aren't enabled")
+        if provider is None:
+            raise HTTPException(404, "That sign-in isn't enabled")
         if not saved or not state or not secrets.compare_digest(state, str(saved.get("state", ""))):
-            _signin("signin", "denied", "cognito", reason="state mismatch")
+            _signin("signin", "denied", idp, reason="state mismatch")
             raise HTTPException(400, "Sign-in expired or was started elsewhere; try again")
         try:
-            who = cognito.identity(code, verifier=saved["verifier"], nonce=saved["nonce"])
+            who = provider.identity(code, verifier=saved["verifier"], nonce=saved["nonce"])
         except SignInError as exc:
-            _signin("signin", "denied", "cognito", reason="identity refused")
+            _signin("signin", "denied", idp, reason="identity refused")
             raise HTTPException(401, str(exc)) from exc
-        _signin("signin", "success", "cognito", who.email)
+        except OSError as exc:  # the provider's token endpoint can't be reached
+            _signin("signin", "failure", idp, reason=str(exc)[:100])
+            raise HTTPException(502, "The identity provider can't be reached; try again shortly") from exc
+        _signin("signin", "success", idp, who.email)
         # The person is their verified email: invitations, groups and approvals find them by it,
-        # whichever way they signed in (GitHub's verified email links the same way).
+        # whichever way they signed in (GitHub's verified email links the same way). An identity
+        # provider's groups come as idp:<group>, approvers a gate can name.
         user = User(login=who.email, name=who.name or who.email.split("@", 1)[0], avatar_url=who.picture,
-                    email=who.email, idp="cognito", strong=who.strong)
+                    email=who.email, idp=idp, strong=who.strong, teams=[f"idp:{g}" for g in who.groups])
         resp = RedirectResponse(local_path(saved.get("next") or "/"), status_code=302)
         resp.delete_cookie(OIDC_COOKIE, path="/api/auth")
         _set_session(resp, user)

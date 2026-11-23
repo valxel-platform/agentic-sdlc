@@ -44,9 +44,9 @@ class User:
     name: str = ""
     avatar_url: str = ""
     orgs: list[str] = field(default_factory=list)
-    teams: list[str] = field(default_factory=list)  # "org/team-slug"
+    teams: list[str] = field(default_factory=list)  # "org/team-slug"; "idp:<group>" from an OIDC provider
     email: str = ""  # verified, when the sign-in provides one
-    idp: str = "github"  # how they signed in: github, cognito or dev; mcp for a call from api/mcp.py
+    idp: str = "github"  # how they signed in: github, cognito, oidc or dev; mcp for a call from api/mcp.py
     # Two factors at sign-in: GitHub (which requires two-factor sign-in of everyone who contributes
     # code) and dev sign-in count; through Cognito, only a passkey (web/identity.py). A workspace's
     # admins and group approvers need it to act (api/app.py).
@@ -61,6 +61,8 @@ class User:
         a = approver.strip().lstrip("@").lower()
         if a.startswith("group:"):  # a workspace's approver group
             return a[len("group:"):] in {g.lower() for g in self.groups}
+        if a.startswith("idp:"):  # a group in the team's own identity provider, read at sign-in
+            return a in {t.lower() for t in self.teams}
         if "/" in a:
             return a in {t.lower() for t in self.teams}
         return a == self.login.lower()
@@ -69,11 +71,16 @@ class User:
         return org.lower() in {o.lower() for o in self.orgs}
 
 
+def _needs_two_factors(approver: str) -> bool:
+    return approver.strip().lstrip("@").lower().startswith(("group:", "idp:"))
+
+
 def can_decide(user: User, item: dict) -> bool:
-    """A GitHub team or login decides as before. A workspace group decides only from a two-factor
-    sign-in (a passkey through Cognito): its members may have joined with nothing but an email."""
+    """A GitHub team or login decides as before. A workspace group, or an identity provider's group,
+    decides only from a two-factor sign-in (a passkey, or the provider's MFA): its members may have
+    joined with nothing but an email."""
     approvers = item.get("approvers") or []
-    if any(user.matches(a) for a in approvers if not a.strip().lower().startswith("group:")):
+    if any(user.matches(a) for a in approvers if not _needs_two_factors(a)):
         return True
     return user.strong and any(user.matches(a) for a in approvers)
 
@@ -84,8 +91,8 @@ def needs_passkey(user: User, approvers: list[str]) -> bool:
         user.matches(a) for a in approvers)
 
 
-PASSKEY_NEEDED = ("Approving through a workspace group needs a passkey sign-in. Choose 'Use a passkey' "
-                  "(add one first from your workspace page), then try again.")
+PASSKEY_NEEDED = ("Approving through a group needs a two-factor sign-in: a passkey, or your identity "
+                  "provider's multi-factor sign-in. Choose 'Use a passkey' (or sign in again), then try again.")
 
 
 class SessionSigner:
@@ -146,7 +153,7 @@ def user_from_payload(payload: dict | None) -> User | None:
 
 @dataclass
 class AuthConfig:
-    mode: str  # github | cognito | dev (any identity; never in production)
+    mode: str  # github | cognito | oidc | dev (any identity; never in production)
     secret: str
     client_id: str = ""  # GitHub OAuth
     client_secret: str = ""
@@ -158,6 +165,19 @@ class AuthConfig:
     cognito_client_secret: str = ""
     cognito_issuer: str = ""
     cognito_google: bool = True
+    # The team's own OpenID Connect provider (web/identity.py OIDCProvider, T-148)
+    oidc_issuer: str = ""
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_label: str = "Sign in with your company account"
+    oidc_groups_claim: str = ""
+    oidc_email_verified: str = "claim"
+    oidc_step_up_acr: str = ""
+    oidc_strong_acr: tuple = ()
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(self.oidc_issuer and self.oidc_client_id and self.oidc_client_secret)
 
     @property
     def github_enabled(self) -> bool:
@@ -189,15 +209,27 @@ class AuthConfig:
                   cognito_client_id=os.environ.get("VALXEL_COGNITO_CLIENT_ID", ""),
                   cognito_client_secret=current("VALXEL_COGNITO_CLIENT_SECRET"),
                   cognito_issuer=os.environ.get("VALXEL_COGNITO_ISSUER", ""),
-                  cognito_google=(os.environ.get("VALXEL_COGNITO_GOOGLE") or "true").lower() != "false")
-        if mode not in ("github", "cognito", "dev"):
-            raise RuntimeError(f"VALXEL_AUTH must be github, cognito or dev, not {mode!r}")
+                  cognito_google=(os.environ.get("VALXEL_COGNITO_GOOGLE") or "true").lower() != "false",
+                  oidc_issuer=os.environ.get("VALXEL_OIDC_ISSUER", ""),
+                  oidc_client_id=os.environ.get("VALXEL_OIDC_CLIENT_ID", ""),
+                  oidc_client_secret=current("VALXEL_OIDC_CLIENT_SECRET"),
+                  oidc_label=os.environ.get("VALXEL_OIDC_LABEL") or "Sign in with your company account",
+                  oidc_groups_claim=os.environ.get("VALXEL_OIDC_GROUPS_CLAIM", ""),
+                  oidc_email_verified=(os.environ.get("VALXEL_OIDC_EMAIL_VERIFIED") or "claim").lower(),
+                  oidc_step_up_acr=os.environ.get("VALXEL_OIDC_STEP_UP_ACR", ""),
+                  oidc_strong_acr=tuple(a.strip() for a in os.environ.get("VALXEL_OIDC_STRONG_ACR", "").split(",")
+                                        if a.strip()))
+        if mode not in ("github", "cognito", "oidc", "dev"):
+            raise RuntimeError(f"VALXEL_AUTH must be github, cognito, oidc or dev, not {mode!r}")
         # GitHub mode needs GitHub's OAuth app and may add Cognito; Cognito mode the reverse.
         if mode == "github" and not cfg.github_enabled:
             raise RuntimeError("GitHub sign-in needs VALXEL_GITHUB_OAUTH_CLIENT_ID and VALXEL_GITHUB_OAUTH_CLIENT_SECRET")
         if mode == "cognito" and not cfg.cognito_enabled:
             raise RuntimeError("Cognito sign-in needs VALXEL_COGNITO_DOMAIN, VALXEL_COGNITO_CLIENT_ID, "
                                "VALXEL_COGNITO_CLIENT_SECRET and VALXEL_COGNITO_ISSUER")
+        if mode == "oidc" and not cfg.oidc_enabled:
+            raise RuntimeError("OIDC sign-in needs VALXEL_OIDC_ISSUER, VALXEL_OIDC_CLIENT_ID and "
+                               "VALXEL_OIDC_CLIENT_SECRET")
         return cfg
 
     def ring(self) -> Callable[[], list[str]]:
@@ -229,6 +261,18 @@ class AuthConfig:
         return CognitoProvider(domain=self.cognito_domain, client_id=self.cognito_client_id,
                                client_secret=self.cognito_client_secret, issuer=self.cognito_issuer,
                                redirect_uri=self.oidc_redirect_uri, google=self.cognito_google, opener=opener)
+
+    def oidc(self, opener=None):
+        """The team's own OIDC provider, or None when it isn't configured."""
+        if not self.oidc_enabled:
+            return None
+        from .identity import OIDCProvider
+
+        return OIDCProvider(issuer=self.oidc_issuer, client_id=self.oidc_client_id,
+                            client_secret=self.oidc_client_secret, redirect_uri=self.oidc_redirect_uri,
+                            label=self.oidc_label, groups_claim=self.oidc_groups_claim,
+                            email_verified=self.oidc_email_verified, step_up_acr=self.oidc_step_up_acr,
+                            strong_acr=tuple(self.oidc_strong_acr), opener=opener)
 
 
 class GitHubOAuth:
