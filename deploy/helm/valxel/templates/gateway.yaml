@@ -42,7 +42,7 @@ data:
       general:  { require_baa: false, redaction: redact, detectors: [secret, card_number, us_ssn] }
     callers:
       sdlc-tool:
-        key_sha256: {{ .Values.gateway.toolKeySha256 | quote }}
+        key_sha256: {{ .Values.gateway.toolKeySha256 | toString | quote }}
         budget_usd_per_day: {{ .Values.gateway.budgetUsdPerDay }}
         models: ["claude-*"{{ if .Values.gateway.openai }}, "gpt-*"{{ end }}]
         max_tokens: 128000

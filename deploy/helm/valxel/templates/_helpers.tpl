@@ -70,7 +70,7 @@ capabilities:
 {{- if not (has .Values.auth.mode (list "github" "cognito")) -}}{{- fail "auth.mode is github or cognito" -}}{{- end -}}
 {{- if not (has .Values.kafka.mode (list "strimzi" "external")) -}}{{- fail "kafka.mode is strimzi or external" -}}{{- end -}}
 {{- if not (has .Values.networkPolicy.flavor (list "cilium" "kubernetes")) -}}{{- fail "networkPolicy.flavor is cilium or kubernetes" -}}{{- end -}}
-{{- if not (regexMatch "^[a-f0-9]{64}$" (required "gateway.toolKeySha256: the SHA-256 of the tool's gateway key, in hex" .Values.gateway.toolKeySha256)) -}}
+{{- if not (regexMatch "^[a-f0-9]{64}$" (required "gateway.toolKeySha256: the SHA-256 of the tool's gateway key, in hex" .Values.gateway.toolKeySha256 | toString)) -}}
 {{- fail "gateway.toolKeySha256 must be 64 hex characters" -}}
 {{- end -}}
 {{- if eq .Values.sessions.namespace .Release.Namespace -}}
