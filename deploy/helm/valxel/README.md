@@ -31,7 +31,7 @@ Strict mode is on. If anything it needs is missing, the API refuses to start and
   - the delivery GitHub App's key and the Provisioning App's key, each imported as a sign-only key;
   - roles for the tool's, the provisioning worker's and the sink's service accounts, through Pod Identity or IRSA annotations.
 - **A ReadWriteMany storage class** for artifacts (EFS, Filestore, Azure Files...).
-- **Two GitHub Apps in their org (delivery and provisioning), and a GitHub OAuth app or Cognito for sign-in.**
+- **Two GitHub Apps in their org (delivery and provisioning), and for sign-in a GitHub OAuth app, Cognito, or their own OIDC provider.**
 - **Their own model key.** For PHI, their own BAA with the provider (`gateway.baa: true`).
 - **DNS and TLS** for `publicUrl`.
 
@@ -42,7 +42,7 @@ External Secrets make (`externalSecrets.items`):
 
 | Secret (value) | Keys |
 |---|---|
-| `secrets.tool` | `DATABASE_URL`, `VALXEL_SESSION_SECRET`, `VALXEL_GITHUB_WEBHOOK_SECRET`, `VALXEL_LLM_GATEWAY_API_KEY`, `VALXEL_GITHUB_OAUTH_CLIENT_SECRET` or `VALXEL_COGNITO_CLIENT_SECRET`, and any other secret setting the tool reads |
+| `secrets.tool` | `DATABASE_URL`, `VALXEL_SESSION_SECRET`, `VALXEL_GITHUB_WEBHOOK_SECRET`, `VALXEL_LLM_GATEWAY_API_KEY`, `VALXEL_GITHUB_OAUTH_CLIENT_SECRET`, `VALXEL_COGNITO_CLIENT_SECRET` or `VALXEL_OIDC_CLIENT_SECRET`, and any other secret setting the tool reads |
 | `secrets.provisioner` | `DATABASE_URL` |
 | `gateway.existingSecret` | `ANTHROPIC_API_KEY`, `GATEWAY_DATABASE_URL`, optionally `OPENAI_API_KEY` |
 | `auditSink.existingSecret` | `OWNER_URL`, `WRITER_URL`, `WRITER_PASSWORD` |

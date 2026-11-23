@@ -30,7 +30,7 @@ settings (environment variable names, `config/`, governance), and only differs i
 | Agent sessions | a container per session (gVisor when installed) | a container per session under gVisor | Agent Sandbox pods under gVisor |
 | Model calls | the LLM gateway in Compose | the LLM gateway in Compose | the LLM gateway in the cluster |
 | Audit | Kafka and the sink in Compose | the same, archive to S3 Object Lock | Strimzi Kafka, the sink, Object Lock |
-| Sign-in | dev sign-in | GitHub or Cognito, TLS | GitHub or Cognito |
+| Sign-in | dev sign-in | GitHub, Cognito or an OIDC provider, TLS | GitHub, Cognito or an OIDC provider |
 | Strict mode | off: stand-ins allowed | on, the VM tier's checks | on, the cluster's checks |
 
 `VALXEL_TIER` (laptop, vm, cluster) says which one an instance is. Strict mode checks what the tier

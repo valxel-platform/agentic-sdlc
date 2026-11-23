@@ -26,15 +26,24 @@ route:
     annotations: {}
     tlsSecretName: ""
 
-# --- Sign-in: GitHub (with the tool's OAuth app) or Cognito.
+# --- Sign-in: GitHub (with the tool's OAuth app), Cognito, or the team's own OIDC provider (Okta,
+# Entra ID, Google Workspace, Keycloak...). With github, an OIDC provider set below is offered too.
 auth:
-  mode: github        # github | cognito
+  mode: github        # github | cognito | oidc
   githubOAuthClientId: ""
   cognito:
     domain: ""
     clientId: ""
     issuer: ""
     google: false
+  oidc:
+    issuer: ""                      # https://...; its /.well-known/openid-configuration must name it
+    clientId: ""                    # the client secret: VALXEL_OIDC_CLIENT_SECRET in secrets.tool
+    label: Sign in with your company account
+    groupsClaim: ""                 # e.g. groups: each becomes an approver, idp:<group>
+    emailVerified: claim            # claim | issuer (Entra ID sends no email_verified; trust only your own tenant)
+    stepUpAcr: ""                   # acr_values asked for when someone must sign in again with two factors
+    strongAcr: []                   # acr values that mean two factors (amr mfa, hwk or swk always do)
 
 # --- The GitHub Apps. Delivery acts in product orgs; the Provisioning App creates repos and only the
 # provisioning worker may sign for it. Both private keys are sign-only KMS keys (strict mode refuses

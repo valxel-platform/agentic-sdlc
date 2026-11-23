@@ -52,7 +52,8 @@ def test_the_default_setup_lists_every_stand_in(services):
     found = strict.stand_ins(services, auth_mode="dev", env={})
     assert "VALXEL_MODE is not live: agents return canned output" in found
     assert any(f.startswith("VALXEL_DELIVERY is not live") for f in found)
-    assert any(f.startswith("VALXEL_AUTH is not github") for f in found)
+    assert any(f.startswith("VALXEL_AUTH is dev") for f in found)
+    assert not any(f.startswith("VALXEL_AUTH") for f in strict.stand_ins(services, auth_mode="oidc", env={}))
     assert any(f.startswith("DATABASE_URL is not set") for f in found)
     assert "FARM: tools.work_tracking names jira, which has no server URL or credentials" in found
     assert "FARM: tools.diagrams names lucid, which has no server URL or credentials" in found

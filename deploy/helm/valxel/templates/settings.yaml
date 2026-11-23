@@ -20,11 +20,26 @@ data:
   VALXEL_AUTH: {{ .Values.auth.mode | quote }}
   {{- if eq .Values.auth.mode "github" }}
   VALXEL_GITHUB_OAUTH_CLIENT_ID: {{ required "auth.githubOAuthClientId: the tool's GitHub OAuth app" .Values.auth.githubOAuthClientId | quote }}
-  {{- else }}
+  {{- else if eq .Values.auth.mode "cognito" }}
   VALXEL_COGNITO_DOMAIN: {{ required "auth.cognito.domain" .Values.auth.cognito.domain | quote }}
   VALXEL_COGNITO_CLIENT_ID: {{ required "auth.cognito.clientId" .Values.auth.cognito.clientId | quote }}
   VALXEL_COGNITO_ISSUER: {{ required "auth.cognito.issuer" .Values.auth.cognito.issuer | quote }}
   VALXEL_COGNITO_GOOGLE: {{ .Values.auth.cognito.google | toString | quote }}
+  {{- end }}
+  {{- if or (eq .Values.auth.mode "oidc") .Values.auth.oidc.issuer }}
+  VALXEL_OIDC_ISSUER: {{ required "auth.oidc.issuer: the identity provider's issuer, https://..." .Values.auth.oidc.issuer | quote }}
+  VALXEL_OIDC_CLIENT_ID: {{ required "auth.oidc.clientId" .Values.auth.oidc.clientId | quote }}
+  VALXEL_OIDC_LABEL: {{ .Values.auth.oidc.label | quote }}
+  VALXEL_OIDC_EMAIL_VERIFIED: {{ .Values.auth.oidc.emailVerified | quote }}
+  {{- with .Values.auth.oidc.groupsClaim }}
+  VALXEL_OIDC_GROUPS_CLAIM: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.auth.oidc.stepUpAcr }}
+  VALXEL_OIDC_STEP_UP_ACR: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.auth.oidc.strongAcr }}
+  VALXEL_OIDC_STRONG_ACR: {{ join "," . | quote }}
+  {{- end }}
   {{- end }}
   # The delivery GitHub App signs through KMS: no key material in the process.
   VALXEL_GITHUB_APP_ID: {{ required "github.appId: the delivery GitHub App's id" .Values.github.appId | quote }}

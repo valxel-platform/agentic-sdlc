@@ -1,8 +1,9 @@
-"""Sign-in through an OpenID Connect provider: Google and email through Amazon Cognito.
+"""Sign-in through an OpenID Connect provider: Google and email through Amazon Cognito, or the
+team's own identity provider (Okta, Entra ID, Google Workspace, Keycloak...) through OIDCProvider.
 
 GitHub stays on its own OAuth flow (web/auth.py): GitHub isn't a standard OpenID provider, and its
 sign-in also brings the person's orgs and teams. Everything else goes through an IdentityProvider,
-so the vendor behind it can change; Cognito is the first one.
+so the vendor behind it can change.
 
 Cognito's managed login offers, from one user pool (deploy/cognito.yaml):
 - Google, federated through the pool;
@@ -50,8 +51,9 @@ class Identity:
     email: str  # verified, lower case
     name: str = ""
     picture: str = ""
-    method: str = ""  # google, email, passkey
+    method: str = ""  # google, email, passkey; oidc
     strong: bool = False  # two factors (a passkey): may act as an admin or group approver
+    groups: tuple[str, ...] = ()  # the identity provider's groups, when it sends them (OIDCProvider)
 
 
 class IdentityProvider(Protocol):
@@ -175,3 +177,147 @@ class CognitoProvider:
         return Identity(subject=str(claims["sub"]), email=email, name=str(claims.get("name") or ""),
                         picture=str(claims.get("picture") or ""), method=method,
                         strong=bool(amr & STRONG_AMR) or level >= 3)
+
+
+# ------------------------------------------------------------------------ any OIDC provider (T-148)
+
+OIDC_STRONG_AMR = {"mfa", "hwk", "swk"}  # RFC 8176: more than one factor, or a hardware or software key
+ALGORITHMS = ["RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512"]
+
+
+@dataclass
+class OIDCProvider:
+    """The team's own identity provider, found from its issuer (VALXEL_OIDC_*).
+
+    Discovery (`<issuer>/.well-known/openid-configuration`) gives the endpoints and the keys. The flow
+    is the same as Cognito's: the authorization code with PKCE, a state and a nonce, and the ID
+    token's signature, issuer, audience, expiry and nonce checked. Only a verified email signs anyone
+    in: `email_verified` must be true, unless `email_verified="issuer"`, for a provider that doesn't
+    send the claim (Entra ID) and whose issuer is the team's own tenant, where the team controls
+    every address. Two factors are read from `amr` (mfa, hwk, swk) or `acr` (strong_acr). Groups,
+    when `groups_claim` names the claim, become `idp:<group>` approvers."""
+
+    issuer: str
+    client_id: str
+    client_secret: str
+    redirect_uri: str  # <public url>/api/auth/oidc/callback
+    label: str = "Sign in with your company account"
+    scopes: str = "openid email profile"
+    groups_claim: str = ""
+    email_verified: str = "claim"  # claim | issuer
+    step_up_acr: str = ""  # asked for when someone must sign in again with two factors
+    strong_acr: tuple[str, ...] = ()  # acr values that mean two factors
+    opener: object = None
+    name: str = "oidc"
+    _config: dict = field(default_factory=dict)
+    _keys: dict = field(default_factory=dict)
+    _keys_at: float = 0.0
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def __post_init__(self) -> None:
+        self.issuer = self.issuer.rstrip("/")
+        if not self.issuer.startswith("https://"):
+            raise ValueError("VALXEL_OIDC_ISSUER must be https://")
+        if self.email_verified not in ("claim", "issuer"):
+            raise ValueError("VALXEL_OIDC_EMAIL_VERIFIED is claim or issuer")
+        self.opener = self.opener or build_opener()
+
+    def _get(self, url: str) -> dict:
+        with self.opener.open(Request(url, headers={"Accept": "application/json"}), timeout=15) as resp:  # type: ignore[attr-defined]
+            return json.loads(resp.read())
+
+    def config(self) -> dict:
+        """The provider's discovery document, read once; its issuer must be the one configured."""
+        with self._lock:
+            if not self._config:
+                got = self._get(f"{self.issuer}/.well-known/openid-configuration")
+                if str(got.get("issuer", "")).rstrip("/") != self.issuer:
+                    raise SignInError("The identity provider's discovery document names another issuer")
+                for key in ("authorization_endpoint", "token_endpoint", "jwks_uri"):
+                    if not str(got.get(key, "")).startswith("https://"):
+                        raise SignInError(f"The identity provider's discovery document has no https {key}")
+                self._config = got
+            return self._config
+
+    def options(self) -> list[dict]:
+        return [{"id": "oidc", "label": self.label}]
+
+    def authorize_url(self, *, option: str = "oidc", state: str, nonce: str, verifier: str, step_up: bool = False,
+                      hint: str = "") -> str:
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+        q = {"response_type": "code", "client_id": self.client_id, "redirect_uri": self.redirect_uri,
+             "scope": self.scopes, "state": state, "nonce": nonce,
+             "code_challenge": challenge, "code_challenge_method": "S256"}
+        if step_up:  # sign in again, now, and with two factors where the provider can be asked
+            q["prompt"], q["max_age"] = "login", "0"
+            if self.step_up_acr:
+                q["acr_values"] = self.step_up_acr
+        if hint:
+            q["login_hint"] = hint
+        return f"{self.config()['authorization_endpoint']}?{urlencode(q)}"
+
+    def _token(self, form: dict) -> dict:
+        cfg = self.config()
+        methods = cfg.get("token_endpoint_auth_methods_supported") or ["client_secret_basic"]
+        headers = {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}
+        if "client_secret_basic" in methods:
+            from urllib.parse import quote
+
+            pair = f"{quote(self.client_id, safe='')}:{quote(self.client_secret, safe='')}"
+            headers["Authorization"] = "Basic " + base64.b64encode(pair.encode()).decode()
+        else:  # client_secret_post
+            form = {**form, "client_secret": self.client_secret}
+        req = Request(cfg["token_endpoint"], data=urlencode(form).encode(), method="POST", headers=headers)
+        with self.opener.open(req, timeout=15) as resp:  # type: ignore[attr-defined]
+            return json.loads(resp.read())
+
+    def _jwks(self, kid: str) -> dict:
+        """The provider's signing key `kid`, fetched again when an unknown one appears (key rotation)."""
+        with self._lock:
+            stale = time.time() - self._keys_at > 60
+        if kid not in self._keys and stale:
+            keys = {k.get("kid", ""): k for k in self._get(self.config()["jwks_uri"]).get("keys", [])}
+            with self._lock:
+                self._keys, self._keys_at = keys, time.time()
+        if kid not in self._keys:
+            raise SignInError("The sign-in token was signed with a key the identity provider doesn't publish")
+        return self._keys[kid]
+
+    def verify(self, id_token: str, nonce: str) -> dict:
+        import jwt
+
+        try:
+            header = _b64json(id_token.split(".", 1)[0])
+            if header.get("alg") not in ALGORITHMS:
+                raise SignInError(f"The sign-in token's algorithm {header.get('alg')!r} isn't accepted")
+            key = jwt.PyJWK(self._jwks(header.get("kid", "")), algorithm=header["alg"])
+            claims = jwt.decode(id_token, key=key.key, algorithms=[header["alg"]], audience=self.client_id,
+                                issuer=self.issuer, options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+                                leeway=30)
+        except SignInError:
+            raise
+        except Exception as exc:  # a bad signature, the wrong audience or issuer, expired
+            raise SignInError(f"The sign-in token didn't check out: {exc}") from exc
+        aud = claims.get("aud")
+        if isinstance(aud, list) and len(aud) > 1 and claims.get("azp") != self.client_id:
+            raise SignInError("The sign-in token was issued to another application")
+        if not nonce or not secrets.compare_digest(str(claims.get("nonce", "")), nonce):
+            raise SignInError("The sign-in token wasn't issued for this sign-in")
+        return claims
+
+    def identity(self, code: str, *, verifier: str, nonce: str) -> Identity:
+        tokens = self._token({"grant_type": "authorization_code", "code": code, "redirect_uri": self.redirect_uri,
+                              "client_id": self.client_id, "code_verifier": verifier})
+        claims = self.verify(tokens.get("id_token", ""), nonce)
+        email = str(claims.get("email") or "").strip().lower()
+        verified = str(claims.get("email_verified")).lower() == "true" or self.email_verified == "issuer"
+        if not email or "@" not in email or not verified:
+            raise SignInError("Your email address isn't verified, so it can't sign you in")
+        amr = {str(a).lower() for a in (claims.get("amr") or [])}
+        acr = str(claims.get("acr") or "")
+        strong = bool(amr & OIDC_STRONG_AMR) or (bool(acr) and acr in set(self.strong_acr) | {self.step_up_acr} - {""})
+        raw = claims.get(self.groups_claim) if self.groups_claim else None
+        groups = tuple(sorted({str(g).strip() for g in (raw if isinstance(raw, list) else [])
+                               if str(g).strip()}))[:200]
+        return Identity(subject=str(claims["sub"]), email=email, name=str(claims.get("name") or ""),
+                        picture=str(claims.get("picture") or ""), method="oidc", strong=strong, groups=groups)
