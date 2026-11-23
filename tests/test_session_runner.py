@@ -100,7 +100,7 @@ def test_a_resume_restores_the_transcript_and_falls_back_to_the_handoff(tmp_path
 def test_the_runner_clones_with_the_one_repo_token(tmp_path, monkeypatch):
     got = {}
 
-    def fake_clone(repo, branch, token, root):
+    def fake_clone(repo, branch, token, root, via=""):
         got.update(repo=repo, branch=branch, token=token)
         (Path(root) / "work" / "farm-api").mkdir(parents=True)
         return str(Path(root) / "work" / "farm-api")

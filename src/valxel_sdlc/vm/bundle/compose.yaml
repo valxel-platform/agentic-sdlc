@@ -50,6 +50,8 @@ x-tool: &tool
     VALXEL_SESSION_RUNTIME: runsc
     VALXEL_SESSION_LAUNCHER_URL: http://session-launcher:8083
     VALXEL_SESSION_LAUNCHER_TOKEN_FILE: /run/secrets/session_launcher_token
+    # Sessions' git goes through the egress proxy's broker with a pass, never a GitHub token.
+    VALXEL_GIT_BROKER_URL: http://egress-proxy:3128
     VALXEL_BACKUP_MARKER: /backups/last-success
   secrets: &tool-secrets
     - DATABASE_URL
@@ -58,6 +60,7 @@ x-tool: &tool
     - VALXEL_GITHUB_WEBHOOK_SECRET
     - VALXEL_GITHUB_APP_PRIVATE_KEY
     - VALXEL_LLM_GATEWAY_API_KEY
+    - VALXEL_GIT_BROKER_KEY
     - session_launcher_token
   volumes: [artifacts:/data/artifacts, backups:/backups:ro]
   networks: [default]
@@ -131,7 +134,9 @@ services:
       VALXEL_EGRESS_ALLOW: ${VALXEL_EGRESS_ALLOW:-}
       # The launcher's token: it alone collects a session's refusals for the audit trail (T-115).
       VALXEL_SESSION_LAUNCHER_TOKEN_FILE: /run/secrets/session_launcher_token
-    secrets: [session_launcher_token]
+      # The git broker's key: sessions push and fetch through the proxy with a pass (git_broker).
+      VALXEL_GIT_BROKER_KEY_FILE: /run/secrets/VALXEL_GIT_BROKER_KEY
+    secrets: [session_launcher_token, VALXEL_GIT_BROKER_KEY]
     networks: [default, sessions]
 
   postgres:
@@ -241,6 +246,7 @@ secrets:
   VALXEL_GITHUB_APP_PRIVATE_KEY: {file: ./secrets/VALXEL_GITHUB_APP_PRIVATE_KEY}
   VALXEL_GITHUB_PROVISIONER_PRIVATE_KEY: {file: ./secrets/VALXEL_GITHUB_PROVISIONER_PRIVATE_KEY}
   VALXEL_LLM_GATEWAY_API_KEY: {file: ./secrets/VALXEL_LLM_GATEWAY_API_KEY}
+  VALXEL_GIT_BROKER_KEY: {file: ./secrets/VALXEL_GIT_BROKER_KEY}
   session_launcher_token: {file: ./secrets/session-launcher-token}
   POSTGRES_SUPERUSER_PASSWORD: {file: ./secrets/POSTGRES_SUPERUSER_PASSWORD}
   VALXEL_DB_PASSWORD: {file: ./secrets/VALXEL_DB_PASSWORD}

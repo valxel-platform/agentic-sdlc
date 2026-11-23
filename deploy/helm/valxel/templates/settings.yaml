@@ -70,6 +70,8 @@ data:
   VALXEL_SESSION_EXECUTOR: kubernetes
   VALXEL_SESSION_NAMESPACE: {{ .Values.sessions.namespace | quote }}
   VALXEL_SESSION_POOL: agent-session
+  # Sessions' git goes through the egress proxy's broker with a pass; the key is a secret file.
+  VALXEL_GIT_BROKER_URL: {{ include "valxel.egressProxyUrl" . | quote }}
   # Model calls through the gateway: the tool and its sessions hold gateway keys, never a model key.
   VALXEL_LLM_GATEWAY_URL: {{ include "valxel.gatewayUrl" . | quote }}
   # The tool's own audit records go to Kafka beside the gateway's; the sink keeps both.

@@ -119,7 +119,7 @@ The chart reads these Secrets in its namespace. Make them by hand, or have Exter
 
 | Secret | Keys |
 |---|---|
-| `valxel-tool` | `DATABASE_URL` (the `valxel` login, `sslmode=require`); `VALXEL_SESSION_SECRET` (`openssl rand -hex 32`); `VALXEL_GITHUB_WEBHOOK_SECRET`; `VALXEL_LLM_GATEWAY_API_KEY` (`openssl rand -hex 32`); `VALXEL_GITHUB_OAUTH_CLIENT_SECRET`, `VALXEL_COGNITO_CLIENT_SECRET` or `VALXEL_OIDC_CLIENT_SECRET`; `VALXEL_GITHUB_APP_CLIENT_SECRET`; `VALXEL_GITHUB_PROVISIONER_APP_CLIENT_SECRET` |
+| `valxel-tool` | `DATABASE_URL` (the `valxel` login, `sslmode=require`); `VALXEL_SESSION_SECRET` (`openssl rand -hex 32`); `VALXEL_GITHUB_WEBHOOK_SECRET`; `VALXEL_LLM_GATEWAY_API_KEY` (`openssl rand -hex 32`); `VALXEL_GIT_BROKER_KEY` (`openssl rand -hex 32`: seals agent sessions' git passes; the egress proxy mounts it alone); `VALXEL_GITHUB_OAUTH_CLIENT_SECRET`, `VALXEL_COGNITO_CLIENT_SECRET` or `VALXEL_OIDC_CLIENT_SECRET`; `VALXEL_GITHUB_APP_CLIENT_SECRET`; `VALXEL_GITHUB_PROVISIONER_APP_CLIENT_SECRET` |
 | `valxel-provisioner` | `DATABASE_URL` |
 | `valxel-llm-gateway` | `ANTHROPIC_API_KEY` (the customer's own key; for PHI, under their own BAA); `GATEWAY_DATABASE_URL`; optionally `OPENAI_API_KEY` |
 | `valxel-audit-database` | `OWNER_URL` (`audit_owner`); `WRITER_URL` (`audit_writer`, with a new password); `WRITER_PASSWORD` (that password) |

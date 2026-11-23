@@ -67,7 +67,7 @@ def test_every_process_is_hardened_and_runs_images_by_digest(sets):
     docs = _render(*sets)
     pods = dict(_pods(docs))
     assert {"valxel-api", "valxel-worker", "valxel-provisioner", "valxel-llm-gateway", "valxel-audit-sink",
-            "agent-session"} <= set(pods)
+            "valxel-egress-proxy", "agent-session"} <= set(pods)
     for name, spec in pods.items():
         assert spec["securityContext"]["runAsNonRoot"] is True, name
         for c in spec.get("initContainers", []) + spec["containers"]:
@@ -91,6 +91,7 @@ def test_the_settings_are_productions():
     assert data["VALXEL_SESSION_EXECUTOR"] == "kubernetes" and data["VALXEL_TENANCY"] == "rls"
     assert data["VALXEL_SECRET_STORE"] == "files" and data["VALXEL_PROVISIONING"] == "queue"
     assert data["VALXEL_LLM_GATEWAY_URL"] == "http://valxel-llm-gateway.valxel.svc.cluster.local:8080"
+    assert data["VALXEL_GIT_BROKER_URL"] == "http://valxel-egress-proxy.valxel.svc.cluster.local:3128"
     assert "sasl.password" not in data["VALXEL_AUDIT_KAFKA_CONFIG"]
     # The strict-mode settings the tool checks are all set (valxel_sdlc.strict).
     for name in ("VALXEL_AUDIT_ANCHOR_BUCKET", "VALXEL_CHECKPOINT_ARCHIVE_BUCKET", "VALXEL_GITHUB_APP_KMS_KEY_ID"):
@@ -123,12 +124,57 @@ def test_only_the_provisioner_can_sign_for_the_provisioning_app():
     assert sa["valxel-provisioner"] != sa["valxel-api"]
 
 
-def test_sessions_reach_only_the_egress_list_and_the_gateway():
-    policy = next(d for d in _render()
-                  if d["kind"] == "CiliumNetworkPolicy" and d["metadata"]["name"] == "agent-session")
-    fqdns = [r["matchName"] for e in policy["spec"]["egress"] for r in e.get("toFQDNs", [])]
-    assert fqdns == yaml.safe_load((ROOT / "config" / "egress.yaml").read_text())["allowed"]
+def _named(docs, kind, name):
+    return next(d for d in docs if d["kind"] == kind and d["metadata"]["name"] == name)
+
+
+def test_sessions_reach_only_the_egress_proxy_and_the_gateway():
+    """The engineering review's egress recommendation: no session connects out on its own."""
+    docs = _render()
+    policy = _named(docs, "CiliumNetworkPolicy", "agent-session")
+    assert not any("toFQDNs" in e for e in policy["spec"]["egress"])
+    reached = [m["matchLabels"].get("app") for e in policy["spec"]["egress"] for m in e.get("toEndpoints", [])]
+    assert "egress-proxy" in reached and "llm-gateway" in reached
+    dns = [r["matchName"] for e in policy["spec"]["egress"] for p in e.get("toPorts", [])
+           for r in (p.get("rules") or {}).get("dns", [])]
+    assert dns == ["valxel-egress-proxy.valxel.svc.cluster.local", "valxel-llm-gateway.valxel.svc.cluster.local"]
     assert {"toCIDR": ["169.254.169.254/32", "fd00:ec2::254/128"]} in policy["spec"]["egressDeny"]
+    proxy = _named(docs, "CiliumNetworkPolicy", "valxel-egress-proxy")
+    fqdns = [r["matchName"] for e in proxy["spec"]["egress"] for r in e.get("toFQDNs", [])]
+    assert fqdns == yaml.safe_load((ROOT / "config" / "egress.yaml").read_text())["allowed"]
+
+
+def test_with_portable_policy_sessions_still_reach_only_the_proxy_and_the_gateway():
+    docs = _render("networkPolicy.flavor=kubernetes")
+    session = _named(docs, "NetworkPolicy", "agent-session")
+    assert not any("ipBlock" in t for e in session["spec"]["egress"] for t in e["to"])
+    proxy = _named(docs, "NetworkPolicy", "valxel-egress-proxy")
+    assert any("ipBlock" in t for e in proxy["spec"]["egress"] for t in e["to"])
+
+
+def test_the_proxy_holds_the_broker_key_and_nothing_else_of_the_tools():
+    docs = _render()
+    spec = _named(docs, "Deployment", "valxel-egress-proxy")["spec"]["template"]["spec"]
+    assert spec["automountServiceAccountToken"] is False
+    key = next(v for v in spec["volumes"] if v["name"] == "broker-key")["secret"]
+    assert key["items"] == [{"key": "VALXEL_GIT_BROKER_KEY", "path": "VALXEL_GIT_BROKER_KEY"}]
+    env = {e["name"]: e.get("value") for e in spec["containers"][0]["env"]}
+    assert env["VALXEL_EGRESS_GITHUB_DIRECT"] == "false" and "DATABASE_URL" not in env
+    session = _named(docs, "SandboxTemplate", "agent-session")["spec"]["podTemplate"]["spec"]["containers"][0]
+    senv = {e["name"]: e.get("value") for e in session["env"]}
+    assert senv["HTTPS_PROXY"] == "http://valxel-egress-proxy.valxel.svc.cluster.local:3128"
+    assert "valxel-llm-gateway.valxel.svc.cluster.local" in senv["NO_PROXY"]
+
+
+def test_registry_mirrors_are_used_and_allowed():
+    docs = _render("sessions.registryMirrors.npm=https://artifacts.acme.test/api/npm/npm/",
+                   "sessions.registryMirrors.pypi=https://artifacts.acme.test/api/pypi/pypi/simple")
+    session = _named(docs, "SandboxTemplate", "agent-session")["spec"]["podTemplate"]["spec"]["containers"][0]
+    senv = {e["name"]: e.get("value") for e in session["env"]}
+    assert senv["NPM_CONFIG_REGISTRY"] == "https://artifacts.acme.test/api/npm/npm/"
+    assert senv["PIP_INDEX_URL"] == "https://artifacts.acme.test/api/pypi/pypi/simple"
+    allowed = yaml.safe_load(_named(docs, "ConfigMap", "valxel-egress-proxy")["data"]["egress.yaml"])["allowed"]
+    assert allowed.count("artifacts.acme.test") == 1
 
 
 @pytest.mark.parametrize("sets,says", [
@@ -139,6 +185,7 @@ def test_sessions_reach_only_the_egress_list_and_the_gateway():
     (("sessions.namespace=valxel",), "sessions.namespace must differ"),
     (("tool.extraSettings.VALXEL_SMTP_PASSWORD=x",), "looks like a secret"),
     (("archives.checkpointBucket=",), "archives.checkpointBucket"),
+    (("sessions.registryMirrors.npm=http://artifacts.acme.test/npm/",), "registryMirrors.npm must be https"),
 ])
 def test_it_refuses_what_production_would_refuse(sets, says):
     assert says in _render(*sets, ok=False)

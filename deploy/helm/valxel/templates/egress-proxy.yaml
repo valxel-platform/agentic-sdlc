@@ -1,0 +1,140 @@
+{{- $px := include "valxel.egressProxy" . -}}
+# The egress proxy: agent sessions' only way out (network.yaml lets them reach nothing else but the
+# gateway). It tunnels HTTPS to the package registries on the egress list, and is the git broker
+# (valxel_sdlc.git_broker): sessions push and fetch through it with a pass, and it alone puts the
+# GitHub token on the request. Sessions hold no GitHub token and can't reach github.com directly.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $px }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# Where sessions may connect: the chart's egress list (a copy of config/egress.yaml) and the
+# customer's registry mirrors.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $px }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+data:
+  egress.yaml: |
+    allowed:
+    {{- range (include "valxel.egressHosts" . | fromYamlArray) }}
+      - {{ . }}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $px }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.egressProxy.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: egress-proxy
+  template:
+    metadata:
+      labels:
+        {{- include "valxel.labels" . | nindent 8 }}
+        app: egress-proxy
+        {{- if .Values.mesh.istioAmbient }}
+        istio.io/dataplane-mode: ambient
+        {{- end }}
+      annotations:
+        checksum/egress: {{ include "valxel.egressHosts" . | sha256sum }}
+    spec:
+      serviceAccountName: {{ $px }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- include "valxel.podSecurity" . | nindent 8 }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app: egress-proxy
+      containers:
+        - name: proxy
+          image: {{ include "valxel.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["valxel", "egress-proxy", "--port", "3128"]
+          ports:
+            - name: proxy
+              containerPort: 3128
+          env:
+            - name: HOME
+              value: /tmp
+            - name: VALXEL_EGRESS_CONFIG
+              value: /etc/valxel-egress/egress.yaml
+            # The key passes are sealed with: the same secret the tool seals them with, and only it.
+            - name: VALXEL_GIT_BROKER_KEY_FILE
+              value: /var/run/valxel-broker/VALXEL_GIT_BROKER_KEY
+            - name: VALXEL_EGRESS_GITHUB_DIRECT
+              value: {{ .Values.egressProxy.githubDirect | toString | quote }}
+          readinessProbe:
+            tcpSocket: {port: proxy}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: proxy}
+            periodSeconds: 20
+            failureThreshold: 6
+          resources: {{- toYaml .Values.egressProxy.resources | nindent 12 }}
+          securityContext: {{- include "valxel.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            - name: egress
+              mountPath: /etc/valxel-egress
+              readOnly: true
+            - name: broker-key
+              mountPath: /var/run/valxel-broker
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: egress
+          configMap:
+            name: {{ $px }}
+        - name: broker-key
+          secret:
+            secretName: {{ .Values.secrets.tool }}
+            defaultMode: 0440
+            items:
+              - key: VALXEL_GIT_BROKER_KEY
+                path: VALXEL_GIT_BROKER_KEY
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $px }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app: egress-proxy
+  ports:
+    - name: proxy
+      port: 3128
+      targetPort: proxy
+{{- if gt (int .Values.egressProxy.replicas) 1 }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $px }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app: egress-proxy
+{{- end }}

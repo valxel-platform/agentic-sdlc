@@ -134,12 +134,12 @@ def run_spec(spec: dict, root: Path | None = None, *, query=None, on_step=None) 
         dest.write_text(text, encoding="utf-8")
     co = spec.get("checkout") or {}
     if co:
-        cwd = clone(_repo(co["repo"]), co["branch"], co["token"], root)
+        cwd = clone(_repo(co["repo"]), co["branch"], co["token"], root, via=co.get("via", ""))
     else:
         cwd = str(root / "work")
         Path(cwd).mkdir(parents=True, exist_ok=True)
         for rc in spec.get("read_checkouts") or []:  # the code an architect reads: as it was, read-only
-            read_clone(rc["repo"], rc["sha"], rc["token"], root)
+            read_clone(rc["repo"], rc["sha"], rc["token"], root, via=rc.get("via", ""))
     options = {**(spec.get("options") or {}), "cwd": cwd, "settings": json.dumps(claude_settings(str(home))),
                "env": {**(spec.get("env") or {}), "HOME": str(home), "TMPDIR": str(home / "tmp"), **NO_SCRIPTS},
                "plugins": [{"type": "local", "path": p} for p in
@@ -181,23 +181,25 @@ def run_codex_spec(spec: dict, root: Path, *, runner=None) -> dict:
 
     co = spec.get("checkout") or {}
     if co:
-        cwd = clone(_repo(co["repo"]), co["branch"], co["token"], root)
+        cwd = clone(_repo(co["repo"]), co["branch"], co["token"], root, via=co.get("via", ""))
     else:
         cwd = str(root / "work")
         Path(cwd).mkdir(parents=True, exist_ok=True)
         for rc in spec.get("read_checkouts") or []:
-            read_clone(rc["repo"], rc["sha"], rc["token"], root)
+            read_clone(rc["repo"], rc["sha"], rc["token"], root, via=rc.get("via", ""))
     scratch = root / "codex"
     scratch.mkdir(parents=True, exist_ok=True)
     return execute(spec, cwd, scratch, runner=runner or run_codex, home_template=os.environ.get("VALXEL_CODEX_HOME", ""))
 
 
-def read_clone(repo: str, sha: str, token: str, root: Path) -> str:
-    """A read-only checkout of `repo` at `sha` under root/work, its token not kept in the clone."""
+def read_clone(repo: str, sha: str, token: str, root: Path, via: str = "") -> str:
+    """A read-only checkout of `repo` at `sha` under root/work, its token not kept in the clone.
+    With `via`, through the git broker with the session's pass (valxel_sdlc.git_broker)."""
     import stat
     import subprocess
 
-    from .sandbox import _askpass
+    from .git_broker import remote_url
+    from .sandbox import _askpass, _proxy_env
 
     if not _SHA.fullmatch(str(sha)):
         raise ValueError(f"not a commit sha: {sha!r}")
@@ -206,8 +208,8 @@ def read_clone(repo: str, sha: str, token: str, root: Path) -> str:
     folder = root / ".git-read"
     folder.mkdir(exist_ok=True)
     env = {"PATH": os.environ.get("PATH", ""), "GIT_ASKPASS": str(_askpass(folder, token)),
-           "GIT_TERMINAL_PROMPT": "0", "HOME": str(root / "home")}
-    for args in (["init", "--quiet"], ["remote", "add", "origin", f"https://github.com/{repo}.git"],
+           "GIT_TERMINAL_PROMPT": "0", "HOME": str(root / "home"), **_proxy_env()}
+    for args in (["init", "--quiet"], ["remote", "add", "origin", remote_url(repo, via)],
                  ["fetch", "--quiet", "--depth", "1", "origin", sha], ["checkout", "--quiet", sha]):
         subprocess.run(["git", "-C", str(dest), *args], check=True, env=env, capture_output=True, timeout=600)
     shutil.rmtree(folder, ignore_errors=True)  # the token goes with it
@@ -303,6 +305,22 @@ def _failed(exc: Exception) -> dict:
 
 class Executor(Protocol):
     def run(self, spec: dict, on_step=None) -> dict: ...
+
+
+class Brokered:
+    """Sessions' git through the broker (valxel_sdlc.git_broker): each spec's tokens become a pass
+    before it leaves the tool, whichever executor runs it."""
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+
+    def run(self, spec: dict, on_step=None) -> dict:
+        from .git_broker import broker_spec
+
+        spec = broker_spec(spec)
+        if on_step and "on_step" in inspect.signature(self.inner.run).parameters:
+            return self.inner.run(spec, on_step=on_step)
+        return self.inner.run(spec)
 
 
 def run_with_steps(spec: dict, on_step) -> dict:
@@ -453,17 +471,21 @@ def executor() -> Executor:
     global _executor
     if _executor is None:
         kind = os.environ.get("VALXEL_SESSION_EXECUTOR", "local").lower()
+        ex: Any
         if kind == "kubernetes":
-            _executor = KubernetesExecutor(namespace=os.environ.get("VALXEL_SESSION_NAMESPACE", "valxel-sessions"),
+            ex = KubernetesExecutor(namespace=os.environ.get("VALXEL_SESSION_NAMESPACE", "valxel-sessions"),
                                            pool=os.environ.get("VALXEL_SESSION_POOL", "agent-session"),
                                            port=int(os.environ.get("VALXEL_SESSION_RUNNER_PORT", "8081")),
                                            ready_s=float(os.environ.get("VALXEL_SESSION_READY_S", "120")))
         elif kind == "docker":
             from .session_launcher import executor_from_env
 
-            _executor = executor_from_env()
+            ex = executor_from_env()
         elif kind == "local":
-            _executor = LocalExecutor()
+            ex = LocalExecutor()
         else:
             raise RuntimeError(f"VALXEL_SESSION_EXECUTOR is kubernetes, docker or local, not {kind!r}")
+        from .git_broker import enabled
+
+        _executor = Brokered(ex) if kind != "local" and enabled() else ex
     return _executor

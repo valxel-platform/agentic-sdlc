@@ -26,7 +26,7 @@ If the images are private, run `docker login ghcr.io` first.
 | Service | Role |
 |---|---|
 | api | The tool's API and web app, on 127.0.0.1:8080 |
-| worker | Agents, builds and deploys. It is the only service with the Docker socket |
+| worker | Agents, builds and deploys. It and the session launcher are the only services with the Docker socket |
 | llm-gateway | The only service with the model key. It applies the data-class rules and the budget, and audits every call |
 | kafka, audit-sink | The gateway's audit records, into the `audit` database |
 | postgres | The tool's database and the audit database |
@@ -99,8 +99,10 @@ fine for a cluster that only this machine can reach.
 - Local images aren't scanned or signed. Strict mode, used on the VM and cluster tiers, refuses
   `VALXEL_DELIVERY=local`.
 - Agent sessions each run in a container of their own, started by the session launcher, on an
-  internal network that reaches only the LLM gateway and the egress proxy (GitHub and package
-  registries; add hosts with `VALXEL_EGRESS_ALLOW`). With gVisor installed in Docker (`runsc`)
+  internal network that reaches only the LLM gateway and the egress proxy (package registries; add
+  hosts with `VALXEL_EGRESS_ALLOW`). Their git goes through the proxy's broker with a pass: no GitHub
+  token reaches a session, and it can push only to its own repository (`secrets/git-broker-key`,
+  written by `valxel dev init`). With gVisor installed in Docker (`runsc`)
   they run under it; without it, under Docker's default runtime, which isolates less.
 
 `valxel dev down` stops everything. `valxel dev down --wipe` also deletes the databases and artifacts.

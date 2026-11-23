@@ -40,10 +40,11 @@ Status: **in place**, **new** (with the review fixes), or **gap** (tracker item)
 
 | Threat | Control | Status |
 | --- | --- | --- |
-| Injected agent leaks code or tokens over the network | Sandbox egress limited to one list of registries and GitHub (`config/egress.yaml`, generated into the cluster policy) | new (T-129) |
+| Injected agent leaks code or tokens over the network | Sessions reach only the egress proxy and the gateway; the proxy allows one list of registries and GitHub's download hosts (`config/egress.yaml`, also the proxy's FQDN policy) | new (T-129; proxy in the cluster tier with the git broker) |
+| Injected agent steals the repo token, or pushes code to a repository of its own | No GitHub token in the sandbox: git goes through the egress proxy's broker with a sealed per-session pass; push only to the session's repository, fetch only from the repositories it was given; github.com itself isn't tunnelled; every brokered request logged (`git_broker.py`) | new (git broker) |
 | ...through DNS lookups of its own domain | DNS limited to the listed names and two cluster services | new (T-128) |
 | ...through the model call itself | Gateway redacts every credential type we issue before a provider sees text | new (T-126) |
-| Injected agent installs a malicious package and commits it | Registry proxy with quarantine; new dependencies flagged for a person | gap (T-136) |
+| Injected agent installs a malicious package and commits it | The customer's registry proxy with quarantine (`sessions.registryMirrors` points npm and pip at it); new dependencies flagged for a person | partly: mirrors supported; quarantine is the customer's, flagging gap (T-136) |
 | Injected agent pushes harmful code | One-repo token without settings or status rights; G5 review by a person; untrusted-content wrapping; injection eval at zero | in place |
 | Agent reaches another sandbox, the node, the API server or instance metadata | gVisor per session, Cilium deny rules, no service-account token, read-only root | in place |
 | Agent overspends | Session budget in the gateway; unpriced models refused for every caller | new (T-127); hard cap gap (T-137) |

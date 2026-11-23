@@ -15,9 +15,11 @@ from valxel_sdlc.web.auth import AuthConfig
 # Secrets in a files store (as the deployment mounts them), never the environment.
 _SECRETS = tempfile.mkdtemp(prefix="strict-secrets-")
 Path(_SECRETS, "VALXEL_SERVICENOW_AUTH_CLN").write_text("Basic x")
+Path(_SECRETS, "VALXEL_GIT_BROKER_KEY").write_text("ab" * 32)
 LIVE = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files",
         "VALXEL_SECRETS_DIR": _SECRETS, "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes",
-        "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_AUDIT_SINK": "kafka", "VALXEL_AUDIT_ANCHOR_BUCKET": "valxel-audit-anchors", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_CHECKPOINT_ARCHIVE_BUCKET": "valxel-checkpoints", "VALXEL_SIGNALS_TOKENS": "scoped", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app"}
+        "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_AUDIT_SINK": "kafka", "VALXEL_AUDIT_ANCHOR_BUCKET": "valxel-audit-anchors", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_CHECKPOINT_ARCHIVE_BUCKET": "valxel-checkpoints", "VALXEL_SIGNALS_TOKENS": "scoped", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app",
+        "VALXEL_GIT_BROKER_URL": "http://egress-proxy:3128"}
 
 
 class LiveTracker:
@@ -66,9 +68,10 @@ def test_a_fully_live_setup_passes_and_only_warns_about_known_gaps(services, mon
     monkeypatch.setenv("VALXEL_SECRET_STORE", "files")
     monkeypatch.setenv("VALXEL_SECRETS_DIR", str(tmp_path))
     (tmp_path / "VALXEL_SERVICENOW_AUTH_CLN").write_text("Basic x")
+    (tmp_path / "VALXEL_GIT_BROKER_KEY").write_text("cd" * 32)
     live_ish(services)
     env = {"VALXEL_DELIVERY": "live", "VALXEL_PROVISIONING": "queue", "VALXEL_SECRET_STORE": "files", "VALXEL_TENANCY": "rls", "VALXEL_SESSION_EXECUTOR": "kubernetes", "VALXEL_LLM_GATEWAY_URL": "http://llm-gateway", "VALXEL_AUDIT_SINK": "kafka", "VALXEL_AUDIT_ANCHOR_BUCKET": "valxel-audit-anchors", "VALXEL_RUN_QUEUE": "postgres", "VALXEL_CHECKPOINT_ARCHIVE_BUCKET": "valxel-checkpoints", "VALXEL_SIGNALS_TOKENS": "scoped", "VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:us-east-2:1:key/app",
-           "VALXEL_SECRETS_DIR": str(tmp_path)}
+           "VALXEL_SECRETS_DIR": str(tmp_path), "VALXEL_GIT_BROKER_URL": "http://egress-proxy:3128"}
     gaps = strict.check(services, auth_mode="github", env=env)
     assert gaps == []
     from valxel_sdlc.telemetry import Telemetry
@@ -204,3 +207,13 @@ def test_on_a_vm_sessions_run_in_containers_and_the_app_key_is_a_file_secret(ser
     assert not any("SESSION_EXECUTOR" in f or "KMS_KEY_ID" in f or f.startswith("VALXEL_TIER") for f in found), found
     cluster = strict.stand_ins(services, auth_mode="github", env={**LIVE, "VALXEL_SESSION_EXECUTOR": "docker"})
     assert any("docker on the cluster tier" in f for f in cluster)
+
+
+def test_production_sessions_reach_github_only_through_the_broker(services):
+    """The engineering review's egress recommendation: sessions hold a pass, not GitHub tokens."""
+    live_ish(services)
+    env = {k: v for k, v in LIVE.items() if k != "VALXEL_GIT_BROKER_URL"}
+    assert any("VALXEL_GIT_BROKER_URL" in f for f in strict.stand_ins(services, auth_mode="github", env=env))
+    assert not any("GIT_BROKER" in f for f in strict.stand_ins(services, auth_mode="github", env=LIVE))
+    bad = strict.stand_ins(services, auth_mode="github", env={**LIVE, "VALXEL_GIT_BROKER_URL": "egress-proxy"})
+    assert any("must be http(s)" in f for f in bad)

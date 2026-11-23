@@ -7,6 +7,19 @@
 {{- define "valxel.sink" -}}{{ include "valxel.name" . }}-audit-sink{{- end -}}
 {{- define "valxel.kafka" -}}{{ include "valxel.name" . }}-audit{{- end -}}
 {{- define "valxel.sessionSA" -}}agent-session{{- end -}}
+{{- define "valxel.egressProxy" -}}{{ include "valxel.name" . }}-egress-proxy{{- end -}}
+{{- define "valxel.egressProxyHost" -}}{{ include "valxel.egressProxy" . }}.{{ .Release.Namespace }}.svc.cluster.local{{- end -}}
+{{- define "valxel.egressProxyUrl" -}}http://{{ include "valxel.egressProxyHost" . }}:3128{{- end -}}
+{{- define "valxel.gatewayHost" -}}{{ include "valxel.gateway" . }}.{{ .Release.Namespace }}.svc.cluster.local{{- end -}}
+
+{{/* Where sessions may connect, through the egress proxy: the egress list (a copy of
+config/egress.yaml) and the hosts of the customer's registry mirrors. A YAML list. */}}
+{{- define "valxel.egressHosts" -}}
+{{- $hosts := list -}}
+{{- range .Values.sessions.egress }}{{ $hosts = append $hosts . }}{{ end -}}
+{{- range $k, $v := .Values.sessions.registryMirrors }}{{- if $v }}{{ $hosts = append $hosts (urlParse $v).hostname }}{{- end }}{{ end -}}
+{{- $hosts | uniq | toYaml -}}
+{{- end -}}
 
 {{- define "valxel.labels" -}}
 app.kubernetes.io/name: valxel
@@ -73,6 +86,9 @@ capabilities:
 {{- if not (has .Values.networkPolicy.flavor (list "cilium" "kubernetes")) -}}{{- fail "networkPolicy.flavor is cilium or kubernetes" -}}{{- end -}}
 {{- if not (regexMatch "^[a-f0-9]{64}$" (required "gateway.toolKeySha256: the SHA-256 of the tool's gateway key, in hex" .Values.gateway.toolKeySha256 | toString)) -}}
 {{- fail "gateway.toolKeySha256 must be 64 hex characters" -}}
+{{- end -}}
+{{- range $k, $v := .Values.sessions.registryMirrors -}}
+{{- if and $v (not (hasPrefix "https://" $v)) -}}{{- fail (printf "sessions.registryMirrors.%s must be https://" $k) -}}{{- end -}}
 {{- end -}}
 {{- if eq .Values.sessions.namespace .Release.Namespace -}}
 {{- fail "sessions.namespace must differ from the release's namespace: sessions are isolated in one of their own" -}}

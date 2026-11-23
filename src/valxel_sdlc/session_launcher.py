@@ -101,7 +101,7 @@ class Settings:
         self.max = int(e.get("VALXEL_SESSION_MAX", "4"))
         self.wait_s = float(e.get("VALXEL_SESSION_READY_S", "120"))
         self.proxy = e.get("VALXEL_SESSION_PROXY", "http://egress-proxy:3128")
-        self.no_proxy = e.get("VALXEL_SESSION_NO_PROXY", "llm-gateway,localhost,127.0.0.1")
+        self.no_proxy = e.get("VALXEL_SESSION_NO_PROXY", "llm-gateway,egress-proxy,localhost,127.0.0.1")
         token_file = e.get("VALXEL_SESSION_LAUNCHER_TOKEN_FILE", "")
         self.token = Path(token_file).read_text(encoding="utf-8").strip() if token_file else \
             e.get("VALXEL_SESSION_LAUNCHER_TOKEN", "")
