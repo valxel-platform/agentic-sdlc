@@ -54,6 +54,18 @@ def stand_ins(services, *, auth_mode: str, env=None) -> list[str]:
     elif s.mode == "live" and executor == "docker" and tier == "cluster":
         out.append("VALXEL_SESSION_EXECUTOR is docker on the cluster tier: the cluster runs sessions in Agent "
                    "Sandbox pods (kubernetes)")
+    if s.mode == "live" and executor in ("kubernetes", "docker") and tier in ("vm", "cluster"):
+        from .git_broker import enabled as broker_on
+
+        try:
+            on = broker_on(env)
+        except RuntimeError as exc:
+            out.append(str(exc))
+            on = True
+        if not on:
+            out.append("VALXEL_GIT_BROKER_URL and VALXEL_GIT_BROKER_KEY are not both set: agent sessions hold GitHub "
+                       "tokens and can reach all of github.com; send their git through the egress proxy's broker "
+                       "(valxel_sdlc.git_broker)")
     if env.get("VALXEL_LLM_GATEWAY_URL") and any(env.get(k) for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")):
         out.append("The tool holds a model provider's key while its model calls go through the LLM gateway: "
                    "the key belongs to the gateway alone")

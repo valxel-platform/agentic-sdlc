@@ -2,10 +2,11 @@
 {{- $rel := .Release.Namespace -}}
 {{- $inst := .Release.Name -}}
 {{- if eq .Values.networkPolicy.flavor "cilium" }}
-# What a session may reach: the names in sessions.egress (package registries and GitHub), the LLM
-# gateway (sessions hold a gateway token, not a model key), and DNS for those names only. Nothing
-# else: not the cluster's API, not the tool, not another sandbox, not the instance metadata endpoint.
-# Deny rules win over every allow, here or in any policy added later.
+# What a session may reach: the egress proxy (package registries, and git through its broker:
+# egress-proxy.yaml), the LLM gateway (sessions hold a gateway token, not a model key), and DNS for
+# those two names only. Nothing else: not the internet directly, not the cluster's API, not the tool,
+# not another sandbox, not the instance metadata endpoint. Deny rules win over every allow, here or
+# in any policy added later.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
@@ -50,17 +51,17 @@ spec:
             - {port: "53", protocol: ANY}
           rules:
             dns:
-              {{- range .Values.sessions.egress }}
-              - matchName: {{ . }}
-              {{- end }}
-              - matchName: {{ include "valxel.gateway" . }}.{{ $rel }}.svc.cluster.local
-    - toFQDNs:
-        {{- range .Values.sessions.egress }}
-        - matchName: {{ . }}
-        {{- end }}
+              - matchName: {{ include "valxel.egressProxyHost" . }}
+              - matchName: {{ include "valxel.gatewayHost" . }}
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $rel }}
+            app.kubernetes.io/instance: {{ $inst }}
+            app: egress-proxy
       toPorts:
         - ports:
-            - {port: "443", protocol: TCP}
+            - {port: "3128", protocol: TCP}
+            - {port: "15008", protocol: TCP}
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: {{ $rel }}
@@ -69,6 +70,53 @@ spec:
         - ports:
             - {port: "8080", protocol: TCP}
             - {port: "15008", protocol: TCP}
+---
+# The egress proxy: in, sessions; out, the egress list's names on 443 and DNS for them alone.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "valxel.egressProxy" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $inst }}
+      app: egress-proxy
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ $ns }}
+            app: agent-session
+      toPorts:
+        - ports:
+            - {port: "3128", protocol: TCP}
+            - {port: "15008", protocol: TCP}
+    - fromEntities: [host]      # the kubelet's probes
+  egressDeny:
+    - toEntities: [kube-apiserver]
+    - toCIDR: [169.254.169.254/32, fd00:ec2::254/128]
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: {{ .Values.networkPolicy.dnsNamespace }}
+            {{- range $k, $v := .Values.networkPolicy.dnsSelector }}
+            {{ $k }}: {{ $v }}
+            {{- end }}
+      toPorts:
+        - ports:
+            - {port: "53", protocol: ANY}
+          rules:
+            dns:
+              {{- range (include "valxel.egressHosts" . | fromYamlArray) }}
+              - matchName: {{ . }}
+              {{- end }}
+    - toFQDNs:
+        {{- range (include "valxel.egressHosts" . | fromYamlArray) }}
+        - matchName: {{ . }}
+        {{- end }}
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}
 ---
 # The gateway: in, the tool and its sessions; out, the model providers, its database, Kafka, DNS.
 apiVersion: cilium.io/v2
@@ -122,8 +170,9 @@ spec:
             - {port: "5432", protocol: TCP}
             - {port: "9094", protocol: TCP}
 {{- else }}
-# Portable NetworkPolicy: it can't name hosts, so a session may reach any public address on 443
-# (and nothing private: not the cluster, not the metadata endpoint). Prefer flavor: cilium.
+# Portable NetworkPolicy: a session reaches DNS, the gateway and the egress proxy, nothing else. The
+# proxy may reach any public address on 443 (NetworkPolicy can't name hosts) and allows only the
+# egress list itself. Prefer flavor: cilium, which also limits the proxy by name.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -160,6 +209,42 @@ spec:
             matchLabels: {app: llm-gateway}
       ports:
         - {port: 8080, protocol: TCP}
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $rel }}}
+          podSelector:
+            matchLabels: {app: egress-proxy, app.kubernetes.io/instance: {{ $inst }}}
+      ports:
+        - {port: 3128, protocol: TCP}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "valxel.egressProxy" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $inst }}
+      app: egress-proxy
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $ns }}}
+          podSelector:
+            matchLabels: {app: agent-session}
+      ports:
+        - {port: 3128, protocol: TCP}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ .Values.networkPolicy.dnsNamespace }}}
+          podSelector:
+            matchLabels: {{- toYaml .Values.networkPolicy.dnsSelector | nindent 14 }}
+      ports:
+        - {port: 53, protocol: UDP}
+        - {port: 53, protocol: TCP}
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
@@ -221,6 +306,26 @@ spec:
       to:
         - operation:
             ports: ["8081"]
+---
+# Only sessions may use the egress proxy.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: {{ include "valxel.egressProxy" . }}
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $inst }}
+      app: egress-proxy
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/{{ $ns }}/sa/{{ include "valxel.sessionSA" . }}"]
+      to:
+        - operation:
+            ports: ["3128"]
 ---
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy

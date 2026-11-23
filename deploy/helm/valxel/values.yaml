@@ -132,9 +132,28 @@ sessions:
     - codeload.github.com
     - objects.githubusercontent.com
 
-# --- Network policy. cilium: sessions may reach only the names above (FQDN rules), nothing in the
-# cluster but the gateway, never the metadata endpoint. kubernetes: portable NetworkPolicy, which
-# can't name hosts, so sessions may reach any public address on 443; use it only where Cilium isn't.
+  # The customer's own registry proxies (Artifactory, CodeArtifact, Nexus...), https://. Sessions'
+  # npm and pip use them, and the egress proxy allows their hosts. With them set, the public
+  # registries can be taken off `egress` above (in config/egress.yaml first: they're one list).
+  registryMirrors:
+    npm: ""                         # e.g. https://artifacts.acme.com/api/npm/npm/
+    pypi: ""                        # e.g. https://artifacts.acme.com/api/pypi/pypi/simple
+
+# --- The egress proxy: sessions' only way out (egress-proxy.yaml). HTTPS to the hosts above, and git
+# through its broker: sessions push and fetch with a pass, never a GitHub token, and only to the
+# repositories the session was given (valxel_sdlc.git_broker). The broker's key is
+# VALXEL_GIT_BROKER_KEY in secrets.tool (openssl rand -hex 32).
+egressProxy:
+  replicas: 2
+  # true lets sessions tunnel to github.com as well, around the broker: only for a deployment whose
+  # tooling needs it, since a tunnel to github.com can push anywhere.
+  githubDirect: false
+  resources: {requests: {cpu: 100m, memory: 128Mi}, limits: {memory: 512Mi}}
+
+# --- Network policy. Sessions reach the egress proxy and the gateway, nothing else: not the
+# internet, the cluster, the tool or the metadata endpoint. The proxy reaches the egress list.
+# cilium also limits the proxy to the listed names (FQDN rules); kubernetes (portable
+# NetworkPolicy, which can't name hosts) leaves that to the proxy itself.
 networkPolicy:
   flavor: cilium                    # cilium | kubernetes
   dnsSelector: {k8s-app: kube-dns}

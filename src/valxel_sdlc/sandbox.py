@@ -141,10 +141,25 @@ def protect_process() -> bool:
     return _protected
 
 
+def _proxy_env() -> dict[str, str]:
+    """The sandbox's proxy settings, which git needs to reach anything from a sandbox with no route out."""
+    return {k: v for k in ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy")
+            if (v := os.environ.get(k))}
+
+
+def allowed_domains() -> list[str]:
+    """The shell sandbox's network allowlist: config/egress.yaml, and the git broker when it's on
+    (the session's own git push goes there)."""
+    from .git_broker import host, url
+
+    b = url()
+    return egress() + ([host(b)] if b and host(b) not in egress() else [])
+
+
 def claude_sandbox() -> dict:
     """Claude Code's sandbox for Bash: every command inside it, network only to the allowlist."""
     return {"enabled": True, "autoAllowBashIfSandboxed": True, "allowUnsandboxedCommands": False,
-            "network": {"allowedDomains": egress()},
+            "network": {"allowedDomains": allowed_domains()},
             # Unprivileged containers can't create the user namespaces the full sandbox needs.
             "enableWeakerNestedSandbox": os.environ.get("VALXEL_AGENT_SANDBOX_WEAKER", "") == "1"}
 
@@ -259,15 +274,19 @@ def _checkout(services, repo: str, branch: str, root: Path) -> tuple[str, dict]:
     return clone(repo, branch, repo_token(services, repo), root), {"repo": repo, "permissions": {"contents": "write"}}
 
 
-def clone(repo: str, branch: str, token: str, root: Path) -> str:
+def clone(repo: str, branch: str, token: str, root: Path, via: str = "") -> str:
     """A checkout of `repo` on `branch` (new if it doesn't exist yet) under root/work, pushing with
-    `token` through an askpass script only root holds. Here, or in a session's sandbox."""
+    `token` through an askpass script only root holds. Here, or in a session's sandbox. With `via`
+    (the git broker, valxel_sdlc.git_broker) the remote is the broker and `token` is the session's
+    pass, not a GitHub token."""
+    from .git_broker import remote_url
+
     name = repo.split("/", 1)[1]
     dest = root / "work" / name
     askpass = _askpass(root, token)
     env = {"PATH": os.environ.get("PATH", ""), "GIT_ASKPASS": str(askpass), "GIT_TERMINAL_PROMPT": "0",
-           "HOME": str(root / "home")}
-    url = f"https://github.com/{repo}.git"
+           "HOME": str(root / "home"), **_proxy_env()}
+    url = remote_url(repo, via)
     subprocess.run(["git", "clone", "--quiet", "--depth", "50", url, str(dest)], check=True, env=env,
                    capture_output=True, timeout=300)
     have = subprocess.run(["git", "-C", str(dest), "ls-remote", "--heads", "origin", branch], env=env,

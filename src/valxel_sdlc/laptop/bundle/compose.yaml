@@ -54,8 +54,11 @@ x-tool: &tool
     VALXEL_SESSION_EXECUTOR: docker
     VALXEL_SESSION_LAUNCHER_URL: http://session-launcher:8083
     VALXEL_SESSION_LAUNCHER_TOKEN_FILE: /run/secrets/session_launcher_token
+    # Sessions' git goes through the egress proxy's broker with a pass, never a GitHub token.
+    VALXEL_GIT_BROKER_URL: http://egress-proxy:3128
+    VALXEL_GIT_BROKER_KEY_FILE: /run/secrets/git_broker_key
   volumes: [artifacts:/data/artifacts]
-  secrets: [session_launcher_token]
+  secrets: [session_launcher_token, git_broker_key]
   networks: [default]
   # OpenChoreo's local hostnames lead to its gateway on this machine (unused in docker mode).
   extra_hosts:
@@ -107,7 +110,8 @@ services:
     networks: [default, sessions]
     restart: unless-stopped
 
-  # Sessions' only way out: GitHub and the package registries (valxel_sdlc.egress_proxy).
+  # Sessions' only way out: the package registries, and git through its broker (sessions push and
+  # fetch with a pass; the proxy alone puts the GitHub token on) (valxel_sdlc.egress_proxy).
   egress-proxy:
     image: ghcr.io/valxel-platform/agentic-sdlc:${VALXEL_VERSION:-main}
     command: ["valxel", "egress-proxy"]
@@ -115,7 +119,8 @@ services:
       VALXEL_EGRESS_ALLOW: ${VALXEL_EGRESS_ALLOW:-}
       # The launcher's token: it alone collects a session's refusals for the audit trail (T-115).
       VALXEL_SESSION_LAUNCHER_TOKEN_FILE: /run/secrets/session_launcher_token
-    secrets: [session_launcher_token]
+      VALXEL_GIT_BROKER_KEY_FILE: /run/secrets/git_broker_key
+    secrets: [session_launcher_token, git_broker_key]
     networks: [default, sessions]
     restart: unless-stopped
 
@@ -203,3 +208,5 @@ networks:
 secrets:
   session_launcher_token:
     file: ./secrets/session-launcher-token   # written by valxel dev init
+  git_broker_key:
+    file: ./secrets/git-broker-key           # written by valxel dev init

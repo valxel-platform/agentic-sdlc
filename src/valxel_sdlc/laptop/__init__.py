@@ -110,6 +110,7 @@ def init(*, target: Path | None = None, anthropic_key: str = "", github_token: s
     policy.write_text(gateway_policy(env["VALXEL_GATEWAY_KEY"]))
     policy.chmod(0o644)  # read by the gateway's container user; holds only a hash
     launcher_token(target)
+    broker_key(target)
     return target
 
 
@@ -122,6 +123,18 @@ def launcher_token(target: Path) -> Path:
     f = d / "session-launcher-token"
     if not f.exists() or not f.read_text().strip():
         f.write_text("vxl_" + secrets.token_urlsafe(32) + "\n")
+    f.chmod(0o644)
+    return f
+
+
+def broker_key(target: Path) -> Path:
+    """The git broker's key, once: the worker seals sessions' passes with it and the egress proxy
+    opens them (valxel_sdlc.git_broker). Readable by the containers' user; not in .env."""
+    d = target / "secrets"
+    d.mkdir(exist_ok=True)
+    f = d / "git-broker-key"
+    if not f.exists() or not f.read_text().strip():
+        f.write_text(secrets.token_hex(32) + "\n")
     f.chmod(0o644)
     return f
 
