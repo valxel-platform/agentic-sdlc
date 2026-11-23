@@ -46,5 +46,4 @@ When that happens, the seam's known breaks are the list of calls to turn into an
 - No new network calls, deploys or failure modes now; the seams stop getting worse.
 - Fixing a known break is ordinary refactoring, visible in the debt list's length.
 - The rules are about imports; a seam can still reach another through the database or the engine.
-  Revisit with T-02 (cells), which may force operations or a regulated tenant's delivery to run
-  separately.
+  Revisit if a regulated product needs its operations or delivery to run separately.

@@ -188,10 +188,10 @@ How it behaves:
 - **AWS** connects at go-live, with a CloudFormation stack the customer creates in their own account
   (`deploy/customer-stack.yaml`). In the AWS row the admin picks the mode and region, and **Open AWS
   to create the stack** opens the console's quick-create page with the stack's parameters filled in:
-  Valxel's account, the workspace, the mode and the workspace's external ID. After creating it,
+  the account the tool runs in, the workspace, the mode and the workspace's external ID. After creating it,
   they enter their account ID and Valxel assumes both roles to check them.
 
-  The stack makes one role per job, each trusting only Valxel's account (`VALXEL_AWS_ACCOUNT_ID`),
+  The stack makes one role per job, each trusting only the tool's account (`VALXEL_AWS_ACCOUNT_ID`),
   only with that external ID, and acting only on resources tagged `valxel:workspace`:
   - **Deploy, lite mode:** the products' VMs, reached over SSH with one-minute EC2 Instance Connect
     keys.
@@ -333,10 +333,10 @@ would show one customer another's work. Postgres row-level security makes the da
   threads in `_platform/`). With `VALXEL_TENANCY=rls`, every read and write checks the current scope
   as the policies do: a request or run touches only its own workspaces' folders, the platform all of
   them, and no scope none; a stored reference that points outside its thread's folder is refused.
-  Shared storage (the tools cluster's EFS, which every API and worker pod mounts) holds every
+  Shared storage (the ReadWriteMany volume every API and worker pod mounts) holds every
   workspace's files, so this check is what keeps them apart.
-- **What it doesn't cover:** separate deployments per regulated customer ("cells") are a separate
-  decision.
+- **What it doesn't cover:** for the strongest separation, a regulated product can have an install
+  of its own ([install guide](self-hosted.md)).
 
 ## Tracing and the audit trail (VX-8, VX-15)
 

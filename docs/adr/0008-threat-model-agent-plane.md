@@ -17,7 +17,7 @@ a gap shows here before a review finds it.
 
 | Asset | Where it lives |
 | --- | --- |
-| Customer code | Agent sandboxes while a session runs; the customer's GitHub. Valxel handles it only while working (hosted agreement) |
+| Customer code | Agent sandboxes while a session runs; the customer's GitHub. The tool handles it only while working ([code and secrets](../code-and-secrets.md)) |
 | Repo credentials | GitHub App installation tokens (`ghs_`), one repository each, minted per session |
 | Model access | The LLM gateway's provider keys; sessions hold short-lived gateway tokens (`vgs_`) with their own budget |
 | PHI and payment data | Products' environments only; sample data is synthetic. Agents never see real PHI |
@@ -32,7 +32,7 @@ a gap shows here before a review finds it.
 | An outside attacker | The web app and API, MCP and A2A endpoints, webhooks, sign-in |
 | A compromised person's account | A stolen session or GitHub account of an approver or admin |
 | An insider | A Valxel operator or customer admin with database or cluster access |
-| A customer of a shared deployment | Another workspace's data, sessions or cluster tenancy (the shared non-prod cluster) |
+| A team in another workspace of the same install | Another workspace's data or sessions |
 
 ## Controls
 
@@ -53,7 +53,7 @@ Status: **in place**, **new** (with the review fixes), or **gap** (tracker item)
 | Audit records lost or quietly dropped | Outbox in the request, relayed to Kafka at least once; a decision that can't be recorded doesn't happen | in place (T-113) |
 | Outside attacker through the web app | Sign-in on every route, workspace roles re-read per request, JSON-only writes, frame-ancestors none, HSTS | in place (headers new, T-142) |
 | Assistants and agents acting for a person | MCP and A2A accept only a person's token; calls carry the client and are audited | in place (T-117) |
-| One customer sees another's data | Row-level security per workspace; per-workspace network policy for sessions; checkpoint archive keys by workspace | in place; the shared non-prod cluster's per-customer isolation is to be proven in the hosted rehearsal (T-123, T-125) |
+| One customer sees another's data | Row-level security per workspace; per-workspace network policy for sessions; checkpoint archive keys by workspace | in place |
 | Code kept longer than the work needs | Sandboxes deleted with the session, leftovers swept after 6 hours; transcripts after 24 hours; trace content off by default; agents' notes keep only short code excerpts, secrets masked; a deletion rule for every place ([code and secrets](../code-and-secrets.md)) | in place (T-121) |
 
 ## Decision
@@ -73,5 +73,4 @@ Status: **in place**, **new** (with the review fixes), or **gap** (tracker item)
   lists: each self-approval then carries a reason, says `waived` in the decision and the audit
   event, and is listed for someone (an advisor, a later hire) to review. That is a compensating
   control, not the control; it ends when a second approver joins.
-- Open gaps stay listed until closed: T-136, T-137 and the hosted cluster's tenant isolation
-  (T-121 closed 2026-11-23).
+- Open gaps stay listed until closed: T-136 and T-137 (T-121 closed 2026-11-23).

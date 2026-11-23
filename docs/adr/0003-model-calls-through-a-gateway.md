@@ -16,7 +16,7 @@ and a product's budget. Agent sessions (Claude Code, Codex) run code and must no
   and model, enforces the data class's allowlist, applies prompt layering and caching, and writes
   one ledger record per call (`gateway/`). Roles, fallbacks and budgets stay in the tool.
 - In deployed environments, the tool's calls and its sessions' calls go on to ss-llm-gateway in the
-  tools cluster: redaction, metering and audit happen there, provider keys live only there, and
+  same cluster: redaction, metering and audit happen there, provider keys live only there, and
   sessions get short-lived tokens with their own budget (`gateway_sessions.py`, T-06, T-08).
 
 ## Alternatives
