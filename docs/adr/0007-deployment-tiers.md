@@ -6,7 +6,7 @@ Deciders: Sunil Vallabhaneni
 
 ## Context
 
-The tool runs in production only on the tools EKS cluster (platform-foundation): Flux, Istio
+Until now the tool ran in production only on a full EKS cluster (platform-foundation): Flux, Istio
 ambient, Cilium, gVisor session sandboxes, the LLM gateway, an audit Kafka and sink, RDS, EFS,
 Langfuse. That is the right home at scale, and most of the open rollout work (T-43 to T-60) is
 standing it up. Meanwhile:
@@ -23,12 +23,12 @@ settings (environment variable names, `config/`, governance), and only differs i
 
 | | Laptop | Single VM | Cluster |
 | --- | --- | --- | --- |
-| For | building with the tool, end to end, on one machine | early customers and small teams | scale, regulated tenants, cells (T-02) |
-| Runs | Docker Compose | Docker Compose, hardened | EKS tools cluster (platform-foundation) |
+| For | building with the tool, end to end, on one machine | small teams | larger teams and regulated products |
+| Runs | Docker Compose | Docker Compose, hardened | Kubernetes, with the Helm chart (`deploy/helm/valxel`, T-122) |
 | Products deploy to | the same Docker (lite runtime, ADR via lite mode) | lite VMs, or OpenChoreo | OpenChoreo data planes |
 | Images built by | local Docker from the GitHub repo | the VM's Docker, or OpenChoreo | OpenChoreo build plane |
 | Agent sessions | a container per session (gVisor when installed) | a container per session under gVisor | Agent Sandbox pods under gVisor |
-| Model calls | the LLM gateway in Compose | the LLM gateway in Compose | the tools-cluster gateway |
+| Model calls | the LLM gateway in Compose | the LLM gateway in Compose | the LLM gateway in the cluster |
 | Audit | Kafka and the sink in Compose | the same, archive to S3 Object Lock | Strimzi Kafka, the sink, Object Lock |
 | Sign-in | dev sign-in | GitHub or Cognito, TLS | GitHub or Cognito |
 | Strict mode | off: stand-ins allowed | on, the VM tier's checks | on, the cluster's checks |
