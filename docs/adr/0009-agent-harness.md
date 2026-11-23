@@ -1,7 +1,7 @@
 # 0009. The agent harness: Claude Code and Codex for code, measured against LangChain
 
 Date: 2026-11-23
-Status: Proposed
+Status: Accepted (2026-11-23; the document-phase trial is parked)
 Deciders: Sunil Vallabhaneni
 
 ## Context
@@ -61,6 +61,7 @@ LangChain is the obvious alternative, because we already depend on its LangGraph
    a shadow variant for spec, designer and planner. Replay it on past cases with the existing evals,
    and adopt it per role only if it matches or beats the current runtime on quality, at no more
    cost.
+   Parked (2026-11-23): accepted, not yet scheduled; tracked as T-147.
 4. Any runtime added stays behind `AgentRuntime` and the gateway, and runs in the session sandbox
    when it touches code. That makes the choice per role, and reversible.
 
