@@ -1,7 +1,6 @@
-# Where the hosted tool may keep customer code or secrets (T-121)
+# Where the tool may keep code or secrets (T-121)
 
-For hosted sessions the agreement says customer code is handled only while working, and not kept.
-This is every place the tool writes something that could hold customer code, a fragment of it, or
+Valxel handles a product's code while its agents work on it, and doesn't keep it. This is every place the tool writes something that could hold customer code, a fragment of it, or
 a secret, with how long it lasts and what deletes it. Each row names the code or test that proves it.
 
 Secrets get one rule everywhere: none are stored outside the secret store and KMS. Anything the
@@ -34,7 +33,7 @@ masked as everywhere else. Documents the agents write are not notes and are kept
 ones live in the customer's repository.
 
 These excerpts stay with the feature, and for regulated lanes in the six-year archive, as part of
-the audit record. The customer agreement says so.
+the audit record. The [security packet](security-packet.md) says so.
 
 Evidence: `secret_scrub.py` (`keep_excerpts`, `excerpt`), wrapped around every checkpointer in
 `api/app.py` and `cli.py`; `tests/test_secret_scrub.py::test_notes_keep_an_excerpt_of_code_never_the_whole_of_it`,
