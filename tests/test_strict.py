@@ -225,5 +225,5 @@ def test_strict_mode_names_the_installations_cloud():
 
     assert strict_problems({}) == [] and strict_problems({"VALXEL_CLOUD": "AWS"}) == []
     assert strict_problems({"VALXEL_CLOUD": "gcp"}) == []
-    assert "no adapters yet" in strict_problems({"VALXEL_CLOUD": "azure"})[0]
+    assert strict_problems({"VALXEL_CLOUD": "azure"}) == []
     assert "not 'oracle'" in strict_problems({"VALXEL_CLOUD": "oracle"})[0]

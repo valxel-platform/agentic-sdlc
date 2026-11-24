@@ -1,0 +1,16 @@
+{
+  "schemaId": "AIP Budget Notification",
+  "data": {
+    "SubscriptionName": "agtech-production",
+    "SubscriptionId": "1B2C3D4E-0000-4000-8000-00000000AA03",
+    "SpendingAmount": "912.40",
+    "BudgetStartDate": "11/1/2026 12:00:00 AM -07:00",
+    "Budget": "1000",
+    "Unit": "USD",
+    "BudgetCreator": "valxel",
+    "BudgetName": "valxel-AG-production",
+    "BudgetType": "Cost",
+    "ResourceGroup": "",
+    "NotificationThresholdAmount": "900"
+  }
+}

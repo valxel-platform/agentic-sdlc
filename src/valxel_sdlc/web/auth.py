@@ -176,6 +176,7 @@ class AuthConfig:
     oidc_strong_acr: tuple = ()
     oidc_profile: str = ""  # google | entra: a known provider's defaults (web/identity.py OIDC_PROFILES)
     oidc_hosted_domain: str = ""  # google: the Workspace domain whose accounts may sign in
+    oidc_tenant: str = ""  # entra: the tenant ID, when VALXEL_OIDC_ISSUER isn't set
 
     @property
     def oidc_enabled(self) -> bool:
@@ -222,7 +223,8 @@ class AuthConfig:
                   oidc_strong_acr=tuple(a.strip() for a in os.environ.get("VALXEL_OIDC_STRONG_ACR", "").split(",")
                                         if a.strip()),
                   oidc_profile=(os.environ.get("VALXEL_OIDC_PROFILE") or "").lower(),
-                  oidc_hosted_domain=os.environ.get("VALXEL_OIDC_HOSTED_DOMAIN", "").strip().lower())
+                  oidc_hosted_domain=os.environ.get("VALXEL_OIDC_HOSTED_DOMAIN", "").strip().lower(),
+                  oidc_tenant=os.environ.get("VALXEL_OIDC_TENANT", "").strip().lower())
         cfg.apply_profile({k for k in ("VALXEL_OIDC_ISSUER", "VALXEL_OIDC_LABEL", "VALXEL_OIDC_EMAIL_VERIFIED",
                                        "VALXEL_OIDC_GROUPS_CLAIM") if os.environ.get(k)})
         if mode not in ("github", "cognito", "oidc", "dev"):
@@ -251,6 +253,14 @@ class AuthConfig:
         for key, value in OIDC_PROFILES[self.oidc_profile].items():
             if fields[key] not in set_explicitly:
                 setattr(self, f"oidc_{key}", value)
+        if self.oidc_profile == "entra":
+            if not self.oidc_issuer and self.oidc_tenant:
+                self.oidc_issuer = f"https://login.microsoftonline.com/{self.oidc_tenant}/v2.0"
+            tenant = self.oidc_issuer.rstrip("/").split("/")[-2] if self.oidc_issuer.count("/") >= 4 else ""
+            if tenant in ("common", "organizations", "consumers") or "{tenantid}" in self.oidc_issuer:
+                raise RuntimeError("VALXEL_OIDC_PROFILE is entra: set VALXEL_OIDC_TENANT (or an issuer naming your "
+                                   "tenant), not a multi-tenant endpoint: the profile trusts the issuer's addresses, "
+                                   "so it must be your own tenant")
         if self.oidc_profile == "google" and not self.oidc_hosted_domain:
             raise RuntimeError("VALXEL_OIDC_PROFILE is google: set VALXEL_OIDC_HOSTED_DOMAIN to your Google Workspace "
                                "domain, or anyone with a Google account could sign in")

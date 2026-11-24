@@ -203,6 +203,10 @@ def default_sources(settings=None):
         from ..cloud.gcp.costs import GcpBillingCosts
 
         aws = GcpBillingCosts(os.environ["VALXEL_GCP_BILLING_DATASET"])
+    elif provider() == "azure":
+        from ..cloud.azure.costs import from_env as azure_costs
+
+        aws = azure_costs()
     elif os.environ.get("VALXEL_AWS_COST_EXPLORER", "").lower() in ("1", "true", "yes"):
         from ..cloud.aws.costs import CostExplorerSource
 

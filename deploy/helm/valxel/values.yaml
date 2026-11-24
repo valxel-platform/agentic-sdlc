@@ -62,11 +62,16 @@ github:
 # The cloud this installation runs on (ADR 0010), and its region. One cloud per installation: the
 # products it builds use that cloud's services too. Only aws has adapters today.
 cloud:
-  provider: aws        # aws | gcp
+  provider: aws        # aws | gcp | azure
   region: ""
   project: ""          # gcp: the Google Cloud project the tool runs in
   serviceAccount: ""   # gcp: the tool's own Google service account, which customers' connect templates trust
   billingDataset: ""   # gcp: project.dataset of the Cloud Billing export, for cost reviews
+  subscription: ""     # azure: the subscription the tool runs in
+  keyVault: ""         # azure: the tool's Key Vault (https://<name>.vault.azure.net): secrets and the Apps' keys
+  federationIssuer: "" # azure: the AKS cluster's OIDC issuer URL, which customers' connect templates trust
+  # On Azure, also annotate the tool's service account (tool.serviceAccountAnnotations) with
+  # azure.workload.identity/client-id: <the tool's managed identity's client ID>.
 # Deprecated: cloud.region. Still read when cloud.region is empty.
 awsRegion: ""
 

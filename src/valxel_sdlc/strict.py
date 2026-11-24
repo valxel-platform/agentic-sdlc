@@ -202,14 +202,14 @@ def secrets_in_environment(env, *, live: bool = False) -> list[str]:
     if kind == "env":
         return ["VALXEL_SECRET_STORE is env: secrets come from environment variables, which anything that can "
                 "read the process's environment can read, and which pass to whatever it starts; use your "
-                "cloud's secret manager (aws, gcp) or files"] if live else []
+                "cloud's secret manager (aws, gcp, azure) or files"] if live else []
     from .cloud import UnknownCloud, provider
 
     try:
         cloud = provider(env)
     except UnknownCloud:
         cloud = ""  # cloud.strict_problems says so
-    if kind in ("aws", "gcp") and cloud and kind != cloud:
+    if kind in ("aws", "gcp", "azure") and cloud and kind != cloud:
         return [f"VALXEL_SECRET_STORE is {kind}, but the installation runs on {cloud} (VALXEL_CLOUD): use {cloud} "
                 "or files"]
     names = in_environment(env)
@@ -242,13 +242,16 @@ def app_key_in_kms(env) -> list[str]:
     from .cloud import UnknownCloud, provider
 
     try:
-        gcp = provider(env) == "gcp"
+        cloud = provider(env)
     except UnknownCloud:
         return []
-    if gcp != env[n["kms"]].startswith("projects/"):
-        want = "a Cloud KMS key version (projects/.../cryptoKeyVersions/<n>)" if gcp else "an AWS KMS key id or ARN"
-        return [f"{n['kms']} must be {want} on this installation's cloud"]
-    return []
+    key = env[n["kms"]]
+    shapes = {"gcp": (key.startswith("projects/"), "a Cloud KMS key version (projects/.../cryptoKeyVersions/<n>)"),
+              "azure": (key.startswith("https://") and "/keys/" in key,
+                        "a Key Vault key version (https://<vault>.vault.azure.net/keys/<name>/<version>)"),
+              "aws": (not key.startswith(("projects/", "https://")), "an AWS KMS key id or ARN")}
+    ok, want = shapes.get(cloud, (True, ""))
+    return [] if ok else [f"{n['kms']} must be {want} on this installation's cloud"]
 
 
 def provisioning_split(env) -> list[str]:

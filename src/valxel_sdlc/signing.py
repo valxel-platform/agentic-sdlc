@@ -6,9 +6,11 @@ A `Signer` signs bytes with RSASSA-PKCS1-v1_5 and SHA-256 (RS256, what GitHub re
                   so nothing that reads the tool's memory or files can take it.
     GcpKmsSigner  Cloud KMS, the same on Google Cloud (VALXEL_CLOUD=gcp): the *_KMS_KEY_ID settings
                   then name a key version, projects/.../cryptoKeyVersions/<n>.
+    AzureKeyVaultSigner  Key Vault (an RSA-HSM key), the same on Azure (VALXEL_CLOUD=azure): the
+                  *_KMS_KEY_ID settings name a key version, https://<vault>.vault.azure.net/keys/<k>/<v>.
     RsaKeySigner  a PEM key in memory, for laptops and small self-hosted installs.
 
-Google Cloud KMS, Azure Key Vault and Vault's Transit engine sign RS256 the same way: each is
+Vault's Transit engine signs RS256 the same way: it would be
 another `Signer` with `sign(message)`.
 
 `github_app_signer(app=...)` picks one for each of the two GitHub Apps (valxel_sdlc.provision_queue):
@@ -93,6 +95,10 @@ def github_app_signer(env: Mapping[str, str] | None = None, *, app: str = "deliv
             from .cloud.gcp.signing import GcpKmsSigner
 
             return GcpKmsSigner(key_id)
+        if provider(env) == "azure":
+            from .cloud.azure.signing import AzureKeyVaultSigner
+
+            return AzureKeyVaultSigner(key_id)
         from .cloud.aws import signing as aws
 
         return aws.KmsSigner(key_id, region=env.get("AWS_REGION", ""))

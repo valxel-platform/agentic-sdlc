@@ -1,0 +1,21 @@
+{
+  "schemaId": "azureMonitorCommonAlertSchema",
+  "data": {
+    "essentials": {
+      "alertId": "/subscriptions/1b2c3d4e-0000-4000-8000-00000000aa01/providers/Microsoft.AlertsManagement/alerts/6f1e2d3c-0000-4000-8000-000000000001",
+      "alertRule": "vx-field-readings-1a2b3c4d-consumers-behind",
+      "severity": "Sev1",
+      "signalType": "Metric",
+      "monitorCondition": "Fired",
+      "monitoringService": "Platform",
+      "alertTargetIDs": ["/subscriptions/1b2c3d4e-0000-4000-8000-00000000aa01/resourcegroups/vx-ag-dev/providers/microsoft.eventhub/namespaces/vx-field-readings-1a2b3c4d"],
+      "configurationItems": ["vx-field-readings-1a2b3c4d"],
+      "originAlertId": "1b2c3d4e-0000-4000-8000-00000000aa01_vx-ag-dev_microsoft.insights_metricAlerts_vx-field-readings-1a2b3c4d-consumers-behind_-1",
+      "firedDateTime": "2026-11-24T06:01:00.000Z",
+      "description": "valxel product=AG feature=AG-FEAT-7 resource=field-readings env=production consumers=agtech-field-worker alarm=consumers-behind severity=sev2\nA reader is over five minutes behind; events it doesn't read before retention ends are lost.",
+      "essentialsVersion": "1.0",
+      "alertContextVersion": "1.0"
+    },
+    "alertContext": {"conditionType": "SingleResourceMultipleMetricCriteria"}
+  }
+}

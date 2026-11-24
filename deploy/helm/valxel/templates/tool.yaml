@@ -9,6 +9,9 @@ metadata:
     {{- if $root.Values.mesh.istioAmbient }}
     istio.io/dataplane-mode: ambient
     {{- end }}
+    {{- if eq (include "valxel.cloud" $root) "azure" }}
+    azure.workload.identity/use: "true"   # AKS Workload Identity: the projected token and AZURE_* settings
+    {{- end }}
   annotations:
     checksum/settings: {{ include (print $root.Template.BasePath "/settings.yaml") $root | sha256sum }}
 spec:

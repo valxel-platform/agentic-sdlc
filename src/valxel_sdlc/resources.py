@@ -160,11 +160,12 @@ def cloud_name(catalog: dict) -> str:
 
 
 PROJECT_ID = re.compile(r"[a-z][a-z0-9-]{4,28}[a-z0-9]")
+SUBSCRIPTION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 def check_cloud(cloud: dict | None, data_class: str, pipeline: list[str], catalog: dict) -> list[str]:
-    """product.yaml runtime.cloud: an account (AWS) or project (Google Cloud) per environment, in a
-    region the catalog allows for the data class."""
+    """product.yaml runtime.cloud: an account (AWS), project (Google Cloud) or subscription (Azure)
+    per environment, in a region the catalog allows for the data class."""
     if not cloud:
         return []
     out = []
@@ -183,8 +184,10 @@ def check_cloud(cloud: dict | None, data_class: str, pipeline: list[str], catalo
             out.append(f"{field}.accounts.{env} must be the environment's Google Cloud project ID")
         elif provider == "aws" and not re.fullmatch(r"\d{12}", value):
             out.append(f"{field}.accounts.{env} must be the environment's 12-digit AWS account id")
+        elif provider == "azure" and not SUBSCRIPTION_ID.fullmatch(value):
+            out.append(f"{field}.accounts.{env} must be the environment's Azure subscription ID (a lowercase GUID)")
     if len({str(accounts.get(e)) for e in pipeline}) < len(pipeline):
-        noun = "project" if provider == "gcp" else "account"
+        noun = {"gcp": "project", "azure": "subscription"}.get(provider, "account")
         out.append(f"{field}.accounts: each environment needs its own {CLOUD_NAMES.get(provider, provider)} {noun}")
     return out
 
@@ -483,8 +486,10 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
         project, namespace = owner_target(owner)
         params = {p: (str(v).split("+") if ((t.get("parameters") or {}).get(p) or {}).get("type") == "list" else v)
                   for p, v in e["params"].items()}
+        # An existing resource keeps its type; a new one is made as the cloud's ClusterResourceType for
+        # the type, which is the type's own name unless another module provides it there.
         prior = existing.get(e["name"], "")
-        kind = prior if prior and canonical(prior, catalog) == e["type"] else e["type"]
+        kind = prior if prior and canonical(prior, catalog) == e["type"] else (t.get("resource_type") or e["type"])
         out.append({"name": e["name"], "type": kind, "project": project, "namespace": namespace,
                     "owner": owner, "stateful": bool(t.get("stateful")),
                     "parameters": {**params, "consumers": consumers,
@@ -570,6 +575,13 @@ def instruction(ctx: dict, task: dict) -> str:
                " library's own tracing, Firestore's FirestoreOpenTelemetryOptions or Pub/Sub's"
                " setEnableOpenTelemetryTracing, as the event worker template's StoreConfig does; Python:"
                " opentelemetry-instrumentation-grpc), so the calls show in OpenChoreo's traces.")
+    elif (catalog.get("cloud") or "aws") == "azure":
+        how = (" Read each name from its environment variable, reach the service behind a port in the code, and"
+               " use the Azure SDK's DefaultAzureCredential (the pod's identity through AKS Workload Identity):"
+               " never connection strings, keys or fixed names. Test against "
+               + ", ".join(e for e in emulators if e) + ". Use only the access listed. Trace every Azure call with"
+               " OpenTelemetry (Java: azure-core-tracing-opentelemetry; Python: azure-core-tracing-opentelemetry),"
+               " so the calls show in OpenChoreo's traces.")
     else:
         how = (" Read each name from its environment variable, reach the service behind a port in the code, and use"
                " the AWS SDK's default credentials (the pod's identity): never keys or fixed names. Test against "

@@ -21,7 +21,7 @@ from typing import Any
 CLOUDS = ("aws", "gcp", "azure")
 # Clouds with a full set of adapters. Strict mode refuses any other: a cloud named here before its
 # adapters land would quietly fall back to stand-ins.
-SUPPORTED = ("aws", "gcp")
+SUPPORTED = ("aws", "gcp", "azure")
 DEFAULT = "aws"
 
 
@@ -51,8 +51,10 @@ def strict_problems(env: Mapping[str, str] | None = None) -> list[str]:
 
 
 def immutable_store(bucket: str, *, env: Mapping[str, str] | None = None, client: Any = None, clock=time.time):
-    """The installation's ImmutableStore on `bucket`: S3 Object Lock, or Cloud Storage with locked
-    object retention. `client` is the cloud's storage client (tests pass a fake)."""
+    """The installation's ImmutableStore on `bucket`: S3 Object Lock, Cloud Storage with locked
+    object retention, or a Blob Storage container with locked version-level immutability
+    (`https://<account>.blob.core.windows.net/<container>`). `client` is the cloud's storage client
+    (tests pass a fake)."""
     name = provider(env)
     if name == "aws":
         from .aws.storage import S3Immutable
@@ -62,10 +64,18 @@ def immutable_store(bucket: str, *, env: Mapping[str, str] | None = None, client
         from .gcp.storage import GcsImmutable
 
         return GcsImmutable(bucket, client=client, clock=clock)
+    if name == "azure":
+        from .azure.storage import AzureBlobImmutable
+
+        account_url, _, container = bucket.rstrip("/").rpartition("/")
+        if not account_url.startswith("https://") or not container:
+            raise ValueError(f"On Azure a locked bucket is https://<account>.blob.core.windows.net/<container>, "
+                             f"not {bucket!r}")
+        return AzureBlobImmutable(container, account_url=account_url, client=client, clock=clock)
     raise UnknownCloud(f"no immutable store for {name} yet")
 
 
-# Tags and labels (ADR 0010). AWS tags are free-form (`valxel:feature` = `FARM-FEAT-1`). Google Cloud
+# Tags and labels (ADR 0010). AWS and Azure tags are free-form (`valxel:feature` = `FARM-FEAT-1`). Google Cloud
 # labels allow only lowercase letters, digits, `_` and `-`, up to 63 characters: `valxel:feature`
 # becomes `valxel_feature` and its value `farm-feat-1`. Valxel's ids are uppercase letters, digits
 # and hyphens, so a label's value reads back as the id by upper-casing it.

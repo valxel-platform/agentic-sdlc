@@ -9,6 +9,8 @@ tool stores one secret and each sender holds only its own:
                       and Inspector findings. Events from that AWS account only.
   project:<PROJECT>   a Google Cloud project's senders: Cloud Monitoring's webhook channel and
                       Security Command Center's Pub/Sub push. Events from that project only.
+  subscription:<ID>   an Azure subscription's senders: Azure Monitor's action group and Defender for
+                      Cloud's workflow automation. Events from that subscription only.
 
 `valxel signals-token product CLN` or `valxel signals-token account 123456789012` prints one. A
 leaked token can then raise or resolve signals for its own product or account and nothing else;
@@ -28,13 +30,14 @@ import re
 from dataclasses import dataclass
 
 NAME = "VALXEL_SIGNALS_TOKEN"
-KINDS = ("product", "account", "project")
+KINDS = ("product", "account", "project", "subscription")
 PROJECT_ID = re.compile(r"[a-z][a-z0-9-]{4,28}[a-z0-9]")
+SUBSCRIPTION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 @dataclass(frozen=True)
 class Scope:
-    kind: str  # platform | product | account
+    kind: str  # platform | product | account | project | subscription
     name: str = ""
 
     def allows(self, signal: dict) -> bool:
@@ -51,6 +54,8 @@ def derive(secret: str, kind: str, name: str) -> str:
         raise ValueError(f"a signals token is for a product, an account or a project, not {kind!r}")
     if kind == "project" and not PROJECT_ID.fullmatch(name):
         raise ValueError("a Google Cloud project ID is 6 to 30 lowercase letters, digits and hyphens")
+    if kind == "subscription" and not SUBSCRIPTION_ID.fullmatch(name):
+        raise ValueError("an Azure subscription ID is a lowercase GUID")
     if kind == "account" and not re.fullmatch(r"\d{12}", name):
         raise ValueError("an AWS account is 12 digits")
     if kind == "product" and not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", name):
@@ -89,9 +94,9 @@ def scope_of(header: str, kinds: tuple[str, ...], products: list[str], env=None)
             for pid in products:
                 if hmac.compare_digest(got, derive(secret, "product", pid)):
                     return Scope("product", pid)
-    if "account" in kinds:
-        return Scope("account?", got)
-    return Scope("project?", got) if "project" in kinds else None
+    # A token for an account, a subscription or a project: checked once the event names it.
+    kind = next((k for k in ("account", "subscription", "project") if k in kinds), "")
+    return Scope(f"{kind}?", got) if kind else None
 
 
 def account_scope(candidate: Scope, account: str, env=None) -> Scope | None:
@@ -117,4 +122,18 @@ def project_scope(candidate: Scope, project: str, env=None) -> Scope | None:
         return None
     if any(hmac.compare_digest(candidate.name, derive(s, "project", project)) for s in values(NAME, env)):
         return Scope("project", project)
+    return None
+
+
+def subscription_scope(candidate: Scope, subscription: str, env=None) -> Scope | None:
+    """A subscription token checked against the Azure subscription the event comes from."""
+    from ..secret_ring import values
+
+    if candidate.kind != "subscription?":
+        return candidate
+    subscription = (subscription or "").lower()
+    if not SUBSCRIPTION_ID.fullmatch(subscription):
+        return None
+    if any(hmac.compare_digest(candidate.name, derive(s, "subscription", subscription)) for s in values(NAME, env)):
+        return Scope("subscription", subscription)
     return None
