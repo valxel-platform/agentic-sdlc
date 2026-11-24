@@ -1,6 +1,6 @@
 # Running Valxel
 
-For whoever installs and runs the tool: sign-in and who can decide, workspaces and connections, tenant isolation, the audit trail, the security model and supply chain, models, the modes and replacing the stubs. Installing on a cluster or a VM: see the install guide and ADR 0007.
+For whoever installs and runs the tool: sign-in and who can decide, workspaces and connections, tenant isolation, the audit trail, the security model and supply chain, models, the modes and connecting the integrations. Installing on a cluster or a VM: see the install guide and ADR 0007.
 
 Back to the [README](../README.md).
 
@@ -12,7 +12,7 @@ Back to the [README](../README.md).
 - [Supply chain: what goes into a build, and what may run](#supply-chain-what-goes-into-a-build-and-what-may-run)
 - [Models: more than one vendor](#models-more-than-one-vendor)
 - [Modes](#modes)
-- [Replacing the stubs](#replacing-the-stubs)
+- [Connecting the integrations](#connecting-the-integrations)
 - [Where customer code or secrets may be kept](code-and-secrets.md)
 - [Self-hosted: install and upgrade](self-hosted.md), [releases and support](releases.md), [security packet](security-packet.md)
 
@@ -557,8 +557,8 @@ layers, its JSON reply, its caps) is the same whichever vendor runs it.
 
 ## Modes
 
-- **stub** (default): `StubProvider` returns each phase's deterministic output and simulates prompt
-  caching (exact-prefix match at breakpoints, TTL refreshed on hits, isolated per workspace). Use
+- **offline** (`VALXEL_MODE=stub`, the default): each phase returns deterministic output and the
+  gateway simulates prompt caching (exact-prefix match at breakpoints, TTL refreshed on hits, isolated per workspace). Use
   `simulate_faults` on intake, for example `{"spec": 1, "build": 1}`, to exercise loops and
   escalations.
 - **live**: `pip install -e ".[live]"`, then set `VALXEL_MODE=live` and `ANTHROPIC_API_KEY`. Roles
@@ -612,14 +612,17 @@ layers, its JSON reply, its caps) is the same whichever vendor runs it.
   with a warning naming them. What runs but can't be checked (a shared library that declares no
   package) is logged as a warning. `/api/healthz` reports `strict` (`valxel_sdlc/strict.py`).
 
-## Replacing the stubs
+## Connecting the integrations
 
-| Stub | Replace with | Interface |
-| --- | --- | --- |
-| `InMemoryCatalog` (no `DATABASE_URL` only) | `PostgresCatalog` with a database; a mirror to the Backstage catalog in the OpenChoreo portal is still open | `integrations/catalog.py` |
-| `StubPackageRegistry` (stub delivery only) | Release tags on GitHub; packages checked in GitHub Packages | `integrations/packages.py` |
-| `StubFlags` (stub delivery only) | Each product's Flipt (`tools.flags` in product.yaml) | `integrations/flags.py` |
-| Phase templates | Real agent output in live mode; keep the section structure the checks read | `agents/templates.py` |
-| Build tasks | Coder agents in sandboxed containers with a checkout of one repo each | `runtime/claude_code.py` |
+Each integration is configuration. With its settings in place the tool uses the real system;
+without them it keeps working offline, which strict mode refuses in production.
+
+| Integration | Live, when configured | Offline | Interface |
+| --- | --- | --- | --- |
+| Product catalog | `PostgresCatalog` with `DATABASE_URL`; a mirror to the Backstage catalog in the OpenChoreo portal is still open | In memory | `integrations/catalog.py` |
+| Packages | Release tags on GitHub; packages checked in GitHub Packages (`VALXEL_DELIVERY=live`) | In memory | `integrations/packages.py` |
+| Feature flags | Each product's Flipt (`tools.flags` in product.yaml, `VALXEL_DELIVERY=live`) | In memory | `integrations/flags.py` |
+| Phase documents | Agents in live mode; their output keeps the section structure the checks read | Deterministic templates | `agents/templates.py` |
+| Build tasks | Coder agents in sandboxed containers, each with a checkout of one repo | Deterministic change notes | `runtime/claude_code.py` |
 
 Have compliance counsel review the regulatory constitution articles.

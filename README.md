@@ -6,10 +6,12 @@ Valxel Agentic SDLC is an agentic software development lifecycle built on LangGr
 the Product, Design and Engineering plugin skills take a feature from idea to production. Humans
 decide at six gates, and an escalation path takes over a phase when agents are stuck.
 
-This release wires the **whole pipeline end to end with stub agents**: all eight phases, all six
-gates, evaluator loops, escalations, the model gateway, the usage ledger and product
-constitutions. It runs offline and deterministically. Each stub sits behind an interface you
-replace with the real integration (see [Replacing the stubs](docs/operators.md#replacing-the-stubs)).
+The **whole pipeline runs end to end**: all eight phases, all six gates, evaluator loops,
+escalations, the model gateway, the usage ledger and product constitutions. Every integration
+(models, GitHub, OpenChoreo, feature flags, work tracking, paging, AWS, Azure and Google Cloud)
+sits behind an interface, and which system it reaches is configuration: point it at the real
+service, or run the same pipeline offline and deterministically for evaluation and tests (see
+[Modes](docs/operators.md#modes) and [Connecting the integrations](docs/operators.md#connecting-the-integrations)).
 
 **[Architecture](docs/architecture.md)**: how the parts fit together, how a feature and an
 incident move through the tool, and the design rules.
@@ -75,7 +77,7 @@ VALXEL_AUTH=dev VALXEL_SESSION_SECRET=$(openssl rand -hex 32) \
 ```
 
 For frontend work, run the API as above and `cd web && npm run dev`. Vite serves the app on
-port 5173 and proxies `/api` to port 8080. To fill a fresh stub-mode server with features at different stages, run
+port 5173 and proxies `/api` to port 8080. To fill a fresh offline-mode server with features at different stages, run
 `python web/scripts/seed.py` (it signs in as `demo` through development sign-in).
 
 `valxel demo` runs one feature through every phase, auto-approving gates. `--fault spec=1` makes

@@ -7,7 +7,8 @@ part; [How the design maps to code](contributors.md#how-the-design-maps-to-code)
 The tool is one Python service with one Postgres database. Agents do the work, people decide at
 gates, and each product's own governance repo sets the rules the tool must follow. Everything
 outside the dashed frame below belongs to the products or to third parties, and the tool reaches each
-through an interface with an offline stub, so the whole pipeline runs deterministically in tests.
+through an interface, configured per installation: the real system, or an offline mode in which the
+whole pipeline runs deterministically for evaluation and tests.
 
 ![Valxel SDLC: people, production signals and GitHub webhooks enter its API; the engine runs the roadmap, feature pipeline and incident workflows, which use agents through the model gateway and act under the production policy through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, Jira or OpenProject, Lucid or draw.io, AWS and the Backstage catalog. It reads governance pinned per feature and deploys products, which send signals back.](architecture.svg)
 
@@ -98,8 +99,9 @@ in a layer and `tests/test_seams.py` fails on any import that points upward or a
   release, when the policy allows it and the analysis agrees.
 - **Threads survive restarts.** LangGraph checkpoints every step in Postgres, so waits on people,
   CI and deploys resume after a restart.
-- **Every integration is an interface.** Stub mode runs offline and deterministically; live mode
-  swaps in Claude Code, the Claude API and the real systems one interface at a time.
+- **Every integration is an interface.** Configuration picks what each one reaches: Claude Code,
+  the Claude API and the real systems in live mode, one interface at a time, or the offline mode,
+  deterministic for evaluation and tests.
 
 ## Keeping this current
 

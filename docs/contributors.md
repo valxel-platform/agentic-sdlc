@@ -180,7 +180,7 @@ The pipeline reads agents' work by machine, so the shapes are fixed and every re
 
 - **Format contracts.** Each phase's agent is told exactly which sections and bullet forms its
   document needs (`agents/formats.py`): the ones the deterministic checks and parsers read.
-  Everything else is free prose. A test keeps each contract in step with the stub documents,
+  Everything else is free prose. A test keeps each contract in step with the offline mode's documents,
   which pass the checks.
 - **Replies in a fixed shape.** The critic, the reviewer and the coder answer in JSON with a fixed
   schema (`agents/structured.py`). Claude Code enforces it as structured output, and every reply
@@ -331,7 +331,7 @@ src/valxel_sdlc/
   governance/      sources (local, GitHub), GitHub App tokens, manifest validation, pinned loader
   graph/           pipeline.py wires the graph; routing, briefs, gates, provision, infra, merge_train,
                    delivery and rollout hold its nodes; phase.py the phase subgraphs
-  agents/          roster, prompt-layer builder, stub templates, section parsers (parse.py: tolerant of
+  agents/          roster, prompt-layer builder, offline templates, section parsers (parse.py: tolerant of
                    '*', '1.', bold ids, typographic arrows and heading variants)
   evaluators/      deterministic checks, rubric critic
   gateway/         gateway, providers, prompt layers, pricing, ledger

@@ -549,7 +549,7 @@ claims, each with a confidence and a source (a web page it read, the request, an
 picks the depth: `quick` (a few searches, the default), `thorough` (more alternatives, pricing,
 market size) or `own` (no searching: their own research, put in the same form). Web search runs
 where the runtime has it (Claude Code, or the Claude API's web search tool at $10 per 1,000
-searches, added to the ledger); elsewhere and in stub mode the note says nothing was searched.
+searches, added to the ledger); elsewhere and in offline mode the note says nothing was searched.
 Searches go to a search engine no BAA covers, so a PHI product's attachments stay out of a research
 call that searches. The brief then has `## Evidence` (every claim cites the note: `(E1, E3)`) and
 `## Assumptions` (`- A1: We believe ...; test: ...`); the checks and the critic hold it to both,
@@ -562,7 +562,7 @@ The product council decides twice: on the brief before any architecture is writt
 gate), then on the architecture and roadmap together (the product gate). Until the brief is
 approved every call runs as PHI, so only models under a BAA see the vision.
 
-From the command line, in stub mode by default (`--mode live` for real models):
+From the command line, in offline mode by default (`--mode live` for real models):
 
 ```bash
 valxel inception --vision vision.md --org acme-water --out out            # the brief, for the brief gate
@@ -825,7 +825,7 @@ is a commit in the product's flag repo.
 
 **Without a flag service** a product still ships: features get no flag, a launch-group member
 waits after staging until its launch is approved (like a train), and incidents roll back instead.
-With stub delivery, products without Flipt get in-memory flags so the demo works end to end.
+With offline delivery, products without Flipt get in-memory flags so the demo works end to end.
 
 ## Production issues: incidents, hotfixes and intent changes
 
@@ -902,7 +902,7 @@ neither PHI nor payment data: alert titles can quote exception messages, and Pag
 those products' data boundary. Sends go out in order on a background thread; throttling, server
 errors and network failures are retried for about two minutes. The incident page shows what was
 sent, and says so plainly when a product has no PagerDuty service or PagerDuty refused a page.
-Without `VALXEL_PAGERDUTY_ROUTING_KEYS` (stub mode) nothing is sent.
+Without `VALXEL_PAGERDUTY_ROUTING_KEYS` nothing is sent (offline).
 
 **The incident.**
 
@@ -1170,7 +1170,7 @@ runtime:
    `VALXEL_OPENCHOREO_MCP_URL` (`<api host>/mcp`), `VALXEL_OPENCHOREO_TOKEN_URL` and
    `VALXEL_OPENCHOREO_CLIENT_SECRET`.
 3. Create each product's OpenChoreo project, components and deployment pipeline to match
-   `runtime`. Try a sandbox product first: with stub agents, the change notes alone make real PRs.
+   `runtime`. Try a sandbox product first: in offline mode, the change notes alone make real PRs.
 
 The adapters match tool and argument names against OpenChoreo's published tool schemas, and
 the startup check names any missing setting.
@@ -1288,7 +1288,7 @@ quality:
     block_on: high
 ```
 
-In stub delivery mode every suite passes with sample numbers; tests inject results through
+With offline delivery every suite passes with sample numbers; tests inject results through
 `services.quality.sources["stub"].results`.
 
 ### After merge: findings on the default branch (scan upkeep)
@@ -1516,7 +1516,7 @@ group, held to its riskiest feature's bake time, and every flag widens together.
 off, or whose users fail more (only that flag is turned off), stops the launch for the release
 managers: start again, leave it as it is, or cancel it, which turns all its flags off. The
 release's record says shipped once every flag is on for everyone. Store apps keep their stores'
-staged rollout. Stub delivery compresses bake times, as it does deployments.
+staged rollout. Offline delivery compresses bake times, as it does deployments.
 
 ## Change management: every production change, and looking back
 
@@ -1928,7 +1928,7 @@ in the tracker though done here, or renamed. The G6 packet lists it; by default 
 
 Adapters resolve tool and argument names from each server's published tool schemas, so they keep
 working when a server renames a parameter. Without credentials a provider runs as an offline
-stand-in, and `/api/products` reports `mode: stub`. Unattended agents can't complete an OAuth
+stand-in, and `/api/products` reports it as offline (`mode: stub`). Unattended agents can't complete an OAuth
 consent screen, so each server needs an API key or token issued to a service account.
 
 ## Performance tests
@@ -2117,7 +2117,7 @@ lesson is proposed when:
   diff, are the evidence);
 - the same phase was sent back for the same reason on 3 features (`lessons.REPEAT_FEATURES`).
 
-The knowledge agent turns the correction into one instruction (in stub mode a fixed rule does) and
+The knowledge agent turns the correction into one instruction (in offline mode a fixed rule does) and
 the tool opens a pull request in the product's governance repo with one file per lesson:
 
 ```yaml
