@@ -87,6 +87,14 @@ capabilities:
 {{- if and $key (not (hasPrefix "projects/" $key)) -}}{{- fail (printf "%s must be a Cloud KMS key version: projects/.../cryptoKeyVersions/<n>" $what) -}}{{- end -}}
 {{- end -}}
 {{- end -}}
+{{- if eq (include "valxel.cloud" .) "azure" -}}
+{{- if not (regexMatch "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" (.Values.cloud.subscription | default "")) -}}{{- fail "cloud.subscription: the Azure subscription the tool runs in (a lowercase GUID)" -}}{{- end -}}
+{{- if not (hasPrefix "https://" (.Values.cloud.keyVault | default "")) -}}{{- fail "cloud.keyVault: the tool's Key Vault, https://<name>.vault.azure.net" -}}{{- end -}}
+{{- if eq .Values.auth.mode "cognito" -}}{{- fail "auth.mode cognito is AWS's: on Azure use oidc (profile entra, or your own provider)" -}}{{- end -}}
+{{- range $what, $key := dict "github.appKmsKeyId" .Values.github.appKmsKeyId "github.provisionerKmsKeyId" .Values.github.provisionerKmsKeyId -}}
+{{- if and $key (not (regexMatch "^https://[a-z0-9-]+\\.(vault|managedhsm)\\.azure\\.net/keys/" $key)) -}}{{- fail (printf "%s must be a Key Vault key version: https://<vault>.vault.azure.net/keys/<name>/<version>" $what) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if not (hasPrefix "https://" (required "publicUrl: the tool's address, https://..." .Values.publicUrl)) -}}
 {{- fail "publicUrl must be https://: the tool is served over TLS only" -}}
 {{- end -}}
@@ -109,12 +117,14 @@ capabilities:
 {{- define "valxel.cloud" -}}{{ (.Values.cloud | default dict).provider | default "aws" }}{{- end -}}
 {{- define "valxel.cloudRegion" -}}{{ (.Values.cloud | default dict).region | default .Values.awsRegion | default "" }}{{- end -}}
 
-{{/* A bucket by name: s3://name or gs://name accepted, and checked against the cloud. */}}
+{{/* A bucket by name: s3://name, gs://name or an Azure container's URL accepted, and checked against the cloud. */}}
 {{- define "valxel.bucket" -}}
 {{- $v := .value -}}
 {{- $cloud := include "valxel.cloud" .root -}}
 {{- if hasPrefix "s3://" $v -}}{{- if ne $cloud "aws" -}}{{- fail (printf "%s is an S3 bucket, but cloud.provider is %s" .what $cloud) -}}{{- end -}}{{- $v = trimPrefix "s3://" $v -}}
 {{- else if hasPrefix "gs://" $v -}}{{- if ne $cloud "gcp" -}}{{- fail (printf "%s is a Cloud Storage bucket, but cloud.provider is %s" .what $cloud) -}}{{- end -}}{{- $v = trimPrefix "gs://" $v -}}
+{{- else if regexMatch "^https://[a-z0-9]+\\.blob\\.core\\.windows\\.net/" $v -}}{{- if ne $cloud "azure" -}}{{- fail (printf "%s is a Blob Storage container, but cloud.provider is %s" .what $cloud) -}}{{- end -}}
+{{- else if eq $cloud "azure" -}}{{- fail (printf "%s is a Blob Storage container on Azure: https://<account>.blob.core.windows.net/<container>" .what) -}}
 {{- end -}}
 {{- $v | trimSuffix "/" -}}
 {{- end -}}

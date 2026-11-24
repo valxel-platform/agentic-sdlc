@@ -1891,6 +1891,15 @@ export const api = {
       project,
       mode,
     }),
+  azureLaunch: (ws: string, mode: string, region: string) =>
+    request<{ url: string; command: string; mode: string }>(
+      "GET",
+      `/workspaces/${encodeURIComponent(ws)}/connections/azure/launch?mode=${mode}&region=${encodeURIComponent(region)}`,
+    ),
+  azureCheck: (
+    ws: string,
+    body: { subscription: string; deploy_client_id: string; agents_client_id: string; mode: string },
+  ) => request<Connection>("POST", `/workspaces/${encodeURIComponent(ws)}/connections/azure/check`, body),
   disconnect: (ws: string, tool: string, account: string) =>
     request<{ revoke: string }>(
       "DELETE",

@@ -264,8 +264,9 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         return await ingest(await within(scope, from_inspector(event)))
 
     def url_sender(request: Request, *kinds: str):
-        """Google Cloud's senders (a Cloud Monitoring webhook channel, a Pub/Sub push subscription)
-        put no Bearer header of ours on their requests: the token is in the URL (?token=), or the
+        """Google Cloud's and Azure's senders (a Cloud Monitoring webhook channel, a Pub/Sub push
+        subscription, an action group) put no Bearer header of ours on their requests: the token
+        is in the URL (?token=), or the
         password of a webhook_basicauth channel."""
         from ...ops.signal_tokens import scope_of
         from ...secret_ring import values
@@ -342,6 +343,53 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             raise HTTPException(401, "Budgets take the platform's signals token")
         reg = list(eng().services.settings.registry)
         return await ingest(from_gcp_budget(await body_json(request), reg))
+
+    def for_subscription(scope, subscription: str):
+        from ...ops.signal_tokens import subscription_scope
+
+        checked = subscription_scope(scope, subscription)
+        if checked is None:
+            raise HTTPException(401, "Bad token for this subscription")
+        return checked
+
+    @api.post("/signals/azure-monitor", status_code=202)
+    async def azure_monitor(request: Request) -> dict:
+        """Azure Monitor alerts from Valxel's alert rules (common alert schema), through an action
+        group's webhook to https://<host>/api/signals/azure-monitor?token=<the subscription's signals
+        token> (`valxel signals-token subscription <id>`). Production alerts open and resolve Valxel's."""
+        from ...ops.signals import from_azure_monitor
+
+        scope = url_sender(request, "subscription")
+        sigs = from_azure_monitor(await body_json(request))
+        if sigs:
+            scope = for_subscription(scope, sigs[0]["labels"]["subscription"])
+        return await alarm_changes(await within(scope, sigs))
+
+    @api.post("/signals/defender", status_code=202)
+    async def defender_finding(request: Request) -> dict:
+        """Defender for Cloud container image vulnerabilities, from workflow automation posting to
+        https://<host>/api/signals/defender?token=<the subscription's signals token>. High and
+        critical findings open incidents for the component, like Inspector's."""
+        from ...ops.signals import from_defender
+
+        scope = url_sender(request, "subscription")
+        sigs = from_defender(await body_json(request))
+        if sigs:
+            scope = for_subscription(scope, sigs[0]["labels"]["subscription"])
+        return await ingest(await within(scope, sigs))
+
+    @api.post("/signals/azure-budgets", status_code=202)
+    async def azure_budgets(request: Request) -> dict:
+        """Cost Management budget alerts, from an action group's webhook to
+        https://<host>/api/signals/azure-budgets?token=<VALXEL_SIGNALS_TOKEN>. Budgets take the
+        platform's token, as AWS Budgets and Cloud Billing budgets do."""
+        from ...ops.signals import from_azure_budget
+
+        scope = url_sender(request)
+        if scope.kind != "platform":
+            raise HTTPException(401, "Budgets take the platform's signals token")
+        reg = list(eng().services.settings.registry)
+        return await ingest(from_azure_budget(await body_json(request), reg))
 
     def for_account(scope, event: dict):
         from ...ops.signal_tokens import account_scope

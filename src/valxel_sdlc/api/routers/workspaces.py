@@ -14,7 +14,8 @@ from ...web.auth import (
     User,
 )
 from ..context import CONNECT_COOKIE
-from ..models import WorkspaceIn, PlanIn, MemberIn, MemberUpdate, GroupIn, GroupMembers, AwsCheckIn, GcpCheckIn, GatesIn
+from ..models import (WorkspaceIn, PlanIn, MemberIn, MemberUpdate, GroupIn, GroupMembers, AwsCheckIn, GcpCheckIn,
+                      AzureCheckIn, GatesIn)
 
 
 log = logging.getLogger(__name__)
@@ -336,6 +337,34 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         mode = body.mode or (wsx().get(workspace) or {}).get("plan", "lite")
         try:
             return conns().gcp_check(workspace, project=body.project, mode=mode, actor=user.login)
+        except ConnectionError_ as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @api.get("/workspaces/{workspace}/connections/azure/launch")
+    def azure_launch(workspace: str, mode: str = "", region: str = "eastus",
+                     user: User = Depends(current_user)) -> dict:
+        """Azure Cloud Shell, and the command that deploys the connect template for this workspace."""
+        from ...connections import ConnectionError_
+
+        admin_of(user, workspace)
+        mode = mode or (wsx().get(workspace) or {}).get("plan", "lite")
+        try:
+            return {**conns().azure_launch(workspace, mode=mode, region=region, actor=user.login), "mode": mode}
+        except ConnectionError_ as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/workspaces/{workspace}/connections/azure/check")
+    def azure_check(workspace: str, body: AzureCheckIn, user: User = Depends(current_user)) -> dict:
+        """After the template ran: Valxel signs in as its identities; the subscription is connected when both do."""
+        from ...connections import ConnectionError_
+
+        admin_of(user, workspace)
+        mode = body.mode or (wsx().get(workspace) or {}).get("plan", "lite")
+        try:
+            return conns().azure_check(workspace, subscription=body.subscription,
+                                       deploy_client_id=body.deploy_client_id,
+                                       agents_client_id=body.agents_client_id, tenant=body.tenant,
+                                       mode=mode, actor=user.login)
         except ConnectionError_ as exc:
             raise HTTPException(422, str(exc)) from exc
 

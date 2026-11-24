@@ -321,6 +321,10 @@ class OIDCProvider:
                               "client_id": self.client_id, "code_verifier": verifier})
         claims = self.verify(tokens.get("id_token", ""), nonce)
         email = str(claims.get("email") or "").strip().lower()
+        if not email and self.email_verified == "issuer":
+            # Entra ID sends `email` only when the app asks for it as an optional claim; the user's
+            # sign-in name (UPN) is the tenant's own, which the issuer vouches for.
+            email = str(claims.get("preferred_username") or "").strip().lower()
         verified = str(claims.get("email_verified")).lower() == "true" or self.email_verified == "issuer"
         if not email or "@" not in email or not verified:
             raise SignInError("Your email address isn't verified, so it can't sign you in")

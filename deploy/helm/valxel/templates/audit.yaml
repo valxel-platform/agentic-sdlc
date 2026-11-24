@@ -123,6 +123,9 @@ spec:
       labels:
         {{- include "valxel.labels" . | nindent 8 }}
         app: audit-sink
+        {{- if eq (include "valxel.cloud" .) "azure" }}
+        azure.workload.identity/use: "true"
+        {{- end }}
     spec:
       serviceAccountName: {{ $sink }}
       {{- with .Values.imagePullSecrets }}
@@ -159,8 +162,8 @@ spec:
               value: audit-sink
             - name: AUDIT_SINK_ARCHIVE_BUCKET
               value: {{ include "valxel.bucket" (dict "root" . "what" "archives.auditArchiveBucket" "value" (required "archives.auditArchiveBucket: a locked bucket for the audit sink's locked copy" .Values.archives.auditArchiveBucket)) | quote }}
-            - name: AUDIT_SINK_ARCHIVE_PROVIDER   # s3 or gcs (ss-audit-sink)
-              value: {{ ternary "gcs" "s3" (eq (include "valxel.cloud" .) "gcp") | quote }}
+            - name: AUDIT_SINK_ARCHIVE_PROVIDER   # s3, gcs or azure (ss-audit-sink)
+              value: {{ get (dict "aws" "s3" "gcp" "gcs" "azure" "azure") (include "valxel.cloud" .) | quote }}
             - name: AUDIT_SINK_ARCHIVE_REGION
               value: {{ include "valxel.cloudRegion" . | quote }}
             - name: AUDIT_SINK_ARCHIVE_RETENTION_DAYS   # must match the bucket's own retention

@@ -1,0 +1,18 @@
+{
+  "properties": {
+    "nextLink": null,
+    "columns": [
+      {"name": "Cost", "type": "Number"},
+      {"name": "UsageDate", "type": "Number"},
+      {"name": "ServiceName", "type": "String"},
+      {"name": "TagKey", "type": "String"},
+      {"name": "TagValue", "type": "String"},
+      {"name": "Currency", "type": "String"}
+    ],
+    "rows": [
+      [12.5, 20261123, "Azure Cosmos DB", "valxel:feature", "AG-FEAT-7", "USD"],
+      [3.25, 20261123, "Service Bus", "valxel:feature", "AG-FEAT-7", "USD"],
+      [7.0, 20261123, "Storage", "", "", "USD"]
+    ]
+  }
+}

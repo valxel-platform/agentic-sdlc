@@ -4,6 +4,8 @@
 
     gcp    Google Secret Manager, the same names with `__` for `/` (valxel_sdlc.cloud.gcp.secrets),
            in VALXEL_GCP_PROJECT; the newest enabled version is current, the one before it previous.
+    azure  Azure Key Vault (VALXEL_AZURE_KEY_VAULT), the same names with `--` for `/` and `-` for `_`
+           (valxel_sdlc.cloud.azure.secrets); newest enabled version current, the one before previous.
     aws    AWS Secrets Manager, read when needed and cached briefly. Each secret is
            `<prefix>/platform/<NAME>`, or `<prefix>/products/<product>/<NAME>` for a product's own
            (Flipt, ServiceNow, metrics), or `<prefix>/orgs/<org>/<NAME>`, so access policies can be
@@ -90,7 +92,7 @@ def secret_id(name: str, prefix: str = "valxel") -> str:
     return f"{prefix}/platform/{name}"
 
 
-STORES = ("env", "files", "aws", "gcp")
+STORES = ("env", "files", "aws", "gcp", "azure")
 _aws: dict[tuple[str, str], SecretStore] = {}
 
 
@@ -122,6 +124,15 @@ def store_for(env: Mapping[str, str] | None = None) -> SecretStore:
             from .cloud.gcp.secrets import GcpSecretStore
 
             _aws[key] = GcpSecretStore(prefix=key[0], project=key[1].removeprefix("gcp:"))
+        return _aws[key]
+    if kind == "azure":
+        from .cloud.azure import key_vault
+
+        key = (env.get("VALXEL_SECRET_PREFIX", "") or "valxel", key_vault(env))
+        if key not in _aws:
+            from .cloud.azure.secrets import AzureSecretStore
+
+            _aws[key] = AzureSecretStore(prefix=key[0], vault_url=key[1])
         return _aws[key]
     return EnvStore(env)
 

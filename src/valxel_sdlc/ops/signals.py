@@ -368,6 +368,125 @@ def from_scc(push: dict) -> list[dict]:
     }]
 
 
+def _subscription_of(resource_id: str) -> str:
+    """An Azure resource ID's subscription (/subscriptions/<id>/...), lowercase."""
+    parts = (resource_id or "").strip("/").split("/")
+    return parts[1].lower() if len(parts) > 1 and parts[0].lower() == "subscriptions" else ""
+
+
+AZURE_SEV = {"sev0": "sev1", "sev1": "sev2", "sev2": "sev3", "sev3": "sev4", "sev4": "sev4"}
+
+
+def from_azure_monitor(payload: dict) -> list[dict]:
+    """An Azure Monitor alert in the common alert schema, as an action group's webhook sends it (the
+    data plane's alarm-routing composition). Only Valxel's alert rules count: their description's
+    first line says whose they are, as a CloudWatch alarm's does. Fired fires, Resolved resolves."""
+    if str(payload.get("schemaId") or "") != "azureMonitorCommonAlertSchema":
+        return []
+    ess = (payload.get("data") or {}).get("essentials") or {}
+    condition = str(ess.get("monitorCondition") or "")
+    if condition not in ("Fired", "Resolved"):
+        return []
+    who, says = _valxel_line(str(ess.get("description") or ""))
+    if not who:
+        return []
+    consumers = [c for c in who.get("consumers", "").split(",") if c]
+    targets = [str(x) for x in ess.get("alertTargetIDs") or []]
+    subscription = _subscription_of(targets[0] if targets else str(ess.get("alertId") or ""))
+    rule = str(ess.get("alertRule") or "")
+    resource = who.get("resource") or (str((ess.get("configurationItems") or [rule])[0]) if rule else "")
+    alarm = who.get("alarm", "")
+    alert_id = str(ess.get("alertId") or "")
+    from urllib.parse import quote
+
+    return [{
+        "source": "azure-monitor", "category": "azure", "status": "firing" if condition == "Fired" else "resolved",
+        "product_id": who.get("product", ""), "component": consumers[0] if consumers else "",
+        "env": who.get("env") or "production",
+        "severity": _sev(who.get("severity", ""), {}, AZURE_SEV.get(str(ess.get("severity") or "").lower(), "sev3")),
+        "title": f"{resource}: {alarm.replace('-', ' ')}" if alarm else rule,
+        "detail": says.strip()[:4000],
+        "fingerprint": f"azure-monitor:{subscription}:{rule}:{','.join(sorted(targets))}",
+        "url": (f"https://portal.azure.com/#blade/Microsoft_Azure_Monitoring/AlertDetailsTemplateBlade/alertId/"
+                f"{quote(alert_id, safe='')}") if alert_id else "",
+        "at": str(ess.get("resolvedDateTime") if condition == "Resolved" else ess.get("firedDateTime") or now()),
+        "labels": {"resource": resource, "feature_id": who.get("feature", ""), "alarm": alarm,
+                   "consumers": ",".join(consumers), "subscription": subscription},
+    }]
+
+
+def from_azure_budget(payload: dict, products, at: str = "") -> list[dict]:
+    """A Cost Management budget's alert, as an action group's webhook sends it (schema "AIP Budget
+    Notification"). Budgets are named valxel-<product id>-<environment>, as on AWS."""
+    if str(payload.get("schemaId") or "") != "AIP Budget Notification":
+        return []
+    data = payload.get("data") or {}
+    name = str(data.get("BudgetName") or "")
+    if not name:
+        return []
+    product_id, env = "", ""
+    rest = name[len("valxel-"):] if name.lower().startswith("valxel-") else ""
+    for pid in sorted(products, key=len, reverse=True):
+        if rest.lower() == pid.lower() or rest.lower().startswith(pid.lower() + "-"):
+            product_id, env = pid, rest[len(pid) + 1:]
+            break
+    budget, spent = float(data.get("Budget") or 0), float(data.get("SpendingAmount") or 0)
+    threshold = float(data.get("NotificationThresholdAmount") or 0)
+    share = threshold / budget if budget else 0.0
+    over = budget and spent >= budget
+    unit = str(data.get("Unit") or "USD")
+    subscription = str(data.get("SubscriptionId") or "").lower()
+    return [{
+        "source": "azure-budgets", "category": "cost", "resolves": False, "status": "firing",
+        "product_id": product_id, "component": "", "env": env or "production",
+        "severity": "sev2" if over else "sev3",
+        "title": f"Azure budget {name}: spend above {share:.0%}",
+        "detail": f"{spent:,.2f} {unit} against a budget of {budget:,.2f} {unit} since "
+                  f"{data.get('BudgetStartDate') or 'the period began'}",
+        "fingerprint": f"azure-budgets:{subscription}:{name}:{threshold}:{data.get('BudgetStartDate', '')}",
+        "url": "", "at": at or now(),
+        "labels": {"budget": name, "subscription": subscription},
+    }]
+
+
+def from_defender(payload: dict) -> list[dict]:
+    """A Defender for Cloud container image vulnerability (a sub-assessment of the registry or
+    running-images recommendation), as workflow automation posts it: high and critical findings in
+    images that run. The image's repository name is the component's, as with Inspector and Security
+    Command Center; a healthy (fixed) finding resolves its signal."""
+    props = payload.get("properties")
+    item: dict = props if isinstance(props, dict) else payload
+    extra = item.get("additionalData") or {}
+    if "Vulnerability" not in str(extra.get("assessedResourceType") or ""):
+        return []
+    vuln = extra.get("vulnerabilityDetails") or {}
+    sev = str(vuln.get("severity") or (item.get("status") or {}).get("severity") or item.get("severity") or "").upper()
+    if sev not in ("CRITICAL", "HIGH"):
+        return []
+    art = extra.get("artifactDetails") or {}
+    repo = str(art.get("repositoryName") or extra.get("repositoryName") or "")
+    component = repo.rsplit("/", 1)[-1]
+    digest = str(art.get("digest") or extra.get("imageDigest") or "")
+    image = f"{art.get('registryHost') or extra.get('registryHost') or ''}/{repo}@{digest}".lstrip("/")
+    cves = extra.get("cve") or []
+    cve = str(vuln.get("cveId") or (cves[0].get("title") if cves and isinstance(cves[0], dict) else "")
+              or item.get("displayName") or "")
+    fixed = str((extra.get("softwareDetails") or {}).get("fixedVersion") or "")
+    healthy = str((item.get("status") or {}).get("code") or "").lower() == "healthy"
+    subscription = _subscription_of(str(payload.get("id") or item.get("resourceDetails", {}).get("id") or ""))
+    return [{
+        "source": "defender", "category": "security", "status": "resolved" if healthy else "firing",
+        "product_id": "", "component": component, "env": "production",
+        "severity": "sev2" if sev == "CRITICAL" and fixed else "sev3",
+        "title": f"{component or image}: {cve} ({sev.lower()})",
+        "detail": (str(item.get("description") or item.get("impact") or "")[:3000]
+                   + (f" Fixed in {fixed}: rebuild with it." if fixed else " No fixed version yet.")),
+        "fingerprint": f"defender:{subscription}:{image}:{cve}",
+        "url": "", "at": str(item.get("timeGenerated") or now()),
+        "labels": {"vulnerability": cve, "image": image, "subscription": subscription},
+    }]
+
+
 def resolve_product(services, signal: dict) -> tuple[str, str]:
     """(product_id, repo) for a signal: an explicit product label wins; otherwise the component is
     matched against each product's repos and OpenChoreo component names."""

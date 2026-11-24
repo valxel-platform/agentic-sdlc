@@ -1,0 +1,34 @@
+{
+  "id": "/subscriptions/1b2c3d4e-0000-4000-8000-00000000aa03/providers/Microsoft.Security/assessments/c0b7cfc6-3172-465a-b378-53c7ff2cc0d5/subAssessments/7e3c1a2b-0000-4000-8000-000000000009",
+  "name": "7e3c1a2b-0000-4000-8000-000000000009",
+  "type": "Microsoft.Security/assessments/subAssessments",
+  "properties": {
+    "id": "CVE-2026-1234",
+    "displayName": "CVE-2026-1234",
+    "status": {
+      "code": "Healthy",
+      "severity": "High"
+    },
+    "description": "A heap overflow in libexample lets a crafted request run code.",
+    "timeGenerated": "2026-11-24T05:00:00Z",
+    "resourceDetails": {
+      "id": "/repositories/agtech-field-api/images/sha256:9f0e"
+    },
+    "additionalData": {
+      "assessedResourceType": "AzureContainerRegistryVulnerability",
+      "artifactDetails": {
+        "registryHost": "acmevalxel.azurecr.io",
+        "repositoryName": "agtech/agtech-field-api",
+        "digest": "sha256:9f0e"
+      },
+      "softwareDetails": {
+        "fixedVersion": "1.4.2",
+        "packageName": "libexample"
+      },
+      "vulnerabilityDetails": {
+        "cveId": "CVE-2026-1234",
+        "severity": "Critical"
+      }
+    }
+  }
+}

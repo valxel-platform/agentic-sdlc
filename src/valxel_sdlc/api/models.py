@@ -212,6 +212,14 @@ class GcpCheckIn(BaseModel):
     mode: str = Field(default="", pattern=r"^(|lite|full)$")
 
 
+class AzureCheckIn(BaseModel):
+    subscription: str = Field(pattern=r"^[0-9a-fA-F-]{36}$")
+    deploy_client_id: str = Field(default="", pattern=r"^(|[0-9a-fA-F-]{36})$")
+    agents_client_id: str = Field(default="", pattern=r"^(|[0-9a-fA-F-]{36})$")
+    tenant: str = Field(default="", pattern=r"^(|[0-9a-fA-F-]{36})$")
+    mode: str = Field(default="", pattern=r"^(|lite|full)$")
+
+
 class GatesIn(BaseModel):
     gates: dict[str, list[str]]
 
