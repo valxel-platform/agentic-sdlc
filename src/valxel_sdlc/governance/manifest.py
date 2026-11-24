@@ -175,7 +175,7 @@ def parse_manifest(text: str, entry: RegistryEntry, limits: Limits,
             problems.append("a live lite product needs runtime.vms.non_production: the VM its environments run on")
         runtime = {"openchoreo_project": str(runtime["openchoreo_project"]), "pipeline": pipeline,
                    # Where it runs (valxel_sdlc.environments): full = its own clusters; lite = hosted on
-                   # Valxel's shared plane while built, then the customer's VM once live (valxel_sdlc.lite).
+                   # The shared non-production plane while built, then its own VMs once live (valxel_sdlc.lite).
                    "mode": mode, "phase": phase,
                    "hosted_since": str(runtime.get("hosted_since") or "") if mode == "lite" else "",
                    # A live lite product's VMs (lite.golive): Docker hosts, e.g. ssh://valxel@10.0.1.5.

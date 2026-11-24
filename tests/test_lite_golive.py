@@ -1,4 +1,4 @@
-"""Lite mode, part 4: go-live moves a hosted lite product to the customer's VM."""
+"""Lite mode, part 4: go-live moves a lite product from the shared plane to its own VMs."""
 
 from __future__ import annotations
 

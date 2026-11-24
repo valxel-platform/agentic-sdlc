@@ -1831,7 +1831,7 @@ export const api = {
   billing: (ws: string) => request<Billing>("GET", `/workspaces/${encodeURIComponent(ws)}/billing`),
   setPlan: (ws: string, plan: "lite" | "full") =>
     request<Workspace>("PUT", `/workspaces/${encodeURIComponent(ws)}/plan`, { plan }),
-  createWorkspace: (body: { id: string; name: string; plan: string }) =>
+  createWorkspace: (body: { id: string; name: string; plan?: string }) =>
     request<Workspace>("POST", "/workspaces", body),
   workspace: (ws: string) => request<WorkspaceView>("GET", `/workspaces/${encodeURIComponent(ws)}`),
   invite: (

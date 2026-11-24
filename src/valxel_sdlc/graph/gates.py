@@ -130,8 +130,8 @@ def make_gate(gate: str, services):
             if hosted(snap.product.runtime):
                 interrupt({"type": "external", "wait": "go_live", "product_id": state["product_id"],
                            "feature_id": state["feature_id"], "since": now(),
-                           "label": (f"Waiting for {state['product_id']} to go live: Valxel hosts it while it's "
-                                     "built, so it has no production until it moves to the customer's VM")})
+                           "label": (f"Waiting for {state['product_id']} to go live: while it's built it runs on the "
+                                     "shared non-production plane, so it has no production until it moves to its VMs")})
 
         limits = services.settings.limits
         history, sent_back = correction_history(state, phase), times_sent_back(state, phase)

@@ -46,7 +46,7 @@ LITE_PHASES = ("hosted", "live")
 
 
 def shared_plane() -> str:
-    """Valxel's shared non-production data plane, where lite products are hosted while built."""
+    """The shared non-production data plane, where lite products run while they are built."""
     return os.environ.get("VALXEL_SHARED_DATA_PLANE", "") or "valxel-shared-nonprod"
 
 
@@ -62,7 +62,7 @@ def default_mode() -> str:
 
 
 def hosted(runtime: dict | None) -> bool:
-    """A lite product that hasn't gone live: Valxel hosts it, and it has no production yet."""
+    """A lite product that hasn't gone live: it runs on the shared plane, with no production yet."""
     rt = runtime or {}
     return rt.get("mode") == "lite" and (rt.get("phase") or "hosted") == "hosted"
 
@@ -133,8 +133,8 @@ def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: st
 
     def clusters() -> dict:
         if mode == "lite":
-            return {"skipped": True, "why": "lite mode: hosted on Valxel's shared non-production plane until it goes "
-                                            "live on the customer's VM; no clusters of its own"}
+            return {"skipped": True, "why": "lite mode: on the shared non-production plane until it goes live on "
+                                            "its own VMs; no clusters of its own"}
         files = cluster_files(product_id, tier, template or DEFAULT_TEMPLATE, zones, awake)
         if not infra_repo:
             return {"skipped": True, "files": sorted(files),
