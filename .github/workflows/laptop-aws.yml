@@ -71,6 +71,10 @@ jobs:
         if: failure()
         run: |
           k() { kubectl --context k3d-valxel "$@"; }
+          k get pods -A | grep -v -E "Running|Completed" || true
+          k describe nodes | grep -A12 "Allocated resources" || true
+          k -n crossplane-system get events --sort-by=.lastTimestamp | tail -30 || true
+          k -n crossplane-system get pods -o wide || true
           k get resources.openchoreo.dev,resourcereleasebindings.openchoreo.dev -A -o yaml | grep -B2 -A12 "conditions:" | head -150 || true
           k get managed -A -o custom-columns='KIND:.kind,NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,WHY:.status.conditions[?(@.type=="Synced")].message' || true
           k get providers.pkg.crossplane.io,functions.pkg.crossplane.io || true
