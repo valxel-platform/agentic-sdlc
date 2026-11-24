@@ -257,7 +257,7 @@ def test_up_with_aws_starts_moto_and_installs_the_aws_catalog_on_the_cluster(tmp
     assert fetch[-2:] == [cluster.PLATFORM_RESOURCES, cluster.PLATFORM_RESOURCES_REF]
     (cmd,) = installs
     assert cmd[1].endswith("platform-resources/local/aws/install.py")
-    assert cmd[2:] == ["--context", "k3d-valxel", "--moto", "valxel-moto", "--resource-types"]  # Crossplane is there
+    assert cmd[2:] == ["--context", "k3d-valxel", "--moto", "valxel-moto", "--openchoreo"]  # Crossplane is there
 
 
 def test_up_with_aws_installs_crossplane_when_openchoreo_has_none(tmp_path, monkeypatch):
@@ -276,3 +276,16 @@ def test_up_with_aws_installs_crossplane_when_openchoreo_has_none(tmp_path, monk
 
 def test_platform_resources_is_pinned_to_a_commit():
     assert len(cluster.PLATFORM_RESOURCES_REF) == 40 and int(cluster.PLATFORM_RESOURCES_REF, 16) >= 0
+
+
+def test_up_lets_the_tools_client_use_openchoreos_api(tmp_path, monkeypatch):
+    """OpenChoreo's k3d install binds no role to the system app the laptop signs in as, and its API
+    hides the tools a caller's role doesn't allow (found by the laptop-aws workflow)."""
+    monkeypatch.setattr(laptop, "docker_gid", lambda: "0")
+    monkeypatch.setattr(cluster, "missing_tools", list)
+    laptop.init(target=tmp_path, anthropic_key="k", github_token="ghp_t")
+    kube = Kube()
+    assert cluster.up(tmp_path, run=kube, installer=lambda **kw: None) == 0
+    applied = [json.loads(i) for c, i in kube.calls if i and "ClusterAuthzRoleBinding" in i]
+    assert applied and applied[0]["spec"]["entitlement"] == {"claim": "client_id", "value": "openchoreo-system-app"}
+    assert applied[0]["spec"]["roleMappings"][0]["roleRef"]["kind"] == "ClusterAuthzRole"

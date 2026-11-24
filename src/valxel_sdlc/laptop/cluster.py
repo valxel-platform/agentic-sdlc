@@ -9,7 +9,8 @@ reaches the shared platform.
 - `up` creates the cluster with OpenChoreo's own k3d installer (pinned below, checked by hash),
   with the workflow plane for builds; gives builds read access to your products' repos (the GitHub
   token in .env, stored in the cluster's OpenBao, never on a command line); adds the names the
-  tool's repo standards use (laptop only, see `_aliases`); and points .env at it.
+  tool's repo standards use (laptop only, see `_aliases`); lets the tool's client use OpenChoreo's
+  API (TOOL_BINDING); and points .env at it.
 - `check` compares what the tool needs with what this OpenChoreo offers: the MCP tools it calls,
   and the component types and workflows config/repos.yaml names.
 - `status` and `down`.
@@ -62,7 +63,7 @@ SETTINGS = {
 # every AWS call going to moto beside it (platform-resources local/aws, valxel_sdlc.laptop.aws). The
 # commit is pinned like the installer; VALXEL_PLATFORM_RESOURCES names a checkout to use instead.
 PLATFORM_RESOURCES = "https://github.com/valxel-platform/platform-resources"
-PLATFORM_RESOURCES_REF = "3193e1b8a6e9fc71ba4e639acb0ee60e84b32639"  # platform-resources#15 (local/aws)
+PLATFORM_RESOURCES_REF = "2044eb88dd8d66affb2d3141f1544f49d9f94c03"  # platform-resources#16 (pods, agent RBAC)
 
 # Laptop-only names: the tool's repo standards build with `docker` and deploy web apps as
 # `web-app`; a fresh OpenChoreo calls these `dockerfile-builder` and `web-application`. The
@@ -117,6 +118,23 @@ def store_git_token(token: str, *, run=_run) -> None:
                           {"secretKey": "password", "remoteRef": {"key": "valxel-github-password", "property": "value"}}]},
     }
     run(_kubectl("apply", "-f", "-"), input=json.dumps(ref))
+
+
+# OpenChoreo's API shows and runs only the MCP tools the caller's role allows, and its k3d install
+# binds no role to the system app the laptop's tool signs in as: without this, the tool sees none of
+# the resource, release-binding or environment tools. Admin, as OpenChoreo's own defaults give their
+# MCP tryout client; only on this machine's cluster.
+TOOL_BINDING = {
+    "apiVersion": "openchoreo.dev/v1alpha1", "kind": "ClusterAuthzRoleBinding",
+    "metadata": {"name": "valxel-laptop-tool", "labels": {"valxel.dev/laptop": "true"}},
+    "spec": {"entitlement": {"claim": "client_id", "value": SETTINGS["VALXEL_OPENCHOREO_CLIENT_ID"]},
+             "roleMappings": [{"roleRef": {"name": "admin", "kind": "ClusterAuthzRole"}}],
+             "effect": "allow"},
+}
+
+
+def grant_tool(*, run=_run) -> None:
+    run(_kubectl("apply", "-f", "-"), input=json.dumps(TOOL_BINDING))
 
 
 def _copy(obj: dict, name: str) -> dict:
@@ -179,20 +197,22 @@ def platform_resources(target: Path, *, run=_run) -> Path:
 def with_aws(target: Path, *, run=_run, catalog=None) -> int:
     """AWS on moto for the tool and this cluster: AWS mode in .env, moto started, and the AWS catalog
     installed on this cluster's Crossplane (Crossplane too if OpenChoreo didn't bring one), with
-    OpenChoreo's resource types, so a feature's resources go OpenChoreo -> Crossplane -> moto."""
+    OpenChoreo's resource types, so a feature's resources go OpenChoreo -> Crossplane -> moto, and
+    the valxel-local-aws trait in every component type, so components' pods reach moto too."""
     from . import compose
     from .aws import MOTO_CONTAINER
     from .aws import point_env as aws_env
 
     aws_env(target, on=True)
-    if run(compose(target, "up", "-d", "--wait", "moto"), check=False).returncode:
-        print("moto didn't start: docker compose logs moto", file=sys.stderr)
+    started = run(compose(target, "up", "-d", "--wait", "moto"), check=False)
+    if started.returncode:
+        print(f"moto didn't start: {(started.stderr or started.stdout or '').strip()}", file=sys.stderr)
         return 1
     repo = platform_resources(target, run=run)
     has_crossplane = run(_kubectl("get", "deployment", "-n", "crossplane-system", "crossplane"),
                          check=False).returncode == 0
     cmd = [sys.executable, str(repo / "local" / "aws" / "install.py"), "--context", CONTEXT, "--moto", MOTO_CONTAINER,
-           "--resource-types", *([] if has_crossplane else ["--crossplane"])]
+           "--openchoreo", *([] if has_crossplane else ["--crossplane"])]
     # This interpreter and a file of the pinned (or your own) platform-resources checkout; its
     # progress goes straight to the terminal.
     return (catalog or (lambda c: subprocess.run(c, check=False).returncode))(cmd)  # noqa: S603
@@ -218,6 +238,7 @@ def up(target: Path | None = None, *, run=_run, opener=urllib.request.urlopen, i
     else:
         print("No VALXEL_GITHUB_TOKEN in .env: builds can only clone public repos.", file=sys.stderr)
     applied = aliases(run=run)
+    grant_tool(run=run)
     point_env(target, on=True)
     print(f"OpenChoreo {OPENCHOREO_VERSION} is up (console http://openchoreo.localhost:8080, "
           "admin@openchoreo.dev / Admin@123).")

@@ -1,0 +1,91 @@
+# The laptop tier's AWS on moto, end to end through OpenChoreo (tracker CP-118): on a runner, the
+# same commands a developer runs (valxel dev init, aws on, cluster up --aws), then
+# scripts/laptop_aws_e2e.py: a Resource the tool creates and binds through OpenChoreo's API becomes
+# a table in moto (OpenChoreo -> Crossplane -> moto), and a component's pod reaches moto and sees it.
+# platform-resources' own local-aws workflow checks the Crossplane half on every catalog change.
+name: laptop-aws
+
+on:
+  pull_request:
+    paths:
+      - "src/valxel_sdlc/laptop/**"
+      - "src/valxel_sdlc/integrations/openchoreo.py"
+      - "src/valxel_sdlc/cloud/aws/local.py"
+      - "scripts/laptop_aws_e2e.py"
+      - ".github/workflows/laptop-aws.yml"
+  schedule:
+    - cron: "17 9 * * 1"  # weekly: OpenChoreo, Crossplane and moto images move under us
+  workflow_dispatch:
+    inputs:
+      platform_resources_ref:
+        description: "platform-resources branch or commit to install from (default: the pinned commit)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: laptop-aws-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  K3D_VERSION: v5.8.3
+  K3D_SHA256: dbaa79a76ace7f4ca230a1ff41dc7d8a5036a8ad0309e9c54f9bf3836dbe853e  # k3d-linux-amd64, the release's checksums.txt
+  PLATFORM_RESOURCES_REF: ${{ inputs.platform_resources_ref || '' }}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Room for OpenChoreo's images
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: Install the tool and k3d
+        run: |
+          pip install --quiet -e ".[dev]"
+          curl -sSfL -o /tmp/k3d "https://github.com/k3d-io/k3d/releases/download/$K3D_VERSION/k3d-linux-amd64"
+          echo "$K3D_SHA256  /tmp/k3d" | sha256sum -c -
+          sudo install -m 0755 /tmp/k3d /usr/local/bin/k3d && k3d version
+      - name: platform-resources at a chosen ref (else the pinned commit)
+        if: env.PLATFORM_RESOURCES_REF != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: valxel-platform/platform-resources
+          ref: ${{ env.PLATFORM_RESOURCES_REF }}
+          path: platform-resources
+          persist-credentials: false
+      - name: valxel dev init, aws on, cluster up --aws
+        run: |
+          if [ -n "$PLATFORM_RESOURCES_REF" ]; then export VALXEL_PLATFORM_RESOURCES="$PWD/platform-resources"; fi
+          # No model calls here: the key only has to be there for the bundle's compose file.
+          echo "sk-ant-placeholder-not-used" | valxel dev init --anthropic-key-stdin
+          valxel dev aws on
+          valxel dev cluster up --aws
+      - name: The tool -> OpenChoreo -> Crossplane -> moto, and a pod -> moto
+        run: python scripts/laptop_aws_e2e.py
+      - name: What happened
+        if: failure()
+        run: |
+          k() { kubectl --context k3d-valxel "$@"; }
+          k get pods -A | grep -v -E "Running|Completed" || true
+          k describe nodes | grep -A12 "Allocated resources" || true
+          k -n crossplane-system get events --sort-by=.lastTimestamp | tail -30 || true
+          k -n crossplane-system get pods -o wide || true
+          k get resources.openchoreo.dev,resourcereleasebindings.openchoreo.dev -A -o yaml | grep -B2 -A12 "conditions:" | head -150 || true
+          k get managed -A -o custom-columns='KIND:.kind,NAME:.metadata.name,READY:.status.conditions[?(@.type=="Ready")].status,WHY:.status.conditions[?(@.type=="Synced")].message' || true
+          k get providers.pkg.crossplane.io,functions.pkg.crossplane.io || true
+          k get clustercomponenttypes -o yaml | grep -A4 "traits:" || true
+          k get deployments -A | grep -v kube-system || true
+          for ns in openchoreo-control-plane crossplane-system; do
+            for p in $(k -n "$ns" get pods -o name 2>/dev/null | grep -E "controller|provider-aws-dynamodb"); do
+              echo "::group::$ns/$p"; k -n "$ns" logs "$p" --tail=60 || true; echo "::endgroup::"
+            done
+          done
+          docker logs valxel-moto --tail 100 || true

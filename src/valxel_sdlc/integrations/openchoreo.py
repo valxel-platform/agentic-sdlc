@@ -367,15 +367,25 @@ def _get(d: Any, *paths: str) -> Any:
     return None
 
 
+# The keys lists come under. OpenChoreo 1.3's MCP handlers name each list for its kind
+# ({"resource_release_bindings": [...], "next_cursor": ...}); any other list of objects is taken too.
+LIST_KEYS = ("items", "data", "release_bindings", "releaseBindings", "bindings", "results",
+             "resource_release_bindings", "resources", "resource_releases", "releases", "environments",
+             "projects", "components", "workloads", "workflow_runs")
+
+
 def _list(res: Any) -> list[dict]:
     if isinstance(res, list):
         return [r for r in res if isinstance(r, dict)]
     if isinstance(res, dict):
-        for k in ("items", "data", "release_bindings", "releaseBindings", "bindings", "results"):
+        for k in LIST_KEYS:
             if isinstance(res.get(k), list):
                 return [r for r in res[k] if isinstance(r, dict)]
         if _get(res, "name", "metadata.name"):
             return [res]
+        lists = [v for v in res.values() if isinstance(v, list) and v and all(isinstance(x, dict) for x in v)]
+        if len(lists) == 1:
+            return list(lists[0])
     return []
 
 
@@ -395,6 +405,10 @@ def _condition(obj: dict, ctype: str) -> str | None:
     for c in _get(obj, "status.conditions", "conditions") or []:
         if isinstance(c, dict) and c.get("type") == ctype:
             return str(c.get("status"))
+    # OpenChoreo 1.3's list summaries carry no conditions, only `status`: "Ready", or the Ready
+    # condition's reason when it isn't.
+    if ctype == "Ready" and isinstance(obj, dict) and isinstance(obj.get("status"), str) and obj["status"]:
+        return "True" if obj["status"] == "Ready" else "False"
     return None
 
 
@@ -594,7 +608,8 @@ class OpenChoreoMcp:
         if b is None:
             return {"state": "absent"}
         ready = _condition(b, "Ready")
-        raw = str(_get(b, "status.status", "status.state", "state") or "").lower()
+        raw = str(_get(b, "status.status", "status.state", "state") or
+                  (b.get("status") if isinstance(b.get("status"), str) else "") or "").lower()
         if ready == "True" or raw in ("ready", "active", "deployed"):
             state = "ready"
         elif raw in ("failed", "error") or _condition(b, "Failed") == "True":
@@ -847,8 +862,22 @@ class OpenChoreoMcp:
         return {"name": name, "release": self._latest(res), "change": "created"}
 
     def _resource_bindings(self, name, namespace) -> list[dict]:
-        return _list(self._call(("list_resource_release_bindings",),
-                                {**self._ns(namespace), ("resource_name", "name"): name}))
+        """The resource's bindings in full. OpenChoreo 1.3 lists a summary (no conditions, no
+        outputs), so each is read again with get_resource_release_binding where the server has it."""
+        found = _list(self._call(("list_resource_release_bindings",),
+                                 {**self._ns(namespace), ("resource_name", "name"): name}))
+        if "get_resource_release_binding" not in set(self.server.tool_names()):
+            return found
+        return [self._binding_detail(b, namespace) for b in found]
+
+    def _binding_detail(self, summary: dict, namespace) -> dict:
+        if _get(summary, "status.conditions", "conditions") is not None:
+            return summary
+        try:
+            return self._call(("get_resource_release_binding",), {
+                **self._ns(namespace), ("name", "binding_name"): _get(summary, "name", "metadata.name")}) or summary
+        except McpError:
+            return summary  # the summary will do
 
     def bind_resource(self, *, name, env, size, actor, actor_type, project, namespace=None, pipeline=PIPELINE,
                       retain=False) -> dict:
@@ -904,7 +933,8 @@ class OpenChoreoMcp:
                                                                   "key": str(ref.get("key", ""))}})
             out.append({"env": self._env_of(b), "release": str(_get(b, "spec.resourceRelease", "resourceRelease") or ""),
                         "state": self._state_of(b), "binding": str(_get(b, "name", "metadata.name") or ""),
-                        "size": str(_get(b, "spec.resourceTypeEnvironmentConfigs.size") or ""), "outputs": outputs})
+                        "size": str(_get(b, "spec.resourceTypeEnvironmentConfigs.size",
+                                            "resourceTypeEnvironmentConfigs.size") or ""), "outputs": outputs})
         return out
 
     def resource_status(self, *, name, env, project, namespace=None) -> dict:
