@@ -22,6 +22,7 @@ services:
       VALXEL_OTEL_ENDPOINT: ${VALXEL_OTEL_ENDPOINT:-}   # OTLP/HTTP collector for agent session traces
       VALXEL_OTEL_HEADERS: ${VALXEL_OTEL_HEADERS:-}
       VALXEL_TRACE_URL: ${VALXEL_TRACE_URL:-}           # e.g. https://langfuse.example.com/project/valxel/traces/{trace_id}
+      VALXEL_TRACE_ENVIRONMENT: ${VALXEL_TRACE_ENVIRONMENT:-test}   # a dev install's traces are trials (ADR 0011)
       VALXEL_CONFIG_REPO: ${VALXEL_CONFIG_REPO:-}       # config PRs are evaluated against past work (valxel / evals)
       VALXEL_CANARY_CONFIG_DIR: ${VALXEL_CANARY_CONFIG_DIR:-}   # a candidate config a share of new features runs with
       VALXEL_CANARY_PERCENT: ${VALXEL_CANARY_PERCENT:-0}

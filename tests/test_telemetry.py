@@ -133,3 +133,31 @@ def test_full_content_adds_the_prompt_and_reply_for_general_lanes_only():
     TracedRuntime(Echo(), tel).run(task("phi"))
     general, phi = exporter.get_finished_spans()
     assert general.events[0].attributes["gen_ai.completion"] == "the reply" and not phi.events
+
+
+def test_traces_say_whether_they_are_real_work_or_a_test(tmp_path):
+    """ADR 0011: real work is "production" by default; replays and trials set "test", which the
+    collector sends to Langfuse's test project. Sessions carry the same value as the tool's spans."""
+    assert telemetry.load_config(tmp_path, env={}).environment == "production"
+    cfg = telemetry.load_config(tmp_path, env={"VALXEL_OTEL_ENDPOINT": "http://c:4318",
+                                               "VALXEL_TRACE_ENVIRONMENT": "Test"})
+    assert cfg.environment == "test"
+    with pytest.raises(ValueError, match="VALXEL_TRACE_ENVIRONMENT"):
+        telemetry.load_config(tmp_path, env={"VALXEL_TRACE_ENVIRONMENT": "prod; drop"})
+
+    tel = Telemetry(cfg, provider=TracerProvider(), config_version="cfg1")
+    t = task()
+    with tel.agent_span(t, "claude_code"):
+        env = tel.subprocess_env(t, "claude_code")
+    assert "deployment.environment.name=test" in env["OTEL_RESOURCE_ATTRIBUTES"]
+    assert 'environment = "test"' in tel.codex_config(t)
+
+
+def test_eval_replays_trace_as_test():
+    """Both ways of replaying past work tag their traces "test" before anything is traced."""
+    import inspect
+
+    from valxel_sdlc import cli, code_eval_runner
+
+    assert '"VALXEL_TRACE_ENVIRONMENT": "test"' in inspect.getsource(code_eval_runner)
+    assert 'os.environ["VALXEL_TRACE_ENVIRONMENT"] = "test"' in inspect.getsource(cli)

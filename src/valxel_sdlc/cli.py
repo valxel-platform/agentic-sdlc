@@ -322,6 +322,8 @@ def _eval(args: argparse.Namespace) -> int:
 
     from . import evals
 
+    # Replays aren't real work: their traces go to Langfuse's test project (ADR 0011).
+    os.environ["VALXEL_TRACE_ENVIRONMENT"] = "test"
     settings = load_settings(mode=args.mode)
     phases = tuple(args.phase or ())
     classes = tuple(args.data_class or ("general",))
