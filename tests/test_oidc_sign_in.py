@@ -221,3 +221,50 @@ def test_oidc_mode_needs_its_settings(monkeypatch):
     assert got.oidc_enabled and got.oidc_strong_acr == ("a", "b") and got.oidc_email_verified == "claim"
     with pytest.raises(ValueError, match="https"):
         OIDCProvider(issuer="http://idp.example", client_id="c", client_secret="s", redirect_uri="r")
+
+
+def test_the_google_profile_pins_the_workspace_domain(monkeypatch):
+    """ADR 0010: on Google Cloud, sign-in is Google Workspace through the google profile."""
+    monkeypatch.setenv("VALXEL_AUTH", "oidc")
+    monkeypatch.setenv("VALXEL_SESSION_SECRET", secrets.token_hex(24))
+    monkeypatch.setenv("VALXEL_PUBLIC_URL", "https://sdlc.acme.example")
+    monkeypatch.setenv("VALXEL_OIDC_CLIENT_ID", CLIENT)
+    monkeypatch.setenv("VALXEL_OIDC_CLIENT_SECRET", "shh")
+    monkeypatch.setenv("VALXEL_OIDC_PROFILE", "google")
+    with pytest.raises(RuntimeError, match="VALXEL_OIDC_HOSTED_DOMAIN"):
+        AuthConfig.from_env()
+    monkeypatch.setenv("VALXEL_OIDC_HOSTED_DOMAIN", "Acme.example")
+    got = AuthConfig.from_env()
+    assert (got.oidc_issuer, got.oidc_label, got.oidc_hosted_domain) == (
+        "https://accounts.google.com", "Sign in with Google", "acme.example")
+    monkeypatch.setenv("VALXEL_OIDC_PROFILE", "okta")
+    with pytest.raises(RuntimeError, match="google, entra"):
+        AuthConfig.from_env()
+
+
+def test_the_entra_profile_trusts_its_tenants_addresses_unless_told_otherwise():
+    cfg_ = AuthConfig(mode="oidc", secret="x" * 40, oidc_profile="entra")
+    cfg_.apply_profile()
+    assert (cfg_.oidc_email_verified, cfg_.oidc_groups_claim) == ("issuer", "groups")
+    cfg_ = AuthConfig(mode="oidc", secret="x" * 40, oidc_profile="entra", oidc_groups_claim="roles")
+    cfg_.apply_profile({"VALXEL_OIDC_GROUPS_CLAIM"})
+    assert cfg_.oidc_groups_claim == "roles"
+
+
+def test_a_hosted_domain_refuses_other_accounts():
+    fake = FakeIdP()
+    p = OIDCProvider(issuer=ISSUER, client_id=CLIENT, client_secret="shh", redirect_uri="https://x/cb", opener=fake,
+                     hosted_domain="acme.example")
+    url = p.authorize_url(state="s", nonce="n", verifier="v" * 43)
+    assert parse_qs(urlparse(url).query)["hd"] == ["acme.example"]
+
+    def identity(**claims):
+        fake.nonce, fake.challenge = "n", base64.urlsafe_b64encode(
+            hashlib.sha256(b"v" * 43).digest()).decode().rstrip("=")
+        fake.claims = claims
+        return p.identity("code", verifier="v" * 43, nonce="n")
+
+    assert identity(hd="acme.example").email == "ana@acme.example"
+    for bad in ({"hd": None}, {"hd": "evil.example"}, {"hd": "acme.example", "email": "ana@evil.example"}):
+        with pytest.raises(SignInError, match=r"acme\.example account"):
+            identity(**bad)

@@ -383,7 +383,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     if mcp_settings is not None:
         from starlette.routing import Route
 
-        verifier = mcp_api.PersonVerifier(mcp_settings["issuer"], mcp_settings["domain"], mcp_settings["client_ids"])
+        verifier = mcp_api.PersonVerifier(mcp_settings["issuer"], mcp_settings["domain"], mcp_settings["client_ids"],
+                                          kind=mcp_settings["kind"])
         mcp_server = mcp_api.build(app, ctx.signer, verifier, mcp_settings["resource"],
                                    refused=lambda why: _refused_token("mcp", why))
         mcp_app = mcp_server.streamable_http_app(streamable_http_path="/mcp", stateless_http=True, json_response=True,
@@ -397,7 +398,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
     if a2a_settings is not None:
         from . import a2a
 
-        a2a_verifier = mcp_api.PersonVerifier(a2a_settings["issuer"], a2a_settings["domain"], a2a_settings["client_ids"])
+        a2a_verifier = mcp_api.PersonVerifier(a2a_settings["issuer"], a2a_settings["domain"],
+                                              a2a_settings["client_ids"], kind=a2a_settings["kind"])
         app.router.routes[:0] = a2a.build(app, ctx.signer, a2a_verifier, auth.public_url, app.version,
                                           refused=lambda why: _refused_token("a2a", why))
 

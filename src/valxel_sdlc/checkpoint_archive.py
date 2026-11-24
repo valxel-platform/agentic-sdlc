@@ -6,7 +6,7 @@ data class is regulated (phi, payments), that history is the forensic record, so
 first: every checkpoint the thread holds, in every namespace, with its metadata and pending writes,
 serialized exactly as the checkpointer stores them, as one gzipped JSON Lines file:
 
-    s3://<VALXEL_CHECKPOINT_ARCHIVE_BUCKET>/checkpoints/<workspace>/<product>/<thread>/<UTC time>-<sha256 prefix>.jsonl.gz
+    <VALXEL_CHECKPOINT_ARCHIVE_BUCKET>/checkpoints/<workspace>/<product>/<thread>/<UTC time>-<sha256 prefix>.jsonl.gz
 
 Each file belongs to its workspace and product, three ways: its path; its tags (`workspace`,
 `product`), which the bucket's policy matches against a reader's own `valxel-workspace` tag, so a
@@ -85,10 +85,15 @@ def read(data: bytes, serde: Any) -> list[dict]:
 
 
 class Archive:
+    """Where regulated lanes' checkpoints go: an ImmutableStore (valxel_sdlc.cloud) on `bucket`."""
+
     def __init__(self, bucket: str, retention_days: int = 2190, *, s3: Any = None,
-                 clock: Any = time.time) -> None:
+                 clock: Any = time.time, store: Any = None) -> None:
+        from .cloud import immutable_store
+
         self.bucket, self.retention_days, self.clock = bucket, retention_days, clock
-        self._s3 = s3
+        # `s3` is a storage client for the installation's cloud (tests pass a fake); `store` an ImmutableStore.
+        self.store = store or immutable_store(bucket, client=s3, clock=clock)
 
     @classmethod
     def from_env(cls) -> Archive | None:
@@ -97,19 +102,10 @@ class Archive:
             return None
         return cls(bucket, int(os.environ.get("VALXEL_CHECKPOINT_ARCHIVE_RETENTION_DAYS") or 2190))
 
-    @property
-    def s3(self) -> Any:
-        if self._s3 is None:
-            import boto3
-
-            self._s3 = boto3.client("s3")
-        return self._s3
-
     def put(self, saver: Any, product_id: str, thread_id: str, workspace: str = "") -> str:
         """Archive the thread's checkpoints under its workspace and product; the object's key.
         Raises NotArchived."""
-        from datetime import UTC, datetime, timedelta
-        from urllib.parse import urlencode
+        from datetime import UTC, datetime
 
         workspace = workspace or "unassigned"
         for part in (workspace, product_id):
@@ -126,23 +122,15 @@ class Archive:
         now = datetime.fromtimestamp(self.clock(), UTC)
         key = (f"checkpoints/{workspace}/{product_id}/{thread_id}/"
                f"{now.strftime('%Y%m%dT%H%M%SZ')}-{digest[:16]}.jsonl.gz")
-        context = {"valxel:workspace": workspace, "valxel:product": product_id}
         try:
-            self.s3.put_object(
-                Bucket=self.bucket, Key=key, Body=data, ContentType="application/x-ndjson",
-                ContentEncoding="gzip", ChecksumAlgorithm="SHA256",
-                ServerSideEncryption="aws:kms",
-                # The data key carries the workspace and product: no bucket key, which would drop it.
-                SSEKMSEncryptionContext=base64.b64encode(json.dumps(context).encode()).decode(),
-                BucketKeyEnabled=False,
-                Tagging=urlencode({"workspace": workspace, "product": product_id}),
-                ObjectLockMode="COMPLIANCE",
-                ObjectLockRetainUntilDate=now + timedelta(days=self.retention_days),
-                Metadata={"sha256": digest, "checkpoints": str(n), "format": FORMAT,
-                          "workspace": workspace, "product": product_id, "thread": thread_id})
+            self.store.put(key, data, retain_days=self.retention_days, content_type="application/x-ndjson",
+                           encoding="gzip",
+                           meta={"sha256": digest, "checkpoints": str(n), "format": FORMAT,
+                                 "workspace": workspace, "product": product_id, "thread": thread_id},
+                           scope={"workspace": workspace, "product": product_id})
         except Exception as exc:
             raise NotArchived(f"upload to {self.bucket} failed: {type(exc).__name__}") from exc
-        log.info("archived %d checkpoints of %s to s3://%s/%s", n, thread_id, self.bucket, key)
+        log.info("archived %d checkpoints of %s to %s/%s", n, thread_id, getattr(self.store, "where", self.bucket), key)
         return key
 
 

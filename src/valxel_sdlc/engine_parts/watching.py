@@ -220,9 +220,9 @@ class WatchingMixin:
 
     def _audit_anchorer(self):
         if getattr(self, "_anchorer", None) is None:
-            from ..audit_anchors import Anchorer, S3Anchors
+            from ..audit_anchors import Anchorer, ObjectAnchors
 
-            self._anchorer = Anchorer(S3Anchors.from_env(), getattr(self.services, "workspaces", None),
+            self._anchorer = Anchorer(ObjectAnchors.from_env(), getattr(self.services, "workspaces", None),
                                       self.services.changes, self.services.audit)
         return self._anchorer
 

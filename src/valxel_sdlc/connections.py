@@ -177,7 +177,11 @@ class AwsConnect:
 
     def __init__(self, *, valxel_account: str, template_url: str, assume: Callable[..., dict] | None = None) -> None:
         self.valxel_account, self.template_url = valxel_account, template_url
-        self._assume = assume or _sts_assume
+        if assume is None:
+            from .cloud.aws.accounts import sts_assume
+
+            assume = sts_assume
+        self._assume: Callable[..., dict] = assume
 
     @classmethod
     def from_env(cls, env=None) -> AwsConnect | None:
@@ -214,16 +218,6 @@ def aws_reason(exc: Exception, job: str, account: str) -> str:
         return (f"Valxel can't assume the {job} role in {account}: the stack isn't there (still creating, failed or "
                 "deleted), or it was made for another workspace. Open the stack in CloudFormation to see why")
     return f"Checking the {job} role in {account} failed: {text[:200]}"
-
-
-def _sts_assume(role_arn: str, *, external_id: str, session: str) -> dict:
-    """Assume the role for 15 minutes and say which account answered."""
-    import boto3  # the 'aws' extra
-
-    creds = boto3.client("sts").assume_role(RoleArn=role_arn, RoleSessionName=session[:64], ExternalId=external_id,
-                                            DurationSeconds=900)["Credentials"]
-    return boto3.client("sts", aws_access_key_id=creds["AccessKeyId"], aws_secret_access_key=creds["SecretAccessKey"],
-                        aws_session_token=creds["SessionToken"]).get_caller_identity()
 
 
 def aws_health(conns: Connections) -> Callable[[dict], str]:

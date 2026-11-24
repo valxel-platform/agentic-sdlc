@@ -18,6 +18,9 @@ data:
   VALXEL_CLOUD: {{ include "valxel.cloud" . | quote }}
   {{- if eq (include "valxel.cloud" .) "aws" }}
   AWS_REGION: {{ include "valxel.cloudRegion" . | quote }}
+  {{- else if eq (include "valxel.cloud" .) "gcp" }}
+  VALXEL_GCP_PROJECT: {{ .Values.cloud.project | quote }}
+  GOOGLE_CLOUD_PROJECT: {{ .Values.cloud.project | quote }}
   {{- end }}
   # Sign-in.
   VALXEL_AUTH: {{ .Values.auth.mode | quote }}
@@ -83,8 +86,8 @@ data:
   VALXEL_AUDIT_TOPIC: {{ .Values.kafka.topic | quote }}
   # The password is a secret file (VALXEL_AUDIT_KAFKA_PASSWORD), never in this config.
   VALXEL_AUDIT_KAFKA_CONFIG: {{ dict "security.protocol" "SASL_SSL" "sasl.mechanisms" "SCRAM-SHA-512" "sasl.username" (include "valxel.kafkaUsername" (dict "root" . "user" "tool")) "ssl.ca.location" "/etc/audit-kafka/ca.crt" | toJson | quote }}
-  VALXEL_AUDIT_ANCHOR_BUCKET: {{ required "archives.auditAnchorBucket: an Object Lock bucket for the audit chains' heads" .Values.archives.auditAnchorBucket | quote }}
-  VALXEL_CHECKPOINT_ARCHIVE_BUCKET: {{ required "archives.checkpointBucket: an Object Lock bucket for regulated lanes' history" .Values.archives.checkpointBucket | quote }}
+  VALXEL_AUDIT_ANCHOR_BUCKET: {{ include "valxel.bucket" (dict "root" . "what" "archives.auditAnchorBucket" "value" (required "archives.auditAnchorBucket: a locked bucket for the audit chains' heads" .Values.archives.auditAnchorBucket)) | quote }}
+  VALXEL_CHECKPOINT_ARCHIVE_BUCKET: {{ include "valxel.bucket" (dict "root" . "what" "archives.checkpointBucket" "value" (required "archives.checkpointBucket: a locked bucket for regulated lanes' history" .Values.archives.checkpointBucket)) | quote }}
   VALXEL_CHECKPOINT_ARCHIVE_RETENTION_DAYS: {{ .Values.archives.checkpointRetentionDays | quote }}
   {{- with .Values.tool.governanceRepo }}
   VALXEL_GOVERNANCE_REPO: {{ . | quote }}

@@ -54,7 +54,8 @@ class MemoryImmutable:
         self.objects: dict[str, tuple[bytes, datetime]] = {}
         self._clock = clock
 
-    def put(self, key: str, data: bytes, *, retain_days: int) -> None:
+    def put(self, key: str, data: bytes, *, retain_days: int, content_type: str = "application/octet-stream",
+            encoding: str = "", meta: dict[str, str] | None = None, scope: dict[str, str] | None = None) -> None:
         if retain_days < 1:
             raise ValueError("retain_days must be at least 1")
         if key in self.objects:

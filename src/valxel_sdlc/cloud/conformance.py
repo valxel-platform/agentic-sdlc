@@ -73,8 +73,8 @@ def immutable_store(store, *, prefix: str = "conformance/") -> list[str]:
         out.append("get() must return what put() wrote")
     try:
         store.put(key, b"rewritten", retain_days=1)
-        out.append("a second put() of the same key must raise: objects are written once")
-    except Exception:  # noqa: BLE001 - any refusal will do; what matters is that it refuses
+        out.append("a second put() of the same key must raise FileExistsError: objects are written once")
+    except FileExistsError:
         if store.get(key) != b"anchored":
             out.append("a refused rewrite must leave the object as it was")
     if key not in store.keys(prefix):

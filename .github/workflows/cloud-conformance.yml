@@ -1,0 +1,69 @@
+# The cloud adapters against real clouds, nightly (ADR 0010, CP-113): tests/live/. Pull requests
+# check the adapters against fakes and the same conformance checks; this job checks the clouds
+# still behave as the fakes say.
+#
+# Google Cloud: the sandbox project trusts this repository's GitHub OIDC tokens through Workload
+# Identity Federation, so no key is stored. Repository variables (Settings, Variables):
+#   GCP_WIF_PROVIDER     projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+#   GCP_SERVICE_ACCOUNT  the conformance service account (secretmanager.admin on labelled secrets,
+#                        cloudkms.signerVerifier on the key, storage.objectAdmin on the bucket)
+#   GCP_PROJECT, GCP_CONFORMANCE_BUCKET, GCP_CONFORMANCE_KEY  (tests/live/test_gcp_conformance.py)
+# Without them the job says so and passes, so a fork stays green.
+name: cloud-conformance
+on:
+  schedule: [{ cron: "23 7 * * *" }]
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  gcp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - id: configured
+        env:
+          PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+        run: |
+          if [ -z "$PROVIDER" ]; then
+            echo "::notice::GCP_WIF_PROVIDER is not set: skipping the Google Cloud conformance run"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.configured.outputs.run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: steps.configured.outputs.run == 'true'
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - if: steps.configured.outputs.run == 'true'
+        name: Federate GitHub's OIDC token into Google credentials (no stored key)
+        env:
+          PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ vars.GCP_SERVICE_ACCOUNT }}
+        run: |
+          token_file="$RUNNER_TEMP/github-oidc-token"
+          curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=//iam.googleapis.com/$PROVIDER" | jq -r .value > "$token_file"
+          python - "$PROVIDER" "$SERVICE_ACCOUNT" "$token_file" > "$RUNNER_TEMP/gcp-credentials.json" <<'PY'
+          import json, sys
+          provider, account, token_file = sys.argv[1:4]
+          print(json.dumps({
+              "type": "external_account", "audience": f"//iam.googleapis.com/{provider}",
+              "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+              "token_url": "https://sts.googleapis.com/v1/token",
+              "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/"
+                                                   f"serviceAccounts/{account}:generateAccessToken",
+              "credential_source": {"file": token_file, "format": {"type": "text"}}}))
+          PY
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/gcp-credentials.json" >> "$GITHUB_ENV"
+      - if: steps.configured.outputs.run == 'true'
+        run: pip install -r requirements.lock && pip install -e ".[dev,gcp]"
+      - if: steps.configured.outputs.run == 'true'
+        env:
+          VALXEL_GCP_LIVE: "1"
+          VALXEL_GCP_PROJECT: ${{ vars.GCP_PROJECT }}
+          VALXEL_GCP_CONFORMANCE_BUCKET: ${{ vars.GCP_CONFORMANCE_BUCKET }}
+          VALXEL_GCP_CONFORMANCE_KEY: ${{ vars.GCP_CONFORMANCE_KEY }}
+        run: python -m pytest -q tests/live

@@ -150,55 +150,20 @@ class FileVault:
         self._file(path).unlink(missing_ok=True)
 
 
-class AwsVault:
-    """AWS Secrets Manager. Credentials come from the process's role; a deleted connection's secret
-    goes after a 7-day recovery window."""
-
-    def __init__(self, client=None, region: str = "") -> None:
-        if client is None:
-            import boto3  # the 'aws' extra
-
-            client = boto3.client("secretsmanager", **({"region_name": region} if region else {}))
-        self.client = client
-
-    @staticmethod
-    def _code(exc: Exception) -> str:
-        return (getattr(exc, "response", None) or {}).get("Error", {}).get("Code", "")
-
-    def get(self, path: str) -> dict | None:
-        try:
-            got = self.client.get_secret_value(SecretId=path)
-        except Exception as exc:
-            if self._code(exc) in ("ResourceNotFoundException", "InvalidRequestException"):
-                return None
-            raise
-        return json.loads(got.get("SecretString") or "null")
-
-    def put(self, path: str, value: dict) -> None:
-        body = json.dumps(value)
-        try:
-            self.client.put_secret_value(SecretId=path, SecretString=body)
-        except Exception as exc:
-            if self._code(exc) != "ResourceNotFoundException":
-                raise
-            self.client.create_secret(Name=path, SecretString=body,
-                                      Tags=[{"Key": "valxel:kind", "Value": "connection-token"}])
-
-    def delete(self, path: str) -> None:
-        try:
-            self.client.delete_secret(SecretId=path, RecoveryWindowInDays=7)
-        except Exception as exc:
-            if self._code(exc) != "ResourceNotFoundException":
-                raise
-
-
 def vault_for(env=None):
     from .secret_ring import store_kind
 
     env = env if env is not None else os.environ
     kind = store_kind(env)
     if kind == "aws":
+        from .cloud.aws.secrets import AwsVault
+
         return AwsVault(region=env.get("AWS_REGION", ""))
+    if kind == "gcp":
+        from .cloud.gcp import project
+        from .cloud.gcp.secrets import GcpVault
+
+        return GcpVault(project=project(env))
     if kind == "files":
         return FileVault(env.get("VALXEL_SECRETS_DIR", "") or "/run/secrets/valxel")
     log.warning("Tool connection tokens are kept in memory (VALXEL_SECRET_STORE is env): they go when Valxel restarts")
@@ -406,3 +371,12 @@ class OAuthTools:
             return ""
 
         return check
+
+
+def __getattr__(name: str):
+    """Names that moved to valxel_sdlc.cloud.aws.secrets (ADR 0010), still importable from here."""
+    if name in ("AwsVault",):
+        from .cloud.aws import secrets
+
+        return getattr(secrets, name)
+    raise AttributeError(name)

@@ -62,8 +62,9 @@ github:
 # The cloud this installation runs on (ADR 0010), and its region. One cloud per installation: the
 # products it builds use that cloud's services too. Only aws has adapters today.
 cloud:
-  provider: aws
+  provider: aws        # aws | gcp
   region: ""
+  project: ""          # gcp: the Google Cloud project the tool runs in
 # Deprecated: cloud.region. Still read when cloud.region is empty.
 awsRegion: ""
 
@@ -108,6 +109,8 @@ artifacts:
   existingClaim: ""
 
 # --- Object storage with Object Lock (compliance mode).
+# Buckets by name, or as s3://name on AWS and gs://name on Google Cloud: S3 Object Lock in compliance
+# mode, or Cloud Storage with per-object retention enabled (the tool writes each object Locked).
 archives:
   checkpointBucket: ""              # regulated lanes' checkpoint history (6 years)
   checkpointRetentionDays: 2190

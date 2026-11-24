@@ -20,7 +20,7 @@ Strict mode is on. If anything it needs is missing, the API refuses to start and
 
 ## What the customer provides
 
-- **One cloud** (`cloud.provider`, `cloud.region`; ADR 0010): the installation and the products it builds use that cloud. Only `aws` has adapters today; `awsRegion` still reads as `cloud.region`.
+- **One cloud** (`cloud.provider`, `cloud.region`; ADR 0010): the installation and the products it builds use that cloud. `aws` or `gcp` (with `cloud.project`; see the self-hosted guide's [On Google Cloud](../../../docs/self-hosted.md#on-google-cloud)). `awsRegion` still reads as `cloud.region`.
 - **Kubernetes 1.29 or later:**
   - a gVisor node pool, with a `RuntimeClass` named `gvisor` or the one set in `sessions.runtimeClassName`;
   - Agent Sandbox (`extensions.agents.x-k8s.io`);

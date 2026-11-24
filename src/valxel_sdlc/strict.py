@@ -201,8 +201,17 @@ def secrets_in_environment(env, *, live: bool = False) -> list[str]:
         return [str(exc)]
     if kind == "env":
         return ["VALXEL_SECRET_STORE is env: secrets come from environment variables, which anything that can "
-                "read the process's environment can read, and which pass to whatever it starts; use aws or "
-                "files"] if live else []
+                "read the process's environment can read, and which pass to whatever it starts; use your "
+                "cloud's secret manager (aws, gcp) or files"] if live else []
+    from .cloud import UnknownCloud, provider
+
+    try:
+        cloud = provider(env)
+    except UnknownCloud:
+        cloud = ""  # cloud.strict_problems says so
+    if kind in ("aws", "gcp") and cloud and kind != cloud:
+        return [f"VALXEL_SECRET_STORE is {kind}, but the installation runs on {cloud} (VALXEL_CLOUD): use {cloud} "
+                "or files"]
     names = in_environment(env)
     return [f"VALXEL_SECRET_STORE is {kind}, but these secrets are also in the environment: {', '.join(names)}; "
             "keep them only in the store"] if names else []
@@ -230,6 +239,15 @@ def app_key_in_kms(env) -> list[str]:
                  "import it into KMS as a sign-only key and set the key's id (docs: GitHub App key in KMS)")]
     if held:
         return [f"{n['kms']} is set, but the key is still held here too ({', '.join(held)}): remove it"]
+    from .cloud import UnknownCloud, provider
+
+    try:
+        gcp = provider(env) == "gcp"
+    except UnknownCloud:
+        return []
+    if gcp != env[n["kms"]].startswith("projects/"):
+        want = "a Cloud KMS key version (projects/.../cryptoKeyVersions/<n>)" if gcp else "an AWS KMS key id or ARN"
+        return [f"{n['kms']} must be {want} on this installation's cloud"]
     return []
 
 

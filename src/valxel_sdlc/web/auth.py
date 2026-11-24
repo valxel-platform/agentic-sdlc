@@ -174,6 +174,8 @@ class AuthConfig:
     oidc_email_verified: str = "claim"
     oidc_step_up_acr: str = ""
     oidc_strong_acr: tuple = ()
+    oidc_profile: str = ""  # google | entra: a known provider's defaults (web/identity.py OIDC_PROFILES)
+    oidc_hosted_domain: str = ""  # google: the Workspace domain whose accounts may sign in
 
     @property
     def oidc_enabled(self) -> bool:
@@ -218,7 +220,11 @@ class AuthConfig:
                   oidc_email_verified=(os.environ.get("VALXEL_OIDC_EMAIL_VERIFIED") or "claim").lower(),
                   oidc_step_up_acr=os.environ.get("VALXEL_OIDC_STEP_UP_ACR", ""),
                   oidc_strong_acr=tuple(a.strip() for a in os.environ.get("VALXEL_OIDC_STRONG_ACR", "").split(",")
-                                        if a.strip()))
+                                        if a.strip()),
+                  oidc_profile=(os.environ.get("VALXEL_OIDC_PROFILE") or "").lower(),
+                  oidc_hosted_domain=os.environ.get("VALXEL_OIDC_HOSTED_DOMAIN", "").strip().lower())
+        cfg.apply_profile({k for k in ("VALXEL_OIDC_ISSUER", "VALXEL_OIDC_LABEL", "VALXEL_OIDC_EMAIL_VERIFIED",
+                                       "VALXEL_OIDC_GROUPS_CLAIM") if os.environ.get(k)})
         if mode not in ("github", "cognito", "oidc", "dev"):
             raise RuntimeError(f"VALXEL_AUTH must be github, cognito, oidc or dev, not {mode!r}")
         # GitHub mode needs GitHub's OAuth app and may add Cognito; Cognito mode the reverse.
@@ -231,6 +237,23 @@ class AuthConfig:
             raise RuntimeError("OIDC sign-in needs VALXEL_OIDC_ISSUER, VALXEL_OIDC_CLIENT_ID and "
                                "VALXEL_OIDC_CLIENT_SECRET")
         return cfg
+
+    def apply_profile(self, set_explicitly: set[str] | frozenset[str] = frozenset()) -> None:
+        """Fill the OIDC settings a profile knows, where they weren't set (VALXEL_OIDC_PROFILE)."""
+        from .identity import OIDC_PROFILES
+
+        if not self.oidc_profile:
+            return
+        if self.oidc_profile not in OIDC_PROFILES:
+            raise RuntimeError(f"VALXEL_OIDC_PROFILE is one of {', '.join(OIDC_PROFILES)}, not {self.oidc_profile!r}")
+        fields = {"issuer": "VALXEL_OIDC_ISSUER", "label": "VALXEL_OIDC_LABEL",
+                  "email_verified": "VALXEL_OIDC_EMAIL_VERIFIED", "groups_claim": "VALXEL_OIDC_GROUPS_CLAIM"}
+        for key, value in OIDC_PROFILES[self.oidc_profile].items():
+            if fields[key] not in set_explicitly:
+                setattr(self, f"oidc_{key}", value)
+        if self.oidc_profile == "google" and not self.oidc_hosted_domain:
+            raise RuntimeError("VALXEL_OIDC_PROFILE is google: set VALXEL_OIDC_HOSTED_DOMAIN to your Google Workspace "
+                               "domain, or anyone with a Google account could sign in")
 
     def ring(self) -> Callable[[], list[str]]:
         """The session keys, current first: re-read on each use when they come from the store."""
@@ -272,7 +295,8 @@ class AuthConfig:
                             client_secret=self.oidc_client_secret, redirect_uri=self.oidc_redirect_uri,
                             label=self.oidc_label, groups_claim=self.oidc_groups_claim,
                             email_verified=self.oidc_email_verified, step_up_acr=self.oidc_step_up_acr,
-                            strong_acr=tuple(self.oidc_strong_acr), opener=opener)
+                            strong_acr=tuple(self.oidc_strong_acr), hosted_domain=self.oidc_hosted_domain,
+                            opener=opener)
 
 
 class GitHubOAuth:

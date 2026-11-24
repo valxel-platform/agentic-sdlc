@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from valxel_sdlc import secret_ring, signing, strict
+from valxel_sdlc.cloud.aws import signing as aws_signing
 from valxel_sdlc.config import ProviderConfig, ServerConfig
 from valxel_sdlc.governance.sources import GitHubAppTokenProvider
 
@@ -169,7 +170,7 @@ def test_a_pem_still_works(app_key):
 
 def test_the_signer_is_chosen_by_setting(app_key, tmp_path, monkeypatch):
     pem, _ = app_key
-    monkeypatch.setattr(signing, "KmsSigner", lambda key_id, region="": ("kms", key_id))
+    monkeypatch.setattr(aws_signing, "KmsSigner", lambda key_id, region="": ("kms", key_id))
     assert signing.github_app_signer({"VALXEL_GITHUB_APP_KMS_KEY_ID": "arn:aws:kms:k"}) == ("kms", "arn:aws:kms:k")
     (tmp_path / "VALXEL_GITHUB_APP_PRIVATE_KEY").write_text(pem)
     assert isinstance(signing.github_app_signer({"VALXEL_SECRETS_DIR": str(tmp_path)}), signing.RsaKeySigner)
