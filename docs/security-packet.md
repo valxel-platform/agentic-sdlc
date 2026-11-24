@@ -162,6 +162,7 @@ Google's services behind them:
 | Audit anchors, checkpoint archive, audit archive | S3 Object Lock, compliance mode | Cloud Storage per-object retention, Locked mode: no one can shorten it or delete an object until it ends, the project owner included |
 | Customer accounts | Roles with an external ID, 15-minute sessions | Service accounts Valxel impersonates for 15 minutes per job; each names its workspace and a fingerprint of its external ID, which Valxel checks before use |
 | Products' resources | IAM policies per component, KMS with the product key | IAM roles on each resource per component, CMEK with the product key, labels `valxel_*` |
+| Products' Postgres | RDS in private subnets, KMS, deletion protection | Cloud SQL on a private IP only (private services access), TLS required, CMEK, deletion protection; the password in a Kubernetes Secret in the component's namespace, never in the resource's status |
 | Sign-in | GitHub, Cognito, or your OIDC provider | GitHub, Google Workspace (domain pinned), or your OIDC provider |
 | Model calls | Anthropic through the gateway | Anthropic, or Claude on Vertex AI in your project through the gateway |
 

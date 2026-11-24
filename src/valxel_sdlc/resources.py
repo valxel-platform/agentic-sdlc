@@ -483,8 +483,10 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
         project, namespace = owner_target(owner)
         params = {p: (str(v).split("+") if ((t.get("parameters") or {}).get(p) or {}).get("type") == "list" else v)
                   for p, v in e["params"].items()}
+        # An existing resource keeps its type; a new one is made as the cloud's ClusterResourceType for
+        # the type, which is the type's own name unless another module provides it there.
         prior = existing.get(e["name"], "")
-        kind = prior if prior and canonical(prior, catalog) == e["type"] else e["type"]
+        kind = prior if prior and canonical(prior, catalog) == e["type"] else (t.get("resource_type") or e["type"])
         out.append({"name": e["name"], "type": kind, "project": project, "namespace": namespace,
                     "owner": owner, "stateful": bool(t.get("stateful")),
                     "parameters": {**params, "consumers": consumers,

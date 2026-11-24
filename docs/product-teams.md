@@ -1752,8 +1752,8 @@ Features that need a managed service get it from the platform's catalog (`platfo
 in sdlc-governance), by neutral type: `key-value-table`, `event-stream`, `queue`, `object-bucket`,
 `topic`, `postgres` and `cache`. Each type names the service behind it on each cloud (ADR 0010):
 on AWS DynamoDB, Kinesis, SQS, S3, SNS, and RDS PostgreSQL and ElastiCache Valkey through
-OpenChoreo's Crossplane provisioner; on Google Cloud Firestore, Pub/Sub and Cloud Storage
-(Cloud SQL and Memorystore to follow). The architect sees only the installation's cloud's services
+OpenChoreo's Crossplane provisioner; on Google Cloud Firestore, Pub/Sub, Cloud Storage and Cloud
+SQL for PostgreSQL (Memorystore to follow; Cloud SQL has no `paused` size). The architect sees only the installation's cloud's services
 and prices. The version 1 names (`dynamodb-table`, `sqs-queue`...) still read as aliases, and a
 resource made under one keeps it. Each type is an OpenChoreo ClusterResourceType backed by a
 Crossplane Composition per cloud in `valxel-platform/platform-resources`, with encryption, private
