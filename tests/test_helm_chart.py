@@ -240,3 +240,43 @@ def test_on_google_cloud_buckets_and_keys_are_googles():
 ])
 def test_on_google_cloud_it_refuses_aws_settings(extra, says):
     assert says in _render(*GCP, *extra, ok=False)
+
+
+AZURE = ("cloud.provider=azure", "cloud.region=eastus", "cloud.subscription=1b2c3d4e-0000-4000-8000-00000000aa01",
+         "cloud.keyVault=https://acme-valxel.vault.azure.net/",
+         "cloud.federationIssuer=https://eastus.oic.prod-aks.azure.com/tenant/cluster/",
+         "github.appKmsKeyId=https://acme-valxel.vault.azure.net/keys/delivery-app/0123456789abcdef0123456789abcdef",
+         "github.provisionerKmsKeyId=https://acme-valxel.vault.azure.net/keys/provisioner-app/"
+         "0123456789abcdef0123456789abcdef",
+         "archives.checkpointBucket=https://acmevalxel.blob.core.windows.net/checkpoints",
+         "archives.auditAnchorBucket=https://acmevalxel.blob.core.windows.net/anchors",
+         "archives.auditArchiveBucket=https://acmevalxel.blob.core.windows.net/audit/")
+
+
+def test_on_azure_containers_keys_and_workload_identity_are_azures():
+    """CP-401/402/404: Key Vault, Blob Storage containers by URL, AKS Workload Identity on the pods."""
+    docs = _render(*AZURE)
+    data = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "valxel-settings")["data"]
+    assert data["VALXEL_CLOUD"] == "azure" and "AWS_REGION" not in data
+    assert data["VALXEL_AZURE_KEY_VAULT"] == "https://acme-valxel.vault.azure.net"
+    assert data["VALXEL_AZURE_FEDERATION_SUBJECT"] == "system:serviceaccount:valxel:valxel"
+    assert data["VALXEL_CHECKPOINT_ARCHIVE_BUCKET"] == "https://acmevalxel.blob.core.windows.net/checkpoints"
+    sink = next(spec for name, spec in _pods(docs) if name == "valxel-audit-sink")
+    env = {e["name"]: e.get("value") for e in sink["containers"][0]["env"]}
+    assert (env["AUDIT_SINK_ARCHIVE_BUCKET"], env["AUDIT_SINK_ARCHIVE_PROVIDER"]) == (
+        "https://acmevalxel.blob.core.windows.net/audit", "azure")
+    tool = next(d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "valxel-api")
+    assert tool["spec"]["template"]["metadata"]["labels"]["azure.workload.identity/use"] == "true"
+
+
+@pytest.mark.parametrize("extra,says", [
+    (("cloud.subscription=",), "cloud.subscription"),
+    (("cloud.keyVault=",), "cloud.keyVault"),
+    (("github.appKmsKeyId=projects/p/locations/l/keyRings/r/cryptoKeys/k/cryptoKeyVersions/1",),
+     "github.appKmsKeyId must be a Key Vault key version"),
+    (("archives.auditAnchorBucket=gs://acme-anchors",), "is a Cloud Storage bucket, but cloud.provider is azure"),
+    (("archives.auditAnchorBucket=acme-anchors",), "is a Blob Storage container on Azure"),
+    (("auth.mode=cognito",), "auth.mode cognito is AWS's: on Azure"),
+])
+def test_on_azure_it_refuses_other_clouds_settings(extra, says):
+    assert says in _render(*AZURE, *extra, ok=False)

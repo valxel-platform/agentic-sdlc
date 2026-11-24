@@ -590,13 +590,24 @@ def make_connections(svc):
         oauth = OAuthTools(clients, redirect_uri=f"{public}/api/connections/oauth/callback", vault=vault_for())
     from .cloud import provider
 
-    gcp = None
+    gcp = azure = None
     if provider() == "gcp":
         from .cloud.gcp.accounts import GcpConnect
 
         gcp = GcpConnect.from_env()
-    conns = Connections(svc.workspaces, github=github, aws=AwsConnect.from_env() if gcp is None else None,
-                        notify=notify, health=health, oauth=oauth, gcp=gcp)
+    if provider() == "azure":
+        from .cloud.azure.accounts import AzureConnect
+
+        azure = AzureConnect.from_env()
+    conns = Connections(svc.workspaces, github=github,
+                        aws=AwsConnect.from_env() if provider() == "aws" else None,
+                        notify=notify, health=health, oauth=oauth, gcp=gcp, azure=azure)
+    if azure is not None:
+        from .cloud.azure.accounts import set_reach
+        from .connections import azure_health
+
+        set_reach(conns.azure_reach)  # cost and inventory reads sign in with the connection's IDs
+        conns.health_checks["azure"] = azure_health(conns)
     if conns.aws is not None:
         conns.health_checks["aws"] = aws_health(conns)
     if conns.gcp is not None:

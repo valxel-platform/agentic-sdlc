@@ -170,6 +170,22 @@ What differs: Google Cloud grants most roles to a whole project rather than to l
 resources, so give Valxel's connections projects of their own. Cost data comes from the Cloud
 Billing export, which a billing administrator turns on once.
 
+## On Azure
+
+| Control | On Azure |
+|---|---|
+| Agent sessions | AKS Pod Sandboxing (Kata Containers, its own kernel per pod), Kubernetes NetworkPolicy; sessions reach only the egress proxy and the gateway |
+| Tool identity | AKS Workload Identity: no secrets or certificates |
+| GitHub App keys | Key Vault RSA-HSM keys, imported, sign-only, not exportable |
+| Secrets | Key Vault (current and previous version), soft delete and purge protection on |
+| Audit anchors, checkpoint archive, audit archive | Blob Storage version-level immutability, Locked: no one can shorten it or delete a blob until it ends, the subscription owner included |
+| Customer subscriptions | Two managed identities in the customer's subscription, trusting only Valxel's workload identity through federated credentials (no secret crosses); each tagged with its workspace and a fingerprint of its external ID, which Valxel checks before use |
+| Products' resources | Role assignments per component on each resource; in full mode Valxel may assign only the catalog's data roles (a constrained delegation); customer-managed keys; tags `valxel:*` |
+| Sign-in | GitHub, Entra ID (your tenant only), or your OIDC provider |
+
+As on Google Cloud, Azure scopes these roles to a subscription, not to tags: give Valxel
+subscriptions of their own. Cost data comes from Cost Management, read by the read-only identity.
+
 ## Shared responsibility
 
 | The Valxel project | The team running it |

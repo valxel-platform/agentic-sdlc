@@ -627,6 +627,25 @@ const cases: Case[] = [
     body: { project: "acme-prod", mode: "full" },
   },
   {
+    name: "azureLaunch encodes region",
+    call: () => api.azureLaunch("ws1", "full", "westeurope"),
+    method: "GET",
+    path: "/workspaces/ws1/connections/azure/launch?mode=full&region=westeurope",
+  },
+  {
+    name: "azureCheck",
+    call: () =>
+      api.azureCheck("ws1", {
+        subscription: "s",
+        deploy_client_id: "d",
+        agents_client_id: "a",
+        mode: "full",
+      }),
+    method: "POST",
+    path: "/workspaces/ws1/connections/azure/check",
+    body: { subscription: "s", deploy_client_id: "d", agents_client_id: "a", mode: "full" },
+  },
+  {
     name: "awsCheck",
     call: () => api.awsCheck("ws1", "123456789012", "full"),
     method: "POST",

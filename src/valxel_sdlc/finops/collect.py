@@ -36,7 +36,7 @@ DEFAULT_RATES = {
     "eas_build_usd": 0.0,  # Expo EAS per store build; 0 leaves store builds out
     "people_hour_usd": 0.0,  # loaded cost of an hour at a gate; 0 leaves people out
     "platform_monthly_usd": 0.0,  # OpenChoreo, observability and this tool; 0 leaves it out
-    "settle_days": {"aws": 2, "gcp": 2, "compute": 1},  # a figure is provisional until it is this old
+    "settle_days": {"aws": 2, "gcp": 2, "azure": 3, "compute": 1},  # a figure is provisional until it is this old
 }
 LOOKBACK_DAYS = 35
 
@@ -276,14 +276,14 @@ def collect_runtime(costs, product_id: str, targets: list[tuple[str, str, str, b
 
 
 # --------------------------------------------------------------------------- the cloud
-SOURCES = {"aws": "cost-explorer", "gcp": "billing-export"}
+SOURCES = {"aws": "cost-explorer", "gcp": "billing-export", "azure": "cost-management"}
 
 
 def collect_cloud(costs, product_id: str, accounts: dict[str, str], releases: dict[str, datetime | None],
                   at: datetime, r: dict, provider: str = "aws") -> list[CostRecord]:
     """The product's cloud spend per account (or project) by day, service and feature tag (or
     label). A feature's spend is build cost until it reached production, run cost after; untagged
-    spend is the product's. The category is the cloud's name (aws, gcp)."""
+    spend is the product's. The category is the cloud's name (aws, gcp, azure)."""
     daily = getattr(costs, "cloud_costs_daily", None)
     if daily is None:
         return []

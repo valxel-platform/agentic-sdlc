@@ -44,13 +44,18 @@ def resource_kubectl(name: str, namespace: str | None) -> str:
 
 
 def aws_tags_from_env():
-    """The installation's cloud inventory, when it is set up: AWS's tagging API, or Cloud Asset Inventory."""
+    """The installation's cloud inventory, when it is set up: AWS's tagging API, Cloud Asset
+    Inventory, or Azure Resource Graph."""
     from ..cloud import provider
 
     if provider() == "gcp":
         from ..cloud.gcp.inventory import from_env
 
         return from_env()
+    if provider() == "azure":
+        from ..cloud.azure.inventory import from_env as azure_inventory
+
+        return azure_inventory()
     from ..cloud.aws.inventory import AwsTags
 
     return AwsTags() if os.environ.get("VALXEL_AWS_INVENTORY_ROLE") else None
@@ -128,16 +133,19 @@ def collect(oc, snap, known: dict, *, costs=None, aws=None, at: datetime | None 
                      "state": "released", "release": a.get("version", ""), "feature_id": a.get("feature_id", ""),
                      "ids": {"stores": a.get("stores", "")}})
 
-    unmanaged, aws_note = [], ("not checked: set VALXEL_GCP_SERVICE_ACCOUNT to list labelled Google Cloud resources"
-                               if aws_cfg.get("provider") == "gcp" else
-                               "not checked: set VALXEL_AWS_INVENTORY_ROLE to list tagged AWS resources")
+    cloud = aws_cfg.get("provider") or "aws"
+    unmanaged, aws_note = [], {
+        "gcp": "not checked: set VALXEL_GCP_SERVICE_ACCOUNT to list labelled Google Cloud resources",
+        "azure": "not checked: set VALXEL_AZURE_FEDERATION_ISSUER and _SUBJECT, and connect the subscriptions, "
+                 "to list tagged Azure resources"}.get(cloud, "not checked: set VALXEL_AWS_INVENTORY_ROLE to list "
+                                                         "tagged AWS resources")
     if aws is not None and accounts:
         aws_note = "checked"
         for env, account in sorted(accounts.items()):
             try:
                 found = aws.tagged(product_id=snap.product.product_id, account=account, region=region)
             except Exception as exc:
-                problems.append(f"{'Google Cloud' if aws_cfg.get('provider') == 'gcp' else 'AWS'} {env} ({account}): "
+                problems.append(f"{ {'gcp': 'Google Cloud', 'azure': 'Azure'}.get(cloud, 'AWS')} {env} ({account}): "
                                 f"{type(exc).__name__}: {exc}")
                 aws_note = "partly checked"
                 continue

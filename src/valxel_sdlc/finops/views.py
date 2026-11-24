@@ -10,6 +10,7 @@ from .ledger import CATEGORIES, CostRecord
 # The order categories are shown in, and what each is called.
 LABELS = {"llm": "Agents (model calls)", "ci": "CI", "test": "Acceptance tests", "build": "Builds",
           "environment": "Dev and staging environments", "aws": "AWS services", "gcp": "Google Cloud services",
+          "azure": "Azure services",
           "compute": "Production compute",
           "incident": "Incident triage", "people": "People at gates", "platform": "Shared platform"}
 

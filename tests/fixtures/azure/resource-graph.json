@@ -1,0 +1,8 @@
+{
+  "totalRecords": 2,
+  "count": 2,
+  "data": [
+    {"id": "/subscriptions/1b2c3d4e-0000-4000-8000-00000000aa01/resourceGroups/vx-ag-dev/providers/Microsoft.ServiceBus/namespaces/vx-jobs-1a2b3c4d", "type": "microsoft.servicebus/namespaces", "tags": {"valxel:product": "AG", "valxel:feature": "AG-FEAT-7", "valxel:resource": "jobs"}},
+    {"id": "/subscriptions/1b2c3d4e-0000-4000-8000-00000000aa01/resourceGroups/vx-ag-dev/providers/Microsoft.Storage/storageAccounts/vxuploads1a2b", "type": "microsoft.storage/storageaccounts", "tags": {"valxel:product": "AG", "valxel:feature": "AG-FEAT-9", "valxel:resource": "uploads"}}
+  ]
+}

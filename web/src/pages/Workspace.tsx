@@ -15,6 +15,7 @@ import {
   type WorkspaceView,
 } from "../api";
 import { GATES } from "../vocab";
+import { AzureConnectForm } from "../components/AzureConnectForm";
 import { GcpConnectForm } from "../components/GcpConnectForm";
 
 // The gates a workspace's groups can approve, in pipeline order (valxel_sdlc.workspaces.GATES).
@@ -713,7 +714,7 @@ function Connections({ ws, admin }: { ws: string; admin: boolean }) {
               <h2 id={`h-c-${t.tool}`} className="section-title">
                 {t.name} <span className={`chip ${chip}`}>{label}</span>
               </h2>
-              {admin && t.available && t.tool !== "aws" && t.tool !== "gcp" && (
+              {admin && t.available && t.tool !== "aws" && t.tool !== "gcp" && t.tool !== "azure" && (
                 <button
                   className={t.status === "connected" ? "btn secondary" : "btn"}
                   onClick={() => install(t.tool)}
@@ -777,6 +778,17 @@ function Connections({ ws, admin }: { ws: string; admin: boolean }) {
             )}
             {t.tool === "gcp" && admin && t.available && (
               <GcpConnectForm
+                ws={ws}
+                onDone={(m) => {
+                  setNote(m);
+                  setErr("");
+                  load();
+                }}
+                onError={setErr}
+              />
+            )}
+            {t.tool === "azure" && admin && t.available && (
+              <AzureConnectForm
                 ws={ws}
                 onDone={(m) => {
                   setNote(m);

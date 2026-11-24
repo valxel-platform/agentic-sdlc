@@ -28,13 +28,15 @@ from datetime import datetime, timezone
 from typing import Iterable, Protocol
 
 STAGES = ("build", "run")
-CATEGORIES = ("llm", "ci", "test", "build", "environment", "aws", "gcp", "compute", "incident", "people", "platform")
+CATEGORIES = ("llm", "ci", "test", "build", "environment", "aws", "gcp", "azure", "compute", "incident", "people",
+              "platform")
 BASES = ("estimate", "metered", "billed", "allocated")
 
 # FOCUS ServiceCategory and provider for each of our categories.
 _FOCUS = {"llm": ("AI and Machine Learning", "Anthropic"), "ci": ("Developer Tools", "GitHub"),
           "test": ("Developer Tools", "GitHub"), "build": ("Developer Tools", "OpenChoreo"),
           "environment": ("Compute", "OpenChoreo"), "aws": ("", "AWS"), "gcp": ("", "Google Cloud"),
+          "azure": ("", "Microsoft Azure"),
           "compute": ("Compute", "OpenChoreo"),
           "incident": ("AI and Machine Learning", "Anthropic"), "people": ("Other", "People"),
           "platform": ("Other", "Valxel platform")}

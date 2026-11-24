@@ -65,6 +65,11 @@ TOOLS: tuple[Tool, ...] = (
          "read-only one for agents, costs and inventory",
          "terraform destroy in the connect template's folder, or delete the valxel-* service accounts",
          available=True),
+    Tool("azure", "Azure", "Go-live, in lite or full mode",
+         "Two managed identities Valxel signs in as through a federated credential (no secrets): one with roles "
+         "scoped to the mode, and a read-only one for agents, costs and inventory",
+         "Delete the valxel resource group in the subscription (its identities and their role assignments go "
+         "with it)", available=True),
     Tool("jira", "Jira", "Only if you pick Jira as the tracker",
          "Read and write issues on the Jira site you choose, as the person who connected it",
          "Remove Valxel under Connected apps in your Atlassian account, or Disconnect here", available=True),
@@ -75,6 +80,7 @@ TOOLS: tuple[Tool, ...] = (
     Tool("pagerduty", "PagerDuty", "First production release, if you use it", "Open and resolve incidents; read services",
          "Revoke Valxel under Integrations, OAuth Apps in PagerDuty, or Disconnect here", available=True),
 )
+CLOUD_TOOLS = ("aws", "gcp", "azure")
 TOOL = {t.id: t for t in TOOLS}
 OAUTH_TOOLS = ("jira", "lucid", "sentry", "pagerduty")  # valxel_sdlc.oauth_connections
 # The Apps behind each GitHub tool (valxel_sdlc.signing names their settings).
@@ -246,9 +252,10 @@ class Connections:
 
     def __init__(self, workspaces, *, github: GitHubInstalls | None = None, aws: AwsConnect | None = None, notify=None,
                  health: dict[str, Callable[[dict], str]] | None = None, clock: Callable[[], float] = time.time,
-                 oauth=None, gcp=None) -> None:
+                 oauth=None, gcp=None, azure=None) -> None:
         self.workspaces, self.github, self.aws, self.notify, self.clock = workspaces, github, aws, notify, clock
         self.gcp = gcp  # valxel_sdlc.cloud.gcp.accounts.GcpConnect, on an installation on Google Cloud
+        self.azure = azure  # valxel_sdlc.cloud.azure.accounts.AzureConnect, on an installation on Azure
         self.oauth = oauth  # valxel_sdlc.oauth_connections.OAuthTools: Jira, Lucid, Sentry, PagerDuty
         self.billing = None  # valxel_sdlc.billing.BillingProvider: going live may wait for a card
         # tool -> check(record): "" when it works, otherwise what's wrong in plain words
@@ -268,9 +275,9 @@ class Connections:
     def page(self, workspace: str) -> list[dict]:
         """Every tool, connected or not: what the connections page shows."""
         out = []
-        other = {"aws": "gcp", "gcp": "aws"}.get(self._cloud(), "")
+        cloud = self._cloud()
         for t in TOOLS:
-            if t.id == other:
+            if t.id in CLOUD_TOOLS and t.id != cloud:
                 continue  # one cloud per installation (ADR 0010): only its own is offered
             rows = self.of(workspace, t.id)
             status = ("needs_attention" if any(c["status"] == "needs_attention" for c in rows)
@@ -294,6 +301,8 @@ class Connections:
             return self.aws is not None
         if tool == "gcp":
             return self.gcp is not None
+        if tool == "azure":
+            return self.azure is not None
         if self.oauth is not None and self.oauth.available(tool):
             return True
         return tool in GITHUB_APPS and bool(self.github and self.github.apps.get(GITHUB_APPS[tool]))
@@ -460,6 +469,36 @@ class Connections:
         reach = self.gcp.check(workspace, account=project, external_id=self.external_id(workspace, actor))
         return self.record(workspace, "gcp", project, actor=actor, reach={**reach, "mode": mode})
 
+    def azure_launch(self, workspace: str, *, mode: str, region: str, actor: str) -> dict:
+        """Azure Cloud Shell, and the command that deploys the connect template there for this workspace."""
+        if self.azure is None:
+            raise ConnectionError_("Azure connections aren't set up on this Valxel")
+        self._go_live_allowed(workspace)
+        if mode not in ("lite", "full"):
+            raise ConnectionError_("Choose lite or full mode")
+        ext = self.external_id(workspace, actor)
+        out = {"url": self.azure.launch_url(workspace, external_id=ext, mode=mode, region=region),
+               "command": self.azure.command(workspace, external_id=ext, mode=mode, region=region)}
+        self.store.audit(workspace, actor, "connection.azure_template_opened", {"mode": mode, "region": region})
+        return out
+
+    def azure_check(self, workspace: str, *, subscription: str, deploy_client_id: str, agents_client_id: str,
+                    tenant: str = "", mode: str, actor: str) -> dict:
+        """Sign in as each of the template's identities, and check they were made for this workspace."""
+        if self.azure is None:
+            raise ConnectionError_("Azure connections aren't set up on this Valxel")
+        subscription = subscription.strip().lower()
+        reach = self.azure.check(workspace, account=subscription, external_id=self.external_id(workspace, actor),
+                                 deploy_client_id=deploy_client_id, agents_client_id=agents_client_id, tenant=tenant)
+        return self.record(workspace, "azure", subscription, actor=actor, reach={**reach, "mode": mode})
+
+    def azure_reach(self, subscription: str) -> dict:
+        """A connected subscription's tenant and client IDs, whichever workspace connected it."""
+        for c in self.store.list("connection"):
+            if c.get("tool") == "azure" and str(c.get("account", "")).lower() == subscription.lower():
+                return dict(c.get("reach") or {})
+        return {}
+
     # ------------------------------------------------------------------ health
     def check(self, workspace: str) -> list[dict]:
         """One cheap read per connection; a failure turns it to Needs attention and emails the
@@ -521,6 +560,24 @@ def gcp_health(conns: Connections) -> Callable[[dict], str]:
             return "Google Cloud connections aren't set up on this Valxel any more"
         try:
             conns.gcp.check(c["workspace"], account=c["account"], external_id=conns.external_id(c["workspace"]))
+        except ConnectionError_ as exc:
+            return str(exc)
+        return ""
+
+    return check
+
+
+def azure_health(conns: Connections) -> Callable[[dict], str]:
+    """The template's identities still answer for this workspace."""
+
+    def check(c: dict) -> str:
+        if conns.azure is None:
+            return "Azure connections aren't set up on this Valxel any more"
+        reach = c.get("reach") or {}
+        try:
+            conns.azure.check(c["workspace"], account=c["account"], external_id=conns.external_id(c["workspace"]),
+                              deploy_client_id=reach.get("deploy_client_id", ""),
+                              agents_client_id=reach.get("agents_client_id", ""), tenant=reach.get("tenant", ""))
         except ConnectionError_ as exc:
             return str(exc)
         return ""

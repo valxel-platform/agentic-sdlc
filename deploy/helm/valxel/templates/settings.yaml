@@ -27,6 +27,13 @@ data:
   {{- with .Values.cloud.billingDataset }}
   VALXEL_GCP_BILLING_DATASET: {{ . | quote }}
   {{- end }}
+  {{- else if eq (include "valxel.cloud" .) "azure" }}
+  VALXEL_AZURE_SUBSCRIPTION: {{ .Values.cloud.subscription | quote }}
+  VALXEL_AZURE_KEY_VAULT: {{ .Values.cloud.keyVault | trimSuffix "/" | quote }}
+  {{- with .Values.cloud.federationIssuer }}
+  VALXEL_AZURE_FEDERATION_ISSUER: {{ . | quote }}
+  VALXEL_AZURE_FEDERATION_SUBJECT: {{ printf "system:serviceaccount:%s:%s" $.Release.Namespace (include "valxel.name" $) | quote }}
+  {{- end }}
   {{- end }}
   # Sign-in.
   VALXEL_AUTH: {{ .Values.auth.mode | quote }}
