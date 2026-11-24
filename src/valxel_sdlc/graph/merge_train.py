@@ -75,10 +75,10 @@ def make_merge_train(services):
                               "run_id": run["run_id"], "url": run.get("url", "")}
         cs |= {"merged": True, "published": published, "packages": packages, "runs": runs}
         if merged and getattr(services, "evals", None) is not None:  # coder and reviewer cases: what merged
-            from .. import code_evals
+            from ..eval_case import label_merged
 
             try:
-                code_evals.label_merged(services.evals, state["feature_id"], merged,
+                label_merged(services.evals, state["feature_id"], merged,
                                         lambda repo, n: services.github.pr_files(repo=repo, number=n))
             except Exception:
                 log.warning("%s: coder and reviewer eval cases not labeled", state["feature_id"], exc_info=True)

@@ -24,6 +24,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 from ..cloud.ports import CostSource  # noqa: F401 - the port (ADR 0010), re-exported
+from .cost_plan import plan_from_g4  # noqa: F401  (the core's; re-exported)
 
 CATEGORY = "cost"
 DAYS_PER_MONTH = 30.0
@@ -31,19 +32,6 @@ DAYS_PER_MONTH = 30.0
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
-
-
-def plan_from_g4(summary: dict | None, state: dict, approvers: str) -> dict:
-    """The cost plan G4 approved: AWS services and their monthly cost per environment, and what
-    building the feature had cost when the design was approved."""
-    s = summary or {}
-    return {"approved_at": now().isoformat(), "approved_by": approvers,
-            "aws_monthly_usd": {k: float(v) for k, v in (s.get("monthly_usd") or {}).items()},
-            "resources": [{"name": r["name"], "type": r["type"], "monthly_usd": dict(r["monthly_usd"])}
-                          for r in s.get("resources") or []],
-            "accounts": dict(s.get("accounts") or {}),
-            "build_usd_at_g4": round(float(state.get("cost_usd", 0.0)), 4),
-            "token_budget_usd": state.get("token_budget_usd")}
 
 
 def released_at(state: dict) -> datetime | None:

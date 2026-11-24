@@ -30,6 +30,8 @@ from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 
+from . import session_runner
+
 VERSION = 1
 CONTEXT = "valxel / evals (code)"
 
@@ -157,3 +159,7 @@ def run_spec(spec: dict, root: Path) -> dict:
         svc.github.tokens = _ReadTokens(dict(spec.get("repo_tokens") or {}))
         out[side] = run_cases(svc, cases, budget_usd=float(spec.get("budget_usd") or 20.0))
     return out
+
+
+# A sandbox's runner runs this spec too (valxel session-runner); the core runner doesn't import this.
+session_runner.register("eval", run_spec)

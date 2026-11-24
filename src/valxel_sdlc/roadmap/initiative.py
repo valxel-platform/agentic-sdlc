@@ -83,7 +83,7 @@ def stub_draft(ctx: dict) -> str:
         "", "## Risks", "- Scope grows beyond the budget; the gate reviews the envelope",
     ]
     if ctx.get("research"):
-        from ..inception.templates import evidence_lines
+        from ..research import evidence_lines
 
         lines += evidence_lines(ctx["research"])
     if feedback:

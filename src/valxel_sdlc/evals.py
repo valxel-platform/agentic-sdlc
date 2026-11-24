@@ -68,38 +68,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
-from .eval_case import EvalCase  # in the core: delivery's agents keep cases too
+from .eval_case import (  # noqa: F401  (in the core: the seams' agents keep cases too; re-exported)
+    _DROP,
+    DOC_PHASES,
+    EvalCase,
+    case_from,
+    now,
+)
 from .secret_scrub import scrub
 
 log = logging.getLogger(__name__)
 
-DOC_PHASES = ("discovery", "spec", "design", "architecture", "plan")
 # Replayed only in a disposable runner: model-written code runs (valxel_sdlc.code_evals, coder_injection).
 CODE_PHASES = ("coder", "reviewer", "coder_injection")
 # What a replay doesn't need from the phase's context, or must not inherit from the run it came from.
-_DROP = ("feedback", "prior_findings", "simulate_faults", "budget_remaining_usd", "pilot", "deployments", "quality")
-
-
-def now() -> str:
-    return datetime.now(UTC).isoformat()
-
-
-
-def case_from(state: dict, phase: str, ctx: dict, out: dict, *, config_version: str = "") -> EvalCase:
-    """The eval case a finished document phase leaves behind."""
-    n = sum(1 for e in state.get("events") or [] if e.get("node") == phase and e.get("kind") in ("passed", "escalated"))
-    keep = json.loads(json.dumps({k: v for k, v in ctx.items() if k not in _DROP}, default=str))
-    from .agents import PHASE_SPECS
-
-    content = (out.get("draft") or {}).get("content", "")
-    # A phase without a gate (the plan) has no person's decision: the next phase takes what passed.
-    no_gate = not getattr(PHASE_SPECS[phase], "gate", None) and out.get("status") == "passed"
-    return EvalCase(id=f"{state['feature_id']}:{phase}:{n + 1}", product_id=state["product_id"],
-                    feature_id=state["feature_id"], phase=phase, data_class=ctx.get("data_class", ""),
-                    at=now(), config_version=config_version, ctx=keep,
-                    output=content, status=out.get("status", ""), critic=dict(out.get("critic") or {}),
-                    label={"decision": "no_gate", "first_time": None} if no_gate else None,
-                    reference=content if no_gate else "")
 
 
 # ---------------------------------------------------------------------------------------- stores

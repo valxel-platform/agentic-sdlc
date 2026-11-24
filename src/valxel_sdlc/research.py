@@ -276,3 +276,14 @@ def summary(r: dict | None) -> str:
     if r.get("status") == "escalated":
         line += f"; still has problems: {'; '.join(r.get('findings') or [])[:300]}"
     return line
+
+
+def evidence_lines(research: str) -> list[str]:
+    """The Evidence and Assumptions sections from a research note (none without one)."""
+    if not research:
+        return []
+    ev = [e for e in evidence(research) if e["id"]]
+    asm = [a for a in assumptions(research) if a["id"] and a["test"]]
+    return (["", "## Evidence", *[f"- {e['claim'].rstrip('.')} ({e['id']})" for e in ev],
+             "", "## Assumptions", *[f"- {a['line']}" for a in asm]])
+

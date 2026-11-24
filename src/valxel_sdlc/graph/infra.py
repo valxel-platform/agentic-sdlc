@@ -101,7 +101,7 @@ def _ensure_alert_rules(services, snap, target: dict, role: str = "") -> list[st
 
 
 def _alarms_firing(services, state: FeatureState) -> list[dict]:
-    from ..ops.alarms import for_feature
+    from ..ops.firing import for_feature
 
     try:
         return for_feature(getattr(services, "alarms", None), state)

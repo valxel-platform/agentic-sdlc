@@ -39,14 +39,14 @@ import subprocess
 import time
 from pathlib import Path
 
+# In the core (delivery keeps these cases); re-exported for the evals' readers.
+from .eval_case import CODE_PHASES as PHASES  # noqa: F401
+from .eval_case import _keep, coder_case, label_merged, reviewer_case  # noqa: F401
+
 log = logging.getLogger(__name__)
 
-PHASES = ("coder", "reviewer")
 TEST_TIMEOUT_S = int(os.environ.get("VALXEL_EVAL_TEST_TIMEOUT_S", "1200"))
 MAX_DIFF = 60_000
-# What a replay keeps of the build context: the rest is per-run state (feedback, sessions, faults).
-_DROP = ("feedback", "prior_findings", "simulate_faults", "budget_remaining_usd", "pilot", "sessions",
-         "deployments", "quality")
 
 
 class NotARunner(RuntimeError):
@@ -55,50 +55,6 @@ class NotARunner(RuntimeError):
 
 def runner_allowed(env=None) -> bool:
     return (env if env is not None else os.environ).get("VALXEL_EVAL_RUNNER", "") in ("1", "true", "yes")
-
-
-def _keep(ctx: dict) -> dict:
-    return json.loads(json.dumps({k: v for k, v in ctx.items() if k not in _DROP}, default=str))
-
-
-def coder_case(state_or_ctx: dict, task: dict, output: str, *, config_version: str = ""):
-    from .evals import EvalCase, now
-
-    ctx = state_or_ctx
-    return EvalCase(id=f"{ctx['feature_id']}:{task['id']}:coder", product_id=ctx["product_id"],
-                    feature_id=f"{ctx['feature_id']}:{task['id']}", phase="coder", data_class=ctx.get("data_class", ""),
-                    at=now(), config_version=config_version, ctx={"build": _keep(ctx), "task": dict(task)},
-                    output=output, status="passed")
-
-
-def reviewer_case(ctx: dict, task: dict, tail: str, pr_url: str, output: str, *, config_version: str = ""):
-    from .evals import EvalCase, now
-
-    return EvalCase(id=f"{ctx['feature_id']}:{task['id']}:reviewer", product_id=ctx["product_id"],
-                    feature_id=f"{ctx['feature_id']}:{task['id']}", phase="reviewer",
-                    data_class=ctx.get("data_class", ""), at=now(), config_version=config_version,
-                    ctx={"build": _keep(ctx), "task": dict(task),
-                         "tail": tail.replace(f"Review {pr_url}", "Review the change below", 1)},
-                    output=output, status="passed")
-
-
-def label_merged(store, feature_id: str, prs: dict, pr_files) -> int:
-    """Label a merged change set's coder and reviewer cases: the merge commit and the hidden tests.
-    `pr_files(repo, number)` lists a pull request's files. Returns how many tasks were labeled."""
-    from .evaluators.weakening import TEST_FILE
-
-    n = 0
-    for pr in prs.values():
-        if pr.get("state") != "merged" or not pr.get("merge_sha") or not pr.get("task_id"):
-            continue
-        files = pr_files(pr["repo"], pr["number"]) or []
-        tests = sorted(f["path"] for f in files if TEST_FILE.search(f["path"]) and f.get("status") != "removed")
-        label = {"decision": "merged", "repo": pr["repo"], "pr": pr["number"], "merge_sha": pr["merge_sha"],
-                 "tests": tests}
-        for phase in PHASES:
-            store.label(f"{feature_id}:{pr['task_id']}", phase, label)
-        n += 1
-    return n
 
 
 # --------------------------------------------------------------------------- planted bugs
@@ -252,9 +208,8 @@ def _result(case, started, before, services, **fields) -> dict:
 
 def replay_coder(services, case, *, clone=checkout, run=subprocess.run) -> dict:
     from . import sandbox
-    from .agents import PHASE_SPECS, templates
+    from .agents import PHASE_SPECS, structured, templates
     from .graph.phase import call_agent, coder_tail, feature_folder, for_task
-    from .agents import structured
 
     if not runner_allowed():
         raise NotARunner("coder cases replay only in a disposable runner (VALXEL_EVAL_RUNNER=1)")
@@ -290,8 +245,7 @@ def replay_coder(services, case, *, clone=checkout, run=subprocess.run) -> dict:
 
 def replay_reviewer(services, case, *, clone=checkout) -> dict:
     from . import sandbox
-    from .agents import structured
-    from .agents import PHASE_SPECS, untrusted
+    from .agents import PHASE_SPECS, structured, untrusted
     from .graph.phase import call_agent, for_task
 
     if not runner_allowed():

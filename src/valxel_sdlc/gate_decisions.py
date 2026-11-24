@@ -32,3 +32,9 @@ def normalize(raw, allowed: tuple[str, ...]) -> dict:
     d.setdefault("feedback", "")
     d["active_minutes"] = float(d.get("active_minutes") or 0.0)
     return d
+
+
+def lane_approvers(lane, gate: str) -> list[str]:
+    """G0 falls back to G1's approvers (product owners); a release gate uses G6's."""
+    return list(lane.approvers.get(gate) or lane.approvers.get({"g0": "g1", "release": "g6"}.get(gate, gate)) or [])
+

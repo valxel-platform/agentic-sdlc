@@ -27,10 +27,13 @@ from typing import Annotated, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from ..agent_calls import run_agent
 from ..agents import untrusted
 from ..agents.parse import section
+from ..gate_decisions import lane_approvers
+from ..gate_decisions import normalize as _decide
 from ..governance.prs import governance_pr
-from ..roadmap.graphs import _decide, event, lane_approvers, now, run_agent
+from ..graph_events import event, now
 from ..state import last, merge_dict
 from . import remediation
 from .signals import resolves, still_firing
@@ -346,15 +349,16 @@ def build_incident_graph(services, checkpointer=None):
         if store is None:
             return
         try:
-            from .. import evals
+            from ..eval_case import EvalCase
+            from ..eval_case import now as at
 
             data_class = services.snapshot(state["product_id"]).product.data_class
             if data_class != "general" and logs:
                 tail = tail.replace(logs, "(logs not kept with the eval case for this data class)")
             n = sum(1 for e in state.get("events") or [] if e.get("node") == "triage" and e.get("kind") == "triaged")
-            store.capture(evals.EvalCase(
+            store.capture(EvalCase(
                 id=f"{state['incident_id']}:triage:{n + 1}", product_id=state["product_id"],
-                feature_id=state["incident_id"], phase="triage", data_class=data_class, at=evals.now(),
+                feature_id=state["incident_id"], phase="triage", data_class=data_class, at=at(),
                 config_version=getattr(services.gateway, "config_version", ""),
                 ctx={"tail": tail, "stub": stub, "component": state.get("component", ""), "data_class": data_class},
                 output=output, status="passed"))

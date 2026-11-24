@@ -59,7 +59,7 @@ def platform(services) -> dict:
 
 def existing_context(services, product_id: str) -> str:
     """For an existing product: what it is today, its repos and the decisions already made."""
-    from ..graph.phase import design_knowledge
+    from ..knowledge import design_knowledge
 
     snap = services.snapshot(product_id)
     p = snap.product

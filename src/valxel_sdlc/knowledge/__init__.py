@@ -252,3 +252,13 @@ def design_review(hld: str, pack: dict, feature_id: str = "") -> dict:
     return {"findings": findings, "builds_on": builds_on, "supersedes": supersedes, "contracts": contracts,
             "related": related, "in_flight": in_flight, "record": {"repo": arch.get("repo"), "sha": arch.get("sha")},
             "errors": dict(pack.get("errors") or {})}
+
+
+def design_knowledge(services, snap) -> tuple[dict, str]:
+    """The existing design as data (for checks and G4) and as a prompt section (for agents)."""
+    kn = getattr(services, "knowledge", None)
+    if kn is None:
+        return {}, ""
+    pack = kn.collect(snap)
+    return pack, render(pack, int(kn.cfg.settings.get("max_chars", 12000)))
+

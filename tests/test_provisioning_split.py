@@ -114,7 +114,7 @@ def test_a_governance_repo_needs_its_inceptions_approved_product_gate():
     approved = {"gate_decisions": [{"gate": "product", "decision": "approve"}], "brief": brief}
     states = {"INC-1": approved, "INC-2": {"gate_decisions": [], "brief": brief}}
     eng = SimpleNamespace(services=None, _state=lambda tid: states.get(tid, {}))
-    import valxel_sdlc.inception.setup as setup_mod
+    import valxel_sdlc.inception.formats as setup_mod  # where the provisioning queue reads ids (the core's)
 
     real = setup_mod.ids
     setup_mod.ids = lambda b: {"product_id": "FARM", "governance_repo": "acme-farm/farm-governance"}

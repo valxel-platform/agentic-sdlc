@@ -21,6 +21,8 @@ import threading
 from datetime import UTC, datetime, timezone
 from typing import Protocol
 
+from .firing import resolves, still_firing  # noqa: F401  (the core's; re-exported)
+
 SEVERITIES = ("sev1", "sev2", "sev3", "sev4")
 _ALERT_SEV = {"critical": "sev1", "page": "sev1", "high": "sev2", "error": "sev2", "major": "sev2",
               "warning": "sev3", "warn": "sev3", "medium": "sev3", "info": "sev4", "low": "sev4", "none": "sev4"}
@@ -558,14 +560,3 @@ class PostgresSignalStore:
         return [{**dict(r["data"]), "reason": r["reason"], "received_at": r["received_at"].isoformat()} for r in rows]
 
 
-def still_firing(signals: list[dict]) -> list[dict]:
-    """The latest state of each alert or issue that is still firing. Tickets and notifications that
-    never send a resolution (resolves: false) aren't waited on."""
-    latest: dict[str, dict] = {}
-    for s in signals:
-        latest[s["fingerprint"]] = s
-    return [s for s in latest.values() if s["status"] == "firing" and resolves(s)]
-
-
-def resolves(signal: dict) -> bool:
-    return signal["source"] != "ticket" and signal.get("resolves", True) is not False

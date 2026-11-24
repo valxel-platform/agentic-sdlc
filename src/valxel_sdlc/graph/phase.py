@@ -7,7 +7,6 @@ and only refs, scores and usage flow back to the feature thread.
 
 from __future__ import annotations
 
-import dataclasses
 import json
 import logging
 import re
@@ -20,24 +19,23 @@ from langgraph.types import Send, interrupt
 
 from ..agents import PHASE_SPECS
 from ..agents import templates
-from ..agents.context import build_layers, skills_dir_of, task_texts
+from ..agents.context import task_texts
 from ..agents.parse import merge_sections, parse_affected_repos, parse_cases, parse_tasks
 from .. import budgets, diary, loops, performance, retrieval, safe_mode
-from .. import evals, lessons, telemetry
+from .. import eval_case, telemetry
 from ..config import ProductConfig
 from ..provisioning import naming_policy
 from ..template_contract import roles_with
 from ..evaluators import critique, run_checks, weakening
 from ..agents import formats, structured, untrusted
-from ..gateway import CallTags, ProviderUnavailable
+from ..agent_calls import NO_LESSON_ROLES, call_agent, handoff_text  # noqa: F401  (the core's; patched and read here)
+from ..knowledge import design_knowledge  # the core's; inception reads it too
 from ..graph_events import event, now  # the core's; kept importable from here
 from ..repo_roles import REPO_ORDER
-from ..runtime import AgentResult, AgentTask
+from ..runtime import AgentResult
 from ..state import FeatureState, PhaseState
 
 log = logging.getLogger(__name__)
-
-
 
 
 GATES_CONTEXT = "valxel/gates"
@@ -59,17 +57,6 @@ def gates_status(services, prs, state: str, description: str) -> None:
 # Phases whose agents design or build, and so need the existing design (decisions, contracts,
 # capabilities). Release and operate work from the change set instead.
 KNOWLEDGE_PHASES = ("discovery", "spec", "design", "architecture", "plan", "build")
-
-
-def design_knowledge(services, snap) -> tuple[dict, str]:
-    """The existing design as data (for checks and G4) and as a prompt section (for agents)."""
-    from ..knowledge import render
-
-    kn = getattr(services, "knowledge", None)
-    if kn is None:
-        return {}, ""
-    pack = kn.collect(snap)
-    return pack, render(pack, int(kn.cfg.settings.get("max_chars", 12000)))
 
 
 def released_datasets(services, product_id: str) -> list[dict]:
@@ -248,101 +235,12 @@ def resources_instruction(ctx: dict, task: dict) -> str:
 
 
 # Roles that don't produce or review a phase's work: they get no lessons.
-NO_LESSON_ROLES = ("knowledge", "router", "intake")
-
-
-def call_agent(services, *, role: str, phase: str, ctx: dict, skills: tuple[str, ...], tail: str,
-               stub_text: str | None, max_tokens: int = 4096, schema: dict | None = None,
-               budget_usd: float | None = None, cwd: str | None = None,
-               box: dict | None = None, task_id: str = "", prev_session: dict | None = None,
-               resume_tail: str = "", keep_transcript: bool = False, images: tuple = ()) -> AgentResult:
-    """One agent session. Its dollar cap is the role's, and never more than what's left of the
-    feature's budget (ctx budget_remaining_usd, or `budget_usd` when the caller knows better).
-
-    The same task (prompt layers, reply schema, caps) goes to the role's fallbacks, in order, when
-    the role's provider is unavailable; the result says which role did the work."""
-    snap = services.snapshot(ctx["product_id"], ctx.get("governance"))
-    product = snap.product
-    learned = lessons.instruction(snap.lessons, phase) if role not in NO_LESSON_ROLES else ""
-    if learned:  # what people taught earlier features of this product, for this phase
-        tail = f"{tail}\n\n{learned}"
-    variant = ctx.get("config_variant", "")  # a canary feature's agents run with the candidate config
-    layers = build_layers(
-        role=role, skills=skills, constitution=snap.constitution, product=product,
-        parent_texts=ctx.get("parent_texts", {}), tail=tail, product_context=snap.product_context,
-        design_knowledge=ctx.get("knowledge_text", ""), skills_dir=skills_dir_of(services, variant),
-        caps=services.settings.context_caps,
-    )
-    for layer, note in (layers.meta.get("trimmed") or {}).items():
-        log.info("%s %s/%s: %s cut to its cap: %s", ctx["feature_id"], phase, role, layer, note)
-    left = budget_usd if budget_usd is not None else ctx.get("budget_remaining_usd")
-    candidates = services.roles_for(role, product.data_class, variant) if variant else services.roles_for(role, product.data_class)
-    for i, who in enumerate(candidates):
-        runtime = services.runtime_for(who, variant) if variant else services.runtime_for(who)
-        missing = PHASE_SPECS[phase].required_capabilities - runtime.capabilities
-        if missing:
-            if i == 0:
-                raise RuntimeError(f"Runtime {runtime.name} lacks {sorted(missing)} required by phase {phase}")
-            continue  # a fallback that can't do this phase's work is skipped
-        tags = CallTags(
-            product_id=ctx["product_id"], feature_id=ctx["feature_id"], phase=phase, role=who,
-            data_class=product.data_class, workspace=product.workspace, prompt_version=f"{phase}@1",
-        )
-        # Resume the task's last session, or start fresh: from its handoff when it left one
-        # (valxel_sdlc.sessions). A fallback to another model never resumes.
-        session_args, layers_for = {}, layers
-        if prev_session is not None or keep_transcript:
-            from .. import sessions
-
-            handoff = handoff_text(services, prev_session)
-            fresh = layers if not handoff else dataclasses.replace(layers, tail=layers.tail + sessions.picking_up(handoff))
-            decision = sessions.may_resume(
-                prev_session, task_id=task_id, role=who, model=services.settings.role(who).model, runtime=runtime.name,
-                transcripts=sessions.TranscriptStore(services.settings.artifact_dir), feature_id=ctx["feature_id"])
-            if prev_session:
-                log.info("%s %s %s: %s session %s: %s", ctx["feature_id"], task_id, who,
-                         "resuming" if decision.resume else "not resuming", prev_session.get("session_id"), decision.why)
-            if decision.resume and resume_tail:
-                layers_for = dataclasses.replace(layers, tail=resume_tail)
-                session_args = {"resume": prev_session["session_id"], "fresh_tail": fresh.tail, "session_mode": "resumed"}
-            else:
-                layers_for = fresh
-                session_args = {"session_mode": "handoff" if handoff else "fresh"}
-            session_args["keep_transcript"] = keep_transcript
-        try:
-            res = runtime.run(AgentTask(role=who, phase=phase, tags=tags, layers=layers_for, skills=tuple(skills),
-                                        stub_text=stub_text, max_tokens=max_tokens, schema=schema, images=tuple(images),
-                                        max_budget_usd=None if left is None else max(0.0, float(left)),
-                                        # A box is a session's own writable checkout; a bare cwd is a
-                                        # read-only one (valxel_sdlc.sandbox, valxel_sdlc.workspace).
-                                        cwd=(box or {}).get("cwd") or cwd,
-                                        read_only=(bool(cwd) and not box) or bool((box or {}).get("read_only")),
-                                        sandbox=box, **session_args))
-        except ProviderUnavailable as exc:
-            if i == len(candidates) - 1:
-                raise
-            log.warning("%s %s/%s: %s; handing the task to %s", ctx["feature_id"], phase, who, exc, candidates[i + 1])
-            continue
-        res.role = who
-        return res
-    raise RuntimeError(f"No runtime for role {role} can do phase {phase}")
 
 
 def sessions_instruction() -> str:
     from ..sessions import HANDOFF_INSTRUCTION
 
     return HANDOFF_INSTRUCTION
-
-
-def handoff_text(services, session: dict | None) -> str:
-    """The handoff an earlier session on the task left, or ""."""
-    ref = (session or {}).get("handoff")
-    if not ref:
-        return ""
-    try:
-        return services.artifacts.load(ref)
-    except OSError:
-        return ""
 
 
 def session_record(services, ctx: dict, task: dict, res, handoff) -> dict | None:
@@ -1109,13 +1007,11 @@ def build_build_subgraph(services):
         """A coder or reviewer eval case (valxel_sdlc.code_evals), labeled when the change merges."""
         if getattr(services, "evals", None) is None:
             return
-        from .. import code_evals
-
         try:
             ctx = {**ctx, "data_class": product_data_class(services, ctx)}
             version = getattr(services.gateway, "config_version", "")
-            services.evals.capture(code_evals.coder_case(ctx, task, output, config_version=version) if phase == "coder"
-                                   else code_evals.reviewer_case(ctx, task, tail, pr_url, output, config_version=version))
+            services.evals.capture(eval_case.coder_case(ctx, task, output, config_version=version) if phase == "coder"
+                                   else eval_case.reviewer_case(ctx, task, tail, pr_url, output, config_version=version))
         except Exception:
             log.warning("%s %s: %s eval case not kept", ctx.get("feature_id"), task.get("id"), phase, exc_info=True)
 
@@ -1454,9 +1350,9 @@ def make_phase_node(phase: str, services):
             )
             delta["artifacts"] = {spec.kind: ref}
             delta["trace_links"] = [[p, ref["id"]] for p in ctx["parent_ids"]]
-        if phase in evals.DOC_PHASES and out.get("draft") and getattr(services, "evals", None) is not None:
+        if phase in eval_case.DOC_PHASES and out.get("draft") and getattr(services, "evals", None) is not None:
             try:  # an eval case: what the agent was given, what it wrote and the critic's verdict
-                services.evals.capture(evals.case_from(state, phase, ctx, out,
+                services.evals.capture(eval_case.case_from(state, phase, ctx, out,
                                                        config_version=getattr(services.gateway, "config_version", "")))
             except Exception:
                 log.warning("%s %s: eval case not kept", state["feature_id"], phase, exc_info=True)
