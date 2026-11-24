@@ -29,7 +29,7 @@ from langgraph.types import Command, interrupt
 
 from ..agents import untrusted
 from ..agents.parse import section
-from ..roadmap import governance_pr
+from ..governance.prs import governance_pr
 from ..roadmap.graphs import _decide, event, lane_approvers, now, run_agent
 from ..state import last, merge_dict
 from . import remediation

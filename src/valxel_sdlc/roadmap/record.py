@@ -168,3 +168,24 @@ def update_initiative(text: str, changes: dict, review_line: str = "") -> str:
             body += f"\n\n## Reviews\n\n- {review_line}"
     front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True).strip()
     return f"---\n{front}\n---\n{body}\n"
+
+
+ROADMAP_DIR = "roadmap"
+
+
+def read_roadmap(services, product_id: str) -> dict:
+    """The product's roadmap record at its governance repo's current head."""
+    gov = services.settings.entry(product_id).governance
+    src = services.governance.source
+    sha = src.resolve(gov.org, gov.repo, gov.ref)
+    goals = parse_goals(src.read(gov.org, gov.repo, f"{ROADMAP_DIR}/goals.yaml", sha, optional=True) or "")
+    initiatives, releases = [], []
+    for path in src.list(gov.org, gov.repo, f"{ROADMAP_DIR}/initiatives", sha):
+        i = parse_initiative(src.read(gov.org, gov.repo, path, sha) or "", path) if path.endswith(".md") else None
+        if i:
+            initiatives.append(i)
+    for path in src.list(gov.org, gov.repo, f"{ROADMAP_DIR}/releases", sha):
+        r = parse_release(src.read(gov.org, gov.repo, path, sha) or "", path) if path.endswith(".md") else None
+        if r:
+            releases.append(r)
+    return {"repo": gov.full_name, "sha": sha, "goals": goals, "initiatives": initiatives, "releases": releases}

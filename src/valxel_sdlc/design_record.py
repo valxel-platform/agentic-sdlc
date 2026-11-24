@@ -175,7 +175,7 @@ def propose_after_release(services, state: dict, ux: str) -> dict | None:
         files[f"{base}/components.md"] = new_comps
     if not files:
         return None
-    from .roadmap import governance_pr
+    from .governance.prs import governance_pr
 
     pr = governance_pr(services, state["product_id"], branch=f"valxel/{state['feature_id']}-design", files=files,
                        title=f"{state['feature_id']}: record its screens in the design record",
@@ -204,7 +204,7 @@ def draft_for_existing(services, product_id: str) -> dict:
     from .agents.context import build_layers, skills_dir_of
     from .agents.parse import SCREEN_ROLES
     from .gateway import CallTags
-    from .roadmap import governance_pr
+    from .governance.prs import governance_pr
     from .runtime import AgentTask
 
     snap = services.snapshot(product_id)

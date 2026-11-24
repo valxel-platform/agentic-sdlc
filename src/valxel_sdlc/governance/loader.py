@@ -142,7 +142,7 @@ class GovernanceLoader:
                                             plat["sha"], optional=True) or "")
         except (AlertRulesError, ValueError) as exc:
             raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
-        from ..ops import error_tracking
+        from .. import error_tracking_policy as error_tracking
 
         try:
             tracking = error_tracking.load_policy(s.read(plat["org"], plat["repo"],
