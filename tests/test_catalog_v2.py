@@ -34,7 +34,9 @@ def test_each_cloud_sees_its_own_block():
     assert GCP["types"]["event-stream"]["parameters"]["retention_hours"] == {
         "type": "integer", "default": 24, "min": 24, "max": 744}  # Pub/Sub's 31 days narrows the type's range
     assert AWS["types"]["event-stream"]["parameters"]["retention_hours"]["max"] == 8760
-    assert "postgres" in AWS["types"] and "postgres" not in GCP["types"] and "postgres" in GCP["unavailable"]
+    assert GCP["types"]["postgres"]["service"].startswith("Cloud SQL")
+    assert "paused" not in GCP["types"]["postgres"]["sizes"]
+    assert "cache" in AWS["types"] and "cache" not in GCP["types"] and GCP["unavailable"] == ["cache"]
     assert GCP["regions"]["general"][0] == "us-central1" and GCP["cloud"] == "gcp"
     assert GCP["types"]["workload-identity"]["outputs"] == {"role": "GCP_SERVICE_ACCOUNT"}
     assert AWS["aliases"]["dynamodb-table"] == "key-value-table"
@@ -60,7 +62,7 @@ def test_a_design_on_google_cloud_gets_googles_services_and_prices():
 
 
 @pytest.mark.parametrize(("body", "finding"), [
-    ("- records: postgres; database=farm\n  reads: farm-api", "isn't offered on Google Cloud yet"),
+    ("- sessions: cache\n  reads: farm-api", "isn't offered on Google Cloud yet"),
     ("- readings: event-stream; retention_hours=800\n  writes: farm-api", "between 24 and 744"),
     ("- jobs: queue; max_receives=3\n  writes: farm-api", "between 5 and 100"),
 ])
@@ -85,6 +87,19 @@ def test_new_resources_get_the_neutral_type_and_old_ones_keep_theirs():
                            ctx(GCP, aws_existing=[{"name": "field-state", "type": "dynamodb-table"}])) == []
 
 
+@pytest.mark.parametrize(("catalog", "existing", "made_as"), [
+    (AWS, {}, "postgres-crossplane"),                       # OpenChoreo's ClusterResourceType on AWS
+    (AWS, {"records": "postgres-crossplane"}, "postgres-crossplane"),
+    (GCP, {}, "postgres"),                                  # platform-resources' Cloud SQL on Google Cloud
+])
+def test_postgres_is_made_as_the_clouds_resource_type(catalog, existing, made_as):
+    body = "- records: postgres; database=farm\n  reads, writes: farm-api"
+    out = resources.plan(hld(body), catalog, lambda comp: ("farm", None), product_id="FARM", feature_id="FARM-FEAT-7",
+                         data_class="general", existing=existing)
+    [r] = [r for r in out if r["name"] == "records"]
+    assert r["type"] == made_as and r["outputs"]["password"] == "DB_PASSWORD"
+
+
 def test_a_products_projects_are_checked():
     assert resources.check_cloud(PROJECTS, "general", ["dev", "staging", "production"], GCP) == []
     bad = {**PROJECTS, "region": "europe-west1", "accounts": {"dev": "Farm_Dev", "staging": "x1", "production": "x1"}}
@@ -98,7 +113,7 @@ def test_a_products_projects_are_checked():
 def test_the_architects_guide_names_the_cloud_and_what_isnt_offered():
     guide = resources.catalog_guide(GCP, "general")
     assert guide.startswith("Google Cloud services the platform offers")
-    assert "Not offered on Google Cloud yet: cache, postgres" in guide
+    assert "Not offered on Google Cloud yet: cache" in guide and "Cloud SQL" in guide
     assert "Firestore" in guide and "DynamoDB" not in guide
 
 

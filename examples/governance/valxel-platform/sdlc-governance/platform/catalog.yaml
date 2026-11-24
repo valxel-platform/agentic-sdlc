@@ -17,7 +17,9 @@
 #
 # Aliases: the AWS names of version 1 (dynamodb-table, sqs-queue...) still read, as their type, so
 # designs and resources made before the rename keep working. Resources that already exist keep
-# their type in OpenChoreo; new ones get the neutral type.
+# their type in OpenChoreo; new ones get the neutral type, or the block's `resource_type` where
+# another module provides the ClusterResourceType on that cloud (OpenChoreo's postgres-crossplane
+# and redis-crossplane on AWS).
 #
 # Adding a type, or a cloud's block for one, is a pull request here and a Composition there,
 # approved by the platform owner. Cost figures are rough monthly planning numbers per environment
@@ -272,6 +274,8 @@ types:
     clouds:
       aws:
         service: "Amazon RDS for PostgreSQL (OpenChoreo's provisioner-crossplane)"
+        # OpenChoreo's ClusterResourceType, not platform-resources': new resources are made as it.
+        resource_type: postgres-crossplane
         access: {}
         # connections: the most open connections the size takes (approximately RDS's default
         # max_connections for its memory), checked against the components' pools by the capacity plan.
@@ -287,7 +291,22 @@ types:
         # Built by OpenChoreo's provisioner-crossplane module, which creates no alarms yet.
         alarms: {}
         emulator: "postgres in Testcontainers"
-      # gcp: Cloud SQL for PostgreSQL, once its Composition is in platform-resources (tracker CP-314).
+      gcp:
+        service: "Cloud SQL for PostgreSQL (Enterprise edition): an instance per resource, private IP only"
+        access: {}
+        # connections: max_connections, which the Composition sets for the size. No paused size: Cloud
+        # SQL doesn't stop itself when idle, so dev and staging use small. Prices are estimates for
+        # us-central1 (compute and 20 GB of SSD) until billed.
+        sizes:
+          small: { capacity: db-g1-small, monthly_usd: 30, connections: 50 }
+          medium: { capacity: "db-custom-2-8192", monthly_usd: 105, connections: 400 }
+          medium-ha: { capacity: "db-custom-2-8192, regional (HA)", monthly_usd: 210, connections: 400, multi_az: true }
+          large: { capacity: "db-custom-4-16384, regional (HA)", monthly_usd: 410, connections: 800, multi_az: true }
+        built_in: [CMEK encryption with the product key, private IP only (private services access), TLS required, automated backups, point-in-time recovery, deletion protection]
+        alarms:
+          cpu-high: { metric: cloudsql.googleapis.com/database/cpu/utilization, aligner: ALIGN_MEAN, period_s: 300, periods: 3, above: 0.8, severity: sev3, says: "CPU has been over 80% for 15 minutes: queries are slowing; look for a missing index, or a bigger size." }
+          disk-high: { metric: cloudsql.googleapis.com/database/disk/utilization, aligner: ALIGN_MAX, period_s: 300, periods: 1, above: 0.85, severity: sev2, says: "The disk is over 85% full; it grows by itself, but a fast climb means runaway writes." }
+        emulator: "postgres in Testcontainers"
 
   cache:
     aliases: [redis-crossplane]
@@ -301,6 +320,7 @@ types:
     clouds:
       aws:
         service: "Amazon ElastiCache for Valkey (OpenChoreo's provisioner-crossplane)"
+        resource_type: redis-crossplane
         access: {}
         sizes:
           small: { capacity: cache.t4g.micro, monthly_usd: 12 }
