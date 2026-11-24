@@ -143,7 +143,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
     <div class="diagram">
       <svg viewBox="0 0 1200 920" role="img" aria-labelledby="dg-title dg-desc">
         <title id="dg-title">Valxel SDLC, high-level architecture</title>
-        <desc id="dg-desc">People, production signals and GitHub webhooks enter the tool's API. The engine runs three kinds of LangGraph workflows (roadmap, feature pipeline, incidents), which use agents through a model gateway and a production policy, and act through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, work trackers, AWS and the catalog. Governance repos are read and pinned. Products built from the templates are deployed and send signals back.</desc>
+        <desc id="dg-desc">People, production signals and GitHub webhooks enter the tool's API. The engine runs three kinds of LangGraph workflows (roadmap, feature pipeline, incidents), which use agents through a model gateway and a production policy, and act through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, work trackers, your cloud (AWS, Google Cloud or Azure) and the catalog. Governance repos are read and pinned. Products built from the templates are deployed and send signals back.</desc>
         <defs>
           <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
           <marker id="head-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="head-teal" d="M0,0 L10,5 L0,10 z"/></marker>
@@ -164,8 +164,8 @@ td:first-child { font-weight: 600; white-space: nowrap; }
         <text class="t" x="32" y="330">Prometheus alerts</text>
         <text class="t" x="32" y="354">Sentry or GlitchTip</text>
         <text class="t" x="32" y="378">OpenChoreo alert rules</text>
-        <text class="t" x="32" y="402">CloudWatch alarms</text>
-        <text class="t" x="32" y="426">AWS Budgets</text>
+        <text class="t" x="32" y="402">Cloud alarms</text>
+        <text class="t" x="32" y="426">Cloud budgets</text>
         <text class="t" x="32" y="450">Support tickets</text>
         <text class="s" x="32" y="486">Tied to a product, given a SEV</text>
 
@@ -179,7 +179,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
 
         <rect class="tool" x="276" y="56" width="600" height="84" rx="8"/>
         <text class="h" x="292" y="80">API and web app</text>
-        <text class="s" x="452" y="80">FastAPI, React, live updates over SSE, GitHub sign-in</text>
+        <text class="s" x="452" y="80">FastAPI, React, live updates over SSE, GitHub or OIDC sign-in</text>
         <rect class="chip" x="292" y="94" width="136" height="32" rx="6"/><text class="t" x="360" y="115" text-anchor="middle">Decisions inbox</text>
         <rect class="chip" x="436" y="94" width="136" height="32" rx="6"/><text class="t" x="504" y="115" text-anchor="middle">Features</text>
         <rect class="chip" x="580" y="94" width="136" height="32" rx="6"/><text class="t" x="648" y="115" text-anchor="middle">New intent chat</text>
@@ -245,7 +245,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
         <text class="h-sm" x="932" y="370">ServiceNow</text><text class="s" x="932" y="390">Change receipts</text>
         <text class="h-sm" x="932" y="434">Jira or OpenProject</text><text class="s" x="932" y="454">Epics and initiatives kept in step</text>
         <text class="h-sm" x="932" y="498">Lucid or draw.io</text><text class="s" x="932" y="518">Architecture diagrams for G4</text>
-        <text class="h-sm" x="932" y="562">AWS through Crossplane</text><text class="s" x="932" y="582">Resources, alarms, budgets</text>
+        <text class="h-sm" x="932" y="562">Your cloud through Crossplane</text><text class="s" x="932" y="582">Resources, alarms, budgets</text>
         <text class="h-sm" x="932" y="626">Backstage catalog</text><text class="s" x="932" y="646">Capabilities registered after Operate</text>
         <text class="s" x="932" y="690">Each behind an interface, set by configuration</text>
 
@@ -258,7 +258,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
         <text class="h-sm" x="208" y="806">sdlc-governance</text>
         <text class="s" x="208" y="826">Platform constitution</text>
         <text class="s" x="208" y="844">remediation.yaml</text>
-        <text class="s" x="208" y="862">Alert rules, AWS types</text>
+        <text class="s" x="208" y="862">Alert rules, resource types</text>
         <text class="h-sm" x="384" y="806">Product governance</text>
         <text class="s" x="384" y="826">product.yaml, constitution</text>
         <text class="s" x="384" y="844">ADRs, roadmap</text>
@@ -351,6 +351,8 @@ td:first-child { font-weight: 600; white-space: nowrap; }
       <div class="rule"><h3>Production stays human, with two exceptions</h3><p>Promotion to production is a person's decision at G6. The tool may act on its own in only two ways: turn off a recent feature's flag, or roll back a recent release, and only when the policy allows it and the analysis agrees.</p></div>
       <div class="rule"><h3>Threads survive anything</h3><p>LangGraph checkpoints every step in Postgres. Waits on people, CI and deploys are resumable after a restart, and one replica serves live updates.</p></div>
       <div class="rule"><h3>Every integration is an interface</h3><p>Configuration picks what each one reaches: Claude Code, the Claude API and the real systems in live mode, one interface at a time, or the offline mode, deterministic for evaluation and tests.</p></div>
+      <div class="rule"><h3>Layers only point down</h3><p>The root wires four seams (intake, delivery, the roadmap and operations), and each seam uses only itself and the shared core. <code>config/seams.yaml</code> places every module and a test fails on any import that points upward or across seams. See the <a href="module-map.html">module map</a>.</p></div>
+      <div class="rule"><h3>One cloud per installation</h3><p>An installation runs on AWS, Google Cloud or Azure. The core asks for what it needs through ports (secrets, signing, immutable archives, identity, accounts, cost, inventory, signals), and each cloud's adapters pass the same conformance checks as the in-memory fakes.</p></div>
     </div>
   </section>
 
@@ -360,7 +362,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
       <table>
         <thead><tr><th>Part</th><th>Modules</th><th>Job</th></tr></thead>
         <tbody>
-          <tr><td>API and web</td><td><code>api/app.py</code>, <code>web/auth.py</code>, <code>events.py</code>, <code>web/</code></td><td>REST API, GitHub sign-in, approver matching, live updates, React screens</td></tr>
+          <tr><td>API and web</td><td><code>api/app.py</code>, <code>web/auth.py</code>, <code>events.py</code>, <code>web/</code></td><td>REST API, sign-in (GitHub, Cognito, Google Workspace, Entra ID or OIDC), approver matching, live updates, React screens</td></tr>
           <tr><td>Engine</td><td><code>engine.py</code>, <code>waits.py</code></td><td>Starts and resumes threads, decision inbox, external waits</td></tr>
           <tr><td>Feature pipeline</td><td><code>graph/pipeline.py</code>, <code>graph/phase.py</code></td><td>Phases, gates, escalations, build fan-out, merge train, flag rollout</td></tr>
           <tr><td>Roadmap</td><td><code>roadmap/</code></td><td>Goals, initiatives (G0), releases and launch groups</td></tr>
@@ -371,6 +373,9 @@ td:first-child { font-weight: 600; white-space: nowrap; }
           <tr><td>Model gateway</td><td><code>gateway/</code></td><td>Model routing, data-class allowlist, prompt layers, usage ledger</td></tr>
           <tr><td>Governance</td><td><code>governance/</code>, <code>constitution.py</code></td><td>Reads, validates and pins the platform and product rules</td></tr>
           <tr><td>Knowledge</td><td><code>knowledge/</code>, <code>duplicates.py</code>, <code>intake.py</code></td><td>Architecture record, contracts, duplicate requests, guided intake</td></tr>
+          <tr><td>Agent sessions</td><td><code>session_launcher.py</code>, <code>sandbox.py</code>, <code>egress_proxy.py</code>, <code>git_broker.py</code></td><td>Sandboxed sessions with no GitHub or cloud keys; the egress allowlist; git pushes only to the session's own repo</td></tr>
+          <tr><td>Cloud ports</td><td><code>cloud/</code></td><td>The ports the core uses, with adapters for AWS, Google Cloud and Azure, in-memory fakes and their conformance checks</td></tr>
+          <tr><td>Trust and audit</td><td><code>secret_ring.py</code>, <code>signing.py</code>, <code>audit_events.py</code>, <code>audit_anchors.py</code>, <code>strict.py</code></td><td>Secrets with rotation, signing for the GitHub Apps, the audit trail and its anchors, refusing an unsafe production start</td></tr>
           <tr><td>Integrations</td><td><code>integrations/</code>, <code>worksync.py</code>, <code>ops/servicenow.py</code>, <code>provisioning.py</code></td><td>GitHub, OpenChoreo, Flipt, catalog, MCP, Lucid and draw.io diagrams, Jira and OpenProject, ServiceNow, new repos</td></tr>
         </tbody>
       </table>

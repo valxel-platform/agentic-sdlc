@@ -77,3 +77,6 @@ footer img { height: 22px; }
   article { padding: 24px 20px; }
   .topbar nav { display: none; }
 }
+
+/* Wide tables scroll on their own on small screens, instead of widening the page. */
+@media (max-width: 640px) { article table { display: block; overflow-x: auto; } article code { overflow-wrap: anywhere; } }
