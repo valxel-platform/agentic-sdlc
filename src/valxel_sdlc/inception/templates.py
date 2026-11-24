@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 
+from ..research import evidence_lines  # the core's; the roadmap's initiatives read it too
 from . import Vision, formats
 
 _PHI = re.compile(r"\b(patient|clinic|clinical|health|medical|hipaa|phi|diagnos|prescription|dental)\w*", re.I)
@@ -66,18 +67,6 @@ def brief(v: Vision, ctx: dict) -> str:
         "", "## Agent notes", "- Assumed: the goals and users are the ones the person gave, in their words",
     ]
     return "\n".join(lines) + "\n"
-
-
-def evidence_lines(research: str) -> list[str]:
-    """The Evidence and Assumptions sections from a research note (none without one)."""
-    from .. import research as rs
-
-    if not research:
-        return []
-    ev = [e for e in rs.evidence(research) if e["id"]]
-    asm = [a for a in rs.assumptions(research) if a["id"] and a["test"]]
-    return (["", "## Evidence", *[f"- {e['claim'].rstrip('.')} ({e['id']})" for e in ev],
-             "", "## Assumptions", *[f"- {a['line']}" for a in asm]])
 
 
 def plan_components(v: Vision, prefix: str) -> list[tuple[str, str, str]]:

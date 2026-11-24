@@ -753,7 +753,7 @@ _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 def eval_case(services, s: IntakeSession):
     """The eval case a submitted intake leaves (valxel_sdlc.evals): what the person said, in order,
     and the draft they confirmed. Its data class is the product's; a new product's is phi."""
-    from .evals import EvalCase, now as at
+    from .eval_case import EvalCase, now as at
 
     d = s.draft
     data_class = "phi"

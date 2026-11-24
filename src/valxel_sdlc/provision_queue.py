@@ -201,7 +201,7 @@ def check(engine, req: dict) -> str:
     services = engine.services
     p = req["payload"]
     if req["kind"] == "governance_repo":  # a new product: its inception's product gate approved it
-        from .inception.setup import ids
+        from .inception.formats import ids
 
         state = engine._state(p.get("inception_id") or "")
         if not state:

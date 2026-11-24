@@ -34,18 +34,17 @@ from .repo_files import (  # noqa: F401  (re-exported for delivery's readers)
     standard_file,
     standard_file_path,
 )
-from .repo_policy import effective_standards, plan
+from .repo_policy import (  # noqa: F401  (the core's; re-exported for delivery's readers)
+    Target,
+    _governance_plan,
+    _Lane,
+    _platform_plan,
+    effective_standards,
+    plan,
+    targets,
+)
 
 KINDS = ("lane", "governance", "template", "tool")
-
-
-@dataclass
-class Target:
-    repo: str
-    kind: str
-    product: str  # lane id, or "platform"
-    plan: dict  # what the standards ask for (valxel_sdlc.provisioning.plan, plus kind-specific settings)
-    error: str = ""  # why the lane's own repos couldn't be listed (its governance couldn't be read)
 
 
 @dataclass
@@ -81,91 +80,6 @@ class Report:
     def as_dict(self) -> dict:
         return {"repo": self.repo, "kind": self.kind, "exists": self.exists, "ok": self.ok,
                 "drift": [d.__dict__ for d in self.drift], "applied": self.applied, "errors": self.errors}
-
-
-class _Lane:
-    """Just enough of a ProductConfig for plan() on repos outside a lane."""
-
-    def __init__(self, product_id: str, data_class: str, approvers: dict | None = None, high_risk_paths=()) -> None:
-        self.product_id, self.data_class = product_id, data_class
-        self.approvers, self.high_risk_paths = approvers or {}, tuple(high_risk_paths)
-
-
-def targets(services, only: list[str] | None = None) -> list[Target]:
-    """Every managed repo with its plan. Lanes whose governance can't be read are skipped (the
-    governance loader's error is the report for them)."""
-    std = services.settings.repos
-    out: dict[str, Target] = {}
-    for pid, entry in services.settings.registry.items():
-        gov = entry.governance.full_name
-        lane, error = None, ""
-        try:
-            lane = services.snapshot(pid).product
-        except Exception as exc:  # an unreadable lane still has a governance repo to keep on standards
-            error = f"couldn't read {pid}'s governance, so its repos weren't checked: {exc}"
-        out[gov] = Target(gov, "governance", pid, _governance_plan(std, gov, pid, entry.data_class,
-                                                                  lane.approvers if lane else {}), error)
-        if lane is None:
-            continue
-        standards = lane.repo_standards or effective_standards(std, lane.data_class, {})
-        contracts = contracts_for(std, gov if getattr(entry, "kind", "product") == "product" else None)
-        for r in lane.repos:
-            p = plan(lane, {"name": r.name, "role": r.role, "purpose": ""}, standards)
-            p["managed_files"] = {**p.get("managed_files", {}), **contracts}
-            out[r.name] = Target(r.name, "lane", pid, p)
-    for repo, spec in (std.platform_repos or {}).items():
-        p = _platform_plan(std, repo, spec)
-        if spec.get("kind", "tool") != "governance":
-            p["managed_files"] = {**p.get("managed_files", {}), **contracts_for(std, None)}
-        out[repo] = Target(repo, spec.get("kind", "tool"), spec.get("product", "platform"), p)
-    # The platform's GitHub App merges for the merge train once the pipeline's gates pass, so it
-    # may bypass the review rules (pull requests only) wherever the pipeline merges: lane repos.
-    import os
-
-    app_id = os.environ.get("VALXEL_GITHUB_APP_ID", "")
-    for t in out.values():
-        if app_id and t.kind == "lane":
-            t.plan["ruleset"]["bypass_app_id"] = app_id
-    wanted = set(only or [])
-    return [t for name, t in sorted(out.items()) if not wanted or name in wanted]
-
-
-def _base(std, repo: str, product: str, data_class: str, approvers: dict, role: str) -> dict:
-    lane = _Lane(product, data_class, approvers)
-    return plan(lane, {"name": repo, "role": role, "purpose": ""}, effective_standards(std, data_class, {}))
-
-
-def _governance_plan(std, repo: str, pid: str, data_class: str, approvers: dict) -> dict:
-    p = _base(std, repo, pid, data_class, approvers, "governance")
-    p["ruleset"]["required_checks"] = []
-    p["ruleset"]["gates_check"] = None  # the pipeline doesn't deliver here
-    p["ruleset"]["code_scanning_merge_protection"] = None
-    p["security"]["code_scanning_default_setup"] = False  # no code to scan
-    p["tag_ruleset"] = {}
-    p["files"] = [f for f in p["files"] if f != ".github/dependabot.yml"]
-    p["codeowners"] = None  # owned by the lane's people, not generated
-    # No code: the secrets scan, and the check of the product's data contracts (datasets/).
-    p["managed_files"] = {".github/workflows/secrets.yml": "governance-secrets.yml",
-                          ".github/workflows/datasets.yml": "governance-datasets.yml",
-                          ".github/scripts/datasets.py": "datasets.py",
-                          ".github/scripts/odcs-json-schema-v3.2.0.json": "odcs-json-schema-v3.2.0.json"}
-    return p
-
-
-def _platform_plan(std, repo: str, spec: dict) -> dict:
-    kind = spec.get("kind", "tool")
-    if kind == "governance":
-        return _governance_plan(std, repo, spec.get("product", "platform"), "general", {})
-    role = spec.get("role") or "tool"
-    p = _base(std, repo, spec.get("product", "platform"), spec.get("data_class", "general"), {}, role)
-    checks = spec.get("required_checks") or (std.roles.get(role) or {}).get("required_checks") or []
-    p["ruleset"]["required_checks"] = list(checks)
-    p["ruleset"]["gates_check"] = None  # the pipeline doesn't deliver here
-    p["is_template"] = kind == "template"
-    p["codeowners"] = None
-    if spec.get("visibility"):
-        p["visibility"] = spec["visibility"]
-    return p
 
 
 # -- comparing ---------------------------------------------------------------------------

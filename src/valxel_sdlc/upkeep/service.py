@@ -76,7 +76,7 @@ class Upkeep:
         with self._lock:
             if self._repos and not refresh and time.monotonic() - self._repos[0] < 3600:
                 return self._repos[1]
-        from ..repo_standards import targets
+        from ..repo_policy import targets
 
         found = {t.repo: t.product for t in targets(self.services) if t.kind in ("lane", "governance")
                  and t.product in self.services.settings.registry}

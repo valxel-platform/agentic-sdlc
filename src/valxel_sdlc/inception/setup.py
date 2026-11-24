@@ -25,6 +25,7 @@ import yaml
 from ..outcomes import stub_from_measure
 from ..roadmap.record import render_initiative
 from . import Vision, formats
+from .formats import ids  # the core's; delivery's provisioning queue reads it too
 
 TEAMS = {"g1": "product-owners", "g2": "product-owners", "g3": "design", "g4": "architects",
          "g5": "tech-leads", "security": "security", "g6": "release-managers"}
@@ -33,13 +34,6 @@ BRANCH = "valxel/inception"
 
 def _today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
-
-
-def ids(brief: str) -> dict:
-    p = formats.product(brief)
-    return {"product_id": p["id"], "org": p["org"], "prefix": p["prefix"], "budget_usd": p["budget_usd"],
-            "data_class": formats.data_class(brief)[0] or "general",
-            "governance_repo": f"{p['org']}/{p['prefix']}governance"}
 
 
 def product_yaml(vision: Vision, brief: str) -> str:

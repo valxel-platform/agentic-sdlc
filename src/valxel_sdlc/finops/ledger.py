@@ -23,54 +23,19 @@ import csv
 import io
 import json
 import threading
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from dataclasses import asdict
 from typing import Iterable, Protocol
 
-STAGES = ("build", "run")
-CATEGORIES = ("llm", "ci", "test", "build", "environment", "aws", "gcp", "azure", "compute", "incident", "people",
-              "platform")
-BASES = ("estimate", "metered", "billed", "allocated")
+from .records import (  # noqa: F401  (the core's; re-exported for the ledger's readers)
+    _FOCUS,
+    BASES,
+    CATEGORIES,
+    STAGES,
+    CostRecord,
+    now,
+)
 
 # FOCUS ServiceCategory and provider for each of our categories.
-_FOCUS = {"llm": ("AI and Machine Learning", "Anthropic"), "ci": ("Developer Tools", "GitHub"),
-          "test": ("Developer Tools", "GitHub"), "build": ("Developer Tools", "OpenChoreo"),
-          "environment": ("Compute", "OpenChoreo"), "aws": ("", "AWS"), "gcp": ("", "Google Cloud"),
-          "azure": ("", "Microsoft Azure"),
-          "compute": ("Compute", "OpenChoreo"),
-          "incident": ("AI and Machine Learning", "Anthropic"), "people": ("Other", "People"),
-          "platform": ("Other", "Valxel platform")}
-
-
-def now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-@dataclass
-class CostRecord:
-    key: str
-    product_id: str
-    stage: str  # build | run
-    category: str
-    usd: float
-    period_start: str
-    period_end: str
-    feature_id: str = ""
-    env: str = ""
-    source: str = ""  # usage-ledger, github-actions, openchoreo-finops, cost-explorer, rates, allocation
-    service: str = ""  # e.g. Amazon DynamoDB, claude-opus-5-5, GitHub Actions (Linux)
-    resource: str = ""  # repo, component, run, PR, gate
-    quantity: float = 0.0
-    unit: str = ""  # tokens, minutes, hours
-    basis: str = "metered"
-    status: str = "final"
-    detail: dict = field(default_factory=dict)
-    updated_at: str = ""
-
-    def __post_init__(self) -> None:
-        if self.stage not in STAGES or self.category not in CATEGORIES or self.basis not in BASES:
-            raise ValueError(f"cost record {self.key}: bad stage, category or basis")
-        self.usd = round(float(self.usd), 6)
 
 
 class CostLedger(Protocol):

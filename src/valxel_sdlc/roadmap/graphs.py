@@ -17,13 +17,14 @@ from typing import Annotated, Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
+from ..agent_calls import run_agent  # the core's; incidents call it too
 from ..agents import untrusted
 from ..agents.context import build_layers, skills_dir_of
+from ..gate_decisions import lane_approvers  # the core's
 from ..gateway import CallTags
 from ..graph_events import event, now  # the core's; kept importable from here
 from ..research import DOC_SECTIONS
 from ..research import summary as research_summary
-from ..runtime import AgentTask
 from ..state import last, merge_dict
 from . import governance_pr, read_roadmap
 from .initiative import check_draft, parse_draft, stub_draft
@@ -38,23 +39,6 @@ def _decide(raw, allowed: tuple[str, ...]) -> dict:
     from ..gate_decisions import normalize
 
     return normalize(raw, allowed)
-
-
-def run_agent(services, *, role: str, product_id: str, thread_id: str, phase: str, skills: tuple[str, ...],
-              tail: str, stub_text: str, max_tokens: int = 3000):
-    snap = services.snapshot(product_id)
-    layers = build_layers(role=role, skills=skills, constitution=snap.constitution, product=snap.product,
-                          parent_texts={}, tail=tail, product_context=snap.product_context,
-                          skills_dir=skills_dir_of(services), caps=services.settings.context_caps)
-    tags = CallTags(product_id=product_id, feature_id=thread_id, phase=phase, role=role,
-                    data_class=snap.product.data_class, workspace=snap.product.workspace, prompt_version=f"{phase}@1")
-    return services.runtime_for(role).run(AgentTask(role=role, phase=phase, tags=tags, layers=layers, skills=tuple(skills),
-                                                    stub_text=stub_text, max_tokens=max_tokens))
-
-
-def lane_approvers(lane, gate: str) -> list[str]:
-    """G0 falls back to G1's approvers (product owners); a release gate uses G6's."""
-    return list(lane.approvers.get(gate) or lane.approvers.get({"g0": "g1", "release": "g6"}.get(gate, gate)) or [])
 
 
 # --------------------------------------------------------------------------- initiative

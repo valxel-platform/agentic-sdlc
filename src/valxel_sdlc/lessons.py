@@ -352,8 +352,8 @@ def stub_lesson(c: Candidate) -> dict:
 def distill(services, state: dict, c: Candidate) -> dict:
     """One lesson from the candidate's corrections: an LLM writes it (the knowledge role), the stub
     rule stands in when it can't."""
+    from .agent_calls import call_agent
     from .agents import structured
-    from .graph.phase import call_agent
 
     stub = stub_lesson(c)
     model = _reply_model()
@@ -461,7 +461,7 @@ def propose(services, state: dict, cands: list[Candidate]) -> list[dict]:
 def learn(services, state: dict, corrections: list[dict]) -> list[dict]:
     """Record people's corrections and propose lessons from them. Returns events for the thread;
     never raises (a lesson is a proposal and must not stop the feature)."""
-    from .graph.phase import event
+    from .graph_events import event
 
     store = getattr(services, "lessons", None)
     if store is None or not corrections:

@@ -5,18 +5,22 @@
 seams:
   intake: [intake, inception, attachments]
   roadmap: [roadmap, outcomes.read, outcomes.readouts, outcomes.review]  # reading and reviewing goals' metrics
-  delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env, environments,
-             records, drafts, traceability, design_record, fit, mockups, sketch, prototype, preview, current_screens, screens, scaffolding,
+  delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env,
+             records, drafts, traceability, fit, mockups, sketch, prototype, preview, current_screens, screens, scaffolding,
              dependencies, quality.sonar, quality.sources, standard_files,
              waits, reconcile, pilot, confidence, independent_review]
   ops: [ops, finops, upkeep.alerts, upkeep.register, upkeep.service]
 # Shared definitions several seams read, which use no seam themselves: the core's, though their
 # files sit with the seam that first needed them. (Moving the files is churn for no change in what
-# depends on what.) Only add a module here if it imports nothing from a seam.
+# depends on what.) Only add a module here if it imports nothing from a seam. A module that acts
+# (opens a PR, turns a flag off) does so only through the services it's handed, never a store or
+# client of its own. `quality` and `upkeep` are the packages' own modules (their policy): their
+# sources and services stay in delivery and ops.
 core: [template_contract, resources, outcomes, inception.formats, roadmap.record, ops.changes, ops.alert_rules,
        capacity, repo_policy, repo_files, error_tracking_policy, governance.prs, duplicates, performance,
-       sandboxes, jobs, agent_tools, acceptance, ops.cohorts,
-       quality, upkeep, ops.rollout]  # the packages' own modules: quality and upkeep policy; their sources and services stay in delivery and ops
+       sandboxes, jobs, agent_tools, acceptance, ops.cohorts, quality, upkeep, ops.rollout,
+       environments, design_record, ops.remediation, ops.correlate, ops.cost_plan, ops.firing,
+       finops.records, finops.views]
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # and the tool's health, which measures every seam's agents on real work.
 root: [engine, engine_parts, api, web, cli, services, strict, worksync, run_queue, watcher_jobs, checkpoint_archive,
@@ -30,40 +34,11 @@ cloud_sdk:
     gcp: [google.cloud, google.auth, google.api_core, googleapiclient]
     azure: [azure]
   known: []
-# The burn-down: at most this many known breaks by each date (one target a sprint, about ten fewer
-# each). tests/test_seams.py fails once a date has come and the count is still above it: fix breaks
-# to meet it (move the shared piece into the core, or pass it in from the root); don't move the target.
+# The burn-down (T-140) reached 0 on 2026-11-24, ahead of the 2027-02-28 plan. The one target left
+# holds it there: tests/test_seams.py fails on any break, since none is known debt any more.
 targets:
-  - {by: 2026-12-06, at_most: 55}
-  - {by: 2026-12-20, at_most: 45}
-  - {by: 2027-01-03, at_most: 35}
-  - {by: 2027-01-17, at_most: 25}
-  - {by: 2027-01-31, at_most: 15}
-  - {by: 2027-02-14, at_most: 5}
-  - {by: 2027-02-28, at_most: 0}
-# Imports that break the rules today: known debt. tests/test_seams.py fails on a new one, and on one
-# listed here that's gone (delete its line). Fix one by moving the shared piece into the core, or
-# by passing it in from the root (services.py) instead of importing it.
-known_breaks:
-  - "evaluators.checks -> design_record"  # core -> delivery
-  - "governance.loader -> ops.remediation"  # core -> ops
-  - "graph.gates -> ops.cost"  # delivery -> ops
-  - "graph.infra -> finops.views"  # delivery -> ops
-  - "graph.infra -> ops.alarms"  # delivery -> ops
-  - "graph.merge_train -> code_evals"  # delivery -> root
-  - "graph.phase -> code_evals"  # delivery -> root
-  - "graph.phase -> evals"  # delivery -> root
-  - "inception.run -> graph.phase"  # intake -> delivery
-  - "inception.setup -> design_record"  # intake -> delivery
-  - "inception.setup -> environments"  # intake -> delivery
-  - "intake -> evals"  # intake -> root
-  - "knowledge -> design_record"  # core -> delivery
-  - "lessons -> graph.phase"  # core -> delivery
-  - "ops.incident -> evals"  # ops -> root
-  - "ops.incident -> roadmap.graphs"  # ops -> roadmap
-  - "provision_queue -> inception.setup"  # delivery -> intake
-  - "roadmap.initiative -> inception.templates"  # roadmap -> intake
-  - "roadmap.views -> ops.correlate"  # roadmap -> ops
-  - "roadmap.views -> ops.signals"  # roadmap -> ops
-  - "session_runner -> code_eval_runner"  # core -> root
-  - "upkeep.service -> repo_standards"  # ops -> delivery
+  - {by: 2026-11-24, at_most: 0}
+# Imports that break the rules: none. A new one fails tests/test_seams.py. Fix it by moving the shared
+# piece into the core, or by passing it in from the root (services.py) instead of importing it;
+# don't list it here.
+known_breaks: []

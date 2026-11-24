@@ -715,6 +715,7 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     if args.cmd == "worker":
         return _worker(args)
     if args.cmd == "session-runner":
+        from . import code_eval_runner  # noqa: F401  (adds the "eval" runtime: a config PR's coder and reviewer evals)
         from .session_runner import serve
 
         serve(args.port)

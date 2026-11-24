@@ -248,3 +248,11 @@ def initiatives(text: str) -> list[dict]:
                 {"title": m.group(1), "does": m.group(2),
                  "builds": [c.strip() for c in m.group(3).split(",") if c.strip()]} if m else {"title": "", "line": line})
     return out
+
+
+def ids(brief: str) -> dict:
+    p = product(brief)
+    return {"product_id": p["id"], "org": p["org"], "prefix": p["prefix"], "budget_usd": p["budget_usd"],
+            "data_class": data_class(brief)[0] or "general",
+            "governance_repo": f"{p['org']}/{p['prefix']}governance"}
+

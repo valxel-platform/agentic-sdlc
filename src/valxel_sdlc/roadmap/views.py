@@ -31,7 +31,7 @@ def thread_view(engine, thread_id: str) -> dict:
         raise KeyError(f"Unknown {kind} {thread_id}")
     out = _common(engine, thread_id, s, kind)
     if kind == "incident":
-        from ..ops.signals import still_firing
+        from ..ops.firing import still_firing
 
         from ..ops.correlate import root
 

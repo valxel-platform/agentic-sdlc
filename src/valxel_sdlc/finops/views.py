@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 
-from .ledger import CATEGORIES, CostRecord
+from .records import CATEGORIES, CostRecord
 
 # The order categories are shown in, and what each is called.
 LABELS = {"llm": "Agents (model calls)", "ci": "CI", "test": "Acceptance tests", "build": "Builds",
