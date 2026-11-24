@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextvars
 import logging
 import os
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -114,6 +115,9 @@ class TelemetryConfig:
     content: dict = field(default_factory=dict)
     content_store_baa: bool = False
     trace_url: str = ""
+    # "production" for real work; "test" for eval replays, canary trials in the staging cluster and
+    # dev installs. The collector sends "test" to Langfuse's test project (ADR 0011).
+    environment: str = "production"
 
     def level(self, data_class: str) -> str:
         lvl = self.content.get(data_class, "none")
@@ -150,7 +154,16 @@ def load_config(config_dir: Path | str, env=None) -> TelemetryConfig:
         headers=_headers(env.get(raw.get("headers_env") or "VALXEL_OTEL_HEADERS", "")),
         service_name=str(raw.get("service_name") or "valxel-sdlc"),
         content=content, content_store_baa=bool(raw.get("content_store_baa")),
-        trace_url=env.get(raw.get("trace_url_env") or "VALXEL_TRACE_URL", ""))
+        trace_url=env.get(raw.get("trace_url_env") or "VALXEL_TRACE_URL", ""),
+        environment=_environment(env.get(raw.get("environment_env") or "VALXEL_TRACE_ENVIRONMENT", "")))
+
+
+def _environment(raw: str) -> str:
+    """The deployment environment traces carry: lowercase letters, digits and dashes."""
+    value = (raw or "production").strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,31}", value):
+        raise ValueError(f"VALXEL_TRACE_ENVIRONMENT: {raw!r} is not an environment name (e.g. production, test)")
+    return value
 
 
 def _otlp_provider(cfg: TelemetryConfig):
@@ -166,7 +179,8 @@ def _otlp_provider(cfg: TelemetryConfig):
         log.warning("VALXEL_OTEL_ENDPOINT is set but the OpenTelemetry SDK isn't installed "
                     "(pip install '.[telemetry]'): agent sessions aren't traced")
         return None
-    provider = TracerProvider(resource=Resource.create({"service.name": cfg.service_name}))
+    provider = TracerProvider(resource=Resource.create({"service.name": cfg.service_name,
+                                                        "deployment.environment.name": cfg.environment}))
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=f"{cfg.endpoint}/v1/traces",
                                                                     headers=cfg.headers or None)))
     return provider
@@ -240,7 +254,7 @@ class Telemetry:
             "OTEL_EXPORTER_OTLP_ENDPOINT": self.cfg.endpoint,
             "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
             "OTEL_SERVICE_NAME": f"{self.cfg.service_name}-{runtime.replace('_', '-')}",
-            "OTEL_RESOURCE_ATTRIBUTES": _attr_list(attrs),
+            "OTEL_RESOURCE_ATTRIBUTES": _attr_list(attrs | {"deployment.environment.name": self.cfg.environment}),
         }
         if self.cfg.headers:
             env["OTEL_EXPORTER_OTLP_HEADERS"] = ",".join(f"{k}={v}" for k, v in self.cfg.headers.items())
@@ -269,7 +283,8 @@ class Telemetry:
         level = self.cfg.level(task.tags.data_class)
         headers = ", ".join(f'"{k}" = "{v}"' for k, v in self.cfg.headers.items())
         hdr = f"\nheaders = {{ {headers} }}" if headers else ""
-        return (f'\n[otel]\nenvironment = "valxel"\nlog_user_prompt = {"true" if level == "full" else "false"}\n'
+        prompts = "true" if level == "full" else "false"
+        return (f'\n[otel]\nenvironment = "{self.cfg.environment}"\nlog_user_prompt = {prompts}\n'
                 f'\n[otel.exporter.otlp-http]\nendpoint = "{self.cfg.endpoint}/v1/logs"\nprotocol = "binary"{hdr}\n'
                 f'\n[otel.trace_exporter.otlp-http]\nendpoint = "{self.cfg.endpoint}/v1/traces"\nprotocol = "binary"{hdr}\n')
 

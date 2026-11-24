@@ -144,6 +144,7 @@ def run_spec(spec: dict, root: Path) -> dict:
     # This process is the disposable runner: model-written code may run here, sessions run in it
     # (no sandbox inside the sandbox), and models are reached with the run's gateway token only.
     os.environ.update({"VALXEL_EVAL_RUNNER": "1", "VALXEL_SESSION_EXECUTOR": "local", "VALXEL_DELIVERY": "stub",
+                       "VALXEL_TRACE_ENVIRONMENT": "test",  # replays go to Langfuse's test project (ADR 0011)
                        **{k: str(v) for k, v in (spec.get("env") or {}).items()}})
     for k in ("VALXEL_LLM_GATEWAY_URL", "VALXEL_LLM_GATEWAY_API_KEY", "OPENAI_API_KEY"):
         os.environ.pop(k, None)

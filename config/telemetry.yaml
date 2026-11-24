@@ -23,3 +23,8 @@ content_store_baa: false
 
 # Links from the feature page and the G5/G6 decisions to a session's trace. {trace_id} is filled in.
 trace_url_env: VALXEL_TRACE_URL         # e.g. https://langfuse.example.com/project/valxel/traces/{trace_id}
+
+# Every trace carries deployment.environment.name: "production" for real work (the default), "test"
+# for eval replays, the platform's staging cluster and dev installs. The collector sends "test" to
+# Langfuse's test project, so trials never mix with real sessions, labels and datasets (ADR 0011).
+environment_env: VALXEL_TRACE_ENVIRONMENT

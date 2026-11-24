@@ -115,6 +115,7 @@ data:
   VALXEL_OPENCHOREO_CONSOLE_URL: {{ . | quote }}
   {{- end }}
   VALXEL_INDEPENDENT_REVIEW: {{ ternary "on" "off" .Values.tool.independentReview | quote }}
+  VALXEL_TRACE_ENVIRONMENT: {{ .Values.tool.traceEnvironment | default "production" | quote }}
   {{- with .Values.tool.otelEndpoint }}
   VALXEL_OTEL_ENDPOINT: {{ . | quote }}
   {{- end }}

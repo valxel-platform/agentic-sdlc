@@ -83,7 +83,10 @@ runs, which routes them: structure for every lane to OpenChoreo's observability 
 product's own traces, in the portal's Traces tab), and to the platform's self-hosted Langfuse for
 session views, eval datasets and people's labels, with content only for the lanes allowed it (the
 collector, Langfuse and the routing live in platform-foundation). `VALXEL_TRACE_URL` is the link
-template, e.g. `https://langfuse.example.com/project/valxel/traces/{trace_id}`. Without an endpoint,
+template, e.g. `https://langfuse.example.com/project/valxel/traces/{trace_id}`. Every span carries
+`deployment.environment.name`: `production` unless `VALXEL_TRACE_ENVIRONMENT` says otherwise, and
+`test` for eval replays, the platform's staging cluster and dev installs, which the collector sends
+to Langfuse's test project ([ADR 0011](adr/0011-agent-traces-one-langfuse-two-projects.md)). Without an endpoint,
 or without the OpenTelemetry SDK (`pip install '.[telemetry]'`, included in `live`), nothing is
 exported and strict mode warns.
 
@@ -157,7 +160,8 @@ on production and write and approve code.
   (`--data-class`, `VALXEL_EVAL_DATA_CLASSES`); a regulated case still reaches only the providers its
   data class allows.
 - **Langfuse.** With `VALXEL_LANGFUSE_URL`, `VALXEL_LANGFUSE_PUBLIC_KEY` and
-  `VALXEL_LANGFUSE_SECRET_KEY`, each run writes one dataset per phase (`valxel/<phase>`), links the
+  `VALXEL_LANGFUSE_SECRET_KEY` (the keys of Langfuse's test project, ADR 0011: replays are
+  trials, traced as `test`), each run writes one dataset per phase (`valxel/<phase>`), links the
   run's traces to the items and scores them; documents go to Langfuse only for `general` cases.
 
 ### Trying a config on some features first: the canary

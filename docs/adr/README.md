@@ -17,6 +17,7 @@ dates are when the decision took effect.
 | [0008](0008-threat-model-agent-plane.md) | Threat model for the agent plane | Accepted |
 | [0009](0009-agent-harness.md) | The agent harness: Claude Code and Codex for code, measured against LangChain | Accepted |
 | [0010](0010-one-cloud-per-installation.md) | One cloud per installation, reached through ports in the core | Accepted |
+| [0011](0011-agent-traces-one-langfuse-two-projects.md) | Agent traces: one Langfuse for the tool, with a project for real work and one for tests | Accepted |
 
 Write a new one from [the template](template.md): the context (what forces the choice), the
 decision, what else was considered, and what follows from it, good and bad. Link it from here.
