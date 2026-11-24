@@ -186,8 +186,9 @@ def with_aws(target: Path, *, run=_run, catalog=None) -> int:
     from .aws import point_env as aws_env
 
     aws_env(target, on=True)
-    if run(compose(target, "up", "-d", "--wait", "moto"), check=False).returncode:
-        print("moto didn't start: docker compose logs moto", file=sys.stderr)
+    started = run(compose(target, "up", "-d", "--wait", "moto"), check=False)
+    if started.returncode:
+        print(f"moto didn't start: {(started.stderr or started.stdout or '').strip()}", file=sys.stderr)
         return 1
     repo = platform_resources(target, run=run)
     has_crossplane = run(_kubectl("get", "deployment", "-n", "crossplane-system", "crossplane"),

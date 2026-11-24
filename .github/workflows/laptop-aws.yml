@@ -61,7 +61,8 @@ jobs:
       - name: valxel dev init, aws on, cluster up --aws
         run: |
           if [ -n "$PLATFORM_RESOURCES_REF" ]; then export VALXEL_PLATFORM_RESOURCES="$PWD/platform-resources"; fi
-          valxel dev init < /dev/null
+          # No model calls here: the key only has to be there for the bundle's compose file.
+          echo "sk-ant-placeholder-not-used" | valxel dev init --anthropic-key-stdin
           valxel dev aws on
           valxel dev cluster up --aws
       - name: The tool -> OpenChoreo -> Crossplane -> moto, and a pod -> moto
