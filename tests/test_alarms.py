@@ -103,7 +103,7 @@ def test_g4_shows_the_alarms_and_g6_shows_what_fires_before_production(engine):
     s = engine._state(fid)
     [row] = seen["g4"]["aws_resources"]["resources"]
     assert {a["name"] for a in row["alarms"]} == {"read-throttled", "write-throttled"}
-    [res] = [r for r in s["resources"] if r["type"] == "dynamodb-table"]
+    [res] = [r for r in s["resources"] if r["type"] == "key-value-table"]
     assert res["parameters"]["tags"]["valxel:resource"] == res["name"]
     [firing] = seen["g6"]["alarms_firing"]
     assert firing["env"] == "staging" and firing["severity"] == "sev3" and firing["says"].startswith("Writes")

@@ -265,13 +265,25 @@ def build(ctx: SimpleNamespace) -> APIRouter:
 
     def url_sender(request: Request, *kinds: str):
         """Google Cloud's senders (a Cloud Monitoring webhook channel, a Pub/Sub push subscription)
-        put no Authorization header of ours on their requests: the token is in the URL, ?token=."""
+        put no Bearer header of ours on their requests: the token is in the URL (?token=), or the
+        password of a webhook_basicauth channel."""
         from ...ops.signal_tokens import scope_of
         from ...secret_ring import values
 
         if not values("VALXEL_SIGNALS_TOKEN"):
             raise HTTPException(404, "Signal webhooks are not configured")
         token = request.query_params.get("token", "")
+        auth = request.headers.get("authorization", "")
+        if not token and auth.lower().startswith("basic "):
+            # A Cloud Monitoring webhook_basicauth channel: the token is the password, kept in the
+            # channel's sensitive labels rather than its URL (platform-resources gcp/alarm-routing).
+            import base64
+            import binascii
+
+            try:
+                token = base64.b64decode(auth[6:].strip()).decode().partition(":")[2]
+            except (binascii.Error, UnicodeDecodeError):
+                token = ""
         scope = scope_of(f"Bearer {token}" if token else "", kinds, list(eng().services.settings.registry))
         if scope is None:
             raise HTTPException(401, "Bad token")

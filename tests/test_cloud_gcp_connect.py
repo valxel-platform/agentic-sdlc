@@ -277,6 +277,10 @@ def test_a_projects_token_sends_that_projects_events_only(signals_client):
     incident = fixture("monitoring-incident-open.json")
     r = signals_client.post(f"/api/signals/cloud-monitoring?token={good}", json=incident)
     assert r.status_code == 202, r.text
+    import base64
+
+    basic = {"authorization": "Basic " + base64.b64encode(f"valxel:{good}".encode()).decode()}
+    assert signals_client.post("/api/signals/cloud-monitoring", headers=basic, json=incident).status_code == 202
     other = token_for("project", "farm-staging", "s" * 40)
     assert signals_client.post(f"/api/signals/cloud-monitoring?token={other}",
                                json=fixture("monitoring-incident-open.json")).status_code == 401

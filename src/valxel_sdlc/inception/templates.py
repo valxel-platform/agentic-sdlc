@@ -104,7 +104,7 @@ def architecture(v: Vision, ctx: dict) -> str:
              "everything runs on the platform's OpenChoreo, with records in Postgres and events on Kafka.",
              "", "## Components"]
     lines += [f"- {n} ({r}): {d} [repo: {org}/{prefix}{n}]" for n, r, d in comps]
-    lines += ["", "## Resources", f"- records: postgres-crossplane; database={prefix.rstrip('-')}",
+    lines += ["", "## Resources", f"- records: postgres; database={prefix.rstrip('-')}",
               "    writes: api; reads: api"]
     lines += load_lines(comps)
     lines += ["", "## Shared services", "- None: the product starts on the platform's own services",

@@ -240,12 +240,12 @@ def plan(brief: str, arch: str, platform: dict | None = None, catalog: dict | No
          data_class: str = "general") -> dict:
     """The capacity plan, with findings for anything that doesn't add up."""
     from .inception import formats
-    from .resources import parse_resources
+    from .resources import resolved
 
     cfg = platform or load_platform("")
     catalog = catalog or {}
     comps = components if components is not None else [c for c in formats.components(arch) if c.get("name")]
-    res = resources if resources is not None else [r for r in parse_resources(arch) if r.get("type")]
+    res = resources if resources is not None else [r for r in resolved(arch, catalog) if r.get("type")]
     sc, (t, _why), budget = scale(brief), tier(brief), run_budget(brief)
     findings = list(sc["problems"])
     tiers = cfg["tiers"]
@@ -516,7 +516,8 @@ def check_doc(arch: str, comps: list[dict], resources: list[dict]) -> list[str]:
         if c["role"] in ("bff", "consumer", "event-worker", "agent", "mcp-server", "knowledge", "reporting", "job", "connector", "code-sandbox", "document-intake", "channel") and n not in callers:
             out.append(f"{n}: say under '## Failure' what happens when what it calls is slow or down")
     for r in resources:
-        if r.get("type", "").startswith(("postgres", "dynamodb", "redis", "s3")) and r["name"] not in f["recovery"]:
+        if (r.get("type", "").startswith(("postgres", "dynamodb", "redis", "s3", "key-value", "cache", "object"))
+                and r["name"] not in f["recovery"]):
             out.append(f"{r['name']}: say under '## Failure' how it recovers ('- {r['name']}: recovery: <how the tier's "
                        "RTO and RPO are met>')")
     return out

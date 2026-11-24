@@ -1746,13 +1746,18 @@ A role is worth a generator once it has at least 10 coder tasks and scaffolding 
 of the lines added. Lines stand in for tokens, so "tokens a generator would save" is an
 estimate. Build generators only for roles the report marks.
 
-## AWS services (VX-19)
+## Cloud services (VX-19)
 
-Features that need a managed service get it from the platform's AWS catalog
-(`platform/aws-resources.yaml` in sdlc-governance): DynamoDB, Kinesis, SQS, S3, SNS, and RDS
-PostgreSQL and ElastiCache Valkey through OpenChoreo's Crossplane provisioner. Each type is an
-OpenChoreo ClusterResourceType backed by a Crossplane Composition in `valxel-platform/platform-resources`,
-with encryption, private access, backups and tags built in. People approve; agents do the rest:
+Features that need a managed service get it from the platform's catalog (`platform/catalog.yaml`
+in sdlc-governance), by neutral type: `key-value-table`, `event-stream`, `queue`, `object-bucket`,
+`topic`, `postgres` and `cache`. Each type names the service behind it on each cloud (ADR 0010):
+on AWS DynamoDB, Kinesis, SQS, S3, SNS, and RDS PostgreSQL and ElastiCache Valkey through
+OpenChoreo's Crossplane provisioner; on Google Cloud Firestore, Pub/Sub and Cloud Storage
+(Cloud SQL and Memorystore to follow). The architect sees only the installation's cloud's services
+and prices. The version 1 names (`dynamodb-table`, `sqs-queue`...) still read as aliases, and a
+resource made under one keeps it. Each type is an OpenChoreo ClusterResourceType backed by a
+Crossplane Composition per cloud in `valxel-platform/platform-resources`, with encryption, private
+access, backups and tags (labels on Google Cloud) built in. People approve; agents do the rest:
 
 | Step | Who | What |
 | --- | --- | --- |

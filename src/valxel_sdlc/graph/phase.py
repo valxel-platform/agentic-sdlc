@@ -174,6 +174,7 @@ def feature_ctx(services, state: FeatureState, phase: str) -> dict:
         # AWS services (VX-19): what the platform offers, where the product runs them, what exists.
         "aws_catalog": dict(snap.aws_catalog or {}),
         "aws": (product.runtime or {}).get("aws"),
+        "cloud": (product.runtime or {}).get("cloud"),
         "pipeline": list((product.runtime or {}).get("pipeline") or []),
         "aws_existing": _aws_existing(services, snap) if phase == "architecture" else [],
         # The approved design, for the coder's resource bindings.

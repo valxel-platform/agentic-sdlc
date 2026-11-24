@@ -49,7 +49,7 @@ def test_each_environment_and_the_identifiers_to_find_things(eng):
     assert api[-1]["ids"]["kubectl"] == ("kubectl get deploy,svc,pods -A -l openchoreo.dev/project=farm,"
                                          "openchoreo.dev/component=farm-field-api,openchoreo.dev/environment=production")
     table = next(r for r in inv["items"] if r["name"] == "field-log-dynamodb" and r["env"] == "production")
-    assert (table["type"], table["size"], table["planned_monthly_usd"]) == ("dynamodb-table", "medium", 60.0)
+    assert (table["type"], table["size"], table["planned_monthly_usd"]) == ("key-value-table", "medium", 60.0)
     assert table["ids"]["aws_account"] == "333333333333" and table["ids"]["arn"].endswith("table/farm-field-log")
     assert {"name": "tableName", "value": "farm-field-log"} in table["outputs"]
     assert table["secrets"] == [{"output": "credentials", "name": "field-log-dynamodb-conn", "key": "password"}]

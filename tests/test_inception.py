@@ -83,7 +83,7 @@ def test_architecture_checks(services, vision):
     bad = (a.text.replace("api (provider)", "api (database)")
            .replace("[repo: acme-water/aw-web]", "[repo: other-org/web]")
            .replace("[repo: acme-water/aw-bff]", "[repo: acme-water/bff-service]")
-           .replace("- records: postgres-crossplane; database=aw", "- records: mongodb; database=aw\n- cache: redis-crossplane\n    reads: billing")
+           .replace("- records: postgres; database=aw", "- records: mongodb; database=aw\n- cache: redis-crossplane\n    reads: billing")
            .replace("95% of API requests answer within 300 ms at the expected peak", "fast enough")
            .replace("(alternatives: DynamoDB; ", "("))
     found = "\n".join(checks.architecture(bad, ctx))
@@ -149,7 +149,7 @@ def test_an_existing_product_describes_what_runs_today(services):
 
 def test_the_platform_is_read_from_its_governance_repo(services):
     p = platform(services)
-    assert "VX-1" in p["constitution"] and "postgres-crossplane" in p["catalog"]["types"]
+    assert "VX-1" in p["constitution"] and "postgres" in p["catalog"]["types"]
 
 
 def test_the_command_line(tmp_path, monkeypatch):

@@ -106,7 +106,9 @@ def collect(oc, snap, known: dict, *, costs=None, aws=None, at: datetime | None 
             problems.append(f"{name}: {type(exc).__name__}: {exc}")
             continue
         info = meta.get(name) or {}
-        sizes = ((catalog.get("types") or {}).get(rtype) or {}).get("sizes") or {}
+        from ..resources import canonical
+
+        sizes = ((catalog.get("types") or {}).get(canonical(rtype, catalog)) or {}).get("sizes") or {}
         for b in bindings:
             size = b.get("size") or (info.get("sizes") or {}).get(b["env"], "")
             planned = (sizes.get(size) or {}).get("monthly_usd")
