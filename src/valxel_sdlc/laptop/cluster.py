@@ -62,7 +62,7 @@ SETTINGS = {
 # every AWS call going to moto beside it (platform-resources local/aws, valxel_sdlc.laptop.aws). The
 # commit is pinned like the installer; VALXEL_PLATFORM_RESOURCES names a checkout to use instead.
 PLATFORM_RESOURCES = "https://github.com/valxel-platform/platform-resources"
-PLATFORM_RESOURCES_REF = "main"
+PLATFORM_RESOURCES_REF = "3193e1b8a6e9fc71ba4e639acb0ee60e84b32639"  # platform-resources#15 (local/aws)
 
 # Laptop-only names: the tool's repo standards build with `docker` and deploy web apps as
 # `web-app`; a fresh OpenChoreo calls these `dockerfile-builder` and `web-application`. The

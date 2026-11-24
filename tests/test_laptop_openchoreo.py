@@ -272,3 +272,7 @@ def test_up_with_aws_installs_crossplane_when_openchoreo_has_none(tmp_path, monk
     installs = []
     assert cluster.with_aws(tmp_path, run=kube, catalog=lambda cmd: installs.append(cmd) or 0) == 0
     assert installs[0][1] == str(tmp_path / "pr" / "local" / "aws" / "install.py") and installs[0][-1] == "--crossplane"
+
+
+def test_platform_resources_is_pinned_to_a_commit():
+    assert len(cluster.PLATFORM_RESOURCES_REF) == 40 and int(cluster.PLATFORM_RESOURCES_REF, 16) >= 0
