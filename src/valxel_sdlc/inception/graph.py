@@ -100,7 +100,7 @@ def _report(d) -> dict:
 
 
 def _decide(raw) -> dict:
-    from ..graph.pipeline import normalize
+    from ..gate_decisions import normalize
 
     return normalize(raw, DECISIONS)
 

@@ -97,7 +97,7 @@ def make_flag_rollout(services):
     """Widen a feature's flag step by step, per the plan G6 approved (ops/rollout.py)."""
     from ..ops import rollout as ro
     from ..ops.changes import new as new_change
-    from ..ops.remediation import ROLLOUT_AGENT
+    from ..ops.rollout import ROLLOUT_AGENT
 
     def record(state: FeatureState, release: dict, pct: float, *, by: str, approved: list[str], n: int,
                note: str) -> list[dict]:

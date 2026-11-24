@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 
 COMPRESS_IN_STUB = True
 DEFAULT_TIER = "high"
+ROLLOUT_AGENT = "agent:rollout"  # the actor on every flag change a gradual release makes
 TIERS_BY_RISK = ("low", "high", "regulated")
 
 
@@ -81,10 +82,9 @@ def on_regression(services, *, product_id: str, thread_id: str, title: str, flag
     (events, what happened) for the release managers' decision."""
     from datetime import datetime as _dt
 
-    from ..roadmap.graphs import event
+    from ..graph_events import event
     from .changes import new as new_change
     from .cohorts import describe
-    from .remediation import ROLLOUT_AGENT
 
     worse = res.get("regression") or {}
     keys = {f: k for f, k in flags.items() if k in worse}

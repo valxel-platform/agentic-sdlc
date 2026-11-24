@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import operator
 import re
-from datetime import datetime, timezone
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -21,6 +20,7 @@ from langgraph.types import Command, interrupt
 from ..agents import untrusted
 from ..agents.context import build_layers, skills_dir_of
 from ..gateway import CallTags
+from ..graph_events import event, now  # the core's; kept importable from here
 from ..research import DOC_SECTIONS
 from ..research import summary as research_summary
 from ..runtime import AgentTask
@@ -34,16 +34,8 @@ RELEASE_DECISIONS = ("approve", "abort")
 DATE_DECISIONS = ("ship_ready", "move_date")  # a release's date came and not everything is ready
 
 
-def now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def event(node: str, kind: str, detail: str = "", **extra) -> dict:
-    return {"at": now(), "node": node, "kind": kind, "detail": detail, **extra}
-
-
 def _decide(raw, allowed: tuple[str, ...]) -> dict:
-    from ..graph.pipeline import normalize
+    from ..gate_decisions import normalize
 
     return normalize(raw, allowed)
 
@@ -520,10 +512,10 @@ def build_release_graph(services, checkpointer=None):
 
     def launch_rollout(state: ReleaseState) -> Command:
         """Widen every flag of the launch together, per the plan its gate approved."""
-        from ..graph.pipeline import ESCALATION_DECISIONS, normalize
+        from ..gate_decisions import ESCALATION_DECISIONS, normalize
         from ..ops import rollout as ro
         from ..ops.changes import new as new_change
-        from ..ops.remediation import ROLLOUT_AGENT
+        from ..ops.rollout import ROLLOUT_AGENT
 
         plan = dict(state.get("rollout_plan") or {})
         flags = dict(state.get("flags") or {})

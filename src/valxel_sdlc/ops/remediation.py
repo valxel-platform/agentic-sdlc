@@ -61,13 +61,14 @@ from datetime import datetime, timedelta, timezone
 
 import yaml
 
+from .rollout import ROLLOUT_AGENT  # noqa: F401  (the core's, with the gradual release it names)
+
 ACTIONS = ("flag_off", "rollback")
 QUIET_MINUTES = {"sev1": 10, "sev2": 15, "sev3": 30, "sev4": 60}
 ANALYSIS_WAIT = {"sev1": 5, "sev2": 8, "sev3": 10, "sev4": 10}
 CORROBORATION_WAIT = {"sev1": 5, "sev2": 10, "sev3": 15, "sev4": 15}
 RISK_TIERS = ("low", "high", "regulated")
 AGENT = "agent:remediate"
-ROLLOUT_AGENT = "agent:rollout"
 
 
 class PolicyError(ValueError):

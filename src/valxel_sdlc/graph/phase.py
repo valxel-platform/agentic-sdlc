@@ -30,6 +30,7 @@ from ..template_contract import roles_with
 from ..evaluators import critique, run_checks, weakening
 from ..agents import formats, structured, untrusted
 from ..gateway import CallTags, ProviderUnavailable
+from ..graph_events import event, now  # the core's; kept importable from here
 from ..repo_roles import REPO_ORDER
 from ..runtime import AgentResult, AgentTask
 from ..state import FeatureState, PhaseState
@@ -53,14 +54,6 @@ def gates_status(services, prs, state: str, description: str) -> None:
                                        state=state, description=description, url=pr.get("url", ""))
         except Exception:
             pass
-
-
-def now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def event(node: str, kind: str, detail: str = "", **extra) -> dict:
-    return {"at": now(), "node": node, "kind": kind, "detail": detail, **extra}
 
 
 # Phases whose agents design or build, and so need the existing design (decisions, contracts,
