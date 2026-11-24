@@ -68,6 +68,12 @@ figcaption{color:var(--soft);font-size:14px;margin-top:8px}
 @media(max-width:1100px){.capgrid{grid-template-columns:minmax(0,1fr)}#cpanel{position:static;max-height:none;order:0}}
 @media(max-width:820px){.row5{grid-template-columns:repeat(2,minmax(0,1fr))}.seamrow{grid-template-columns:minmax(0,1fr)}.seamcol{grid-template-columns:repeat(2,minmax(0,1fr))}.seamcol>b,.seamcol .pair{grid-column:1/-1}.lay{grid-template-columns:minmax(0,1fr)}.wires{display:none}}
 @media(max-width:460px){.seamcol,.seamcol .pair{grid-template-columns:minmax(0,1fr)}}
+.layers{border-top:1px solid var(--rule)}
+.layers .pics{display:grid;grid-template-columns:minmax(0,1fr);gap:28px;margin-top:16px}
+.layers .compact{max-width:900px}
+.layers figure{margin:0}
+.layers img{display:block;width:100%;height:auto;border:1px solid var(--rule);border-radius:8px;background:#fff}
+.layers figcaption{margin-top:8px}
 .mapband{background:var(--panel);border-top:1px solid var(--rule)}
 h2{font-size:28px;line-height:1.1;letter-spacing:-.02em;margin:0 0 6px}
 .tools{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;margin:16px 0}
@@ -134,6 +140,17 @@ h2{font-size:28px;line-height:1.1;letter-spacing:-.02em;margin:0 0 6px}
     <div class="tools"><div class="key"><span><i style="background:var(--ink)"></i>Picked</span><span><i style="background:var(--mint)"></i>It uses</span><span><i style="background:var(--sand)"></i>Uses it</span><span>Line weight is the number of imports</span></div><button class="clear" id="mainlinks" type="button">Show the main links</button></div>
   </div>
 </header>
+
+<section class="band layers" aria-labelledby="layh">
+  <div class="wrap">
+    <h2 id="layh">The layers at a glance</h2>
+    <p class="lead">The same layers as pictures to share: the capabilities alone, and with what each one does. Pick either to open it full size.</p>
+    <div class="pics">
+      <figure class="compact"><a href="architecture/capability-layers.png"><img src="architecture/capability-layers.png" alt="Valxel's capabilities in three stacked layers: the root (front doors and wiring), four seams (intake, delivery, roadmap, ops) and the shared core, each layer building only on the ones below it." loading="lazy"></a><figcaption>Capabilities by layer</figcaption></figure>
+      <figure><a href="architecture/capability-layers-detailed.png"><img src="architecture/capability-layers-detailed.png" alt="The same layers with what each capability does, including the clouds Cloud ports adapts to (AWS, Azure, Google Cloud) and the tools Integrations reaches." loading="lazy"></a><figcaption>With what each capability does</figcaption></figure>
+    </div>
+  </div>
+</section>
 
 <section class="band mapband" aria-labelledby="maph">
   <div class="wrap">
