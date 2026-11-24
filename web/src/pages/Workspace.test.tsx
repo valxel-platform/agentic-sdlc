@@ -194,7 +194,6 @@ describe("WorkspacesPage", () => {
       expect(vi.mocked(api.createWorkspace)).toHaveBeenCalledWith({
         id: "acme-farms",
         name: "Acme Farms",
-        plan: "lite",
       }),
     );
     expect(await screen.findByRole("heading", { name: "Acme Farms" })).toBeInTheDocument();
@@ -954,7 +953,7 @@ describe("WorkspacePage extra branches", () => {
     expect(screen.queryByRole("tab", { name: "Audit log" })).not.toBeInTheDocument();
   });
 
-  it("creates a workspace with the chosen plan", async () => {
+  it("creates a workspace with no plan to choose: the server uses the plan it offers", async () => {
     const user = userEvent.setup();
     vi.mocked(api.workspaces).mockResolvedValue([]);
     vi.mocked(api.createWorkspace).mockResolvedValue({ id: "acme", name: "Acme", role: "owner" });
@@ -962,13 +961,12 @@ describe("WorkspacePage extra branches", () => {
     renderWorkspace("/workspaces");
     await screen.findByRole("heading", { name: "New workspace" });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Acme" } });
-    await user.selectOptions(screen.getByLabelText("Plan"), "full");
+    expect(screen.queryByLabelText("Plan")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create workspace" }));
     await waitFor(() =>
       expect(vi.mocked(api.createWorkspace)).toHaveBeenCalledWith({
         id: "acme",
         name: "Acme",
-        plan: "full",
       }),
     );
   });

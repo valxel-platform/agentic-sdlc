@@ -32,7 +32,7 @@ const who = (m: Member) => [m.email, m.github_login && `@${m.github_login}`].fil
 export function WorkspacesPage() {
   const [list, setList] = useState<Workspace[] | null>(null);
   const [err, setErr] = useState("");
-  const [form, setForm] = useState({ id: "", name: "", plan: "lite" });
+  const [form, setForm] = useState({ id: "", name: "" });
   const nav = useNavigate();
   useEffect(() => {
     api
@@ -116,14 +116,6 @@ export function WorkspacesPage() {
               className="mono"
               onChange={(e) => setForm({ ...form, id: e.target.value })}
             />
-          </label>
-          <label className="field">
-            Plan
-            <select value={form.plan} onChange={(e) => setForm({ ...form, plan: e.target.value })}>
-              <option value="lite">Lite</option>
-              <option value="full">Full</option>
-              <option value="self-hosted">Self-hosted</option>
-            </select>
           </label>
           <div className="submit-row">
             <button className="btn" type="submit">

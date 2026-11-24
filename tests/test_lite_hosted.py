@@ -1,4 +1,4 @@
-"""Lite mode, part 3: a lite product is hosted on Valxel's shared plane while it is built."""
+"""Lite mode, part 3: a lite product runs on the shared non-production plane while it is built."""
 
 from __future__ import annotations
 

@@ -1,8 +1,8 @@
-"""Go-live: a lite product moves from Valxel's hosting to the customer's VM.
+"""Go-live: a lite product moves from the shared non-production plane to its own VMs.
 
-While it is built, a lite product runs on Valxel's shared OpenChoreo plane, with dev and staging
+While it is built, a lite product runs on the shared OpenChoreo plane, with dev and staging
 only (valxel_sdlc.environments). When the customer decides to go to production, a person runs
-go-live with the VM (or two) the customer has given Valxel access to:
+go-live with the VM (or two) the product will run on:
 
     releases   what runs in hosted staging: each component's image pinned by digest, and its
                workload.yaml from the repo's default branch
@@ -172,7 +172,7 @@ def go_live(services, *, product_id: str, approver: str, vms: dict,
                                  message=f"{product_id} goes live on its VMs")
         pr = services.github.open_pr(
             repo=repo, branch=branch, title=f"{product_id} goes live", files=["product.yaml"], labels=["valxel", "go-live"],
-            body=(f"{who} moved {product_id} from Valxel's hosting to its VMs on {today}: dev, staging and production run "
+            body=(f"{who} moved {product_id} from the shared non-production plane to its VMs on {today}: dev, staging and production run "
                   "the releases that ran in hosted staging. Merge to deploy through the VMs from now on; features "
                   "waiting at G6 for go-live then ask for approval. Afterwards, retire the hosted environments."))
         return {"url": pr["url"], "repo": repo}

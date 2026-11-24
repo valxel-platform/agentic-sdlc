@@ -651,13 +651,14 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     en.add_argument("--product", required=True)
     en.add_argument("--approver", required=True, help="Who approved the product gate (production is created for them)")
     en.add_argument("--mode", default="stub", choices=["live", "stub"])
-    gl = sub.add_parser("go-live", help="Move a hosted lite product to the customer's VM (dev, staging and production), "
-                                        "or retire its hosted environments once it is live")
+    gl = sub.add_parser("go-live", help="Move a lite product from the shared non-production plane to its own "
+                                        "VMs (dev, staging and production), or remove its shared-plane "
+                                        "environments once it is live")
     gl.add_argument("--product", required=True)
     gl.add_argument("--by", default=os.environ.get("USER", ""), help="Who decided to go to production (a person)")
     gl.add_argument("--vm", help="The non-production VM's Docker host, e.g. ssh://valxel@10.0.1.5")
     gl.add_argument("--prod-vm", default="", help="Production's own VM, if it has one")
-    gl.add_argument("--retire", action="store_true", help="Remove the hosted dev and staging (after the PR merged)")
+    gl.add_argument("--retire", action="store_true", help="Remove its dev and staging from the shared plane (after the PR merged)")
     gl.add_argument("--mode", default="stub", choices=["live", "stub"])
     ca = sub.add_parser("capacity", help="Propose a production stage step, or review production against the "
                                          "capacity plan, as a pull request to runtime/capacity.yaml")
