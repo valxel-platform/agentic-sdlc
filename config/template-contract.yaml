@@ -48,7 +48,7 @@ capabilities:
   supply-chain-pins:
     area: security
     roles: deployed
-    says: "every base image pinned to its digest, kept pinned weekly and on Dependabot's pull requests"
+    says: "every base image pinned to its digest, on Dependabot's pull requests; checked weekly (main is reported on, not changed: updates come through the tool)"
     marker: "supply-chain-pins"
 
   # --- observability
