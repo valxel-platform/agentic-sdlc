@@ -7,6 +7,8 @@ The evaluators, intake's product setup and delivery all read these, so they're t
 
 from __future__ import annotations
 
+from pathlib import Path
+
 
 def contracts_for(std, governance: str | None) -> dict:
     """The contract files a repo keeps, and whose copy each must match: the platform's for the
@@ -20,18 +22,15 @@ def contracts_for(std, governance: str | None) -> dict:
 
 def standard_file_path(name: str):
     """Where the platform's copy of a managed file is, for reading it in place."""
-    from pathlib import Path
-
     return Path(__file__).with_name("standard_files") / name
 
 
 def standard_file(name: str) -> str:
     """The platform's copy of a managed file (src/valxel_sdlc/standard_files/)."""
-    from importlib.resources import files  # nosemgrep: python37-compatibility-importlib2 -- requires-python >=3.11
-
+    package = Path(__file__).parent
     if name == "datasets.py":  # the module itself: governance CI runs the same checks as the evaluator
-        return (files("valxel_sdlc") / "datasets.py").read_text()
-    return (files("valxel_sdlc") / "standard_files" / name).read_text()
+        return (package / "datasets.py").read_text()
+    return (package / "standard_files" / name).read_text()
 
 
 REMOTE = "github:"  # a managed file whose owner is another repo: github:<owner>/<repo>/<path>
