@@ -1,0 +1,31 @@
+{
+  "tables": [
+    {
+      "table_name": "gcp_billing_export_v1_01AB23_45CD67_89EF01"
+    }
+  ],
+  "feature": [
+    {
+      "service": "Cloud Pub/Sub",
+      "usd": 12.5
+    },
+    {
+      "service": "Cloud Firestore",
+      "usd": 3.25
+    }
+  ],
+  "daily": [
+    {
+      "day": "2026-11-20",
+      "service": "Cloud Pub/Sub",
+      "feature": "farm-feat-7",
+      "usd": 6.0
+    },
+    {
+      "day": "2026-11-20",
+      "service": "Compute Engine",
+      "feature": "",
+      "usd": 40.0
+    }
+  ]
+}

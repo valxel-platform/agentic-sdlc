@@ -205,6 +205,9 @@ def test_the_installation_names_its_cloud():
     assert _settings("cloud.region=eu-west-1")["AWS_REGION"] == "eu-west-1"
     gcp = _settings(*GCP)
     assert gcp["VALXEL_CLOUD"] == "gcp" and "AWS_REGION" not in gcp and gcp["VALXEL_GCP_PROJECT"] == "acme-valxel"
+    more = _settings(*GCP, "cloud.serviceAccount=valxel@acme-valxel.iam.gserviceaccount.com",
+                     "cloud.billingDataset=acme-billing.valxel_billing")
+    assert more["VALXEL_GCP_SERVICE_ACCOUNT"].startswith("valxel@") and more["VALXEL_GCP_BILLING_DATASET"]
 
 
 GCP = ("cloud.provider=gcp", "cloud.region=us-central1", "cloud.project=acme-valxel",

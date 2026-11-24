@@ -7,6 +7,8 @@ tool stores one secret and each sender holds only its own:
                       channels, a support tool's tickets. Signals for that product only.
   account:<ACCOUNT>   a data plane account's EventBridge senders: CloudWatch alarms (AlarmRouting)
                       and Inspector findings. Events from that AWS account only.
+  project:<PROJECT>   a Google Cloud project's senders: Cloud Monitoring's webhook channel and
+                      Security Command Center's Pub/Sub push. Events from that project only.
 
 `valxel signals-token product CLN` or `valxel signals-token account 123456789012` prints one. A
 leaked token can then raise or resolve signals for its own product or account and nothing else;
@@ -26,7 +28,8 @@ import re
 from dataclasses import dataclass
 
 NAME = "VALXEL_SIGNALS_TOKEN"
-KINDS = ("product", "account")
+KINDS = ("product", "account", "project")
+PROJECT_ID = re.compile(r"[a-z][a-z0-9-]{4,28}[a-z0-9]")
 
 
 @dataclass(frozen=True)
@@ -40,12 +43,14 @@ class Scope:
             return True
         if self.kind == "product":
             return str(signal.get("product_id") or "") == self.name
-        return str((signal.get("labels") or {}).get("account") or "") == self.name
+        return str((signal.get("labels") or {}).get(self.kind) or "") == self.name
 
 
 def derive(secret: str, kind: str, name: str) -> str:
     if kind not in KINDS:
-        raise ValueError(f"a signals token is for a product or an account, not {kind!r}")
+        raise ValueError(f"a signals token is for a product, an account or a project, not {kind!r}")
+    if kind == "project" and not PROJECT_ID.fullmatch(name):
+        raise ValueError("a Google Cloud project ID is 6 to 30 lowercase letters, digits and hyphens")
     if kind == "account" and not re.fullmatch(r"\d{12}", name):
         raise ValueError("an AWS account is 12 digits")
     if kind == "product" and not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", name):
@@ -84,7 +89,9 @@ def scope_of(header: str, kinds: tuple[str, ...], products: list[str], env=None)
             for pid in products:
                 if hmac.compare_digest(got, derive(secret, "product", pid)):
                     return Scope("product", pid)
-    return Scope("account?", got) if "account" in kinds else None
+    if "account" in kinds:
+        return Scope("account?", got)
+    return Scope("project?", got) if "project" in kinds else None
 
 
 def account_scope(candidate: Scope, account: str, env=None) -> Scope | None:
@@ -97,4 +104,17 @@ def account_scope(candidate: Scope, account: str, env=None) -> Scope | None:
         return None
     if any(hmac.compare_digest(candidate.name, derive(s, "account", account)) for s in values(NAME, env)):
         return Scope("account", account)
+    return None
+
+
+def project_scope(candidate: Scope, project: str, env=None) -> Scope | None:
+    """A project token checked against the Google Cloud project the event comes from."""
+    from ..secret_ring import values
+
+    if candidate.kind != "project?":
+        return candidate
+    if not PROJECT_ID.fullmatch(project or ""):
+        return None
+    if any(hmac.compare_digest(candidate.name, derive(s, "project", project)) for s in values(NAME, env)):
+        return Scope("project", project)
     return None

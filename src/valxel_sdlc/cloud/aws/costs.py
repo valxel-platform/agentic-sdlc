@@ -21,7 +21,7 @@ class CostExplorerSource:
     def component_costs_daily(self, **_) -> list[dict]:
         return []
 
-    def aws_costs_daily(self, *, product_id, account, start, end) -> list[dict]:
+    def cloud_costs_daily(self, *, product_id, account, start, end) -> list[dict]:
         """Everything tagged valxel:product in the account, by day, feature tag and service."""
         flt = {"And": [{"Tags": {"Key": "valxel:product", "Values": [product_id], "MatchOptions": ["EQUALS"]}},
                        {"Dimensions": {"Key": "LINKED_ACCOUNT", "Values": [account]}}]}
@@ -43,7 +43,7 @@ class CostExplorerSource:
             if not token:
                 return out
 
-    def aws_costs(self, *, product_id, feature_id, account, start, end) -> dict[str, float]:
+    def cloud_costs(self, *, product_id, feature_id, account, start, end) -> dict[str, float]:
         flt = {"And": [{"Tags": {"Key": "valxel:feature", "Values": [feature_id], "MatchOptions": ["EQUALS"]}},
                        {"Dimensions": {"Key": "LINKED_ACCOUNT", "Values": [account]}}]}
         out: dict[str, float] = {}

@@ -14,7 +14,7 @@ from ...web.auth import (
     User,
 )
 from ..context import CONNECT_COOKIE
-from ..models import WorkspaceIn, PlanIn, MemberIn, MemberUpdate, GroupIn, GroupMembers, AwsCheckIn, GatesIn
+from ..models import WorkspaceIn, PlanIn, MemberIn, MemberUpdate, GroupIn, GroupMembers, AwsCheckIn, GcpCheckIn, GatesIn
 
 
 log = logging.getLogger(__name__)
@@ -311,6 +311,31 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         mode = body.mode or (wsx().get(workspace) or {}).get("plan", "lite")
         try:
             return conns().aws_check(workspace, account=body.account, mode=mode, actor=user.login)
+        except ConnectionError_ as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @api.get("/workspaces/{workspace}/connections/gcp/launch")
+    def gcp_launch(workspace: str, mode: str = "", region: str = "us-central1",
+                   user: User = Depends(current_user)) -> dict:
+        """Cloud Shell with the connect template, and the command to run there for this workspace."""
+        from ...connections import ConnectionError_
+
+        admin_of(user, workspace)
+        mode = mode or (wsx().get(workspace) or {}).get("plan", "lite")
+        try:
+            return {**conns().gcp_launch(workspace, mode=mode, region=region, actor=user.login), "mode": mode}
+        except ConnectionError_ as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @api.post("/workspaces/{workspace}/connections/gcp/check")
+    def gcp_check(workspace: str, body: GcpCheckIn, user: User = Depends(current_user)) -> dict:
+        """After the template ran: Valxel acts as its service accounts; the project is connected when both do."""
+        from ...connections import ConnectionError_
+
+        admin_of(user, workspace)
+        mode = body.mode or (wsx().get(workspace) or {}).get("plan", "lite")
+        try:
+            return conns().gcp_check(workspace, project=body.project, mode=mode, actor=user.login)
         except ConnectionError_ as exc:
             raise HTTPException(422, str(exc)) from exc
 

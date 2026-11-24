@@ -96,7 +96,7 @@ class StubCostSource:
             out[c] = round(total, 4)
         return out
 
-    def aws_costs(self, *, product_id, feature_id, account, start, end) -> dict[str, float]:
+    def cloud_costs(self, *, product_id, feature_id, account, start, end) -> dict[str, float]:
         rate = self.aws_daily.get((feature_id, account), 0.0)
         return {"Amazon DynamoDB": round(rate * (end - start).total_seconds() / 86400, 4)} if rate else {}
 
@@ -111,7 +111,7 @@ class StubCostSource:
                     out.append({"day": d.isoformat(), "component": c, "usd": usd})
         return out
 
-    def aws_costs_daily(self, *, product_id, account, start, end) -> list[dict]:
+    def cloud_costs_daily(self, *, product_id, account, start, end) -> list[dict]:
         out = []
         for d, a, b in _days(start, end):
             frac = (b - a).total_seconds() / 86400
@@ -150,7 +150,7 @@ class ObserverCostSource:
                 out[it["component"]] += float(it.get("cpuCost") or 0) + float(it.get("memoryCost") or 0)
         return {k: round(v, 4) for k, v in out.items()}
 
-    def aws_costs(self, **_) -> dict[str, float]:
+    def cloud_costs(self, **_) -> dict[str, float]:
         return {}
 
     def component_costs_daily(self, *, namespace, project, env, start, end) -> list[dict]:
@@ -166,27 +166,27 @@ class ObserverCostSource:
                  "usd": round(float(it.get("cpuCost") or 0) + float(it.get("memoryCost") or 0), 6)}
                 for it in items if it.get("component")]
 
-    def aws_costs_daily(self, **_) -> list[dict]:
+    def cloud_costs_daily(self, **_) -> list[dict]:
         return []
 
 
 class CostSources:
-    """Compute from one source, AWS from another."""
+    """Compute from one source, the cloud's own resources from another."""
 
-    def __init__(self, compute, aws) -> None:
-        self.compute, self.aws = compute, aws
+    def __init__(self, compute, cloud) -> None:
+        self.compute, self.cloud = compute, cloud
 
     def component_costs(self, **kw) -> dict[str, float]:
         return self.compute.component_costs(**kw)
 
-    def aws_costs(self, **kw) -> dict[str, float]:
-        return self.aws.aws_costs(**kw)
+    def cloud_costs(self, **kw) -> dict[str, float]:
+        return self.cloud.cloud_costs(**kw)
 
     def component_costs_daily(self, **kw) -> list[dict]:
         return self.compute.component_costs_daily(**kw)
 
-    def aws_costs_daily(self, **kw) -> list[dict]:
-        return self.aws.aws_costs_daily(**kw)
+    def cloud_costs_daily(self, **kw) -> list[dict]:
+        return self.cloud.cloud_costs_daily(**kw)
 
 
 def _iso(t: datetime) -> str:
@@ -194,8 +194,8 @@ def _iso(t: datetime) -> str:
 
 
 def default_sources(settings=None):
-    """Live sources when configured (VALXEL_OPENCHOREO_OBSERVER_URL, VALXEL_AWS_COST_EXPLORER=1);
-    otherwise the stub, which reports no spend."""
+    """Live sources when configured (VALXEL_OPENCHOREO_OBSERVER_URL; VALXEL_AWS_COST_EXPLORER=1, or
+    on Google Cloud VALXEL_GCP_BILLING_DATASET); otherwise the stub, which reports no spend."""
     import os
 
     compute = aws = None
@@ -209,7 +209,13 @@ def default_sources(settings=None):
             auth = ClientCredentials(oc.setting("token_url"), oc.setting("client_id") or "service_mcp_client",
                                      oc.setting("client_secret"), scope=oc.setting("scope"))
         compute = ObserverCostSource(url, auth)
-    if os.environ.get("VALXEL_AWS_COST_EXPLORER", "").lower() in ("1", "true", "yes"):
+    from ..cloud import provider
+
+    if provider() == "gcp" and os.environ.get("VALXEL_GCP_BILLING_DATASET"):
+        from ..cloud.gcp.costs import GcpBillingCosts
+
+        aws = GcpBillingCosts(os.environ["VALXEL_GCP_BILLING_DATASET"])
+    elif os.environ.get("VALXEL_AWS_COST_EXPLORER", "").lower() in ("1", "true", "yes"):
         from ..cloud.aws.costs import CostExplorerSource
 
         aws = CostExplorerSource()

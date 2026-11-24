@@ -60,6 +60,11 @@ TOOLS: tuple[Tool, ...] = (
     Tool("aws", "AWS", "Go-live, in lite or full mode",
          "A role Valxel assumes with your workspace's external ID, scoped to the mode, and a read-only role for agents",
          "Delete the CloudFormation stack", available=True),
+    Tool("gcp", "Google Cloud", "Go-live, in lite or full mode",
+         "Two service accounts Valxel impersonates for 15 minutes at a time: one scoped to the mode, and a "
+         "read-only one for agents, costs and inventory",
+         "terraform destroy in the connect template's folder, or delete the valxel-* service accounts",
+         available=True),
     Tool("jira", "Jira", "Only if you pick Jira as the tracker",
          "Read and write issues on the Jira site you choose, as the person who connected it",
          "Remove Valxel under Connected apps in your Atlassian account, or Disconnect here", available=True),
@@ -241,8 +246,9 @@ class Connections:
 
     def __init__(self, workspaces, *, github: GitHubInstalls | None = None, aws: AwsConnect | None = None, notify=None,
                  health: dict[str, Callable[[dict], str]] | None = None, clock: Callable[[], float] = time.time,
-                 oauth=None) -> None:
+                 oauth=None, gcp=None) -> None:
         self.workspaces, self.github, self.aws, self.notify, self.clock = workspaces, github, aws, notify, clock
+        self.gcp = gcp  # valxel_sdlc.cloud.gcp.accounts.GcpConnect, on an installation on Google Cloud
         self.oauth = oauth  # valxel_sdlc.oauth_connections.OAuthTools: Jira, Lucid, Sentry, PagerDuty
         self.billing = None  # valxel_sdlc.billing.BillingProvider: going live may wait for a card
         # tool -> check(record): "" when it works, otherwise what's wrong in plain words
@@ -262,7 +268,10 @@ class Connections:
     def page(self, workspace: str) -> list[dict]:
         """Every tool, connected or not: what the connections page shows."""
         out = []
+        other = {"aws": "gcp", "gcp": "aws"}.get(self._cloud(), "")
         for t in TOOLS:
+            if t.id == other:
+                continue  # one cloud per installation (ADR 0010): only its own is offered
             rows = self.of(workspace, t.id)
             status = ("needs_attention" if any(c["status"] == "needs_attention" for c in rows)
                       else "connected" if rows else "not_connected")
@@ -271,9 +280,20 @@ class Connections:
                         "status": status, "connections": rows})
         return out
 
+    @staticmethod
+    def _cloud() -> str:
+        from .cloud import UnknownCloud, provider
+
+        try:
+            return provider()
+        except UnknownCloud:
+            return ""
+
     def _can_connect(self, tool: str) -> bool:
         if tool == "aws":
             return self.aws is not None
+        if tool == "gcp":
+            return self.gcp is not None
         if self.oauth is not None and self.oauth.available(tool):
             return True
         return tool in GITHUB_APPS and bool(self.github and self.github.apps.get(GITHUB_APPS[tool]))
@@ -410,6 +430,36 @@ class Connections:
         reach = self.aws.check(workspace, account=account, external_id=self.external_id(workspace, actor))
         return self.record(workspace, "aws", account, actor=actor, reach={**reach, "mode": mode})
 
+    # ------------------------------------------------------------------ Google Cloud
+    def _go_live_allowed(self, workspace: str) -> None:
+        if self.billing is not None:
+            from .billing import blocks_go_live
+
+            why = blocks_go_live(self.workspaces.get(workspace) or {"id": workspace}, self.billing)
+            if why:
+                raise ConnectionError_(why)
+
+    def gcp_launch(self, workspace: str, *, mode: str, region: str, actor: str) -> dict:
+        """Cloud Shell with the connect template, and the command to run there for this workspace."""
+        if self.gcp is None:
+            raise ConnectionError_("Google Cloud connections aren't set up on this Valxel")
+        self._go_live_allowed(workspace)
+        if mode not in ("lite", "full"):
+            raise ConnectionError_("Choose lite or full mode")
+        ext = self.external_id(workspace, actor)
+        out = {"url": self.gcp.launch_url(workspace, external_id=ext, mode=mode, region=region),
+               "command": self.gcp.command(workspace, external_id=ext, mode=mode, region=region)}
+        self.store.audit(workspace, actor, "connection.gcp_template_opened", {"mode": mode, "region": region})
+        return out
+
+    def gcp_check(self, workspace: str, *, project: str, mode: str, actor: str) -> dict:
+        """Act as each of the template's service accounts, and check they were made for this workspace."""
+        if self.gcp is None:
+            raise ConnectionError_("Google Cloud connections aren't set up on this Valxel")
+        project = project.strip().lower()
+        reach = self.gcp.check(workspace, account=project, external_id=self.external_id(workspace, actor))
+        return self.record(workspace, "gcp", project, actor=actor, reach={**reach, "mode": mode})
+
     # ------------------------------------------------------------------ health
     def check(self, workspace: str) -> list[dict]:
         """One cheap read per connection; a failure turns it to Needs attention and emails the
@@ -461,6 +511,21 @@ class Connections:
                             "connections page.")
             except Exception:
                 log.exception("Couldn't email %s about %s", to, c["tool"])
+
+
+def gcp_health(conns: Connections) -> Callable[[dict], str]:
+    """The template's service accounts still answer for this workspace."""
+
+    def check(c: dict) -> str:
+        if conns.gcp is None:
+            return "Google Cloud connections aren't set up on this Valxel any more"
+        try:
+            conns.gcp.check(c["workspace"], account=c["account"], external_id=conns.external_id(c["workspace"]))
+        except ConnectionError_ as exc:
+            return str(exc)
+        return ""
+
+    return check
 
 
 def delivery_health(tokens) -> Callable[[dict], str]:

@@ -1,0 +1,13 @@
+{
+  "message": {
+    "data": "eyJidWRnZXREaXNwbGF5TmFtZSI6ICJ2YWx4ZWwtRkFSTS1wcm9kdWN0aW9uIiwgImFsZXJ0VGhyZXNob2xkRXhjZWVkZWQiOiAxLjAsICJjb3N0QW1vdW50IjogMTE4MC41LCAiY29zdEludGVydmFsU3RhcnQiOiAiMjAyNi0xMS0wMVQwNzowMDowMFoiLCAiYnVkZ2V0QW1vdW50IjogMTAwMC4wLCAiYnVkZ2V0QW1vdW50VHlwZSI6ICJTUEVDSUZJRURfQU1PVU5UIiwgImN1cnJlbmN5Q29kZSI6ICJVU0QifQ==",
+    "attributes": {
+      "billingAccountId": "01AB23-45CD67-89EF01",
+      "budgetId": "b-123",
+      "schemaVersion": "1.0"
+    },
+    "messageId": "1",
+    "publishTime": "2026-11-23T10:00:00Z"
+  },
+  "subscription": "projects/acme-ops/subscriptions/valxel"
+}

@@ -44,6 +44,13 @@ def resource_kubectl(name: str, namespace: str | None) -> str:
 
 
 def aws_tags_from_env():
+    """The installation's cloud inventory, when it is set up: AWS's tagging API, or Cloud Asset Inventory."""
+    from ..cloud import provider
+
+    if provider() == "gcp":
+        from ..cloud.gcp.inventory import from_env
+
+        return from_env()
     from ..cloud.aws.inventory import AwsTags
 
     return AwsTags() if os.environ.get("VALXEL_AWS_INVENTORY_ROLE") else None
@@ -57,7 +64,7 @@ def collect(oc, snap, known: dict, *, costs=None, aws=None, at: datetime | None 
     rt = snap.product.runtime or {}
     pipeline = list(rt.get("pipeline") or ["dev", "staging", "production"])
     project, ns = rt.get("openchoreo_project") or "", rt.get("namespace")
-    aws_cfg = rt.get("aws") or {}
+    aws_cfg = rt.get("cloud") or rt.get("aws") or {}  # the product's cloud (ADR 0010): AWS accounts or GCP projects
     accounts, region = dict(aws_cfg.get("accounts") or {}), aws_cfg.get("region") or ""
     catalog = snap.aws_catalog or {}
     rows, problems = [], []
@@ -119,14 +126,17 @@ def collect(oc, snap, known: dict, *, costs=None, aws=None, at: datetime | None 
                      "state": "released", "release": a.get("version", ""), "feature_id": a.get("feature_id", ""),
                      "ids": {"stores": a.get("stores", "")}})
 
-    unmanaged, aws_note = [], "not checked: set VALXEL_AWS_INVENTORY_ROLE to list tagged AWS resources"
+    unmanaged, aws_note = [], ("not checked: set VALXEL_GCP_SERVICE_ACCOUNT to list labelled Google Cloud resources"
+                               if aws_cfg.get("provider") == "gcp" else
+                               "not checked: set VALXEL_AWS_INVENTORY_ROLE to list tagged AWS resources")
     if aws is not None and accounts:
         aws_note = "checked"
         for env, account in sorted(accounts.items()):
             try:
                 found = aws.tagged(product_id=snap.product.product_id, account=account, region=region)
             except Exception as exc:
-                problems.append(f"AWS {env} ({account}): {type(exc).__name__}: {exc}")
+                problems.append(f"{'Google Cloud' if aws_cfg.get('provider') == 'gcp' else 'AWS'} {env} ({account}): "
+                                f"{type(exc).__name__}: {exc}")
                 aws_note = "partly checked"
                 continue
             mine = {r["name"]: r for r in rows if r["kind"] == "resource" and r["env"] == env}
@@ -134,7 +144,7 @@ def collect(oc, snap, known: dict, *, costs=None, aws=None, at: datetime | None 
                 row = mine.get(f["resource"]) if f["resource"] else None
                 if row is not None:
                     row["ids"]["arn"] = row["ids"]["arn"] or f["arn"]
-                elif not f["resource"] and ":iam::" in f["arn"]:
+                elif not f["resource"] and (":iam::" in f["arn"] or "/serviceAccounts/" in f["arn"]):
                     continue  # a component's workload identity: tagged with the product only
                 else:
                     unmanaged.append({"env": env, "account": account, "arn": f["arn"], "resource_tag": f["resource"],

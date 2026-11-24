@@ -140,7 +140,7 @@ class FakeCosts:
                 out[r["component"]] += float(r["usd"])
         return out
 
-    def aws_costs(self, *, product_id, feature_id, account, start, end):
+    def cloud_costs(self, *, product_id, feature_id, account, start, end):
         out: dict[str, float] = {}
         for r in self.cloud:
             mine = (r["account"], r["product_id"], r["feature_id"]) == (account, product_id, feature_id)
@@ -152,7 +152,7 @@ class FakeCosts:
         return [{"day": r["day"], "component": r["component"], "usd": float(r["usd"])} for r in self.compute
                 if (r["namespace"], r["project"], r["env"]) == (namespace, project, env) and self._in(r, start, end)]
 
-    def aws_costs_daily(self, *, product_id, account, start, end):
+    def cloud_costs_daily(self, *, product_id, account, start, end):
         return [{"day": r["day"], "service": r["service"], "feature_id": r["feature_id"], "usd": float(r["usd"])}
                 for r in self.cloud
                 if (r["account"], r["product_id"]) == (account, product_id) and self._in(r, start, end)]

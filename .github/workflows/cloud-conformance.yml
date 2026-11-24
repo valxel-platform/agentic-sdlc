@@ -6,8 +6,9 @@
 # Identity Federation, so no key is stored. Repository variables (Settings, Variables):
 #   GCP_WIF_PROVIDER     projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
 #   GCP_SERVICE_ACCOUNT  the conformance service account (secretmanager.admin on labelled secrets,
-#                        cloudkms.signerVerifier on the key, storage.objectAdmin on the bucket)
-#   GCP_PROJECT, GCP_CONFORMANCE_BUCKET, GCP_CONFORMANCE_KEY  (tests/live/test_gcp_conformance.py)
+#                        cloudkms.signerVerifier on the key, storage.objectAdmin on the bucket,
+#                        cloudasset.viewer on the project, bigquery.dataViewer and jobUser for billing)
+#   GCP_PROJECT, GCP_CONFORMANCE_BUCKET, GCP_CONFORMANCE_KEY, GCP_BILLING_DATASET  (tests/live/)
 # Without them the job says so and passes, so a fork stays green.
 name: cloud-conformance
 on:
@@ -66,4 +67,5 @@ jobs:
           VALXEL_GCP_PROJECT: ${{ vars.GCP_PROJECT }}
           VALXEL_GCP_CONFORMANCE_BUCKET: ${{ vars.GCP_CONFORMANCE_BUCKET }}
           VALXEL_GCP_CONFORMANCE_KEY: ${{ vars.GCP_CONFORMANCE_KEY }}
+          VALXEL_GCP_BILLING_DATASET: ${{ vars.GCP_BILLING_DATASET }}
         run: python -m pytest -q tests/live

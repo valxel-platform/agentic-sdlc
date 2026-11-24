@@ -263,6 +263,74 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         scope = for_account(scope, event)
         return await ingest(await within(scope, from_inspector(event)))
 
+    def url_sender(request: Request, *kinds: str):
+        """Google Cloud's senders (a Cloud Monitoring webhook channel, a Pub/Sub push subscription)
+        put no Authorization header of ours on their requests: the token is in the URL, ?token=."""
+        from ...ops.signal_tokens import scope_of
+        from ...secret_ring import values
+
+        if not values("VALXEL_SIGNALS_TOKEN"):
+            raise HTTPException(404, "Signal webhooks are not configured")
+        token = request.query_params.get("token", "")
+        scope = scope_of(f"Bearer {token}" if token else "", kinds, list(eng().services.settings.registry))
+        if scope is None:
+            raise HTTPException(401, "Bad token")
+        return scope
+
+    def for_project(scope, project: str):
+        from ...ops.signal_tokens import project_scope
+
+        checked = project_scope(scope, project)
+        if checked is None:
+            raise HTTPException(401, "Bad token for this project")
+        return checked
+
+    async def body_json(request: Request) -> dict:
+        try:
+            got = json.loads(await request.body() or b"{}")
+        except ValueError as exc:
+            raise HTTPException(400, "Body is not JSON") from exc
+        return got if isinstance(got, dict) else {}
+
+    @api.post("/signals/cloud-monitoring", status_code=202)
+    async def cloud_monitoring(request: Request) -> dict:
+        """Google Cloud Monitoring incidents from Valxel's alert policies, through a webhook channel
+        to https://<host>/api/signals/cloud-monitoring?token=<the project's signals token>
+        (`valxel signals-token project <id>`). Production incidents open and resolve Valxel's."""
+        from ...ops.signals import from_cloud_monitoring
+
+        scope = url_sender(request, "project")
+        payload = await body_json(request)
+        scope = for_project(scope, str((payload.get("incident") or {}).get("scoping_project_id") or ""))
+        return await alarm_changes(await within(scope, from_cloud_monitoring(payload)))
+
+    @api.post("/signals/scc", status_code=202)
+    async def scc_finding(request: Request) -> dict:
+        """Security Command Center findings, from a notification config's Pub/Sub topic with a push
+        subscription to https://<host>/api/signals/scc?token=<the project's signals token>. High and
+        critical image vulnerabilities open incidents for the component, like Inspector's."""
+        from ...ops.signals import from_scc
+
+        scope = url_sender(request, "project")
+        sigs = from_scc(await body_json(request))
+        if sigs:
+            scope = for_project(scope, sigs[0]["labels"]["project"])
+        return await ingest(await within(scope, sigs))
+
+    @api.post("/signals/gcp-budgets", status_code=202)
+    async def gcp_budgets(request: Request) -> dict:
+        """Cloud Billing budget notifications, from the budget's Pub/Sub topic with a push
+        subscription to https://<host>/api/signals/gcp-budgets?token=<VALXEL_SIGNALS_TOKEN>. Budgets
+        belong to the billing account, not a project, so they take the platform's token, as AWS
+        Budgets do."""
+        from ...ops.signals import from_gcp_budget
+
+        scope = url_sender(request)
+        if scope.kind != "platform":
+            raise HTTPException(401, "Budgets take the platform's signals token")
+        reg = list(eng().services.settings.registry)
+        return await ingest(from_gcp_budget(await body_json(request), reg))
+
     def for_account(scope, event: dict):
         from ...ops.signal_tokens import account_scope
 

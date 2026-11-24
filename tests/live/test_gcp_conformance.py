@@ -60,3 +60,27 @@ def test_cloud_storage_locked_objects():
 
     store = GcsImmutable(os.environ["VALXEL_GCP_CONFORMANCE_BUCKET"])
     assert conformance.immutable_store(store, prefix=f"conformance/{uuid.uuid4().hex[:8]}/") == []
+
+
+@pytest.mark.skipif(not os.environ.get("VALXEL_GCP_BILLING_DATASET"), reason="no billing export in this sandbox yet")
+def test_the_billing_export_answers():
+    """CP-204 against the sandbox's export: the table is there, and a day's rows have the shape."""
+    from datetime import UTC, datetime, timedelta
+
+    from valxel_sdlc.cloud.gcp.costs import GcpBillingCosts
+
+    src = GcpBillingCosts(os.environ["VALXEL_GCP_BILLING_DATASET"])
+    end = datetime.now(UTC)
+    rows = src.cloud_costs_daily(product_id="CONFORMANCE", account=os.environ["VALXEL_GCP_PROJECT"],
+                                 start=end - timedelta(days=3), end=end)
+    assert all({"day", "service", "feature_id", "usd"} <= set(r) for r in rows)
+
+
+def test_cloud_asset_inventory_answers():
+    """CP-205: the search runs in the sandbox project with the tool's own credentials."""
+    from google.cloud import asset_v1
+
+    client = asset_v1.AssetServiceClient()
+    got = client.search_all_resources(request={"scope": f"projects/{os.environ['VALXEL_GCP_PROJECT']}",
+                                               "query": "labels.valxel_product=conformance"})
+    assert all(r.name for r in got)

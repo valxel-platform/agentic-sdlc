@@ -36,7 +36,7 @@ DEFAULT_RATES = {
     "eas_build_usd": 0.0,  # Expo EAS per store build; 0 leaves store builds out
     "people_hour_usd": 0.0,  # loaded cost of an hour at a gate; 0 leaves people out
     "platform_monthly_usd": 0.0,  # OpenChoreo, observability and this tool; 0 leaves it out
-    "settle_days": {"aws": 2, "compute": 1},  # a figure is provisional until it is this old
+    "settle_days": {"aws": 2, "gcp": 2, "compute": 1},  # a figure is provisional until it is this old
 }
 LOOKBACK_DAYS = 35
 
@@ -275,12 +275,16 @@ def collect_runtime(costs, product_id: str, targets: list[tuple[str, str, str, b
     return out
 
 
-# --------------------------------------------------------------------------- AWS
-def collect_aws(costs, product_id: str, accounts: dict[str, str], releases: dict[str, datetime | None],
-                at: datetime, r: dict) -> list[CostRecord]:
-    """The product's AWS spend per account by day, service and feature tag. A feature's spend is
-    build cost until it reached production, run cost after; untagged spend is the product's."""
-    daily = getattr(costs, "aws_costs_daily", None)
+# --------------------------------------------------------------------------- the cloud
+SOURCES = {"aws": "cost-explorer", "gcp": "billing-export"}
+
+
+def collect_cloud(costs, product_id: str, accounts: dict[str, str], releases: dict[str, datetime | None],
+                  at: datetime, r: dict, provider: str = "aws") -> list[CostRecord]:
+    """The product's cloud spend per account (or project) by day, service and feature tag (or
+    label). A feature's spend is build cost until it reached production, run cost after; untagged
+    spend is the product's. The category is the cloud's name (aws, gcp)."""
+    daily = getattr(costs, "cloud_costs_daily", None)
     if daily is None:
         return []
     start = datetime.combine(at.date() - timedelta(days=LOOKBACK_DAYS), datetime.min.time(), timezone.utc)
@@ -293,11 +297,15 @@ def collect_aws(costs, product_id: str, accounts: dict[str, str], releases: dict
             rel = releases.get(fid)
             stage = "build" if fid and (rel is None or utc(de) <= rel) else "run"
             out.append(CostRecord(
-                key=f"aws:{product_id}:{account}:{fid or '-'}:{row['service']}:{d}", product_id=product_id,
-                feature_id=fid, stage=stage, category="aws", env=env, usd=float(row["usd"]), period_start=ds,
-                period_end=de, source="cost-explorer", service=row["service"], resource=account, basis="billed",
-                status=settled(d, "aws", at, r), detail={"description": f"{row['service']} in {env}"}))
+                key=f"{provider}:{product_id}:{account}:{fid or '-'}:{row['service']}:{d}", product_id=product_id,
+                feature_id=fid, stage=stage, category=provider, env=env, usd=float(row["usd"]), period_start=ds,
+                period_end=de, source=SOURCES.get(provider, provider), service=row["service"], resource=account,
+                basis="billed", status=settled(d, provider, at, r),
+                detail={"description": f"{row['service']} in {env}"}))
     return out
+
+
+collect_aws = collect_cloud  # the name before ADR 0010
 
 
 def collect_platform(product_compute: dict[str, float], month: date, at: datetime, r: dict) -> list[CostRecord]:

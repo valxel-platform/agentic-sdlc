@@ -1,0 +1,25 @@
+[
+  {
+    "name": "//pubsub.googleapis.com/projects/farm-prod/topics/field-events",
+    "asset_type": "pubsub.googleapis.com/Topic",
+    "labels": {
+      "valxel_product": "farm",
+      "valxel_feature": "farm-feat-7",
+      "valxel_resource": "field-events"
+    }
+  },
+  {
+    "name": "//storage.googleapis.com/farm-prod-scratch",
+    "asset_type": "storage.googleapis.com/Bucket",
+    "labels": {
+      "valxel_product": "farm"
+    }
+  },
+  {
+    "name": "//iam.googleapis.com/projects/farm-prod/serviceAccounts/farm-field-worker@farm-prod.iam.gserviceaccount.com",
+    "asset_type": "iam.googleapis.com/ServiceAccount",
+    "labels": {
+      "valxel_product": "farm"
+    }
+  }
+]

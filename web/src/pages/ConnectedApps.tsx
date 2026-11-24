@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { GcpConnectForm } from "../components/GcpConnectForm";
 import { api, type Me, type ToolRow } from "../api";
 
 const NEVER: string[] = [
@@ -149,7 +150,18 @@ export function ConnectedAppsPage({ me }: { me: Me }) {
                   onError={setErr}
                 />
               )}
-              {t.tool !== "aws" && admin && t.available && (
+              {t.tool === "gcp" && admin && t.available && (
+                <GcpConnectForm
+                  ws={ws}
+                  onDone={(m) => {
+                    setNote(m);
+                    setErr("");
+                    load();
+                  }}
+                  onError={setErr}
+                />
+              )}
+              {t.tool !== "aws" && t.tool !== "gcp" && admin && t.available && (
                 <p>
                   <button
                     className={t.status === "connected" ? "btn secondary" : "btn"}
