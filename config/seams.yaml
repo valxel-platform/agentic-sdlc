@@ -3,18 +3,19 @@
 # Rules: a seam uses the core and itself; the core uses no seam; seams don't use each other. The
 # root wires them together and may use any of them.
 seams:
-  intake: [intake, duplicates, inception, attachments]
+  intake: [intake, inception, attachments]
   roadmap: [roadmap, outcomes.read, outcomes.readouts, outcomes.review]  # reading and reviewing goals' metrics
-  delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env, environments, acceptance,
-             records, drafts, traceability, design_record, fit, mockups, sketch, prototype, preview, current_screens, screens, scaffolding, sandboxes, jobs,
-             dependencies, quality, standard_files, agent_tools, performance,
+  delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env, environments,
+             records, drafts, traceability, design_record, fit, mockups, sketch, prototype, preview, current_screens, screens, scaffolding,
+             dependencies, quality, standard_files,
              waits, reconcile, pilot, confidence, independent_review]
   ops: [ops, finops, upkeep]
 # Shared definitions several seams read, which use no seam themselves: the core's, though their
 # files sit with the seam that first needed them. (Moving the files is churn for no change in what
 # depends on what.) Only add a module here if it imports nothing from a seam.
 core: [template_contract, resources, outcomes, inception.formats, roadmap.record, ops.changes, ops.alert_rules,
-       capacity, repo_policy]
+       capacity, repo_policy, repo_files, error_tracking_policy, governance.prs, duplicates, performance,
+       sandboxes, jobs, agent_tools, acceptance, ops.cohorts]
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # and the tool's health, which measures every seam's agents on real work.
 root: [engine, engine_parts, api, web, cli, services, strict, worksync, run_queue, watcher_jobs, checkpoint_archive,
@@ -43,18 +44,9 @@ targets:
 # listed here that's gone (delete its line). Fix one by moving the shared piece into the core, or
 # by passing it in from the root (services.py) instead of importing it.
 known_breaks:
-  - "agents.templates -> acceptance"  # core -> delivery
   - "config -> quality"  # core -> delivery
-  - "design_record -> roadmap"  # delivery -> roadmap
-  - "evaluators.checks -> acceptance"  # core -> delivery
-  - "evaluators.checks -> agent_tools"  # core -> delivery
   - "evaluators.checks -> design_record"  # core -> delivery
-  - "evaluators.checks -> jobs"  # core -> delivery
-  - "evaluators.checks -> repo_standards"  # core -> delivery
-  - "evaluators.checks -> sandboxes"  # core -> delivery
-  - "governance.loader -> ops.error_tracking"  # core -> ops
   - "governance.loader -> ops.remediation"  # core -> ops
-  - "governance.manifest -> performance"  # core -> delivery
   - "governance.manifest -> quality"  # core -> delivery
   - "governance.manifest -> upkeep"  # core -> ops
   - "graph.gates -> ops.cost"  # delivery -> ops
@@ -64,32 +56,25 @@ known_breaks:
   - "graph.merge_train -> code_evals"  # delivery -> root
   - "graph.phase -> code_evals"  # delivery -> root
   - "graph.phase -> evals"  # delivery -> root
-  - "graph.phase -> roadmap"  # delivery -> roadmap
-  - "graph.rollout -> ops.cohorts"  # delivery -> ops
   - "graph.rollout -> ops.remediation"  # delivery -> ops
   - "graph.rollout -> ops.rollout"  # delivery -> ops
   - "inception.graph -> graph.pipeline"  # intake -> delivery
   - "inception.run -> graph.phase"  # intake -> delivery
   - "inception.setup -> design_record"  # intake -> delivery
   - "inception.setup -> environments"  # intake -> delivery
-  - "inception.setup -> repo_standards"  # intake -> delivery
   - "intake -> evals"  # intake -> root
   - "knowledge -> design_record"  # core -> delivery
-  - "knowledge.sources -> roadmap"  # core -> roadmap
   - "lessons -> graph.phase"  # core -> delivery
   - "ops.incident -> evals"  # ops -> root
   - "ops.incident -> graph"  # ops -> delivery
-  - "ops.incident -> roadmap"  # ops -> roadmap
   - "ops.incident -> roadmap.graphs"  # ops -> roadmap
   - "ops.rollout -> roadmap.graphs"  # ops -> roadmap
   - "outcomes.review -> graph.pipeline"  # roadmap -> delivery
   - "provision_queue -> inception.setup"  # delivery -> intake
   - "quality -> upkeep"  # delivery -> ops
   - "roadmap.graphs -> graph.pipeline"  # roadmap -> delivery
-  - "roadmap.graphs -> ops.cohorts"  # roadmap -> ops
   - "roadmap.graphs -> ops.remediation"  # roadmap -> ops
   - "roadmap.graphs -> ops.rollout"  # roadmap -> ops
-  - "roadmap.initiative -> duplicates"  # roadmap -> intake
   - "roadmap.initiative -> inception.templates"  # roadmap -> intake
   - "roadmap.views -> ops.correlate"  # roadmap -> ops
   - "roadmap.views -> ops.signals"  # roadmap -> ops

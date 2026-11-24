@@ -213,7 +213,7 @@ GOAL_PHASES = ("discovery",)
 def product_goals(services, state: dict) -> tuple[list[dict], str]:
     """The product's goals (roadmap/goals.yaml) and the goal of the feature's initiative, if any."""
     try:
-        from ..roadmap import read_roadmap
+        from ..roadmap.record import read_roadmap
 
         road = read_roadmap(services, state["product_id"])
     except Exception:

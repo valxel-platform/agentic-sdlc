@@ -102,7 +102,7 @@ class ProductRoadmap:
         self.services = services
 
     def collect(self, snap, cfg: dict) -> dict:
-        from ..roadmap import read_roadmap
+        from ..roadmap.record import read_roadmap
 
         pid = snap.product.product_id
         record = read_roadmap(self.services, pid)

@@ -476,7 +476,7 @@ def _datasets(text: str, repos: list[dict], ctx: dict) -> list[str]:
     or indexes it, and stays compatible with the version already released."""
     from .. import datasets as ds
     from ..agents.parse import parse_events
-    from ..repo_standards import standard_file_path
+    from ..repo_files import standard_file_path
     from ..retrieval import parse_knowledge
 
     contracts, out = ds.parse_hld(text)

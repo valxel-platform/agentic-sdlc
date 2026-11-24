@@ -23,11 +23,18 @@ Every apply is safe to repeat: it changes only what differs, and rulesets are up
 from __future__ import annotations
 
 import hashlib
-
 from dataclasses import dataclass, field
 
 from .integrations.github import GitHubError, repo_settings_body, ruleset_body
-from .provisioning import effective_standards, plan
+from .repo_files import (  # noqa: F401  (re-exported for delivery's readers)
+    REMOTE,
+    contracts_for,
+    managed_content,
+    remote_source,
+    standard_file,
+    standard_file_path,
+)
+from .repo_policy import effective_standards, plan
 
 KINDS = ("lane", "governance", "template", "tool")
 
@@ -121,16 +128,6 @@ def targets(services, only: list[str] | None = None) -> list[Target]:
             t.plan["ruleset"]["bypass_app_id"] = app_id
     wanted = set(only or [])
     return [t for name, t in sorted(out.items()) if not wanted or name in wanted]
-
-
-def contracts_for(std, governance: str | None) -> dict:
-    """The contract files a repo keeps, and whose copy each must match: the platform's for the
-    platform's repos (governance None), the product's governance repo's for a product's lanes. A
-    product's contracts are its own: the platform never holds or compares against them."""
-    paths = dict((std.defaults or {}).get("contracts") or {})
-    if governance is None:
-        return paths
-    return {path: f"{REMOTE}{governance}/{path}" for path in paths}
 
 
 def _base(std, repo: str, product: str, data_class: str, approvers: dict, role: str) -> dict:
@@ -278,46 +275,6 @@ def compare(t: Target, state: dict | None) -> list[Drift]:
         if state["files"].get(f) is None:
             out.append(Drift("files", f, "present", "missing", "manual"))
     return out
-
-
-def standard_file_path(name: str):
-    """Where the platform's copy of a managed file is, for reading it in place."""
-    from pathlib import Path
-
-    return Path(__file__).with_name("standard_files") / name
-
-
-def standard_file(name: str) -> str:
-    """The platform's copy of a managed file (src/valxel_sdlc/standard_files/)."""
-    from importlib.resources import files
-
-    if name == "datasets.py":  # the module itself: governance CI runs the same checks as the evaluator
-        return (files("valxel_sdlc") / "datasets.py").read_text()
-    return (files("valxel_sdlc") / "standard_files" / name).read_text()
-
-
-REMOTE = "github:"  # a managed file whose owner is another repo: github:<owner>/<repo>/<path>
-
-
-def remote_source(name: str) -> tuple[str, str] | None:
-    """(repo, path) for a managed file another repo owns (the audit schema is ss-audit-sink's)."""
-    if not name.startswith(REMOTE):
-        return None
-    owner, repo, path = name[len(REMOTE):].split("/", 2)
-    return f"{owner}/{repo}", path
-
-
-def managed_content(gh, name: str) -> str | None:
-    """The copy a repo must carry: the platform's, or the owning repo's default branch (a product's
-    governance repo for its contracts). None if there's none to compare with (the product keeps no
-    such contract, or it can't be read now): no drift is reported for it then."""
-    src = remote_source(name)
-    if src is None:
-        return standard_file(name)
-    try:
-        return gh.get_file(repo=src[0], path=src[1], ref="")
-    except Exception:  # noqa: BLE001 - checked again next time
-        return None
 
 
 def managed_drift(gh, t: Target) -> list[Drift]:

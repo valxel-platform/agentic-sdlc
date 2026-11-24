@@ -172,7 +172,7 @@ def starter_contracts(services) -> dict[str, str]:
     """A new product's contracts (audit records, product-event and flag-cohort lines), copied from
     the platform's as a starting point. From then on they're the product's: it changes them in its
     governance repo, and its components are held to its copy, never the platform's."""
-    from ..repo_standards import contracts_for, managed_content
+    from ..repo_files import contracts_for, managed_content
 
     out = {}
     for path, source in contracts_for(services.settings.repos, None).items():

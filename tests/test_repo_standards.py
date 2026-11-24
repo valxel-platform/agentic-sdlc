@@ -400,8 +400,11 @@ def test_managed_workflows_that_differ_or_are_missing_come_back_by_pull_request(
         gh.files[(lane, "main", f"contracts/events/{name}.schema.json")] = rs.standard_file(f"contracts/{name}.schema.json")
     assert not [d for d in rs.reconcile(gh, target(svc, lane), apply=False).drift if d.area == "workflows"]
     # The platform's copy changes later: a new branch and pull request, never the merged one again.
-    original = rs.standard_file
-    monkeypatch.setattr(rs, "standard_file", lambda name: original(name) + ("# v2\n" if name == "report.py" else ""))
+    from valxel_sdlc import repo_files  # where the platform's copies are read (the core's)
+
+    original = repo_files.standard_file
+    monkeypatch.setattr(repo_files, "standard_file",
+                        lambda name: original(name) + ("# v2\n" if name == "report.py" else ""))
     rs.reconcile(gh, target(svc, lane), apply=True)
     [newer] = [p for p in gh.prs.values() if p["repo"] == lane and p["state"] == "open"
                and p["branch"].startswith("valxel/managed-files-")]
