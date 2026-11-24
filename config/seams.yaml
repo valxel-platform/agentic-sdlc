@@ -16,7 +16,7 @@ seams:
 core: [template_contract, resources, outcomes, inception.formats, roadmap.record, ops.changes, ops.alert_rules,
        capacity, repo_policy, repo_files, error_tracking_policy, governance.prs, duplicates, performance,
        sandboxes, jobs, agent_tools, acceptance, ops.cohorts,
-       quality, upkeep]  # the packages' own modules: quality and upkeep policy; their sources and services stay in delivery and ops
+       quality, upkeep, ops.rollout]  # the packages' own modules: quality and upkeep policy; their sources and services stay in delivery and ops
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # and the tool's health, which measures every seam's agents on real work.
 root: [engine, engine_parts, api, web, cli, services, strict, worksync, run_queue, watcher_jobs, checkpoint_archive,
@@ -48,15 +48,11 @@ known_breaks:
   - "evaluators.checks -> design_record"  # core -> delivery
   - "governance.loader -> ops.remediation"  # core -> ops
   - "graph.gates -> ops.cost"  # delivery -> ops
-  - "graph.gates -> ops.rollout"  # delivery -> ops
   - "graph.infra -> finops.views"  # delivery -> ops
   - "graph.infra -> ops.alarms"  # delivery -> ops
   - "graph.merge_train -> code_evals"  # delivery -> root
   - "graph.phase -> code_evals"  # delivery -> root
   - "graph.phase -> evals"  # delivery -> root
-  - "graph.rollout -> ops.remediation"  # delivery -> ops
-  - "graph.rollout -> ops.rollout"  # delivery -> ops
-  - "inception.graph -> graph.pipeline"  # intake -> delivery
   - "inception.run -> graph.phase"  # intake -> delivery
   - "inception.setup -> design_record"  # intake -> delivery
   - "inception.setup -> environments"  # intake -> delivery
@@ -64,14 +60,8 @@ known_breaks:
   - "knowledge -> design_record"  # core -> delivery
   - "lessons -> graph.phase"  # core -> delivery
   - "ops.incident -> evals"  # ops -> root
-  - "ops.incident -> graph"  # ops -> delivery
   - "ops.incident -> roadmap.graphs"  # ops -> roadmap
-  - "ops.rollout -> roadmap.graphs"  # ops -> roadmap
-  - "outcomes.review -> graph.pipeline"  # roadmap -> delivery
   - "provision_queue -> inception.setup"  # delivery -> intake
-  - "roadmap.graphs -> graph.pipeline"  # roadmap -> delivery
-  - "roadmap.graphs -> ops.remediation"  # roadmap -> ops
-  - "roadmap.graphs -> ops.rollout"  # roadmap -> ops
   - "roadmap.initiative -> inception.templates"  # roadmap -> intake
   - "roadmap.views -> ops.correlate"  # roadmap -> ops
   - "roadmap.views -> ops.signals"  # roadmap -> ops

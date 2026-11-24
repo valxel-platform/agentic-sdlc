@@ -11,32 +11,9 @@ from .. import profiles
 from .phase import now, touched_lanes
 
 
-GATE_DECISIONS = ("approve", "revise", "takeover", "abort")
-
-
-HANDBACK_DECISIONS = ("handback", "abort")
-
-
-ESCALATION_DECISIONS = ("resolved", "retry", "abort")
-
-
-SECURITY_DECISIONS = ("retry", "accept_risk", "abort")
-
-
-class InvalidDecision(ValueError):
-    pass
-
-
-def normalize(raw, allowed: tuple[str, ...]) -> dict:
-    d = {"decision": raw} if isinstance(raw, str) else dict(raw or {})
-    decision = str(d.get("decision", "")).lower()
-    if decision not in allowed:
-        raise InvalidDecision(f"decision must be one of {allowed}, got {decision!r}")
-    d["decision"] = decision
-    d.setdefault("approver", "unknown")
-    d.setdefault("feedback", "")
-    d["active_minutes"] = float(d.get("active_minutes") or 0.0)
-    return d
+from ..gate_decisions import (  # noqa: F401  (the core's; re-exported for the pipeline's nodes)
+    ESCALATION_DECISIONS, GATE_DECISIONS, HANDBACK_DECISIONS, SECURITY_DECISIONS, InvalidDecision, normalize,
+)
 
 
 def _record(gate: str, phase: str, d: dict, lane: str = "") -> GateDecision:

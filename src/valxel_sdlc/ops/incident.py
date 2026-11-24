@@ -548,7 +548,7 @@ def build_incident_graph(services, checkpointer=None):
         if d["decision"] == "merge":
             into = str(d.get("into") or "")
             if not into or into == state["incident_id"]:
-                from ..graph import InvalidDecision
+                from ..gate_decisions import InvalidDecision
 
                 raise InvalidDecision("Merging needs the incident to merge into")
             services.close_incident(state["incident_id"])

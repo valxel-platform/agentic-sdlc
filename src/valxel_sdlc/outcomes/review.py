@@ -189,7 +189,7 @@ def build_review_graph(services, checkpointer=None):
                 "events": [event("prepare", "ready", f"goal {ev['status'].replace('_', ' ')}")]}
 
     def review(state: ReviewState) -> dict:
-        from ..graph.pipeline import normalize
+        from ..gate_decisions import normalize
 
         ev = state["evidence"]
         packet = {"type": "gate", "gate": "review", "kind": "review", "phase": "review", "feature_id": state["review_id"],
