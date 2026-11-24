@@ -9,7 +9,8 @@ reaches the shared platform.
 - `up` creates the cluster with OpenChoreo's own k3d installer (pinned below, checked by hash),
   with the workflow plane for builds; gives builds read access to your products' repos (the GitHub
   token in .env, stored in the cluster's OpenBao, never on a command line); adds the names the
-  tool's repo standards use (laptop only, see `_aliases`); and points .env at it.
+  tool's repo standards use (laptop only, see `_aliases`); lets the tool's client use OpenChoreo's
+  API (TOOL_BINDING); and points .env at it.
 - `check` compares what the tool needs with what this OpenChoreo offers: the MCP tools it calls,
   and the component types and workflows config/repos.yaml names.
 - `status` and `down`.
@@ -119,6 +120,23 @@ def store_git_token(token: str, *, run=_run) -> None:
     run(_kubectl("apply", "-f", "-"), input=json.dumps(ref))
 
 
+# OpenChoreo's API shows and runs only the MCP tools the caller's role allows, and its k3d install
+# binds no role to the system app the laptop's tool signs in as: without this, the tool sees none of
+# the resource, release-binding or environment tools. Admin, as OpenChoreo's own defaults give their
+# MCP tryout client; only on this machine's cluster.
+TOOL_BINDING = {
+    "apiVersion": "openchoreo.dev/v1alpha1", "kind": "ClusterAuthzRoleBinding",
+    "metadata": {"name": "valxel-laptop-tool", "labels": {"valxel.dev/laptop": "true"}},
+    "spec": {"entitlement": {"claim": "client_id", "value": SETTINGS["VALXEL_OPENCHOREO_CLIENT_ID"]},
+             "roleMappings": [{"roleRef": {"name": "admin", "kind": "ClusterAuthzRole"}}],
+             "effect": "allow"},
+}
+
+
+def grant_tool(*, run=_run) -> None:
+    run(_kubectl("apply", "-f", "-"), input=json.dumps(TOOL_BINDING))
+
+
 def _copy(obj: dict, name: str) -> dict:
     meta = obj.get("metadata") or {}
     return {"apiVersion": obj["apiVersion"], "kind": obj["kind"], "spec": obj["spec"],
@@ -220,6 +238,7 @@ def up(target: Path | None = None, *, run=_run, opener=urllib.request.urlopen, i
     else:
         print("No VALXEL_GITHUB_TOKEN in .env: builds can only clone public repos.", file=sys.stderr)
     applied = aliases(run=run)
+    grant_tool(run=run)
     point_env(target, on=True)
     print(f"OpenChoreo {OPENCHOREO_VERSION} is up (console http://openchoreo.localhost:8080, "
           "admin@openchoreo.dev / Admin@123).")
