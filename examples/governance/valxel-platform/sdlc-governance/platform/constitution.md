@@ -1,6 +1,6 @@
 ---
 name: platform
-version: 1.8.0
+version: 1.8.1
 ---
 # Valxel platform constitution
 
@@ -43,4 +43,4 @@ Apps on people's devices:
 
 Cloud services:
 
-- **VX-19** A feature uses a managed service of its installation's cloud only from the platform catalog's managed services (`aws-resources.yaml`), declared in its design with what it is for, who may read or write it, and why the platform defaults don't serve; G4 approves the services, their access and their cost. Each component reaches only what it declared, through its own identity and never with keys. Resources are created and changed only through OpenChoreo, per environment, in the product's own cloud account or project and allowed regions; production changes follow G6, and deleting or replacing stored data needs a person. (Policy, Test)
+- **VX-19** A feature uses a managed service of its installation's cloud only from the platform catalog's managed services (`catalog.yaml`), declared in its design with what it is for, who may read or write it, and why the platform defaults don't serve; G4 approves the services, their access and their cost. Each component reaches only what it declared, through its own identity and never with keys. Resources are created and changed only through OpenChoreo, per environment, in the product's own cloud account or project and allowed regions; production changes follow G6, and deleting or replacing stored data needs a person. (Policy, Test)

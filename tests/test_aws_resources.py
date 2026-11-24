@@ -13,7 +13,7 @@ from valxel_sdlc.engine import FeatureEngine
 from valxel_sdlc.services import build_services
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "governance"
-CATALOG = resources.load_catalog((EXAMPLES / "valxel-platform/sdlc-governance/platform/aws-resources.yaml").read_text())
+CATALOG = resources.load_catalog((EXAMPLES / "valxel-platform/sdlc-governance/platform/catalog.yaml").read_text())
 REPOS = [{"name": "o/farm-api", "role": "provider"}, {"name": "o/farm-worker", "role": "event-worker"},
          {"name": "o/farm-web", "role": "consumer"}]
 AWS = {"region": "us-east-2", "accounts": {"dev": "1" * 12, "staging": "2" * 12, "production": "3" * 12}}
@@ -90,7 +90,7 @@ def test_naming_a_service_needs_a_resources_section():
 
 
 def test_restricted_data_classes_are_enforced():
-    catalog = {**CATALOG, "types": {**CATALOG["types"], "kinesis-stream": {**CATALOG["types"]["kinesis-stream"],
+    catalog = {**CATALOG, "types": {**CATALOG["types"], "event-stream": {**CATALOG["types"]["event-stream"],
                                                                           "data_classes": ["general"]}}}
     findings = resources.check(hld(GOOD), REPOS, ctx(aws_catalog=catalog, data_class="phi"))
     assert any("not approved for phi" in f for f in findings)
@@ -118,11 +118,11 @@ def test_coders_get_the_workload_bindings():
     snippet = resources.workload_snippet(hld(GOOD), CATALOG, "farm-worker")
     assert "- ref: readings" in snippet and "stream: READINGS_STREAM" in snippet and "field-state" not in snippet
     text = resources.instruction({"hld_text": hld(GOOD), "aws_catalog": CATALOG}, {"repo": "o/farm-api"})
-    assert "field-state (dynamodb-table, read/write)" in text and "FIELD_STATE_TABLE" in text
+    assert "field-state (key-value-table, read/write)" in text and "FIELD_STATE_TABLE" in text
     assert "DynamoDB Local" in text and "never keys" in text
     assert resources.instruction({"hld_text": hld(GOOD), "aws_catalog": CATALOG}, {"repo": "o/farm-web"}) == ""
     guide = resources.catalog_guide(CATALOG, "general")
-    assert "dynamodb-table (Amazon DynamoDB)" in guide and "workload-identity" not in guide
+    assert "key-value-table (Amazon DynamoDB)" in guide and "workload-identity" not in guide
 
 
 @pytest.fixture
@@ -159,7 +159,7 @@ def test_g4_approves_the_services_and_the_pipeline_creates_them_in_every_environ
                                        description="Keep each field's latest state in DynamoDB")["feature_id"])
     assert v["status"] == "done"
     g4 = seen["g4"]
-    assert [r["type"] for r in g4["resources"]] == ["dynamodb-table"] and g4["region"] == "us-east-2"
+    assert [r["type"] for r in g4["resources"]] == ["key-value-table"] and g4["region"] == "us-east-2"
     assert g4["monthly_usd"]["production"] == 60.0
 
     assert set(oc.resources) == {"farm-field-api-identity", "field-log-dynamodb"}

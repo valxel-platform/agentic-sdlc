@@ -13,7 +13,7 @@ from valxel_sdlc.integrations.openchoreo import StubOpenChoreo
 from valxel_sdlc.resources import load_catalog, parse_resources
 
 PLATFORM = Path(__file__).resolve().parents[1] / "examples/governance/valxel-platform/sdlc-governance/platform"
-CATALOG = load_catalog((PLATFORM / "aws-resources.yaml").read_text())
+CATALOG = load_catalog((PLATFORM / "catalog.yaml").read_text(), "aws")
 CFG = capacity.load_platform((PLATFORM / "capacity.yaml").read_text())
 
 BRIEF = """## Scale
@@ -86,7 +86,7 @@ def test_what_doesnt_add_up_is_said_plainly():
     # A pool too large for any Multi-AZ size.
     cfg = {**CFG, "runtimes": {**CFG["runtimes"], "provider": {**CFG["runtimes"]["provider"], "pool": 60}}}
     p = capacity.plan(BRIEF, ARCH, cfg, CATALOG, data_class="phi")
-    assert any("no Multi-AZ size of postgres-crossplane takes" in f for f in p["findings"])
+    assert any("no Multi-AZ size of postgres takes" in f for f in p["findings"])
     # PHI at tier 3.
     p = plan(brief=BRIEF.replace("tier: 2", "tier: 3"))
     assert any("phi products target tier 2" in f for f in p["findings"])

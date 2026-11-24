@@ -96,11 +96,11 @@ def design_findings(hld: str, repos: list[dict]) -> list[str]:
     for repo in sorted(intakes - named):
         out.append(f"{repo} is a document intake: say what it takes under '## Documents' ('- {repo}: <type>; "
                    "formats pdf, png; max <N> MB; keep <N> days; dataset <name>; fields <name>*, <name>')")
-    buckets = [r for r in parse_resources(hld) if r["type"] == "s3-bucket"]
+    buckets = [r for r in parse_resources(hld) if r["type"] in ("object-bucket", "s3-bucket")]
     for repo in sorted(intakes):
         mine = [b for b in buckets if {"read", "write", "delete"} <= b["access"].get(_short(repo), set())]
         if len(mine) < 2:
-            out.append(f"{repo} needs two s3-buckets in Resources that it reads, writes and deletes: a quarantine "
+            out.append(f"{repo} needs two object-buckets in Resources that it reads, writes and deletes: a quarantine "
                        "for uploads and a clean bucket for checked files")
         elif not any(isinstance(b["params"].get("expire_days"), int) and b["params"]["expire_days"] <= 7
                      for b in mine):

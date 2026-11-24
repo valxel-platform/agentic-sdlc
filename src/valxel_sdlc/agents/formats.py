@@ -120,7 +120,7 @@ sequenceDiagram
                                 that change nothing.)
 ## Documents                   (only with a document-intake repo: what people upload and what's read from it; approved at G4)
 - <org>/<repo>: <type>; formats <pdf, png, jpeg, tiff>; max <N> MB; keep <N> days; dataset <name>; fields <name>*, <name>
-                               (* marks a required field. The repo also needs two s3-buckets in Resources it reads,
+                               (* marks a required field. The repo also needs two object-buckets in Resources it reads,
                                 writes and deletes: a quarantine with expire_days of at most 7, and a clean bucket.
                                 Its Endpoints visibility is project: people reach it through the BFF.)
 ## Knowledge                   (only with a knowledge repo: what agents search, and the embedding model people decide at G4)

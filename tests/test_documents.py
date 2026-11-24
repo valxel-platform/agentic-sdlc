@@ -56,7 +56,7 @@ def test_vague_or_unsafe_lines_are_refused(line, says):
 def test_buckets_visibility_and_lines_for_the_right_repos():
     assert "say what it takes" in documents.design_findings("", REPOS)[0]
     no_buckets = "## Documents\n" + LINE
-    assert any("two s3-buckets" in f for f in documents.design_findings(no_buckets, REPOS))
+    assert any("two object-buckets" in f for f in documents.design_findings(no_buckets, REPOS))
     kept = HLD.replace("expire_days=1", "expire_days=30")
     assert any("expire_days of at most 7" in f for f in documents.design_findings(kept, REPOS))
     exposed = HLD.replace(f"- {REPO}: project", f"- {REPO}: external")

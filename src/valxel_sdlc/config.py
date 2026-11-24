@@ -364,7 +364,7 @@ def load_settings(
         github_api=os.environ.get("VALXEL_GITHUB_API") or gov.get("github_api", "https://api.github.com"),
         platform=RepoPointer(org=plat["org"], repo=plat["repo"], ref=plat.get("ref", "main")),
         platform_constitution_path=plat.get("constitution_path", "constitution.md"),
-        platform_resources_path=plat.get("resources_path", "aws-resources.yaml"),
+        platform_resources_path=plat.get("resources_path", "catalog.yaml"),
         platform_alert_rules_path=plat.get("alert_rules_path", ""),
         platform_capacity_path=plat.get("capacity_path", ""),
         platform_error_tracking_path=plat.get("error_tracking_path", ""),

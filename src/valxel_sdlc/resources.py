@@ -1,17 +1,21 @@
-"""AWS managed services, from the design to every environment (constitution VX-19).
+"""Managed cloud services, from the design to every environment (constitution VX-19).
 
-The platform catalog (`aws-resources.yaml` in the platform governance repo) lists the services a
-product may use: what each is for, which data classes may use it, the IAM actions behind "reads"
-and "writes", sizes with planning costs, and the emulator for tests. Each type is an OpenChoreo
-ClusterResourceType backed by a Crossplane Composition (valxel-platform/platform-resources).
+The platform catalog (`catalog.yaml` in the platform governance repo; `aws-resources.yaml` before
+version 2) lists the services a product may use, by neutral type (key-value-table, queue...): what
+each is for, which data classes may use it, and per cloud (ADR 0010) the service behind it, the
+access behind "reads" and "writes", sizes with planning costs and the emulator for tests. The tool
+reads only the installation's cloud's block of each type (`load_catalog`), so everything below
+sees one cloud's catalog. The version 1 AWS names (dynamodb-table...) read as aliases of their
+type. Each type is an OpenChoreo ClusterResourceType backed by a Crossplane Composition per cloud
+(valxel-platform/platform-resources).
 
 1. Design (architect, checked here, approved at G4). The HLD's Resources section names each
    service a feature needs and who may use it:
 
        ## Resources
-       - field-readings: kinesis-stream; retention_hours=168
+       - field-readings: event-stream; retention_hours=168
          writes: farm-sensor-api; reads: farm-field-worker
-       - field-state: dynamodb-table; partition_key=field_id; size production=large
+       - field-state: key-value-table; partition_key=field_id; size production=large
          reads, writes: farm-field-worker
 
    A service other than the platform defaults needs an ADR naming it. G4 shows the approver the
@@ -26,8 +30,8 @@ ClusterResourceType backed by a Crossplane Composition (valxel-platform/platform
    writing and its consumers reading, with a kafka-user per component they name.
 
 3. Environments (pipeline). OpenChoreo creates a Resource per entry, plus a workload identity per
-   component that uses one: an IAM role through EKS Pod Identity whose policy holds only the
-   actions its declared access needs. Each stage binds the Resource's release to the environment
+   component that uses one: an IAM role through EKS Pod Identity, or a Google service account
+   through GKE Workload Identity, granted only what its declared access needs. Each stage binds the Resource's release to the environment
    with the environment's size, before the components that use it; agents bind dev and staging,
    production is bound after G6 on behalf of the approver. The pipeline never deletes a resource,
    and a change that would replace stored data (a new key, a queue turned FIFO) is a finding:
@@ -43,7 +47,7 @@ import yaml
 from .agents.parse import section
 
 ACCESS_VERBS = {"reads": "read", "writes": "write", "deletes": "delete", "publishes": "write"}
-# Roles that run in the platform and may hold an AWS identity.
+# Roles that run in the platform and may hold a cloud identity.
 AWS_ROLES = ("provider", "event-worker", "agent", "mcp-server", "knowledge", "bff", "reporting", "job", "document-intake")
 IDENTITY_TYPE = "workload-identity"
 KAFKA_USER_TYPE = "kafka-user"
@@ -51,53 +55,143 @@ KAFKA_USER_TYPE = "kafka-user"
 # picked by hand; one per code-sandbox component, its warm pool bound to SANDBOX_SANDBOX_TEMPLATE.
 CODE_RUNNER_TYPE = "code-runner"
 RETENTION_DAYS = {"d": 1, "m": 30, "y": 365}
-# Parameters whose change replaces the resource (and its data).
+# Parameters whose change replaces the resource (and its data): version 1 catalogs' types. Version 2
+# says it per type (replaced_by_changing).
 REPLACING = {"dynamodb-table": ("partition_key", "sort_key"), "sqs-queue": ("fifo",), "sns-topic": ("fifo",),
              "postgres-crossplane": ("database",)}
+CLOUD_NAMES = {"aws": "AWS", "gcp": "Google Cloud", "azure": "Azure"}
 _NAME = re.compile(r"^[a-z][a-z0-9-]{2,39}$")
 _ENTRY = re.compile(r"^([A-Za-z0-9_-]+)\s*:\s*([a-z0-9-]+)\s*(?:;(.*))?$")
-_SERVICES = re.compile(r"\b(DynamoDB|Kinesis|SQS|SNS|S3|ElastiCache|RDS|Aurora|Lambda|Step Functions|EventBridge)\b")
+_SERVICES = re.compile(r"\b(DynamoDB|Kinesis|SQS|SNS|S3|ElastiCache|RDS|Aurora|Lambda|Step Functions|EventBridge|"
+                       r"Firestore|Pub/Sub|Cloud Storage|Bigtable|Spanner|Memorystore|Cloud SQL|Cloud Run)\b")
 
 
 class CatalogError(ValueError):
     pass
 
 
-def load_catalog(text: str) -> dict:
-    """The platform catalog, checked: every type has a purpose, data classes, sizes with costs."""
+def load_catalog(text: str, cloud: str | None = None) -> dict:
+    """The platform catalog as one cloud sees it, checked: every type has a purpose, data classes,
+    and sizes with costs. Version 2 (types with `clouds`): each type that has a block for `cloud`
+    (the installation's, by default), with that block's service, access, sizes, alarms and
+    emulator over the type's own fields; a block's parameters narrow the type's. Version 1 (AWS
+    only, aws-resources.yaml): as written."""
     raw = yaml.safe_load(text or "") or {}
     types = raw.get("types") or {}
     if not isinstance(types, dict):
-        raise CatalogError("aws-resources.yaml: types must be a mapping")
-    for name, t in types.items():
+        raise CatalogError("catalog: types must be a mapping")
+    v2 = int(raw.get("version") or 1) >= 2 or any(isinstance(t, dict) and "clouds" in t for t in types.values())
+    cloud = cloud or _installation_cloud()
+    aliases: dict[str, str] = {}
+    unavailable: list[str] = []
+    if v2:
+        view, aliases, unavailable = _cloud_view(types, cloud)
+        regions = (raw.get("regions") or {}).get(cloud) or {}
+    else:
+        if cloud != "aws":
+            raise CatalogError(f"aws-resources.yaml is the AWS catalog; this installation runs on {cloud}: "
+                               "the platform needs a version 2 catalog (catalog.yaml) with a block for it")
+        view, regions = dict(types), raw.get("regions") or {}
+    for name, t in view.items():
         for key in ("service", "use_for", "data_classes", "sizes"):
             if not t.get(key):
-                raise CatalogError(f"aws-resources.yaml: {name} has no {key}")
+                raise CatalogError(f"catalog: {name} has no {key}" + (f" on {cloud}" if v2 else ""))
         for size, s in (t.get("sizes") or {}).items():
             if not isinstance(s, dict) or not isinstance(s.get("monthly_usd"), (int, float)):
-                raise CatalogError(f"aws-resources.yaml: {name} size {size} has no monthly_usd")
-    return {"types": types, "regions": raw.get("regions") or {}, "defaults": raw.get("defaults") or {},
-            "environment_sizes": raw.get("environment_sizes") or {}, "version": raw.get("version", 1)}
+                raise CatalogError(f"catalog: {name} size {size} has no monthly_usd")
+    return {"types": view, "regions": regions, "defaults": raw.get("defaults") or {},
+            "environment_sizes": raw.get("environment_sizes") or {}, "version": raw.get("version", 1),
+            "cloud": cloud, "aliases": aliases, "unavailable": sorted(unavailable)}
+
+
+def _installation_cloud() -> str:
+    from .cloud import UnknownCloud, provider
+
+    try:
+        return provider()
+    except UnknownCloud:
+        return "aws"  # strict mode says what's wrong with VALXEL_CLOUD
+
+
+def _cloud_view(types: dict, cloud: str) -> tuple[dict[str, dict], dict[str, str], list[str]]:
+    """(each type with a block for `cloud`, merged; alias -> type; the types it has no block for)."""
+    view: dict[str, dict] = {}
+    aliases: dict[str, str] = {}
+    unavailable: list[str] = []
+    for name, t in types.items():
+        aliases.update({str(a): name for a in t.get("aliases") or []})
+        block = (t.get("clouds") or {}).get(cloud)
+        if not block:
+            unavailable.append(name)
+            continue
+        params = {p: dict(s or {}) for p, s in (t.get("parameters") or {}).items()}
+        for p, narrower in (block.get("parameters") or {}).items():
+            params.setdefault(p, {}).update(narrower or {})
+        view[name] = {**{k: v for k, v in t.items() if k not in ("clouds", "aliases")},
+                      **{k: v for k, v in block.items() if k != "parameters"}, "parameters": params}
+    return view, aliases, unavailable
+
+
+def read_catalog(read, path: str) -> str:
+    """The catalog's text: `read(path)` (None when the file isn't there), falling back between
+    catalog.yaml and the version 1 aws-resources.yaml in the same folder, so a governance repo and
+    the tool's settings can each move to the new name in their own time."""
+    text = read(path)
+    if text is None:
+        folder, _, name = path.rpartition("/")
+        other = {"catalog.yaml": "aws-resources.yaml", "aws-resources.yaml": "catalog.yaml"}.get(name)
+        if other:
+            text = read(f"{folder}/{other}" if folder else other)
+    return text or ""
+
+
+def canonical(kind: str, catalog: dict) -> str:
+    """A type's name, with a version 1 alias (dynamodb-table) read as its type (key-value-table)."""
+    return (catalog.get("aliases") or {}).get(kind, kind)
+
+
+def replacing(kind: str, catalog: dict) -> tuple:
+    t = (catalog.get("types") or {}).get(kind) or {}
+    return tuple(t.get("replaced_by_changing") or REPLACING.get(kind, ()))
+
+
+def cloud_name(catalog: dict) -> str:
+    return CLOUD_NAMES.get(catalog.get("cloud") or "aws", str(catalog.get("cloud")))
+
+
+PROJECT_ID = re.compile(r"[a-z][a-z0-9-]{4,28}[a-z0-9]")
+
+
+def check_cloud(cloud: dict | None, data_class: str, pipeline: list[str], catalog: dict) -> list[str]:
+    """product.yaml runtime.cloud: an account (AWS) or project (Google Cloud) per environment, in a
+    region the catalog allows for the data class."""
+    if not cloud:
+        return []
+    out = []
+    provider = str(cloud.get("provider") or "aws")
+    field = "runtime.aws" if cloud.get("_legacy") else "runtime.cloud"
+    allowed = (catalog.get("regions") or {}).get(data_class) if catalog.get("cloud", provider) == provider else None
+    region = str(cloud.get("region") or "")
+    if not region:
+        out.append(f"{field}.region is required")
+    elif allowed is not None and region not in allowed:
+        out.append(f"{field}.region {region} is not allowed for {data_class} data; allowed: {allowed}")
+    accounts = cloud.get("accounts") or {}
+    for env in pipeline:
+        value = str(accounts.get(env) or "")
+        if provider == "gcp" and not PROJECT_ID.fullmatch(value):
+            out.append(f"{field}.accounts.{env} must be the environment's Google Cloud project ID")
+        elif provider == "aws" and not re.fullmatch(r"\d{12}", value):
+            out.append(f"{field}.accounts.{env} must be the environment's 12-digit AWS account id")
+    if len({str(accounts.get(e)) for e in pipeline}) < len(pipeline):
+        noun = "project" if provider == "gcp" else "account"
+        out.append(f"{field}.accounts: each environment needs its own {CLOUD_NAMES.get(provider, provider)} {noun}")
+    return out
 
 
 def check_aws(aws: dict | None, data_class: str, pipeline: list[str], catalog: dict) -> list[str]:
-    """product.yaml runtime.aws: an account per environment, in a region allowed for the data class."""
-    if not aws:
-        return []
-    out = []
-    allowed = (catalog.get("regions") or {}).get(data_class)
-    region = str(aws.get("region") or "")
-    if not region:
-        out.append("runtime.aws.region is required")
-    elif allowed is not None and region not in allowed:
-        out.append(f"runtime.aws.region {region} is not allowed for {data_class} data; allowed: {allowed}")
-    accounts = aws.get("accounts") or {}
-    for env in pipeline:
-        if not re.fullmatch(r"\d{12}", str(accounts.get(env) or "")):
-            out.append(f"runtime.aws.accounts.{env} must be the environment's 12-digit AWS account id")
-    if len({str(accounts.get(e)) for e in pipeline}) < len(pipeline):
-        out.append("runtime.aws.accounts: each environment needs its own AWS account")
-    return out
+    """product.yaml runtime.aws (before runtime.cloud)."""
+    return check_cloud({"provider": "aws", "_legacy": True, **aws} if aws else None, data_class, pipeline, catalog)
 
 
 # --------------------------------------------------------------------------- the design
@@ -157,24 +251,33 @@ def _access_line(entry: dict, line: str) -> None:
                 entry["access"].setdefault(comp, set()).update(access)
 
 
+def resolved(hld: str, catalog: dict) -> list[dict]:
+    """parse_resources, each type read through the catalog's aliases ('named' keeps what was written)."""
+    out = parse_resources(hld)
+    for e in out:
+        e["named"], e["type"] = e["type"], canonical(e["type"], catalog)
+    return out
+
+
 def check(hld: str, repos: list[dict], ctx: dict) -> list[str]:
     """Findings for the design's Resources (VX-19)."""
     catalog = ctx.get("aws_catalog") or {}
-    entries = parse_resources(hld)
+    entries = resolved(hld, catalog)
+    cloud = cloud_name(catalog)
     rest = hld.replace(section(hld, "Resources"), "")
     if not entries:
         named = sorted(set(_SERVICES.findall(section(rest, "ADRs") + section(rest, "Contracts"))))
         if named:
-            return [f"The design names {', '.join(named)} but has no Resources section: declare each AWS "
+            return [f"The design names {', '.join(named)} but has no Resources section: declare each cloud "
                     "service with its type and who reads or writes it (VX-19)"]
         return []
     out: list[str] = []
     types = catalog.get("types") or {}
     if not types:
-        return ["The design declares AWS resources, but the platform has no AWS catalog (aws-resources.yaml)"]
-    if not ctx.get("aws"):
-        out.append("The design needs AWS resources, but the product has no AWS accounts (product.yaml runtime.aws): "
-                   "the platform team sets them up first (VX-19)")
+        return ["The design declares cloud resources, but the platform has no catalog (catalog.yaml)"]
+    if not (ctx.get("cloud") or ctx.get("aws")):
+        out.append(f"The design needs {cloud} resources, but the product has no {cloud} accounts (product.yaml "
+                   "runtime.cloud): the platform team sets them up first (VX-19)")
     roles = {r["name"].split("/", 1)[-1]: r["role"] for r in
              [*repos, *(ctx.get("repos") or []), *(ctx.get("dependency_repos") or [])]}
     adrs = section(hld, "ADRs").lower()
@@ -197,6 +300,10 @@ def check(hld: str, repos: list[dict], ctx: dict) -> list[str]:
         if t is not None and t.get("from_contracts"):
             out.append(f"{name}: {kind} isn't listed under Resources; it comes from the data contracts under "
                        "'## Datasets', one per topic (VX-16)")
+            continue
+        if t is None and kind in (catalog.get("unavailable") or []):
+            out.append(f"{name}: {kind} isn't offered on {cloud} yet; use one of "
+                       f"{sorted(k for k, v in types.items() if _pickable(v))} (VX-19)")
             continue
         if t is None or t.get("internal"):
             out.append(f"{name}: {kind} isn't in the platform catalog; use one of "
@@ -227,7 +334,7 @@ def check(hld: str, repos: list[dict], ctx: dict) -> list[str]:
             if comp not in roles:
                 out.append(f"{name}: {comp} is not a component of the design or the product")
             elif roles[comp] not in AWS_ROLES:
-                out.append(f"{name}: {comp} is a {roles[comp]}, which runs outside the platform and holds no AWS "
+                out.append(f"{name}: {comp} is a {roles[comp]}, which runs outside the platform and holds no cloud "
                            "identity; reach the data through a service (VX-19)")
             bad = sorted(a for a in access if a.startswith("?"))
             if bad:
@@ -241,10 +348,10 @@ def check(hld: str, repos: list[dict], ctx: dict) -> list[str]:
                        "why this service and not the default (VX-19)")
         prior = existing.get(name)
         if prior:
-            if prior.get("type") and prior["type"] != kind:
+            if prior.get("type") and canonical(prior["type"], catalog) != kind:
                 out.append(f"{name} already exists as a {prior['type']}: changing its type replaces it, which a "
                            "person does outside the pipeline; name a new resource instead (VX-19)")
-            for p in REPLACING.get(kind, ()):
+            for p in replacing(kind, catalog):
                 was, now_ = (prior.get("parameters") or {}).get(p), e["params"].get(p)
                 if was is not None and now_ is not None and was != now_:
                     out.append(f"{name}: changing {p} from {was} to {now_} replaces it and its data, which a person "
@@ -281,8 +388,9 @@ def size_for(entry: dict, env: str, catalog: dict) -> str:
 
 
 def summary(hld: str, catalog: dict, pipeline: list[str], aws: dict | None) -> dict | None:
-    """What G4 approves: the services, each component's access, the cost per environment."""
-    entries = [e for e in parse_resources(hld) if e["type"] in (catalog.get("types") or {})]
+    """What G4 approves: the services on the installation's cloud, each component's access, the cost
+    per environment. `aws`: the product's runtime.cloud (or runtime.aws)."""
+    entries = [e for e in resolved(hld, catalog) if e["type"] in (catalog.get("types") or {})]
     if not entries:
         return None
     rows, totals = [], {env: 0.0 for env in pipeline}
@@ -300,6 +408,7 @@ def summary(hld: str, catalog: dict, pipeline: list[str], aws: dict | None) -> d
                                 for n, a in (t.get("alarms") or {}).items()]})
     return {"resources": rows, "monthly_usd": {k: round(v, 2) for k, v in totals.items()},
             "region": (aws or {}).get("region", ""), "accounts": dict((aws or {}).get("accounts") or {}),
+            "cloud": catalog.get("cloud") or "aws", "cloud_name": cloud_name(catalog),
             "note": "Planning figures from the platform catalog, not quotes."}
 
 
@@ -339,15 +448,21 @@ def contract_entries(hld: str, catalog: dict) -> list[dict]:
 
 
 def _entries(hld: str, catalog: dict) -> list[dict]:
-    return parse_resources(hld) + contract_entries(hld, catalog)
+    return resolved(hld, catalog) + contract_entries(hld, catalog)
 
 
 def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: str, data_class: str,
-         code_sandboxes: list[str] | tuple = ()) -> list[dict]:
+         code_sandboxes: list[str] | tuple = (), existing: dict[str, str] | None = None) -> list[dict]:
     """The OpenChoreo Resources to create: one per entry (and per data contract's topic), plus a
     workload identity per component that needs IAM access, a Kafka identity per component a
     contract names, and the platform's sandboxes (code-runner) for each code-sandbox component.
-    `owner_target(component)` -> (project, namespace) of the component."""
+    `owner_target(component)` -> (project, namespace) of the component. `existing`: name -> type of
+    the resources OpenChoreo already runs; one made under an alias keeps that type, so the
+    rename never replaces it. Tags are written as the cloud spells them (labels on Google Cloud)."""
+    from .cloud import tags_for
+
+    cloud = catalog.get("cloud") or "aws"
+    existing = existing or {}
     out: list[dict] = []
     identities: dict[str, dict] = {}
     kafka_users: set[str] = set()
@@ -368,11 +483,14 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
         project, namespace = owner_target(owner)
         params = {p: (str(v).split("+") if ((t.get("parameters") or {}).get(p) or {}).get("type") == "list" else v)
                   for p, v in e["params"].items()}
-        out.append({"name": e["name"], "type": e["type"], "project": project, "namespace": namespace,
+        prior = existing.get(e["name"], "")
+        kind = prior if prior and canonical(prior, catalog) == e["type"] else e["type"]
+        out.append({"name": e["name"], "type": kind, "project": project, "namespace": namespace,
                     "owner": owner, "stateful": bool(t.get("stateful")),
                     "parameters": {**params, "consumers": consumers,
-                                   "tags": {"valxel:product": product_id, "valxel:feature": feature_id,
-                                            "valxel:resource": e["name"], "valxel:data-class": data_class}},
+                                   "tags": tags_for(cloud, {"valxel:product": product_id, "valxel:feature": feature_id,
+                                                            "valxel:resource": e["name"],
+                                                            "valxel:data-class": data_class})},
                     "sizes": {env: e["sizes"][env] for env in e["sizes"]},
                     "outputs": dict(t.get("outputs") or {})})
     ids = []
@@ -380,23 +498,23 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
         project, namespace = owner_target(comp)
         ids.append({"name": f"{comp}-identity", "type": IDENTITY_TYPE, "project": project,
                        "namespace": namespace, "owner": comp, "stateful": False,
-                       "parameters": {"component": comp, "tags": {"valxel:product": product_id,
-                                                                  "valxel:data-class": data_class}},
+                       "parameters": {"component": comp, "tags": tags_for(cloud, {"valxel:product": product_id,
+                                                                                  "valxel:data-class": data_class})},
                     "sizes": {}, "outputs": {}})
     user_type = (catalog.get("types") or {}).get(KAFKA_USER_TYPE)
     for comp in sorted(kafka_users) if user_type else []:
         project, namespace = owner_target(comp)
         ids.append({"name": f"{comp}-kafka", "type": KAFKA_USER_TYPE, "project": project, "namespace": namespace,
                     "owner": comp, "stateful": False,
-                    "parameters": {"component": comp, "tags": {"valxel:product": product_id,
-                                                               "valxel:data-class": data_class}},
+                    "parameters": {"component": comp, "tags": tags_for(cloud, {"valxel:product": product_id,
+                                                                               "valxel:data-class": data_class})},
                     "sizes": {}, "outputs": dict(user_type.get("outputs") or {})})
     for comp in sorted(set(code_sandboxes)):
         project, namespace = owner_target(comp)
         ids.append({"name": f"{comp}-runner", "type": CODE_RUNNER_TYPE, "project": project, "namespace": namespace,
                     "owner": comp, "stateful": False,
-                    "parameters": {"component": comp, "tags": {"valxel:product": product_id,
-                                                               "valxel:data-class": data_class}},
+                    "parameters": {"component": comp, "tags": tags_for(cloud, {"valxel:product": product_id,
+                                                                               "valxel:data-class": data_class})},
                     "sizes": {"production": "medium"}, "outputs": {"pool": "the warm pool its runs claim from"}})
     return ids + out
 
@@ -443,13 +561,23 @@ def instruction(ctx: dict, task: dict) -> str:
         return f" This component uses Kafka topics (VX-16). Add to workload.yaml:\n{snippet}\n" + topics.strip()
     names = ", ".join(f"{e['name']} ({e['type']}, {'/'.join(sorted(e['access'][comp]))})" for e in used)
     emulators = sorted({catalog["types"][e["type"]].get("emulator", "") for e in used if e["type"] in catalog["types"]})
-    return (f" This component uses {names} (VX-19). Add to workload.yaml:\n{snippet}\n"
-            " Read each name from its environment variable, reach the service behind a port in the code, and use"
-            " the AWS SDK's default credentials (the pod's identity): never keys or fixed names. Test against "
-            + ", ".join(e for e in emulators if e) + ". Use only the access listed. Trace every AWS call with"
-            " OpenTelemetry's AWS SDK instrumentation on the client (Java: opentelemetry-aws-sdk-2.2's"
-            " AwsSdkTelemetry interceptor, as the event worker template's StoreConfig does; Python:"
-            " opentelemetry-instrumentation-botocore), so the calls show in OpenChoreo's traces." + topics)
+    if (catalog.get("cloud") or "aws") == "gcp":
+        how = (" Read each name from its environment variable, reach the service behind a port in the code, and"
+               " use the Google Cloud client library's Application Default Credentials (the pod's identity through"
+               " GKE Workload Identity): never keys or fixed names. Test against "
+               + ", ".join(e for e in emulators if e) + ". Use only the access listed. Trace every Google Cloud"
+               " call with OpenTelemetry (Java: the client"
+               " library's own tracing, Firestore's FirestoreOpenTelemetryOptions or Pub/Sub's"
+               " setEnableOpenTelemetryTracing, as the event worker template's StoreConfig does; Python:"
+               " opentelemetry-instrumentation-grpc), so the calls show in OpenChoreo's traces.")
+    else:
+        how = (" Read each name from its environment variable, reach the service behind a port in the code, and use"
+               " the AWS SDK's default credentials (the pod's identity): never keys or fixed names. Test against "
+               + ", ".join(e for e in emulators if e) + ". Use only the access listed. Trace every AWS call with"
+               " OpenTelemetry's AWS SDK instrumentation on the client (Java: opentelemetry-aws-sdk-2.2's"
+               " AwsSdkTelemetry interceptor, as the event worker template's StoreConfig does; Python:"
+               " opentelemetry-instrumentation-botocore), so the calls show in OpenChoreo's traces.")
+    return f" This component uses {names} (VX-19). Add to workload.yaml:\n{snippet}\n" + how + topics
 
 
 def catalog_guide(catalog: dict, data_class: str) -> str:
@@ -457,8 +585,9 @@ def catalog_guide(catalog: dict, data_class: str) -> str:
     types = {k: v for k, v in (catalog.get("types") or {}).items() if _pickable(v)}
     if not types:
         return ""
-    lines = ["AWS services the platform offers (VX-19). Use one only when the platform defaults "
-             f"({', '.join(sorted(set((catalog.get('defaults') or {}).values())))}) can't serve, say why in an ADR, and "
+    defaults = ", ".join(sorted(set((catalog.get("defaults") or {}).values())))
+    lines = [f"{cloud_name(catalog)} services the platform offers (VX-19). Use one only when the platform defaults "
+             f"({defaults}) can't serve, say why in an ADR, and "
              "declare it in a '## Resources' section: '- <name>: <type>; key=value, ...[; size <env>=<size>]' with an "
              "indented line such as 'writes: <component>; reads: <component>'."]
     for name, t in sorted(types.items()):
@@ -467,4 +596,7 @@ def catalog_guide(catalog: dict, data_class: str) -> str:
         params = ", ".join(f"{p}{'*' if s.get('required') else ''}" for p, s in (t.get("parameters") or {}).items())
         lines.append(f"- {name} ({t['service']}): for {t['use_for']} Not for: {t.get('not_for', '')} "
                      f"Access: {', '.join(t.get('access') or {}) or 'credentials'}. Parameters: {params or 'none'}.")
+    gone = [k for k in catalog.get("unavailable") or [] if k not in types]
+    if gone:
+        lines.append(f"Not offered on {cloud_name(catalog)} yet: {', '.join(gone)}.")
     return "\n".join(lines)

@@ -122,7 +122,7 @@ def test_g4_records_the_plan_and_a_released_feature_over_it_opens_a_cost_inciden
     fid, s = released(engine)
     plan = s["cost_plan"]
     assert plan["aws_monthly_usd"]["production"] == 60.0 and plan["accounts"]["production"] == "333333333333"
-    assert [r["type"] for r in plan["resources"]] == ["dynamodb-table"]
+    assert [r["type"] for r in plan["resources"]] == ["key-value-table"]
     at = cost.released_at(s)
 
     assert engine.review_costs(at=at + timedelta(days=3)) == []  # not due yet

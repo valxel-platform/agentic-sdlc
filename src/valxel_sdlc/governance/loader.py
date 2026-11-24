@@ -128,11 +128,12 @@ class GovernanceLoader:
             lessons = load_dir(s, prod["org"], prod["repo"], prod["sha"], files.get("lessons", "lessons"))
         except LessonError as exc:
             raise GovernanceError(f"{entry.governance.full_name}: {exc}") from exc
-        from ..resources import CatalogError, check_aws, load_catalog
+        from ..resources import CatalogError, check_cloud, load_catalog, read_catalog
 
         try:
-            catalog = load_catalog(s.read(plat["org"], plat["repo"], self.settings.platform_resources_path,
-                                          plat["sha"], optional=True) or "")
+            catalog = load_catalog(read_catalog(lambda path: s.read(plat["org"], plat["repo"], path, plat["sha"],
+                                                                    optional=True),
+                                                self.settings.platform_resources_path))
         except (CatalogError, ValueError) as exc:
             raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
         from ..ops.alert_rules import AlertRulesError, load as load_rules
@@ -159,7 +160,7 @@ class GovernanceLoader:
         except (remediation_mod.PolicyError, ValueError) as exc:
             raise GovernanceError(f"{plat['org']}/{plat['repo']}: {exc}") from exc
         runtime = product.runtime or {}
-        problems = check_aws(runtime.get("aws"), product.data_class, list(runtime.get("pipeline") or []), catalog)
+        problems = check_cloud(runtime.get("cloud"), product.data_class, list(runtime.get("pipeline") or []), catalog)
         from ..cloud import UnknownCloud, provider
 
         own = (runtime.get("cloud") or {}).get("provider")
