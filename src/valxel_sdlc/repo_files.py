@@ -27,7 +27,7 @@ def standard_file_path(name: str):
 
 def standard_file(name: str) -> str:
     """The platform's copy of a managed file (src/valxel_sdlc/standard_files/)."""
-    from importlib.resources import files
+    from importlib.resources import files  # nosemgrep: python37-compatibility-importlib2 -- requires-python >=3.11
 
     if name == "datasets.py":  # the module itself: governance CI runs the same checks as the evaluator
         return (files("valxel_sdlc") / "datasets.py").read_text()
