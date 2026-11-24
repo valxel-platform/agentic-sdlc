@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 import yaml
 
@@ -163,3 +164,63 @@ def test_the_laptop_check_names_missing_observer_tools():
         "Observer MCP tool missing: query_resource_metrics", "Observer MCP tool missing: query_http_metrics"]
     assert not [f for f in cluster.check(tool_names=set(), installed_types=set(), installed_flows=set(),
                                          wanted_types=set(), wanted_flows=set()) if f.startswith("Observer")]
+
+
+class ResourceApi:
+    """OpenChoreo 1.3.3's MCP handlers' shapes (internal/openchoreo-api/mcphandlers): lists come
+    under a key named for the kind, and a binding's summary has a status string but no conditions or
+    outputs, which only get_resource_release_binding returns (found by the laptop-aws workflow)."""
+
+    name = "openchoreo"
+    SCHEMAS: ClassVar[dict] = {
+        "list_resource_release_bindings": {"namespace_name", "resource_name", "limit", "cursor"},
+        "get_resource_release_binding": {"namespace_name", "name"},
+    }
+
+    def __init__(self, ready=True):
+        self.ready = ready
+
+    def tool_names(self):
+        return list(self.SCHEMAS)
+
+    def tool_schema(self, tool):
+        return {"properties": {k: {"type": "string"} for k in self.SCHEMAS[tool]}}
+
+    def call(self, tool, args):
+        status = "Ready" if self.ready else "ResourcesNotReady"
+        if tool == "list_resource_release_bindings":
+            assert args == {"namespace_name": "default", "resource_name": "orders"}
+            return {"resource_release_bindings": [{
+                "name": "orders-development", "namespace": "default", "projectName": "shop", "resourceName": "orders",
+                "environment": "development", "resourceRelease": "orders-7887ffbbb", "retainPolicy": "Delete",
+                "status": status}], "next_cursor": ""}
+        assert tool == "get_resource_release_binding"
+        assert args == {"namespace_name": "default", "name": "orders-development"}
+        return {"name": "orders-development", "environment": "development", "resourceRelease": "orders-7887ffbbb",
+                "resourceTypeEnvironmentConfigs": {"size": "small"}, "status": status,
+                "outputs": [{"name": "table", "value": "vx-orders-1a2b"},
+                            {"name": "password", "secretKeyRef": {"name": "orders-conn", "key": "password"}}],
+                "conditions": [{"type": "Ready", "status": "True" if self.ready else "False",
+                                "reason": "Ready" if self.ready else "ResourcesNotReady"}]}
+
+
+def test_resource_bindings_read_1_3s_list_and_detail_shapes():
+    oc = OpenChoreoMcp(ResourceApi(), default_namespace="default")
+    assert oc.resource_status(name="orders", env="development", project="shop") == {"state": "ready", "message": ""}
+    [b] = oc.resource_bindings_of(name="orders", project="shop")
+    assert b["env"] == "development" and b["release"] == "orders-7887ffbbb" and b["size"] == "small"
+    assert b["outputs"] == [{"name": "table", "value": "vx-orders-1a2b"},
+                            {"name": "password", "secret": {"name": "orders-conn", "key": "password"}}]
+    waiting = OpenChoreoMcp(ResourceApi(ready=False), default_namespace="default")
+    assert waiting.resource_status(name="orders", env="development", project="shop")["state"] == "progressing"
+    assert oc.resource_status(name="orders", env="staging", project="shop")["state"] == "absent"
+
+
+def test_lists_come_under_any_key_1_3_names_them_with():
+    from valxel_sdlc.integrations.openchoreo import _condition, _list
+
+    assert _list({"resource_release_bindings": [{"name": "a"}], "next_cursor": ""}) == [{"name": "a"}]
+    assert _list({"cluster_traits": [{"name": "t"}], "next_cursor": ""}) == [{"name": "t"}]  # unknown key, one list
+    assert _condition({"status": "Ready"}, "Ready") == "True"
+    assert _condition({"status": "ResourcesNotReady"}, "Ready") == "False"
+    assert _condition({"status": {"conditions": [{"type": "Ready", "status": "True"}]}}, "Ready") == "True"
