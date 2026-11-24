@@ -31,7 +31,7 @@ concurrency:
 
 env:
   K3D_VERSION: v5.8.3
-  PLATFORM_RESOURCES_REF: ${{ inputs.platform_resources_ref || 'local-aws-pods' }}
+  PLATFORM_RESOURCES_REF: ${{ inputs.platform_resources_ref || '' }}
 
 jobs:
   e2e:
