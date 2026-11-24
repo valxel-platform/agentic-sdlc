@@ -257,7 +257,7 @@ def test_up_with_aws_starts_moto_and_installs_the_aws_catalog_on_the_cluster(tmp
     assert fetch[-2:] == [cluster.PLATFORM_RESOURCES, cluster.PLATFORM_RESOURCES_REF]
     (cmd,) = installs
     assert cmd[1].endswith("platform-resources/local/aws/install.py")
-    assert cmd[2:] == ["--context", "k3d-valxel", "--moto", "valxel-moto", "--resource-types"]  # Crossplane is there
+    assert cmd[2:] == ["--context", "k3d-valxel", "--moto", "valxel-moto", "--openchoreo"]  # Crossplane is there
 
 
 def test_up_with_aws_installs_crossplane_when_openchoreo_has_none(tmp_path, monkeypatch):

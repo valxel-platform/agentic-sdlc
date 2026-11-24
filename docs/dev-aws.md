@@ -56,6 +56,11 @@ ClusterResourceTypes. A feature whose design asks for a table, bucket, queue, to
 gets it in moto, with its components' IAM roles and policies and its alarms, and the tool's
 inventory sees it there.
 
+Components' pods reach the same moto: the `valxel-local-aws` trait, embedded in every component type,
+adds `AWS_ENDPOINT_URL` (moto's Service), placeholder credentials and the region to each
+component's `main` container. A product's AWS SDK calls go to moto with no change to its code or
+config, as on EKS they go to AWS through Pod Identity.
+
 ## What differs from AWS
 
 Moto answers AWS's APIs; it doesn't enforce what AWS enforces. Passing here shows the flows and the
@@ -67,7 +72,7 @@ Compositions work end to end, not that the access they grant is right.
 | The connect roles refuse a wrong external ID | any external ID assumes them |
 | IAM and KMS key policies decide every call | any credentials do anything |
 | The GitHub Apps' keys are imported into KMS (BYOK) | not possible: GitHub calls sign with the PEM, as on any laptop |
-| Pods get credentials from EKS Pod Identity | workload identity makes the role only (no EKS); pods reach moto with any credentials |
+| Pods get credentials from EKS Pod Identity | workload identity makes the role only (no EKS); the `valxel-local-aws` trait gives pods moto's endpoint and placeholder credentials |
 | Kafka topics and users on MSK | not installed |
 | PostgreSQL and cache through OpenChoreo's own templates (RDS, ElastiCache) | not installed |
 | A stack update changes it in place | a second `connect` replaces the stack |
@@ -84,3 +89,7 @@ override, so none of this reaches a shared installation.
 - platform-resources' `local-aws` workflow builds k3d, Crossplane and moto, installs the AWS
   catalog with `local/aws/install.py`, applies a feature's resources as OpenChoreo renders them, and
   checks moto holds what they built.
+- This repo's `laptop-aws` workflow runs what a developer runs (`valxel dev init`, `aws on`,
+  `cluster up --aws`) and then `scripts/laptop_aws_e2e.py`: a Resource the tool creates and binds
+  through OpenChoreo's API with its own client becomes a table in moto, and a component deployed
+  through OpenChoreo lists that table from its pod. On changes to the laptop tier, and weekly.

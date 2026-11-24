@@ -179,7 +179,8 @@ def platform_resources(target: Path, *, run=_run) -> Path:
 def with_aws(target: Path, *, run=_run, catalog=None) -> int:
     """AWS on moto for the tool and this cluster: AWS mode in .env, moto started, and the AWS catalog
     installed on this cluster's Crossplane (Crossplane too if OpenChoreo didn't bring one), with
-    OpenChoreo's resource types, so a feature's resources go OpenChoreo -> Crossplane -> moto."""
+    OpenChoreo's resource types, so a feature's resources go OpenChoreo -> Crossplane -> moto, and
+    the valxel-local-aws trait in every component type, so components' pods reach moto too."""
     from . import compose
     from .aws import MOTO_CONTAINER
     from .aws import point_env as aws_env
@@ -192,7 +193,7 @@ def with_aws(target: Path, *, run=_run, catalog=None) -> int:
     has_crossplane = run(_kubectl("get", "deployment", "-n", "crossplane-system", "crossplane"),
                          check=False).returncode == 0
     cmd = [sys.executable, str(repo / "local" / "aws" / "install.py"), "--context", CONTEXT, "--moto", MOTO_CONTAINER,
-           "--resource-types", *([] if has_crossplane else ["--crossplane"])]
+           "--openchoreo", *([] if has_crossplane else ["--crossplane"])]
     # This interpreter and a file of the pinned (or your own) platform-resources checkout; its
     # progress goes straight to the terminal.
     return (catalog or (lambda c: subprocess.run(c, check=False).returncode))(cmd)  # noqa: S603
