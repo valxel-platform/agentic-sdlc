@@ -11,7 +11,8 @@ from datetime import UTC, datetime
 STAGES = ("build", "run")
 
 
-CATEGORIES = ("llm", "ci", "test", "build", "environment", "aws", "gcp","azure","compute", "incident", "people", "platform")
+CATEGORIES = ("llm", "ci", "test", "build", "environment", "aws", "gcp","azure","compute", "incident", "people",
+              "platform")
 
 
 BASES = ("estimate", "metered", "billed", "allocated")
