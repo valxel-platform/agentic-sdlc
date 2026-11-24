@@ -2,7 +2,7 @@
 #
 # Each type is named for what it is, not for a cloud (agentic-sdlc ADR 0010): key-value-table,
 # event-stream, queue... One installation runs on one cloud, and the SDLC tool reads only that
-# cloud's block of each type (`clouds.aws`, `clouds.gcp`): its service, the access behind "reads"
+# cloud's block of each type (`clouds.aws`, `clouds.gcp`, `clouds.azure`): its service, the access behind "reads"
 # and "writes", sizes with planning costs, the alarms it comes with and the emulator for tests. A
 # type without a block for a cloud isn't offered there. What a type is for, its parameters and its
 # outputs are the same on every cloud; a block may narrow a parameter's range where its service
@@ -23,16 +23,18 @@
 #
 # Adding a type, or a cloud's block for one, is a pull request here and a Composition there,
 # approved by the platform owner. Cost figures are rough monthly planning numbers per environment
-# (us-east-1, us-central1), for the approver to weigh at G4; they are not quotes.
+# (us-east-1, us-central1, eastus), for the approver to weigh at G4; they are not quotes.
 #
 # Alarms: every resource gets its type's standard alarms on its cloud, built by its Composition:
 # CloudWatch alarms on AWS (routed to the SDLC tool through EventBridge), Cloud Monitoring alert
-# policies on Google Cloud (routed through a webhook channel). In production a firing alarm opens
-# an incident for the components that use the resource; elsewhere it shows at G6. AWS: an alarm
-# fires when `metric` (in `cloudwatch_namespace`, by `statistic` over `period_s`) is above `above`
-# for `periods` periods in a row. Google Cloud: when `metric` (a Cloud Monitoring metric type, by
-# `aligner` over `period_s`) stays above `above` for `period_s` x `periods`. `says` is what on-call
-# reads.
+# policies on Google Cloud (routed through a webhook channel), Azure Monitor metric alerts on Azure
+# (routed through an action group). In production a firing alarm opens an incident for the
+# components that use the resource; elsewhere it shows at G6. AWS: an alarm fires when `metric`
+# (in `cloudwatch_namespace`, by `statistic` over `period_s`) is above `above` for `periods`
+# periods in a row. Google Cloud: when `metric` (a Cloud Monitoring metric type, by `aligner` over
+# `period_s`) stays above `above` for `period_s` x `periods`. Azure: when `metric` (in
+# `monitor_namespace`, by `aggregation` over a window of `period_s` x `periods`, filtered by
+# `where` when given) is above `above`. `says` is what on-call reads.
 version: 2
 
 # Regions a product may run in, per cloud and data class. PHI and payment data stay in these.
@@ -45,6 +47,10 @@ regions:
     general: [us-central1, us-east1, us-east4, us-west1, asia-south1]
     payments: [us-central1, us-east1, us-east4, us-west1]
     phi: [us-central1, us-east1, us-east4, us-west1, asia-south1]   # asia-south1: India data stays in India
+  azure:
+    general: [eastus, eastus2, westus2, centralus, centralindia]
+    payments: [eastus, eastus2, westus2, centralus]
+    phi: [eastus, eastus2, westus2, centralus, centralindia]   # centralindia: India data stays in India
 
 # Platform defaults first: a cloud service needs a reason the defaults can't meet, written as an
 # ADR. Kafka (VX-16) carries events; Postgres keeps records; the event worker builds read models.
@@ -94,6 +100,22 @@ types:
         built_in: [CMEK encryption with the product key, point-in-time recovery, delete protection, private access through Private Google Access]
         alarms: {}   # Firestore has no throttling metric to watch; a component's failed calls show in its traces
         emulator: "Firestore emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
+      azure:
+        service: "Azure Cosmos DB for NoSQL: an account of its own per resource (serverless; autoscale when large)"
+        # An item's time to live is its `ttl` field (seconds), whatever ttl_attribute names: Cosmos DB
+        # reads only that field. The Composition turns per-item TTL on when ttl_attribute is set.
+        access:
+          read: ["cosmos:Cosmos DB Built-in Data Reader"]
+          write: ["cosmos:Cosmos DB Built-in Data Contributor"]
+        sizes:
+          small: { capacity: serverless, monthly_usd: 5 }
+          medium: { capacity: serverless, monthly_usd: 60 }
+          large: { capacity: "autoscale, up to 4,000 RU/s", monthly_usd: 400 }
+        built_in: [customer-managed key encryption with the product key, continuous backup (point-in-time restore), local (key) auth off, public network access off, private endpoint]
+        monitor_namespace: Microsoft.DocumentDB/databaseAccounts
+        alarms:
+          throttled: { metric: TotalRequests, where: "StatusCode=429", aggregation: Count, period_s: 300, periods: 2, above: 0, severity: sev3, says: "Requests are throttled (429): the account needs more RU/s, or one partition key is too hot." }
+        emulator: "Azure Cosmos DB emulator (mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator) in Testcontainers"
 
   event-stream:
     aliases: [kinesis-stream]
@@ -135,6 +157,22 @@ types:
         alarms:
           consumers-behind: { metric: pubsub.googleapis.com/subscription/oldest_unacked_message_age, aligner: ALIGN_MAX, period_s: 300, periods: 3, above: 300, severity: sev2, says: "A reader is over five minutes behind; messages it doesn't read before retention ends are lost." }
         emulator: "Pub/Sub emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
+      azure:
+        service: "Azure Event Hubs: a Standard namespace and event hub per resource, a consumer group per reader"
+        parameters:
+          retention_hours: { min: 24, max: 168 }   # Standard keeps events up to 7 days
+        access:
+          read: ["role:Azure Event Hubs Data Receiver"]
+          write: ["role:Azure Event Hubs Data Sender"]
+        sizes:
+          small: { capacity: 1 throughput unit, monthly_usd: 25 }
+          medium: { capacity: "2 throughput units, auto-inflate to 10", monthly_usd: 80 }
+          large: { capacity: "4 throughput units, auto-inflate to 20", monthly_usd: 400 }
+        built_in: [customer-managed key encryption with the product key, local (SAS) auth off, public network access off, private endpoint]
+        monitor_namespace: Microsoft.EventHub/namespaces
+        alarms:
+          throttled: { metric: ThrottledRequests, aggregation: Total, period_s: 300, periods: 2, above: 0, severity: sev3, says: "Requests are throttled: the namespace needs more throughput units." }
+        emulator: "Event Hubs emulator (mcr.microsoft.com/azure-messaging/eventhubs-emulator) in Testcontainers"
 
   queue:
     aliases: [sqs-queue]
@@ -181,6 +219,24 @@ types:
           backlog-age: { metric: pubsub.googleapis.com/subscription/oldest_unacked_message_age, aligner: ALIGN_MAX, period_s: 300, periods: 3, above: 900, severity: sev3, says: "Messages have waited over 15 minutes: the consumer is slow or down." }
           dead-letters: { metric: pubsub.googleapis.com/subscription/num_undelivered_messages, on: dead-letter-queue, aligner: ALIGN_MAX, period_s: 300, periods: 1, above: 0, severity: sev3, says: "Messages failed every retry and are in the dead-letter topic." }
         emulator: "Pub/Sub emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
+      azure:
+        service: "Azure Service Bus queue: a Standard namespace per resource, with its dead-letter queue"
+        parameters:
+          visibility_timeout_s: { min: 5, max: 300 }   # the queue's lock duration
+          max_receives: { min: 1, max: 2000 }          # deliveries before the dead-letter queue
+        access:
+          read: ["role:Azure Service Bus Data Receiver"]
+          write: ["role:Azure Service Bus Data Sender"]
+        sizes:
+          small: { monthly_usd: 10 }
+          medium: { monthly_usd: 20 }
+          large: { monthly_usd: 100 }
+        built_in: [sessions for in-order delivery (fifo), local (SAS) auth off, TLS 1.2, Microsoft-managed encryption (customer-managed keys need Premium)]
+        monitor_namespace: Microsoft.ServiceBus/namespaces
+        alarms:
+          backlog: { metric: ActiveMessages, aggregation: Average, period_s: 300, periods: 3, above: 1000, severity: sev3, says: "Over 1,000 messages have waited for 15 minutes: the consumer is slow or down." }
+          dead-letters: { metric: DeadletteredMessages, aggregation: Maximum, period_s: 300, periods: 1, above: 0, severity: sev3, says: "Messages failed every delivery and are in the dead-letter queue." }
+        emulator: "Service Bus emulator (mcr.microsoft.com/azure-messaging/servicebus-emulator) in Testcontainers"
 
   object-bucket:
     aliases: [s3-bucket]
@@ -220,6 +276,19 @@ types:
         built_in: [CMEK encryption with the product key, public access prevented, uniform bucket-level access, Private Google Access, access logs]
         alarms: {}
         emulator: "fake-gcs-server (fsouza/fake-gcs-server) in Testcontainers"
+      azure:
+        service: "Azure Blob Storage: a storage account and container of its own per resource"
+        access:
+          read: ["role:Storage Blob Data Reader"]
+          write: ["role:Storage Blob Data Contributor"]
+          delete: ["role:Storage Blob Data Contributor"]
+        sizes:
+          small: { monthly_usd: 2 }
+          medium: { monthly_usd: 25 }
+          large: { monthly_usd: 250 }
+        built_in: [customer-managed key encryption with the product key, shared keys off, public access off, TLS 1.2, versioning and soft delete, private endpoint]
+        alarms: {}
+        emulator: "Azurite (mcr.microsoft.com/azure-storage/azurite) in Testcontainers"
 
   topic:
     aliases: [sns-topic]
@@ -258,6 +327,17 @@ types:
         built_in: [CMEK encryption with the product key, Private Google Access]
         alarms: {}
         emulator: "Pub/Sub emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
+      azure:
+        service: "Azure Service Bus topic: a Standard namespace per resource; subscribers get subscriptions"
+        access:
+          write: ["role:Azure Service Bus Data Sender"]
+        sizes:
+          small: { monthly_usd: 10 }
+          medium: { monthly_usd: 20 }
+          large: { monthly_usd: 100 }
+        built_in: [local (SAS) auth off, TLS 1.2, Microsoft-managed encryption]
+        alarms: {}
+        emulator: "Service Bus emulator (mcr.microsoft.com/azure-messaging/servicebus-emulator) in Testcontainers"
 
   postgres:
     aliases: [postgres-crossplane]
@@ -306,6 +386,22 @@ types:
         alarms:
           cpu-high: { metric: cloudsql.googleapis.com/database/cpu/utilization, aligner: ALIGN_MEAN, period_s: 300, periods: 3, above: 0.8, severity: sev3, says: "CPU has been over 80% for 15 minutes: queries are slowing; look for a missing index, or a bigger size." }
           disk-high: { metric: cloudsql.googleapis.com/database/disk/utilization, aligner: ALIGN_MAX, period_s: 300, periods: 1, above: 0.85, severity: sev2, says: "The disk is over 85% full; it grows by itself, but a fast climb means runaway writes." }
+        emulator: "postgres in Testcontainers"
+      azure:
+        service: "Azure Database for PostgreSQL flexible server: a server of its own per resource, private access only"
+        access: {}
+        # connections: max_connections, which the Composition sets for the size. No paused size: a
+        # flexible server can be stopped by hand, not when idle. Prices are estimates for eastus.
+        sizes:
+          small: { capacity: Standard_B1ms, monthly_usd: 15, connections: 50 }
+          medium: { capacity: Standard_D2ds_v5, monthly_usd: 140, connections: 400 }
+          medium-ha: { capacity: "Standard_D2ds_v5, zone-redundant HA", monthly_usd: 280, connections: 400, multi_az: true }
+          large: { capacity: "Standard_D4ds_v5, zone-redundant HA", monthly_usd: 560, connections: 800, multi_az: true }
+        built_in: [customer-managed key encryption with the product key, private access (VNet integration) only, TLS required, automated backups, point-in-time restore, a delete lock]
+        monitor_namespace: Microsoft.DBforPostgreSQL/flexibleServers
+        alarms:
+          cpu-high: { metric: cpu_percent, aggregation: Average, period_s: 300, periods: 3, above: 80, severity: sev3, says: "CPU has been over 80% for 15 minutes: queries are slowing; look for a missing index, or a bigger size." }
+          disk-high: { metric: storage_percent, aggregation: Maximum, period_s: 300, periods: 1, above: 85, severity: sev2, says: "Storage is over 85% full; it grows by itself, but a fast climb means runaway writes." }
         emulator: "postgres in Testcontainers"
 
   cache:
@@ -375,6 +471,16 @@ types:
         built_in: [replication factor 3 and min.insync.replicas 2, a dead-letter topic its readers may write, a SCRAM user per component with access to this topic only, consumer groups named after the component only]
         alarms: {}
         emulator: "Kafka in Testcontainers (the templates' KafkaContainer)"
+      azure:
+        service: "Apache Kafka topic on the environment's Strimzi cluster (provider-kafka)"
+        access: {}   # a SCRAM user per component (kafka-user) with ACLs on this topic only
+        sizes:
+          small: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+          medium: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+          large: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+        built_in: [replication factor 3 and min.insync.replicas 2, a dead-letter topic its readers may write, a SCRAM user per component with access to this topic only, consumer groups named after the component only]
+        alarms: {}
+        emulator: "Kafka in Testcontainers (the templates' KafkaContainer)"
 
   kafka-user:
     internal: true
@@ -392,6 +498,12 @@ types:
           small: { monthly_usd: 0 }
         built_in: [a password only in the component's own namespace (Strimzi), no keys at all (MSK)]
       gcp:
+        service: "One component's Kafka identity: a SCRAM user on the environment's Strimzi cluster"
+        access: {}
+        sizes:
+          small: { monthly_usd: 0 }
+        built_in: [a password only in the component's own namespace]
+      azure:
         service: "One component's Kafka identity: a SCRAM user on the environment's Strimzi cluster"
         access: {}
         sizes:
@@ -423,6 +535,13 @@ types:
         sizes:
           small: { monthly_usd: 0 }
         built_in: [roles granted per resource only, no project-wide roles, no keys]
+      azure:
+        service: "A user-assigned managed identity federated to the component's Kubernetes service account (AKS Workload Identity)"
+        access: {}
+        outputs: { role: AZURE_CLIENT_ID }   # the identity's client ID
+        sizes:
+          small: { monthly_usd: 0 }
+        built_in: [roles assigned per resource only, no subscription-wide roles, no secrets]
 
 # Sizes per environment unless the design says otherwise. Lanes and dev stay small.
 environment_sizes: { dev: small, staging: small, production: medium }

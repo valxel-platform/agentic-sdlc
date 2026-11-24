@@ -521,3 +521,32 @@ def test_azure_budgets_take_the_platform_token(signals_client):
     sub = token_for("subscription", SUB, "s" * 40)
     refused = signals_client.post(f"/api/signals/azure-budgets?token={sub}", json=fixture("budget.json"))
     assert refused.status_code == 401
+
+
+# --------------------------------------------------------------------- the catalog on Azure
+def test_an_azure_installation_sees_azures_services():
+    from valxel_sdlc import resources
+
+    text = (ROOT / "examples/governance/valxel-platform/sdlc-governance/platform/catalog.yaml").read_text()
+    az = resources.load_catalog(text, "azure")
+    assert az["types"]["key-value-table"]["service"].startswith("Azure Cosmos DB")
+    assert az["types"]["queue"]["access"]["write"] == ["role:Azure Service Bus Data Sender"]
+    assert az["types"]["event-stream"]["parameters"]["retention_hours"]["max"] == 168
+    assert az["types"]["workload-identity"]["outputs"] == {"role": "AZURE_CLIENT_ID"}
+    assert az["unavailable"] == ["cache"] and az["regions"]["general"][0] == "eastus"
+    hld = ("# HLD\n\n## ADRs\n- ADR-1: Cosmos DB for field-state\n\n## Resources\n"
+           "- field-state: key-value-table; partition_key=field_id\n  reads, writes: farm-api\n")
+    repos = [{"name": "o/farm-api", "role": "provider"}]
+    subs = {"region": "eastus", "provider": "azure",
+            "accounts": {"dev": SUB, "staging": SUB.replace("aa01", "aa02"),
+                         "production": SUB.replace("aa01", "aa03")}}
+    ctx = {"aws_catalog": az, "cloud": subs, "data_class": "general", "pipeline": ["dev", "staging", "production"],
+           "repos": repos}
+    assert resources.check(hld, repos, ctx) == []
+    out = resources.plan(hld, az, lambda comp: ("farm", None), product_id="FARM", feature_id="FARM-FEAT-7",
+                         data_class="general")
+    r, ident = (next(x for x in out if x["name"] == n) for n in ("field-state", "farm-api-identity"))
+    assert r["parameters"]["consumers"][0]["actions"] == ["cosmos:Cosmos DB Built-in Data Contributor",
+                                                          "cosmos:Cosmos DB Built-in Data Reader"]
+    assert r["parameters"]["tags"]["valxel:feature"] == "FARM-FEAT-7" and ident["type"] == "workload-identity"
+    assert "Azure Cosmos DB" in resources.catalog_guide(az, "general")
