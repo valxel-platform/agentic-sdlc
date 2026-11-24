@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -56,6 +57,12 @@ SETTINGS = {
     "VALXEL_OPENCHOREO_GIT_SECRET_REF": GIT_SECRET_REF,
     "VALXEL_PORT": TOOL_PORT,
 }
+
+# `cluster up --aws`: the platform's AWS catalog (platform-resources) on this cluster's Crossplane,
+# every AWS call going to moto beside it (platform-resources local/aws, valxel_sdlc.laptop.aws). The
+# commit is pinned like the installer; VALXEL_PLATFORM_RESOURCES names a checkout to use instead.
+PLATFORM_RESOURCES = "https://github.com/valxel-platform/platform-resources"
+PLATFORM_RESOURCES_REF = "main"
 
 # Laptop-only names: the tool's repo standards build with `docker` and deploy web apps as
 # `web-app`; a fresh OpenChoreo calls these `dockerfile-builder` and `web-application`. The
@@ -155,7 +162,44 @@ def point_env(target: Path, *, on: bool) -> None:
     write_env(target / ".env", env)
 
 
-def up(target: Path | None = None, *, run=_run, opener=urllib.request.urlopen, installer=None) -> int:
+def platform_resources(target: Path, *, run=_run) -> Path:
+    """The platform-resources checkout `--aws` installs from: VALXEL_PLATFORM_RESOURCES, or the
+    pinned commit fetched into the bundle's folder."""
+    mine = os.environ.get("VALXEL_PLATFORM_RESOURCES", "")
+    if mine:
+        return Path(mine)
+    repo = target / "platform-resources"
+    if not (repo / ".git").exists():
+        run(["git", "init", "-q", str(repo)])
+    run(["git", "-C", str(repo), "fetch", "-q", "--depth", "1", PLATFORM_RESOURCES, PLATFORM_RESOURCES_REF])
+    run(["git", "-C", str(repo), "checkout", "-q", "--force", "FETCH_HEAD"])
+    return repo
+
+
+def with_aws(target: Path, *, run=_run, catalog=None) -> int:
+    """AWS on moto for the tool and this cluster: AWS mode in .env, moto started, and the AWS catalog
+    installed on this cluster's Crossplane (Crossplane too if OpenChoreo didn't bring one), with
+    OpenChoreo's resource types, so a feature's resources go OpenChoreo -> Crossplane -> moto."""
+    from . import compose
+    from .aws import MOTO_CONTAINER
+    from .aws import point_env as aws_env
+
+    aws_env(target, on=True)
+    if run(compose(target, "up", "-d", "--wait", "moto"), check=False).returncode:
+        print("moto didn't start: docker compose logs moto", file=sys.stderr)
+        return 1
+    repo = platform_resources(target, run=run)
+    has_crossplane = run(_kubectl("get", "deployment", "-n", "crossplane-system", "crossplane"),
+                         check=False).returncode == 0
+    cmd = [sys.executable, str(repo / "local" / "aws" / "install.py"), "--context", CONTEXT, "--moto", MOTO_CONTAINER,
+           "--resource-types", *([] if has_crossplane else ["--crossplane"])]
+    # This interpreter and a file of the pinned (or your own) platform-resources checkout; its
+    # progress goes straight to the terminal.
+    return (catalog or (lambda c: subprocess.run(c, check=False).returncode))(cmd)  # noqa: S603
+
+
+def up(target: Path | None = None, *, run=_run, opener=urllib.request.urlopen, installer=None,
+       aws: bool = False, catalog=None) -> int:
     target = target or home()
     lacking = missing_tools()
     if lacking:
@@ -178,6 +222,11 @@ def up(target: Path | None = None, *, run=_run, opener=urllib.request.urlopen, i
     print(f"OpenChoreo {OPENCHOREO_VERSION} is up (console http://openchoreo.localhost:8080, "
           "admin@openchoreo.dev / Admin@123).")
     print(f"Laptop names added: {', '.join(applied)}.")
+    if aws:
+        if with_aws(target, run=run, catalog=catalog):
+            print("The AWS catalog didn't install; see its output above.", file=sys.stderr)
+            return 1
+        print("AWS on moto: the tool and this cluster's Crossplane both use it (http://localhost:5050 for you).")
     print(f"Next: valxel dev up (the tool moves to http://localhost:{TOOL_PORT}), then valxel dev cluster check.")
     return 0
 
@@ -298,7 +347,7 @@ def main(args) -> int:
     target = _P(args.home) if getattr(args, "home", None) else None
     action = (args.services or ["status"])[0]
     if action == "up":
-        return up(target)
+        return up(target, aws=bool(getattr(args, "aws", False)))
     if action == "down":
         return down(target)
     if action == "status":

@@ -210,6 +210,9 @@ def main(args) -> int:
     if args.action == "cluster":
         from .cluster import main as cluster_main
         return cluster_main(args)
+    if args.action == "aws":
+        from .aws import main as aws_main
+        return aws_main(target, args.services)
     if args.action == "init":
         # Keys come on stdin (a pipe or a paste), never as arguments, so they stay out of shell history.
         key = sys.stdin.readline().strip() if args.anthropic_key_stdin else ""
@@ -236,6 +239,10 @@ def main(args) -> int:
             print("Not ready: " + "; ".join(f"{w} ({f})" for w, _, f in bad), file=sys.stderr)
             return 1
         rc = subprocess.call(compose(target, "up", "-d", "--build", "--wait"))
+        from .aws import in_api, is_on
+
+        if rc == 0 and is_on(read_env(target / ".env")):
+            rc = in_api(target, "seed")  # moto keeps nothing across restarts
         if rc == 0:
             print(f"Valxel is up: http://localhost:{tool_port(target)}")
         return rc
@@ -252,10 +259,12 @@ def main(args) -> int:
 
 def add_parser(sub) -> None:
     dv = sub.add_parser("dev", help="The laptop tier: the tool end to end on this machine (init, doctor, up, "
-                                    "down, logs, urls, github-apps; cluster up|down|status|check for a local OpenChoreo)")
-    dv.add_argument("action", choices=["init", "doctor", "up", "down", "logs", "urls", "cluster", "github-apps"])
+                                    "down, logs, urls, github-apps; cluster up|down|status|check for a local "
+                                    "OpenChoreo; aws on|off|status|seed|connect for AWS on moto)")
+    dv.add_argument("action", choices=["init", "doctor", "up", "down", "logs", "urls", "cluster", "github-apps", "aws"])
     dv.add_argument("services", nargs="*", help="With logs: only these services. With cluster: up, down, status "
-                                                "or check")
+                                                "or check. With aws: on, off, status, seed, or connect <workspace> "
+                                                "[lite|full]")
     dv.add_argument("--home", help="Where the bundle lives (default ~/.valxel/laptop)")
     dv.add_argument("--anthropic-key-stdin", action="store_true", help="init: read the model key from stdin")
     dv.add_argument("--github-token-stdin", action="store_true", help="init: read the GitHub token from stdin "
@@ -263,5 +272,7 @@ def add_parser(sub) -> None:
     dv.add_argument("--governance", choices=["local", "github"], help="init: where governance is read from")
     dv.add_argument("--force", action="store_true", help="init: overwrite the policy template and examples")
     dv.add_argument("--wipe", action="store_true", help="down: also delete the databases and artifacts")
+    dv.add_argument("--aws", action="store_true", help="cluster up: also AWS on moto, the tool's and this cluster's "
+                                                       "(Crossplane and the platform's AWS catalog)")
     dv.add_argument("--org", help="github-apps: register the Apps under this GitHub org (the one you'll install "
                                   "them on); default your own account")

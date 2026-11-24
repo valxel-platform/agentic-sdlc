@@ -58,6 +58,8 @@ RUN pip install --no-cache-dir --no-deps .
 COPY config ./config
 # Sample governance repos, used only when VALXEL_GOVERNANCE_SOURCE=local.
 COPY examples ./examples
+# The AWS connect stack: `valxel dev aws connect` deploys it into moto on the laptop tier.
+COPY deploy/customer-stack.yaml ./deploy/customer-stack.yaml
 COPY --from=web /web/dist ./web/dist
 COPY --from=plugins /plugins /opt/valxel/plugins
 # What lays out a copy at another pin (an eval run's or the canary's config): valxel_sdlc.plugins.

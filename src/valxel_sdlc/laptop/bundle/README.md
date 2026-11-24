@@ -91,6 +91,21 @@ fine for a cluster that only this machine can reach.
 
 `valxel dev cluster down` deletes the cluster and switches back to plain Docker.
 
+## With AWS (moto)
+
+To use AWS without an AWS account, every AWS call can go to moto, a local AWS emulator beside the
+tool: archives, connecting a customer's account (`valxel dev aws connect <workspace>`), inventory
+and costs. With `valxel dev cluster up --aws`, a local OpenChoreo's Crossplane provisions a
+feature's AWS resources into the same moto.
+
+```sh
+valxel dev aws on && valxel dev up                  # the tool on moto
+valxel dev cluster up --aws && valxel dev up        # the tool, OpenChoreo and Crossplane on moto
+```
+
+Moto enforces no lock, key or IAM policy. What you can try and what differs from AWS:
+docs/dev-aws.md in the tool's repo.
+
 ## Limits
 
 - Not for anything shared. Dev sign-in lets anyone who reaches port 8080 in, and the worker controls
