@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Valxel module map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* VOICE work: an engineering reference for the platform's owner, dense and exact
+   IDEA a building's floor plan: root on top, four seams side by side, the core as the foundation
+   PICTURE the capability stack: each layer's capabilities as cards, wires for the imports between them; below it, every module on its floor
+   COLOUR white and black; mint marks what a module uses, sand marks what uses it
+   TYPE Space Grotesk 700 for titles and figures, Inter for text
+   LAYOUT title and figures across the top, layer diagram full width; then the map with a sticky detail panel on the right, stacked on a phone */
+:root{color-scheme:light dark;--bg:light-dark(#ffffff,#0c0d0e);--ink:light-dark(#0c0d0e,#f2f3f4);--soft:light-dark(#5d6166,#a4a9ae);--rule:light-dark(#dfe1e4,#2a2d31);--panel:light-dark(#f5f6f7,#16181a);--mint:light-dark(#b8f5d0,#1f6b45);--sand:light-dark(#ffd9a8,#7a4a12);--mintink:light-dark(#0b3d24,#d6ffe7);--sandink:light-dark(#4a2a00,#ffe8c8)}
+:root[data-theme=light]{color-scheme:light}
+:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+html{scroll-padding-top:16px}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Inter,system-ui,sans-serif;overflow-x:clip}
+h1,h2,h3,.fig-num{font-family:"Space Grotesk",Inter,sans-serif}
+.band{padding:clamp(24px,4vw,56px) max(5vw,16px)}
+.wrap{max-width:1240px;margin:0 auto}
+.back{margin:0 0 14px;font-size:14px}
+.back a{color:var(--soft)}
+h1{font-size:clamp(32px,5vw,48px);line-height:1.05;letter-spacing:-.02em;margin:0 0 12px;text-wrap:balance}
+.lead{font-size:17px;max-width:68ch;margin:0}
+.figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(9em,1fr));gap:12px 24px;margin:24px 0 8px}
+.fig-num{font-size:clamp(28px,4vw,40px);font-weight:700;line-height:1}
+.figs span{display:block;color:var(--soft);font-size:14px;margin-top:4px}
+.fig{position:relative;height:clamp(300px,40vw,420px);margin-top:16px}
+.fig>svg{position:absolute;inset:0;width:100%;height:100%}
+.fig text{font:500 14px Inter,sans-serif;fill:currentColor;paint-order:stroke;stroke:var(--bg);stroke-width:4px}
+.fig .t{font:700 16px "Space Grotesk",sans-serif}
+.fig .layer{cursor:pointer}
+.fig .layer:focus-visible rect{stroke-width:3}
+figure{margin:0}
+figcaption{color:var(--soft);font-size:14px;margin-top:8px}
+.capgrid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start;margin-top:20px}
+.stackwrap{position:relative}
+.wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.stack{display:grid;gap:34px;position:relative}
+.lay{display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px;align-items:start}
+.lay>h3{font-size:18px;margin:6px 0 0;line-height:1.1}
+.lay>h3 small{display:block;font:400 13px Inter,sans-serif;color:var(--soft);margin-top:4px}
+.row5{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.seamrow{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:10px}
+.seamcol{display:grid;gap:8px;align-content:start}
+.seamcol>b{font-size:13px;font-weight:600;color:var(--soft);position:relative;z-index:1;background:var(--bg);justify-self:start;padding-right:6px}
+.seamcol .pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.cap{position:relative;z-index:1;text-align:left;font:inherit;color:var(--ink);background:var(--bg);border:1.5px solid var(--ink);border-radius:8px;padding:9px 10px;cursor:pointer;min-height:76px;transition:opacity .15s}
+.cap strong{display:block;font:700 15px/1.2 "Space Grotesk",Inter,sans-serif}
+.cap span{display:block;font-size:12.5px;line-height:1.35;color:var(--soft);margin-top:4px;overflow-wrap:anywhere}
+.cap em{position:absolute;top:-10px;right:8px;font:600 12px Inter,sans-serif;font-style:normal;padding:1px 7px;border-radius:10px;background:var(--ink);color:var(--bg);display:none}
+.lay-core .cap{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.lay-core .cap span{color:color-mix(in srgb,var(--bg) 70%,var(--ink))}
+.fade .cap:not(.on):not(.uses):not(.usedby){background:var(--bg);color:color-mix(in srgb,var(--ink) 38%,var(--bg));border-color:var(--rule)}
+.fade .cap:not(.on):not(.uses):not(.usedby) span{color:inherit}
+.cap.on{outline:3px solid var(--ink);outline-offset:2px}
+.cap.uses{background:var(--mint);color:var(--mintink);border-color:var(--mintink)}
+.cap.usedby{background:var(--sand);color:var(--sandink);border-color:var(--sandink)}
+.cap.uses span,.cap.usedby span{color:inherit;opacity:.8}
+.cap.uses em,.cap.usedby em{display:block}
+.cap:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.panel .pair-l{font-size:13px;color:var(--soft);margin:2px 0 8px 6px;overflow-wrap:anywhere}
+@media(max-width:1100px){.capgrid{grid-template-columns:minmax(0,1fr)}#cpanel{position:static;max-height:none;order:0}}
+@media(max-width:820px){.row5{grid-template-columns:repeat(2,minmax(0,1fr))}.seamrow{grid-template-columns:minmax(0,1fr)}.seamcol{grid-template-columns:repeat(2,minmax(0,1fr))}.seamcol>b,.seamcol .pair{grid-column:1/-1}.lay{grid-template-columns:minmax(0,1fr)}.wires{display:none}}
+@media(max-width:460px){.seamcol,.seamcol .pair{grid-template-columns:minmax(0,1fr)}}
+.mapband{background:var(--panel);border-top:1px solid var(--rule)}
+h2{font-size:28px;line-height:1.1;letter-spacing:-.02em;margin:0 0 6px}
+.tools{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;margin:16px 0}
+.tools input{font:16px Inter,sans-serif;padding:10px 12px;border:1px solid var(--soft);border-radius:6px;background:var(--bg);color:var(--ink);width:min(100%,340px);min-height:44px}
+.tools input:focus-visible,button:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.key{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:14px;color:var(--soft)}
+.key i{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;margin-right:6px;border:1px solid var(--rule)}
+.clear{font:500 14px Inter,sans-serif;min-height:44px;padding:0 14px;border:1px solid var(--soft);border-radius:6px;background:var(--bg);color:var(--ink);cursor:pointer}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:24px;align-items:start}
+.panel{position:sticky;top:16px;background:var(--bg);border:1px solid var(--rule);border-radius:8px;padding:16px;max-height:calc(100svh - 32px);overflow:auto}
+.panel h3{font-size:20px;margin:0 0 4px;overflow-wrap:anywhere}
+.panel p{margin:6px 0;font-size:15px}
+.panel .meta{color:var(--soft);font-size:14px}
+.panel h4{font-size:14px;margin:16px 0 6px;font-weight:600}
+.panel ul{list-style:none;margin:0;padding:0}
+.panel li button{all:unset;cursor:pointer;display:block;padding:4px 6px;border-radius:4px;font-size:14px;overflow-wrap:anywhere}
+.panel li button:hover,.panel li button:focus-visible{background:var(--panel);outline:2px solid var(--ink)}
+.panel .s{color:var(--soft);font-size:13px}
+.floor{border-top:2px solid var(--ink);padding:10px 0 18px}
+.floor h3{font-size:18px;margin:0 0 2px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.floor h3 small{font:400 14px Inter,sans-serif;color:var(--soft)}
+.floor>p{margin:0 0 10px;color:var(--soft);font-size:14px;max-width:80ch}
+.seams{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:0 20px}
+.grp{margin:8px 0 10px}
+.grp b{display:block;font-size:13px;font-weight:600;color:var(--soft);margin-bottom:4px}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{font:500 13px Inter,sans-serif;padding:5px 8px;min-height:30px;border:1px solid var(--rule);border-radius:5px;background:var(--bg);color:var(--ink);cursor:pointer;transition:opacity .15s}
+.chip:hover{border-color:var(--ink)}
+.chip.pkg{font-weight:700}
+.dim .chip{opacity:.28}
+.dim .chip.on,.dim .chip.uses,.dim .chip.usedby,.dim .chip.hit{opacity:1}
+.chip.uses{background:var(--mint);color:var(--mintink);border-color:var(--mint)}
+.chip.usedby{background:var(--sand);color:var(--sandink);border-color:var(--sand)}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip.hit{border-color:var(--ink);border-width:2px}
+.ranks{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;margin-top:8px}
+.rank h3{font-size:18px;margin:0 0 8px}
+.row{display:grid;grid-template-columns:minmax(0,11em) minmax(0,1fr) 3ch;gap:10px;align-items:center;font-size:14px;margin:4px 0}
+.row button{all:unset;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row button:hover,.row button:focus-visible{text-decoration:underline}
+.bar{height:12px;background:var(--ink);border-radius:2px}
+.row span{text-align:right;font-variant-numeric:tabular-nums}
+.note{color:var(--soft);font-size:14px;margin-top:16px}
+@media(max-width:1000px){.grid{grid-template-columns:minmax(0,1fr)}.panel{position:static;max-height:none;order:-1}}
+@media(max-width:820px){.seams{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+@media(max-width:520px){.seams{grid-template-columns:minmax(0,1fr)}}
+@media(prefers-reduced-motion:reduce){.chip{transition:none}}
+</style>
+</head>
+<body>
+<header class="band">
+  <div class="wrap">
+    <p class="back"><a href="index.html">Valxel SDLC docs</a></p>
+    <h1>Valxel in layers: what each one does, and what it leans on</h1>
+    <p class="lead">The root holds the front doors and wires everything together; four seams do the product work; the core supplies ten shared capabilities. Every link runs downward or stays in its layer: <span id="nmods"></span> modules and <span id="nedges"></span> imports, grouped by what they do.</p>
+    <div class="figs" id="figs"></div>
+    <div class="capgrid">
+      <div class="stackwrap">
+        <div class="stack" id="stack"></div>
+        <svg class="wires" id="wires" aria-hidden="true"></svg>
+      </div>
+      <aside class="panel" id="cpanel" aria-live="polite"></aside>
+    </div>
+    <div class="tools"><div class="key"><span><i style="background:var(--ink)"></i>Picked</span><span><i style="background:var(--mint)"></i>It uses</span><span><i style="background:var(--sand)"></i>Uses it</span><span>Line weight is the number of imports</span></div><button class="clear" id="mainlinks" type="button">Show the main links</button></div>
+  </div>
+</header>
+
+<section class="band mapband" aria-labelledby="maph">
+  <div class="wrap">
+    <h2 id="maph">Modules, layer by layer</h2>
+    <p class="lead">Pick a module to see what it uses and what uses it. Packages are grouped; a bold chip is a package's own module (its <code>__init__.py</code>).</p>
+    <div class="tools">
+      <input id="q" type="search" placeholder="Find a module, e.g. agent_calls or rollout" aria-label="Find a module" autocomplete="off">
+      <div class="key"><span><i style="background:var(--ink)"></i>Picked</span><span><i style="background:var(--mint)"></i>It uses</span><span><i style="background:var(--sand)"></i>Uses it</span></div>
+      <button class="clear" id="clear" type="button">Clear</button>
+    </div>
+    <div class="grid">
+      <div id="map"></div>
+      <aside class="panel" id="panel" aria-live="polite"></aside>
+    </div>
+  </div>
+</section>
+
+<section class="band" aria-labelledby="rankh">
+  <div class="wrap">
+    <h2 id="rankh">Where the weight sits</h2>
+    <p class="lead">The modules most of the tool leans on, and the ones that reach into the most others. A change to the first list touches the most code; the second are the wiring points.</p>
+    <div class="ranks">
+      <div class="rank"><h3>Used by the most modules</h3><div id="fanin"></div></div>
+      <div class="rank"><h3>Use the most modules</h3><div id="fanout"></div></div>
+    </div>
+    <p class="note">Read from <code>config/seams.yaml</code> and the imports in <code>src/valxel_sdlc</code> at commit <code>__COMMIT__</code> (__DATE__), by <code>scripts/module_map.py</code>. Imports inside functions count; third-party libraries and the managed <code>standard_files/</code> copied into product repos are left out.</p>
+  </div>
+</section>
+
+<script>
+{
+const D = __DATA__;
+const FLOORS = [
+  {k:'root', name:'Root', note:'Entry points and wiring: the API, CLI, web console, engine and services that put the seams together. Only the root may import a seam.'},
+  {k:'intake', name:'Intake', note:'Taking in requests, ideas and products before work starts: intake, inception, research.'},
+  {k:'delivery', name:'Delivery', note:'The feature pipeline: phases, gates, the merge train, repos and environments.'},
+  {k:'roadmap', name:'Roadmap', note:'Initiatives and the roadmap\'s own graphs and views.'},
+  {k:'ops', name:'Ops', note:'Running products: incidents, signals, alarms, costs, upkeep.'},
+  {k:'core', name:'Core', note:'Shared rules, records, agents, stores and cloud adapters every layer uses. It imports no seam.'}
+];
+const SEAMS = ['intake','delivery','roadmap','ops'];
+const M = D.m, E = D.e, N = M.length;
+const out = M.map(() => []), inn = M.map(() => []);
+for (const [a, b] of E) { out[a].push(b); inn[b].push(a); }
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const byName = new Map(M.map((m, i) => [m.n, i]));
+document.getElementById('nmods').textContent = N;
+document.getElementById('nedges').textContent = E.length.toLocaleString('en-US');
+
+// flows between floors
+const flow = {};
+for (const [a, b] of E) { const k = M[a].s + '>' + M[b].s; flow[k] = (flow[k] || 0) + 1; }
+const count = k => M.filter(m => m.s === k).length;
+const wrong = E.filter(([a, b]) => { const s = M[a].s, t = M[b].s; return s !== t && (s === 'core' || (t !== 'core' && s !== 'root')); }).length;
+document.getElementById('figs').innerHTML = [
+  [N, 'modules'], [E.length.toLocaleString('en-US'), 'imports between them'],
+  [SEAMS.length, 'seams in the middle layer'], [wrong, 'imports the wrong way']
+].map(([v, l]) => `<div><div class="fig-num">${esc(v)}</div><span>${esc(l)}</span></div>`).join('');
+
+
+// capability stack
+const C = D.caps, LK = D.links, capOf = D.cap_of;
+const ci = new Map(C.map((c, i) => [c.k, i]));
+const capIn = C.map(() => []), capOut = C.map(() => []);
+for (const l of LK) { capOut[ci.get(l.a)].push(l); capIn[ci.get(l.b)].push(l); }
+const LAYER = {root: 0, intake: 1, delivery: 1, roadmap: 1, ops: 1, core: 2};
+const keyMods = c => c.mods.slice().sort((a, b) => inn[b].length - inn[a].length || M[a].n.localeCompare(M[b].n)).slice(0, 3).map(i => M[i].n);
+const card = c => `<button type="button" class="cap" data-c="${esc(c.k)}" id="cap-${esc(c.k)}"><em></em><strong>${esc(c.name)}</strong><span>${c.mods.length} modules: ${esc(keyMods(c).join(', '))}</span></button>`;
+const capsIn = k => C.filter(c => c.layer === k);
+const seamCol = (k, label, wide) => `<div class="seamcol${wide ? ' wide' : ''}"><b>${esc(label)}</b>${wide ? `<div class="pair">${capsIn(k).map(card).join('')}</div>` : capsIn(k).map(card).join('')}</div>`;
+const stack = document.getElementById('stack');
+stack.innerHTML =
+  `<div class="lay lay-root"><h3>Root<small>front doors and wiring</small></h3><div class="row5">${capsIn('root').map(card).join('')}</div></div>` +
+  `<div class="lay lay-seams"><h3>Seams<small>the product work</small></h3><div class="seamrow">${seamCol('intake', 'Intake')}${seamCol('delivery', 'Delivery', true)}${seamCol('roadmap', 'Roadmap')}${seamCol('ops', 'Ops')}</div></div>` +
+  `<div class="lay lay-core"><h3>Core<small>shared capabilities</small></h3><div class="row5">${capsIn('core').map(card).join('')}</div></div>`;
+const capBtn = new Map([...stack.querySelectorAll('.cap')].map(b => [b.dataset.c, b]));
+const wires = document.getElementById('wires');
+const wrapEl = stack.parentElement;
+let capPicked = 'pipeline', mainMode = false;
+const anchor = (el, side) => {
+  const r = el.getBoundingClientRect(), w = wrapEl.getBoundingClientRect();
+  return {x: r.left - w.left + r.width / 2, y: side === 'top' ? r.top - w.top : r.bottom - w.top, cy: r.top - w.top + r.height / 2};
+};
+const path = (l, cls) => {
+  const A = capBtn.get(l.a), B = capBtn.get(l.b);
+  const la = LAYER[C[ci.get(l.a)].layer], lb = LAYER[C[ci.get(l.b)].layer];
+  const wdt = Math.min(7, 1 + Math.sqrt(l.n) * 1.1);
+  let d;
+  const ra = A.getBoundingClientRect(), rb = B.getBoundingClientRect();
+  if (la !== lb || Math.abs(ra.top - rb.top) > 20) {
+    const down = rb.top > ra.top;
+    const p = anchor(A, down ? 'bottom' : 'top'), q = anchor(B, down ? 'top' : 'bottom');
+    const my = (p.y + q.y) / 2;
+    d = `M${p.x} ${p.y} C${p.x} ${my} ${q.x} ${my} ${q.x} ${q.y}`;
+  } else {
+    const p = anchor(A, 'bottom'), q = anchor(B, 'bottom');
+    const dip = p.y + 16 + Math.min(10, Math.abs(p.x - q.x) / 40);
+    d = `M${p.x} ${p.y} C${p.x} ${dip} ${q.x} ${dip} ${q.x} ${q.y}`;
+  }
+  return `<path d="${d}" fill="none" class="${cls}" stroke-width="${wdt.toFixed(1)}" stroke-linecap="round"/>`;
+};
+const drawWires = () => {
+  const W = wrapEl.clientWidth, H = wrapEl.clientHeight;
+  wires.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  if (getComputedStyle(wires).display === 'none') return;
+  let s = '<style>.w-u{stroke:var(--mintink);opacity:.75}.w-b{stroke:var(--sandink);opacity:.75}.w-m{stroke:var(--soft);opacity:.55}</style>';
+  if (mainMode) s += LK.filter(l => l.n >= 8 && C[ci.get(l.a)].layer !== C[ci.get(l.b)].layer).map(l => path(l, 'w-m')).join('');
+  else { const i = ci.get(capPicked); s += capOut[i].map(l => path(l, 'w-u')).join('') + capIn[i].map(l => path(l, 'w-b')).join(''); }
+  wires.innerHTML = s;
+};
+const pairList = (l, dir) => {
+  const ps = l.p.slice(0, 3).map(([a, b]) => `${M[a].n} → ${M[b].n}`);
+  return ps.join('; ') + (l.p.length > 3 ? `; and ${l.p.length - 3} more` : '');
+};
+const linkList = (ls, title, other) => {
+  if (!ls.length) return `<h4>${esc(title)}</h4><p class="meta">None.</p>`;
+  return `<h4>${esc(title)} (${ls.length})</h4><ul>` + ls.slice().sort((x, y) => y.n - x.n).map(l => {
+    const o = C[ci.get(l[other])];
+    return `<li><button type="button" data-c="${esc(o.k)}">${esc(o.name)} <span class="s">${esc(o.layer)}, ${l.n} import${l.n > 1 ? 's' : ''}</span></button><div class="pair-l">${esc(pairList(l))}</div></li>`;
+  }).join('') + '</ul>';
+};
+const cpanel = document.getElementById('cpanel');
+const pickCap = k => {
+  capPicked = k; mainMode = false;
+  document.getElementById('mainlinks').textContent = 'Show the main links';
+  const i = ci.get(k), c = C[i];
+  stack.classList.add('fade');
+  for (const [kk, b] of capBtn) { b.classList.remove('on', 'uses', 'usedby'); b.querySelector('em').textContent = ''; }
+  for (const l of capOut[i]) { const b = capBtn.get(l.b); b.classList.add('uses'); b.querySelector('em').textContent = l.n; }
+  for (const l of capIn[i]) { const b = capBtn.get(l.a); b.classList.add('usedby'); b.querySelector('em').textContent = l.n; }
+  capBtn.get(k).classList.add('on');
+  cpanel.innerHTML = `<h3>${esc(c.name)}</h3><p class="meta">${esc(c.layer[0].toUpperCase() + c.layer.slice(1))}, ${c.mods.length} modules, ${c.inside} imports inside it</p><p>${esc(c.d)}</p>` +
+    linkList(capOut[i], 'It uses', 'b') + linkList(capIn[i], 'Used by', 'a') +
+    `<h4>Its modules</h4><p class="pair-l" style="margin-left:0">${esc(c.mods.map(j => M[j].n).sort().join(', '))}</p>`;
+  drawWires();
+};
+const showMain = () => {
+  mainMode = !mainMode;
+  if (!mainMode) { pickCap(capPicked); return; }
+  document.getElementById('mainlinks').textContent = 'Back to the picked capability';
+  stack.classList.remove('fade');
+  for (const [, b] of capBtn) { b.classList.remove('on', 'uses', 'usedby'); }
+  const main = LK.filter(l => l.n >= 8 && C[ci.get(l.a)].layer !== C[ci.get(l.b)].layer);
+  cpanel.innerHTML = `<h3>The main links</h3><p class="meta">Links of 8 or more imports between layers.</p><ul>` + main.map(l =>
+    `<li><button type="button" data-c="${esc(l.a)}">${esc(C[ci.get(l.a)].name)} → ${esc(C[ci.get(l.b)].name)} <span class="s">${l.n}</span></button></li>`).join('') + '</ul>';
+  drawWires();
+};
+stack.addEventListener('click', e => { const b = e.target.closest('.cap'); if (b) pickCap(b.dataset.c); });
+cpanel.addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (b) { pickCap(b.dataset.c); if (innerWidth < 1100) capBtn.get(b.dataset.c).scrollIntoView({block: 'center'}); } });
+document.getElementById('mainlinks').addEventListener('click', showMain);
+const wireObs = new ResizeObserver(drawWires); wireObs.observe(wrapEl);
+pickCap('pipeline');
+
+// the map: floors, then package groups, then chips
+const groupOf = (m) => {
+  const head = m.n.split('.')[0];
+  const siblings = M.filter(x => x.s === m.s && x.n.split('.')[0] === head).length;
+  return siblings > 1 ? head : '';
+};
+const chip = i => {
+  const m = M[i], g = groupOf(m);
+  const label = g && m.n !== g ? m.n.slice(g.length + 1) : m.n;
+  return `<button type="button" class="chip${m.pkg ? ' pkg' : ''}" data-i="${i}" title="${esc(m.n)}">${esc(label)}</button>`;
+};
+const floorHtml = k => {
+  const ids = M.map((m, i) => i).filter(i => M[i].s === k);
+  const groups = new Map();
+  for (const i of ids) { const g = groupOf(M[i]); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(i); }
+  const names = [...groups.keys()].sort((a, b) => (a === '') - (b === '') || a.localeCompare(b));
+  return names.map(g => `<div class="grp"><b>${g ? esc(g) + '/' : 'Modules'}</b><div class="chips">${groups.get(g).sort((a, b) => M[a].n.localeCompare(M[b].n)).map(chip).join('')}</div></div>`).join('');
+};
+const head = f => `<h3>${esc(f.name)}<small>${count(f.k)} modules</small></h3><p>${esc(f.note)}</p>`;
+const map = document.getElementById('map');
+map.innerHTML =
+  `<div class="floor" id="floor-root">${head(FLOORS[0])}${floorHtml('root')}</div>` +
+  `<div class="floor"><h3>Seams<small>each uses only itself and the core</small></h3><div class="seams">${SEAMS.map(k => { const f = FLOORS.find(f => f.k === k); return `<div id="floor-${k}"><h3 style="font-size:16px">${esc(f.name)}<small>${count(k)}</small></h3><p style="margin:0 0 6px;color:var(--soft);font-size:14px">${esc(f.note)}</p>${floorHtml(k)}</div>`; }).join('')}</div></div>` +
+  `<div class="floor" id="floor-core">${head(FLOORS[5])}${floorHtml('core')}</div>`;
+const chips = [...map.querySelectorAll('.chip')];
+const chipOf = new Map(chips.map(c => [+c.dataset.i, c]));
+
+// detail panel
+const panel = document.getElementById('panel');
+const listOf = (ids, title) => {
+  if (!ids.length) return `<h4>${esc(title)}</h4><p class="meta">None.</p>`;
+  const by = {};
+  for (const i of ids) (by[M[i].s] = by[M[i].s] || []).push(i);
+  return `<h4>${esc(title)} (${ids.length})</h4>` + FLOORS.filter(f => by[f.k]).map(f =>
+    `<p class="s">${esc(f.name)}</p><ul>${by[f.k].sort((a, b) => M[a].n.localeCompare(M[b].n)).map(i => `<li><button type="button" data-i="${i}">${esc(M[i].n)}</button></li>`).join('')}</ul>`).join('');
+};
+const idle = () => {
+  panel.innerHTML = `<h3>Pick a module</h3><p class="meta">Its summary, its layer, and every module it uses or is used by show here. Try <button type="button" class="clear" data-i="${byName.get('agent_calls')}" style="min-height:32px">agent_calls</button> or <button type="button" class="clear" data-i="${byName.get('ops.rollout')}" style="min-height:32px">ops.rollout</button>.</p>`;
+};
+let picked = -1;
+const pick = i => {
+  picked = i;
+  map.classList.add('dim');
+  for (const c of chips) c.classList.remove('on', 'uses', 'usedby', 'hit');
+  for (const j of out[i]) chipOf.get(j)?.classList.add('uses');
+  for (const j of inn[i]) chipOf.get(j)?.classList.add('usedby');
+  chipOf.get(i)?.classList.add('on');
+  const m = M[i], f = FLOORS.find(f => f.k === m.s);
+  panel.innerHTML = `<h3>${esc(m.n)}</h3><p class="meta">${esc(f.name)} layer, ${m.l.toLocaleString('en-US')} lines${m.pkg ? ', a package' : ''}</p>` +
+    (m.d ? `<p>${esc(m.d)}</p>` : `<p class="meta">No module docstring.</p>`) +
+    listOf(out[i], 'It uses') + listOf(inn[i], 'Used by');
+};
+const clear = () => { picked = -1; map.classList.remove('dim'); for (const c of chips) c.classList.remove('on', 'uses', 'usedby', 'hit'); idle(); };
+map.addEventListener('click', e => { const c = e.target.closest('.chip'); if (c) pick(+c.dataset.i); });
+panel.addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) { const i = +b.dataset.i; pick(i); chipOf.get(i)?.scrollIntoView({block: 'nearest'}); } });
+document.getElementById('clear').addEventListener('click', () => { document.getElementById('q').value = ''; clear(); });
+
+// search
+const q = document.getElementById('q');
+q.addEventListener('input', () => {
+  const t = q.value.trim().toLowerCase();
+  if (!t) { if (picked >= 0) pick(picked); else clear(); return; }
+  map.classList.add('dim');
+  for (const c of chips) {
+    const m = M[+c.dataset.i];
+    c.classList.remove('on', 'uses', 'usedby');
+    c.classList.toggle('hit', m.n.toLowerCase().includes(t) || m.d.toLowerCase().includes(t));
+  }
+});
+q.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const first = chips.find(c => c.classList.contains('hit'));
+  if (first) { pick(+first.dataset.i); first.scrollIntoView({block: 'nearest'}); }
+});
+
+// rankings
+const rank = (el, arr) => {
+  const top = M.map((m, i) => [i, arr[i].length]).sort((a, b) => b[1] - a[1] || M[a[0]].n.localeCompare(M[b[0]].n)).slice(0, 10);
+  const max = top[0][1];
+  document.getElementById(el).innerHTML = top.map(([i, n]) =>
+    `<div class="row"><button type="button" data-i="${i}" title="${esc(M[i].n)}">${esc(M[i].n)}</button><div class="bar" style="width:${(n / max * 100).toFixed(1)}%"></div><span>${n}</span></div>`).join('');
+};
+rank('fanin', inn); rank('fanout', out);
+document.querySelector('.ranks').addEventListener('click', e => {
+  const b = e.target.closest('[data-i]'); if (!b) return;
+  const i = +b.dataset.i; pick(i); chipOf.get(i)?.scrollIntoView({block: 'center'});
+});
+idle();
+}
+</script>
+</body>
+</html>

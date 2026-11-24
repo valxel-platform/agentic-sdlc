@@ -12,6 +12,8 @@ what may talk to what.
 | [capability-layers.png](capability-layers.png) | The capability layers: root, seams and core, names only |
 | [capability-layers-detailed.png](capability-layers-detailed.png) | The same, with what each capability does |
 | [capability-layers.html](capability-layers.html), [capability-layers-detailed.html](capability-layers-detailed.html) | Their sources: edit, then run [render_layers.py](render_layers.py) |
+| [../module-map.html](../module-map.html) ([on the docs site](https://valxel-platform.github.io/agentic-sdlc/module-map.html)) | The module map: every module, its capability and layer, and its imports, to explore |
+| [module-map.png](module-map.png) | A picture of the module map's capability view, for the README |
 
 Colors: purple is the tool, amber a security boundary, teal data, green the products, gray outside
 systems.
@@ -66,3 +68,16 @@ connection shown here.
 - Colors: blue is the root, green the seams, amber the core.
 - The groupings follow the modules' own descriptions and `config/seams.yaml`; the
   [detailed version](capability-layers-detailed.png) lists what each capability does.
+
+## Module map
+
+[module-map.html](../module-map.html), on the docs site at [https://valxel-platform.github.io/agentic-sdlc/module-map.html](https://valxel-platform.github.io/agentic-sdlc/module-map.html), is the detailed
+companion to the layers: every module of the tool in its capability, the links between capabilities
+drawn with the module pairs behind them, and a module-by-module explorer.
+
+- Generate it with `uv run python scripts/module_map.py`. It reads the layers from
+  `config/seams.yaml` and the imports from `src/valxel_sdlc`; the capabilities are `CAPS` in
+  the script.
+- `tests/test_module_map.py` fails when a module has no capability, or when a capability link points
+  upward or across seams.
+- `module-map.png` is a screenshot of its top section; retake it when the capabilities change.

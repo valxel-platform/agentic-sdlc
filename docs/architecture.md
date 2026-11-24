@@ -32,7 +32,10 @@ rules, governance, integrations, and ports to AWS, Azure and Google Cloud.
 ![Valxel's capabilities in three stacked layers. Root: front doors, feature engine, service wiring, self-evaluation, lite hosting. Seams: intake (guided intake, product inception), delivery (pipeline and gates, design previews, build, merge and release, repos and records), roadmap (initiatives and releases, outcome loop) and ops (incidents and signals, costs and inventory, security upkeep). Core: agent runtime, model gateway, checks and quality policy, workflow rules, governance and records, components and resources, production rules, integrations, cloud ports for AWS, Azure and Google Cloud, trust and access.](architecture/capability-layers.png)
 
 The same layers with what each capability does:
-[capability-layers-detailed.png](architecture/capability-layers-detailed.png).
+[capability-layers-detailed.png](architecture/capability-layers-detailed.png). To go a level
+down, the [module map](https://valxel-platform.github.io/agentic-sdlc/module-map.html) ([module-map.html](module-map.html) here) places all of the
+tool's modules in these capabilities and shows how they import each other: pick a capability or a module
+to see what it uses and what uses it.
 
 The rule that keeps them apart is enforced, not only drawn: `config/seams.yaml` places every module
 in a layer and `tests/test_seams.py` fails on any import that points upward or across seams
@@ -103,5 +106,7 @@ in a layer and `tests/test_seams.py` fails on any import that points upward or a
 Update this page, `architecture.svg` and `architecture.html` in the same pull request as any change
 that adds, removes or moves a part of the tool shown here. A new or moved capability also updates
 the [capability layers](architecture/README.md#capability-layers): edit the two HTML sources and
-re-render the PNGs. The [deployment diagrams](architecture/README.md) follow the
+re-render the PNGs. The module map regenerates from the code: run
+`uv run python scripts/module_map.py` after adding, moving or splitting modules
+(`tests/test_module_map.py` fails until a new module has a capability in its `CAPS`). The [deployment diagrams](architecture/README.md) follow the
 same rule for changes to the Compose bundles, the Helm chart or the network policy.

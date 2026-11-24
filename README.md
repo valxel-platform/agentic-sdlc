@@ -19,6 +19,13 @@ incident move through the tool, and the design rules.
 How it's stacked: the root wires the four seams, the seams do the product work, and the core
 supplies what they share. [The same layers in detail](docs/architecture/capability-layers-detailed.png).
 
+**[Module map](https://valxel-platform.github.io/agentic-sdlc/module-map.html)**: every module of the tool, the capability and layer it belongs to, and
+what it imports and what imports it. Pick a capability to see the capabilities it uses and the ones that use it,
+down to the module pairs; pick a module for its own links. Generated from the code by
+`scripts/module_map.py`.
+
+<p align="center"><a href="https://valxel-platform.github.io/agentic-sdlc/module-map.html"><img src="docs/architecture/module-map.png" alt="The module map: capability cards in the root, seam and core layers, with the links from Pipeline and gates drawn to the capabilities it uses and the ones that use it, and a side panel listing the module pairs behind each link." width="820"></a></p>
+
 ```
 discovery ─G1─ spec ─G2─┬─ design ───────G3─┬─ join ─ provision new repos ─ plan ─ build ─ CI ─[G5 if high risk]─ merge train
                         └─ architecture ─G4─┘    ─ build, deploy dev and staging ─ release ─G6─ production ─ operate
