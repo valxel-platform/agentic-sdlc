@@ -159,6 +159,7 @@ def test_aws_local_refuses_without_an_emulator(monkeypatch):
     monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
     with pytest.raises(SystemExit, match="moto"):
         main(["aws-local", "seed"])
-    monkeypatch.setenv("AWS_ENDPOINT_URL", "https://s3.us-east-1.amazonaws.com")
-    with pytest.raises(SystemExit, match="moto"):
-        main(["aws-local", "seed"])
+    for real in ("https://s3.us-east-1.amazonaws.com", "https://moto.example.com", "http://moto.amazonaws.com"):
+        monkeypatch.setenv("AWS_ENDPOINT_URL", real)
+        with pytest.raises(SystemExit, match="moto"):
+            main(["aws-local", "seed"])

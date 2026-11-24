@@ -14,6 +14,9 @@ from typing import Any
 ACCOUNT = "123456789012"  # moto's account
 REGION = "us-east-1"
 CHECKPOINTS, ANCHORS = "valxel-local-checkpoints", "valxel-local-anchors"
+# Where moto answers on the laptop tier (the compose service) and in tests: `valxel aws-local` runs
+# only against one of these.
+EMULATOR_HOSTS = frozenset({"moto", "localhost", "127.0.0.1"})
 TEMPLATE = Path(os.environ.get("VALXEL_AWS_STACK_TEMPLATE_FILE", "/app/deploy/customer-stack.yaml"))
 
 

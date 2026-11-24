@@ -84,12 +84,14 @@ def _repos(args: argparse.Namespace, github=None) -> int:
 
 
 def _aws_local(args: argparse.Namespace) -> int:
-    """AWS on moto (valxel_sdlc.cloud.aws.local): refused unless AWS_ENDPOINT_URL points somewhere
-    that isn't AWS, so it can't make stacks or buckets in a real account."""
+    """AWS on moto (valxel_sdlc.cloud.aws.local): refused unless AWS_ENDPOINT_URL is moto on this
+    machine or in the laptop compose project, so it can't make stacks or buckets in a real account."""
+    from urllib.parse import urlsplit
+
     from .cloud.aws import local
 
-    endpoint = os.environ.get("AWS_ENDPOINT_URL", "")
-    if not endpoint or "amazonaws.com" in endpoint:
+    host = urlsplit(os.environ.get("AWS_ENDPOINT_URL", "")).hostname or ""
+    if host not in local.EMULATOR_HOSTS:
         raise SystemExit("valxel aws-local is for moto on the laptop tier: AWS_ENDPOINT_URL isn't set to it "
                          "(valxel dev aws on)")
     if args.action == "seed":
