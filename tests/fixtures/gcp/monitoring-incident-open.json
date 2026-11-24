@@ -1,0 +1,23 @@
+{
+  "version": "1.2",
+  "incident": {
+    "incident_id": "0.n1",
+    "scoping_project_id": "farm-prod",
+    "scoping_project_number": 12345,
+    "url": "https://console.cloud.google.com/monitoring/alerting/incidents/0.n1?project=farm-prod",
+    "started_at": 1795480000,
+    "ended_at": null,
+    "state": "open",
+    "summary": "Undelivered messages for field-events-sub above 100 for 5 minutes.",
+    "policy_name": "valxel-farm-field-events-backlog",
+    "condition_name": "backlog",
+    "resource_name": "field-events-sub",
+    "documentation": {
+      "content": "valxel product=FARM feature=FARM-FEAT-7 resource=field-events env=production consumers=farm-field-worker alarm=queue-backlog severity=sev2\nThe worker isn't keeping up with field events.",
+      "mime_type": "text/markdown"
+    },
+    "policy_user_labels": {
+      "valxel_product": "farm"
+    }
+  }
+}

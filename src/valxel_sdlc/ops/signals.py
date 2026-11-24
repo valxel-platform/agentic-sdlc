@@ -18,7 +18,7 @@ import hashlib
 import json
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from typing import Protocol
 
 SEVERITIES = ("sev1", "sev2", "sev3", "sev4")
@@ -245,6 +245,126 @@ def from_inspector(event: dict) -> list[dict]:
         "url": str(vuln.get("sourceUrl") or ""), "at": str(d.get("updatedAt") or event.get("time") or now()),
         "labels": {"vulnerability": str(vuln.get("vulnerabilityId") or ""), "image": str(img.get("imageHash") or ""),
                    "repository": repo_name, "fix_available": fix, "account": str(event.get("account", ""))},
+    }]
+
+
+# ---------------------------------------------------------------- Google Cloud (ADR 0010, CP-206)
+def _valxel_line(text: str) -> tuple[dict[str, str], str]:
+    """The `valxel product=.. feature=.. resource=.. env=.. consumers=a,b alarm=.. severity=..` first
+    line the platform's alert policies (and CloudWatch alarms) carry, and the rest of the text."""
+    first, _, says = (text or "").partition("\n")
+    if not first.startswith("valxel "):
+        return {}, text or ""
+    who = dict(kv.split("=", 1) for kv in first.split()[1:] if "=" in kv)
+    return {k: ("" if v == "-" else v) for k, v in who.items()}, says
+
+
+def from_cloud_monitoring(payload: dict) -> list[dict]:
+    """A Cloud Monitoring alert policy's incident, as its webhook channel sends it (the data plane's
+    alarm-routing composition). Only Valxel's policies count: their documentation's first line says
+    whose they are, as a CloudWatch alarm's description does. open fires, closed resolves."""
+    inc = payload.get("incident") or {}
+    state = str(inc.get("state") or "").lower()
+    if state not in ("open", "closed"):
+        return []
+    who, says = _valxel_line(str((inc.get("documentation") or {}).get("content") or ""))
+    if not who:
+        return []
+    consumers = [c for c in who.get("consumers", "").split(",") if c]
+    policy, project = str(inc.get("policy_name") or ""), str(inc.get("scoping_project_id") or "")
+    resource = who.get("resource") or str(inc.get("resource_name") or policy)
+    alarm = who.get("alarm", "")
+    started = str(inc.get("started_at") or inc.get("ended_at") or "")
+    at = datetime.fromtimestamp(int(started), UTC).isoformat() if started.isdigit() else now()
+    return [{
+        "source": "cloud-monitoring", "category": "gcp", "status": "firing" if state == "open" else "resolved",
+        "product_id": who.get("product", ""), "component": consumers[0] if consumers else "",
+        "env": who.get("env") or "production", "severity": _sev(who.get("severity", ""), {}, "sev3"),
+        "title": f"{resource}: {alarm.replace('-', ' ')}" if alarm else policy,
+        "detail": (says.strip() + " " + str(inc.get("summary") or "")).strip()[:4000],
+        "fingerprint": f"cloud-monitoring:{project}:{inc.get('policy_name') or ''}:{inc.get('condition_name') or ''}",
+        "url": str(inc.get("url") or ""), "at": at,
+        "labels": {"resource": resource, "feature_id": who.get("feature", ""), "alarm": alarm,
+                   "consumers": ",".join(consumers), "project": project},
+    }]
+
+
+def _pubsub_data(push: dict) -> tuple[dict, dict]:
+    """(the message's JSON data, its attributes) from a Pub/Sub push request."""
+    import base64
+
+    msg = push.get("message") or {}
+    try:
+        data = json.loads(base64.b64decode(msg.get("data") or "") or b"{}")
+    except ValueError:
+        data = {}
+    return (data if isinstance(data, dict) else {}), dict(msg.get("attributes") or {})
+
+
+def from_gcp_budget(push: dict, products, at: str = "") -> list[dict]:
+    """A Cloud Billing budget's Pub/Sub notification. Google sends one every so often whether or not
+    a threshold was crossed; only those that name a crossed threshold count. Budgets are named
+    valxel-<product id>-<environment>, as on AWS."""
+    data, attrs = _pubsub_data(push)
+    name = str(data.get("budgetDisplayName") or "")
+    crossed = data.get("alertThresholdExceeded")
+    forecast = data.get("forecastThresholdExceeded")
+    if not name or (crossed is None and forecast is None):
+        return []
+    product_id, env = "", ""
+    rest = name[len("valxel-"):] if name.lower().startswith("valxel-") else ""
+    for pid in sorted(products, key=len, reverse=True):
+        if rest.lower() == pid.lower() or rest.lower().startswith(pid.lower() + "-"):
+            product_id, env = pid, rest[len(pid) + 1:]
+            break
+    actual = crossed is not None
+    spent, budget = float(data.get("costAmount") or 0), float(data.get("budgetAmount") or 0)
+    threshold = float(crossed if crossed is not None else forecast or 0)
+    over = actual and budget and spent >= budget
+    kind = "ACTUAL" if actual else "FORECASTED"
+    cur = str(data.get("currencyCode") or "USD")
+    return [{
+        "source": "gcp-budgets", "category": "cost", "resolves": False, "status": "firing",
+        "product_id": product_id, "component": "", "env": env or "production",
+        "severity": "sev2" if over else "sev3" if actual else "sev4",
+        "title": f"Google Cloud budget {name}: {'actual' if actual else 'forecast'} spend above {threshold:.0%}",
+        "detail": f"{kind} {spent:,.2f} {cur} against a budget of {budget:,.2f} {cur} since "
+                  f"{data.get('costIntervalStart', 'the period began')}",
+        "fingerprint": (f"gcp-budgets:{attrs.get('budgetId') or name}:{kind}:{threshold}:"
+                        f"{data.get('costIntervalStart', '')}"),
+        "url": "", "at": at or now(),
+        "labels": {"budget": name, "billing_account": str(attrs.get("billingAccountId") or ""), "alert_type": kind},
+    }]
+
+
+def from_scc(push: dict) -> list[dict]:
+    """A Security Command Center finding, from its Pub/Sub notification config: high and critical
+    vulnerabilities (Artifact Analysis) in images that run. The image's repository name is the
+    component's, as with Inspector; an inactive finding resolves its signal."""
+    data, _ = _pubsub_data(push)
+    f = data.get("finding") or {}
+    res = data.get("resource") or {}
+    sev = str(f.get("severity") or "").upper()
+    if str(f.get("findingClass") or "").upper() != "VULNERABILITY" or sev not in ("CRITICAL", "HIGH"):
+        return []
+    image = str(f.get("resourceName") or res.get("name") or "")
+    # .../dockerImages/<component>@sha256:... or .../<repo>/<component>@sha256:...
+    path = image.split("@", 1)[0].rstrip("/")
+    component = path.rsplit("/", 1)[-1].split(":", 1)[0] if "/" in path else ""
+    cve = str(((f.get("vulnerability") or {}).get("cve") or {}).get("id") or f.get("category") or "")
+    fixed = str(((f.get("vulnerability") or {}).get("fixedPackage") or {}).get("packageVersion") or "")
+    project = str(res.get("projectDisplayName") or res.get("project_display_name") or "")
+    return [{
+        "source": "scc", "category": "security",
+        "status": "resolved" if str(f.get("state") or "").upper() == "INACTIVE" else "firing",
+        "product_id": "", "component": component, "env": "production",
+        "severity": "sev2" if sev == "CRITICAL" and fixed else "sev3",
+        "title": f"{component or image}: {cve} ({sev.lower()})",
+        "detail": (str(f.get("description") or "")[:3000]
+                   + (f" Fixed in {fixed}: rebuild with it." if fixed else " No fixed version yet.")),
+        "fingerprint": f"scc:{f.get('name') or image + ':' + cve}",
+        "url": str(f.get("externalUri") or ""), "at": str(f.get("eventTime") or now()),
+        "labels": {"vulnerability": cve, "image": image, "project": project},
     }]
 
 

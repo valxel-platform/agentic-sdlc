@@ -219,6 +219,8 @@ export const apiMock = {
   connections: vi.fn(),
   awsLaunch: vi.fn(),
   awsCheck: vi.fn(),
+  gcpLaunch: vi.fn(),
+  gcpCheck: vi.fn(),
   disconnect: vi.fn(),
   workspaceAudit: vi.fn(),
   lessons: vi.fn(),

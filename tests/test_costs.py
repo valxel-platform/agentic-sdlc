@@ -250,7 +250,7 @@ def test_observer_and_cost_explorer_sources():
             return {**page, "NextPageToken": "n"} if len(self.kw) == 1 else page
 
     ce = CE()
-    out = cost.CostExplorerSource(ce).aws_costs(product_id="FARM", feature_id="FARM-FEAT-1", account="3" * 12,
+    out = cost.CostExplorerSource(ce).cloud_costs(product_id="FARM", feature_id="FARM-FEAT-1", account="3" * 12,
                                                  start=T0, end=T0 + timedelta(days=7))
     assert out == {"Amazon DynamoDB": 2.5} and ce.kw[1]["NextPageToken"] == "n"
     tags = ce.kw[0]["Filter"]["And"][0]["Tags"]

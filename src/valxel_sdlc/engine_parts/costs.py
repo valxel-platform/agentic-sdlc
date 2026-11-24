@@ -111,7 +111,7 @@ class CostsMixin:
         aws_actual = {}
         for env, account in sorted((plan.get("accounts") or {}).items()):
             if env in (plan.get("aws_monthly_usd") or {}):
-                aws_actual[env] = src.aws_costs(product_id=s["product_id"], feature_id=s["feature_id"],
+                aws_actual[env] = src.cloud_costs(product_id=s["product_id"], feature_id=s["feature_id"],
                                                 account=account, start=start, end=at)
         before, after, repo_of = {}, {}, {}
         groups: dict[tuple, list[str]] = {}
@@ -210,8 +210,9 @@ class CostsMixin:
             for env in pipeline:
                 targets.add((rt.get("namespace") or "default", rt["openchoreo_project"], env, env == pipeline[-1]))
         recs += fc.collect_runtime(self.services.costs, pid, sorted(targets), windows, at, r)
-        aws = (snap.product.runtime or {}).get("aws") or {}
-        recs += fc.collect_aws(self.services.costs, pid, dict(aws.get("accounts") or {}), releases, at, r)
+        cloud = (snap.product.runtime or {}).get("cloud") or {}
+        recs += fc.collect_cloud(self.services.costs, pid, dict(cloud.get("accounts") or {}), releases, at, r,
+                                 provider=str(cloud.get("provider") or "aws"))
         return ledger.upsert(recs)
 
     def feature_cost(self, feature_id: str) -> dict:

@@ -14,8 +14,8 @@ in-memory one for each, and `conformance.py` the behavior every implementation m
     SignalSource       a cloud's alarms, budget alerts and findings, parsed into signals (ops.signals)
 
 The first four and CostSource were already interfaces; they live here now, and the modules that
-used them re-export them under the same names. CostSource keeps its AWS-named methods until the
-GCP cost adapter lands (phase 2), when they take neutral names.
+used them re-export them under the same names. CostSource's cloud methods are cloud_costs and
+cloud_costs_daily (aws_costs before the GCP adapter).
 """
 
 from __future__ import annotations
@@ -78,12 +78,12 @@ class CloudAccounts(Protocol):
 class CostSource(Protocol):
     def component_costs(self, *, namespace: str, project: str, env: str, components: list[str],
                         start: datetime, end: datetime) -> dict[str, float]: ...  # component -> USD
-    def aws_costs(self, *, product_id: str, feature_id: str, account: str,
+    def cloud_costs(self, *, product_id: str, feature_id: str, account: str,
                   start: datetime, end: datetime) -> dict[str, float]: ...  # service -> USD
     # For the cost ledger (valxel_sdlc.finops): day by day, everything in a project or account.
     def component_costs_daily(self, *, namespace: str, project: str, env: str, start: datetime,
                               end: datetime) -> list[dict]: ...  # [{day, component, usd}]
-    def aws_costs_daily(self, *, product_id: str, account: str, start: datetime,
+    def cloud_costs_daily(self, *, product_id: str, account: str, start: datetime,
                         end: datetime) -> list[dict]: ...  # [{day, service, feature_id ('' = untagged), usd}]
 
 

@@ -65,6 +65,8 @@ cloud:
   provider: aws        # aws | gcp
   region: ""
   project: ""          # gcp: the Google Cloud project the tool runs in
+  serviceAccount: ""   # gcp: the tool's own Google service account, which customers' connect templates trust
+  billingDataset: ""   # gcp: project.dataset of the Cloud Billing export, for cost reviews
 # Deprecated: cloud.region. Still read when cloud.region is empty.
 awsRegion: ""
 

@@ -63,3 +63,26 @@ def immutable_store(bucket: str, *, env: Mapping[str, str] | None = None, client
 
         return GcsImmutable(bucket, client=client, clock=clock)
     raise UnknownCloud(f"no immutable store for {name} yet")
+
+
+# Tags and labels (ADR 0010). AWS tags are free-form (`valxel:feature` = `FARM-FEAT-1`). Google Cloud
+# labels allow only lowercase letters, digits, `_` and `-`, up to 63 characters: `valxel:feature`
+# becomes `valxel_feature` and its value `farm-feat-1`. Valxel's ids are uppercase letters, digits
+# and hyphens, so a label's value reads back as the id by upper-casing it.
+def label_key(tag: str) -> str:
+    return "".join(c if c.isalnum() or c in "_-" else "_" for c in tag.lower())[:63]
+
+
+def label_value(value: str) -> str:
+    return "".join(c if c.isalnum() or c in "_-" else "_" for c in value.lower())[:63]
+
+
+def id_from_label(value: str) -> str:
+    return value.upper()
+
+
+def tags_for(cloud: str, tags: dict[str, str]) -> dict[str, str]:
+    """A resource's Valxel tags as the cloud spells them."""
+    if cloud == "gcp":
+        return {label_key(k): label_value(v) for k, v in tags.items()}
+    return dict(tags)

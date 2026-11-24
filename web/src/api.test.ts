@@ -614,6 +614,19 @@ const cases: Case[] = [
     body: { gates: { g1: ["grp"] } },
   },
   {
+    name: "gcpLaunch encodes region",
+    call: () => api.gcpLaunch("ws1", "full", "europe-west1"),
+    method: "GET",
+    path: "/workspaces/ws1/connections/gcp/launch?mode=full&region=europe-west1",
+  },
+  {
+    name: "gcpCheck",
+    call: () => api.gcpCheck("ws1", "acme-prod", "full"),
+    method: "POST",
+    path: "/workspaces/ws1/connections/gcp/check",
+    body: { project: "acme-prod", mode: "full" },
+  },
+  {
     name: "awsCheck",
     call: () => api.awsCheck("ws1", "123456789012", "full"),
     method: "POST",

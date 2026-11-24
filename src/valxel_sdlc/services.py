@@ -588,10 +588,21 @@ def make_connections(svc):
     if clients:
         public = (os.environ.get("VALXEL_PUBLIC_URL") or "http://localhost:8080").rstrip("/")
         oauth = OAuthTools(clients, redirect_uri=f"{public}/api/connections/oauth/callback", vault=vault_for())
-    conns = Connections(svc.workspaces, github=github, aws=AwsConnect.from_env(), notify=notify, health=health,
-                        oauth=oauth)
+    from .cloud import provider
+
+    gcp = None
+    if provider() == "gcp":
+        from .cloud.gcp.accounts import GcpConnect
+
+        gcp = GcpConnect.from_env()
+    conns = Connections(svc.workspaces, github=github, aws=AwsConnect.from_env() if gcp is None else None,
+                        notify=notify, health=health, oauth=oauth, gcp=gcp)
     if conns.aws is not None:
         conns.health_checks["aws"] = aws_health(conns)
+    if conns.gcp is not None:
+        from .connections import gcp_health
+
+        conns.health_checks["gcp"] = gcp_health(conns)
     for tool in clients:
         conns.health_checks[tool] = oauth.health(tool)
     from .billing import provider_for

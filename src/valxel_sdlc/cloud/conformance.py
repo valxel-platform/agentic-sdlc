@@ -128,10 +128,10 @@ def cost_source(src, *, product_id: str, feature_id: str, account: str, day: str
     out = _shape(src, ports.CostSource)
     start = datetime.fromisoformat(day).replace(tzinfo=UTC)
     end = start + timedelta(days=1)
-    got = src.aws_costs(product_id=product_id, feature_id=feature_id, account=account, start=start, end=end)
+    got = src.cloud_costs(product_id=product_id, feature_id=feature_id, account=account, start=start, end=end)
     if {k: round(v, 2) for k, v in got.items()} != {k: round(v, 2) for k, v in expect.items()}:
         out.append(f"the feature's costs must be {expect}, got {got}")
-    daily = src.aws_costs_daily(product_id=product_id, account=account, start=start, end=end)
+    daily = src.cloud_costs_daily(product_id=product_id, account=account, start=start, end=end)
     if any(not {"day", "service", "feature_id", "usd"} <= set(r) for r in daily):
         out.append("daily rows must carry day, service, feature_id and usd")
     if round(sum(r["usd"] for r in daily if r["feature_id"] == feature_id), 2) != round(sum(expect.values()), 2):

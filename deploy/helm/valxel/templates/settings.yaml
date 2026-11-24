@@ -21,6 +21,12 @@ data:
   {{- else if eq (include "valxel.cloud" .) "gcp" }}
   VALXEL_GCP_PROJECT: {{ .Values.cloud.project | quote }}
   GOOGLE_CLOUD_PROJECT: {{ .Values.cloud.project | quote }}
+  {{- with .Values.cloud.serviceAccount }}
+  VALXEL_GCP_SERVICE_ACCOUNT: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.cloud.billingDataset }}
+  VALXEL_GCP_BILLING_DATASET: {{ . | quote }}
+  {{- end }}
   {{- end }}
   # Sign-in.
   VALXEL_AUTH: {{ .Values.auth.mode | quote }}

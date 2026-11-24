@@ -538,9 +538,10 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     g = sub.add_parser("glitchtip-token", help="The token for a product's GlitchTip webhook URL")
     g.add_argument("product")
     st = sub.add_parser("signals-token", help="A sender's signals token: a product's (Alertmanager, OpenChoreo, "
-                                              "tickets) or a data plane account's (CloudWatch, Inspector)")
-    st.add_argument("kind", choices=["product", "account"])
-    st.add_argument("name", help="The product id or the 12-digit AWS account")
+                                              "tickets), a data plane account's (CloudWatch, Inspector) or a "
+                                              "Google Cloud project's (Cloud Monitoring, Security Command Center)")
+    st.add_argument("kind", choices=["product", "account", "project"])
+    st.add_argument("name", help="The product id, the 12-digit AWS account or the Google Cloud project ID")
     c = sub.add_parser("changes", help="Check the production change log's hash chain (DATABASE_URL)")
     c.add_argument("action", choices=["verify"])
     au = sub.add_parser("audit", help="Check the hash chains of every workspace's audit log and of the production "
@@ -763,6 +764,8 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
             print("Set VALXEL_SIGNALS_TOKEN first (the tool's signals token).", file=sys.stderr)
             return 2
         print(f"Authorization: Bearer {token}")
+        if args.kind == "project":  # Cloud Monitoring and Pub/Sub push send no header: the token rides the URL
+            print(f"URL query: ?token={token}")
         return 0
     if args.cmd == "repos":
         return _repos(args, github)

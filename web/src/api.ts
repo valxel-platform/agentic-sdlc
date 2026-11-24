@@ -1881,6 +1881,16 @@ export const api = {
       account,
       mode,
     }),
+  gcpLaunch: (ws: string, mode: string, region: string) =>
+    request<{ url: string; command: string; mode: string }>(
+      "GET",
+      `/workspaces/${encodeURIComponent(ws)}/connections/gcp/launch?mode=${mode}&region=${encodeURIComponent(region)}`,
+    ),
+  gcpCheck: (ws: string, project: string, mode: string) =>
+    request<Connection>("POST", `/workspaces/${encodeURIComponent(ws)}/connections/gcp/check`, {
+      project,
+      mode,
+    }),
   disconnect: (ws: string, tool: string, account: string) =>
     request<{ revoke: string }>(
       "DELETE",
