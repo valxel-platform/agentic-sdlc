@@ -47,6 +47,13 @@ def strict_problems(env: Mapping[str, str] | None = None) -> list[str]:
     if name not in SUPPORTED:
         return [f"VALXEL_CLOUD is {name}, which has no adapters yet (supported: {', '.join(SUPPORTED)}): "
                 "its secrets, signing, archives and costs would run as stand-ins"]
+    env = env if env is not None else os.environ
+    # An endpoint override sends AWS calls to an emulator (moto on the laptop tier, docs/dev-aws.md),
+    # which takes any credentials and enforces no lock, key or IAM policy.
+    emulated = sorted(k for k, v in env.items() if k.startswith("AWS_ENDPOINT_URL") and v)
+    if emulated:
+        return [f"{', '.join(emulated)} is set: AWS calls go to {env[emulated[0]]}, not AWS (an emulator enforces "
+                "no Object Lock, KMS or IAM policy)"]
     return []
 
 

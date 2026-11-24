@@ -42,7 +42,8 @@ class AwsSecretsManagerStore:
                 return list(hit[1])
         sid = secret_id(name, self.prefix)
         current = self._get(sid, "AWSCURRENT")
-        found = [current, self._get(sid, "AWSPREVIOUS") if current else ""]
+        # [] when unset, [current] with no previous version (the SecretStore port, conformance).
+        found = [v for v in (current, self._get(sid, "AWSPREVIOUS") if current else "") if v]
         with self._lock:
             self._cache[name] = (now + self.ttl, found)
         return found

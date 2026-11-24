@@ -34,6 +34,19 @@ x-tool: &tool
     VALXEL_OPENCHOREO_CONSOLE_URL: ${VALXEL_OPENCHOREO_CONSOLE_URL:-}
     VALXEL_OPENCHOREO_OBSERVER_MCP_URL: ${VALXEL_OPENCHOREO_OBSERVER_MCP_URL:-}
     VALXEL_OPENCHOREO_GIT_SECRET_REF: ${VALXEL_OPENCHOREO_GIT_SECRET_REF:-}
+    # AWS on moto (`valxel dev aws on` sets these; empty, the tool reaches no AWS). Named
+    # VALXEL_DEV_AWS_* in .env so your shell's own AWS_* keys never reach the tool. Strict mode
+    # refuses an endpoint override, so these never leave the laptop tier.
+    AWS_ENDPOINT_URL: ${VALXEL_DEV_AWS_ENDPOINT_URL:-}
+    AWS_ACCESS_KEY_ID: ${VALXEL_DEV_AWS_ACCESS_KEY_ID:-}
+    AWS_SECRET_ACCESS_KEY: ${VALXEL_DEV_AWS_SECRET_ACCESS_KEY:-}
+    AWS_REGION: ${VALXEL_DEV_AWS_REGION:-}
+    VALXEL_CLOUD: ${VALXEL_CLOUD:-}
+    VALXEL_CHECKPOINT_ARCHIVE_BUCKET: ${VALXEL_CHECKPOINT_ARCHIVE_BUCKET:-}
+    VALXEL_AUDIT_ANCHOR_BUCKET: ${VALXEL_AUDIT_ANCHOR_BUCKET:-}
+    VALXEL_AWS_ACCOUNT_ID: ${VALXEL_AWS_ACCOUNT_ID:-}
+    VALXEL_AWS_STACK_TEMPLATE_URL: ${VALXEL_AWS_STACK_TEMPLATE_URL:-}
+    VALXEL_AWS_COST_EXPLORER: ${VALXEL_AWS_COST_EXPLORER:-}
     VALXEL_TIER: laptop
     VALXEL_MODE: live
     VALXEL_DELIVERY: local
@@ -68,6 +81,7 @@ x-tool: &tool
   depends_on:
     postgres: {condition: service_healthy}
     llm-gateway: {condition: service_healthy}
+    moto: {condition: service_healthy, required: false}
   restart: unless-stopped
 
 services:
@@ -180,6 +194,22 @@ services:
       interval: 5s
       timeout: 10s
       retries: 30
+    restart: unless-stopped
+
+  # AWS on this machine (`valxel dev aws on`; profile aws): moto, a local AWS emulator. The tool
+  # reaches it as moto:5000; a local OpenChoreo's Crossplane reaches the same container
+  # (`valxel dev cluster up --aws` joins it to the cluster's network). Port 5050 is for you (aws
+  # --endpoint-url http://localhost:5050). It keeps everything in memory.
+  moto:
+    image: motoserver/moto:5.2.6
+    container_name: valxel-moto
+    profiles: [aws]
+    ports: ["127.0.0.1:5050:5000"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/moto-api/')"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
     restart: unless-stopped
 
   audit-sink:

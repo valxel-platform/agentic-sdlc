@@ -48,7 +48,7 @@ def test_aws_store_reads_current_and_previous_and_caches():
     store = secret_ring.AwsSecretsManagerStore(client=sm, ttl=60, clock=lambda: now[0])
     assert store.versions("VALXEL_SIGNALS_TOKEN") == ["new", "old"]
     assert store.versions("VALXEL_FLIPT_TOKEN_PAY")[0] == "flipt"  # no previous version: just current
-    assert store.versions("VALXEL_SMTP_PASSWORD") == ["", ""]  # not in the store
+    assert store.versions("VALXEL_SMTP_PASSWORD") == []  # not in the store
     calls = sm.calls
     store.versions("VALXEL_SIGNALS_TOKEN")
     assert sm.calls == calls  # cached

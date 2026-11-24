@@ -83,6 +83,35 @@ def _repos(args: argparse.Namespace, github=None) -> int:
     return 0 if all(r.ok for r in reports) else 1
 
 
+def _aws_local(args: argparse.Namespace) -> int:
+    """AWS on moto (valxel_sdlc.cloud.aws.local): refused unless AWS_ENDPOINT_URL is moto on this
+    machine or in the laptop compose project, so it can't make stacks or buckets in a real account."""
+    from urllib.parse import urlsplit
+
+    from .cloud.aws import local
+
+    host = urlsplit(os.environ.get("AWS_ENDPOINT_URL", "")).hostname or ""
+    if host not in local.EMULATOR_HOSTS:
+        raise SystemExit("valxel aws-local is for moto on the laptop tier: AWS_ENDPOINT_URL isn't set to it "
+                         "(valxel dev aws on)")
+    if args.action == "seed":
+        made = local.seed()
+        print(f"moto seeded: {', '.join(made) or 'nothing new'}")
+        return 0
+    if not args.workspace:
+        raise SystemExit("valxel aws-local connect <workspace> [lite|full]")
+    from .connections import Connections
+
+    conns = build_services(load_settings()).connections
+    if not isinstance(conns, Connections) or conns.aws is None:
+        raise SystemExit("AWS connections aren't on: run `valxel dev aws on`, then `valxel dev up`")
+    ext = conns.external_id(args.workspace, "laptop")
+    local.deploy_stack(local.client("cloudformation"), args.workspace, external_id=ext, mode=args.mode)
+    got = conns.aws_check(args.workspace, account=local.ACCOUNT, mode=args.mode, actor="laptop")
+    print(f"{args.workspace} is connected to moto's account {local.ACCOUNT} ({args.mode} mode): {got.get('id', '')}")
+    return 0
+
+
 def _acceptance(args: argparse.Namespace, github=None) -> int:
     from pathlib import Path
 
@@ -648,7 +677,14 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     oc.add_argument("--by", default=os.environ.get("USER", ""), help="record: who entered it")
     oc.add_argument("--dry-run", action="store_true", help="read: don't record the reading")
     oc.add_argument("--json", action="store_true")
+    al = sub.add_parser("aws-local", help="The laptop tier's AWS on moto, inside the api container (`valxel dev aws` "
+                                          "runs it): seed, or connect <workspace> [lite|full]")
+    al.add_argument("action", choices=["seed", "connect"])
+    al.add_argument("workspace", nargs="?", default="")
+    al.add_argument("mode", nargs="?", default="full", choices=["lite", "full"])
     args = p.parse_args(argv)
+    if args.cmd == "aws-local":
+        return _aws_local(args)
     if args.cmd == "lessons-check":
         from .lessons import check_dir
         problems = check_dir(args.directory)

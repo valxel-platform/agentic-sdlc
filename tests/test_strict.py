@@ -225,5 +225,9 @@ def test_strict_mode_names_the_installations_cloud():
 
     assert strict_problems({}) == [] and strict_problems({"VALXEL_CLOUD": "AWS"}) == []
     assert strict_problems({"VALXEL_CLOUD": "gcp"}) == []
+    emulated = strict_problems({"VALXEL_CLOUD": "aws", "AWS_ENDPOINT_URL": "http://moto:5000"})
+    assert len(emulated) == 1 and "AWS_ENDPOINT_URL" in emulated[0] and "http://moto:5000" in emulated[0]
+    assert strict_problems({"AWS_ENDPOINT_URL_S3": "http://localhost:5050"})[0].startswith("AWS_ENDPOINT_URL_S3")
+    assert strict_problems({"AWS_ENDPOINT_URL": ""}) == []
     assert strict_problems({"VALXEL_CLOUD": "azure"}) == []
     assert "not 'oracle'" in strict_problems({"VALXEL_CLOUD": "oracle"})[0]

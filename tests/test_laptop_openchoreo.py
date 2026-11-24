@@ -235,3 +235,44 @@ def test_projects_and_environments_are_found_by_listing_when_the_server_has_no_g
     assert oc.ensure_environment(name="dev", data_plane="np", production=False, actor="agent:x") == "exists"
     assert not [t for t, _ in server.calls if t.startswith("create_")]
     assert oc.ensure_project(project="shop", pipeline="shop-pipeline") == "created"
+
+
+def test_up_with_aws_starts_moto_and_installs_the_aws_catalog_on_the_cluster(tmp_path, monkeypatch):
+    """`valxel dev cluster up --aws` (CP-118): AWS mode on, moto up, then platform-resources'
+    local/aws/install.py against this cluster, with OpenChoreo's resource types."""
+    from valxel_sdlc.laptop import aws
+
+    monkeypatch.setattr(laptop, "docker_gid", lambda: "0")
+    monkeypatch.setattr(cluster, "missing_tools", list)
+    monkeypatch.delenv("VALXEL_PLATFORM_RESOURCES", raising=False)
+    laptop.init(target=tmp_path, anthropic_key="k", github_token="ghp_t")
+    kube, installs = Kube(), []
+    assert cluster.up(tmp_path, run=kube, installer=lambda **kw: None, aws=True,
+                      catalog=lambda cmd: installs.append(cmd) or 0) == 0
+    env = laptop.read_env(tmp_path / ".env")
+    assert aws.is_on(env) and env["VALXEL_LOCAL_RUNTIME"] == "openchoreo"
+    cmds = [c for c, _ in kube.calls]
+    assert any(c[:2] == ["docker", "compose"] and c[-1] == "moto" for c in cmds)
+    fetch = next(c for c in cmds if "fetch" in c)
+    assert fetch[-2:] == [cluster.PLATFORM_RESOURCES, cluster.PLATFORM_RESOURCES_REF]
+    (cmd,) = installs
+    assert cmd[1].endswith("platform-resources/local/aws/install.py")
+    assert cmd[2:] == ["--context", "k3d-valxel", "--moto", "valxel-moto", "--resource-types"]  # Crossplane is there
+
+
+def test_up_with_aws_installs_crossplane_when_openchoreo_has_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(laptop, "docker_gid", lambda: "0")
+    monkeypatch.setenv("VALXEL_PLATFORM_RESOURCES", str(tmp_path / "pr"))
+    laptop.init(target=tmp_path, anthropic_key="k", github_token="ghp_t")
+
+    def kube(cmd, *, input=None, check=True):
+        missing = "crossplane" in cmd and "deployment" in cmd
+        return subprocess.CompletedProcess(cmd, 1 if missing else 0, stdout="", stderr="")
+
+    installs = []
+    assert cluster.with_aws(tmp_path, run=kube, catalog=lambda cmd: installs.append(cmd) or 0) == 0
+    assert installs[0][1] == str(tmp_path / "pr" / "local" / "aws" / "install.py") and installs[0][-1] == "--crossplane"
+
+
+def test_platform_resources_is_pinned_to_a_commit():
+    assert len(cluster.PLATFORM_RESOURCES_REF) == 40 and int(cluster.PLATFORM_RESOURCES_REF, 16) >= 0

@@ -31,7 +31,8 @@ def test_only_the_worker_and_the_session_launcher_reach_docker_and_only_the_api_
     sock = [n for n, s in services.items() if any("docker.sock" in str(v) for v in s.get("volumes") or [])]
     assert sock == ["worker", "session-launcher"]  # products on the laptop; sessions
     published = {n: s["ports"] for n, s in services.items() if s.get("ports")}
-    assert published == {"api": ["127.0.0.1:${VALXEL_PORT:-8080}:8080"]}  # 8090 beside a local OpenChoreo
+    # 8090 beside a local OpenChoreo; moto only in AWS mode (`valxel dev aws on`), for this machine's aws CLI
+    assert published == {"api": ["127.0.0.1:${VALXEL_PORT:-8080}:8080"], "moto": ["127.0.0.1:5050:5000"]}
 
 
 def test_init_writes_owner_only_env_and_a_policy_with_only_the_hash(tmp_path, monkeypatch):
