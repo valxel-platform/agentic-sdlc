@@ -112,11 +112,12 @@ def _inside(base: Path, rel: str) -> Path:
 
 # Runtimes other parts of the tool add (`register`): the root's code eval runner adds "eval" (a config
 # PR's coder and reviewer evals, valxel_sdlc.code_eval_runner), so this core runner doesn't import it.
-SPEC_RUNNERS: dict[str, Callable[[dict, Path], dict]] = {}
+# Each is (run, the work area's prefix), fixed when it's registered: nothing from a spec names a path.
+SPEC_RUNNERS: dict[str, tuple[Callable[[dict, Path], dict], str]] = {}
 
 
-def register(runtime: str, run: Callable[[dict, Path], dict]) -> None:
-    SPEC_RUNNERS[runtime] = run
+def register(runtime: str, run: Callable[[dict, Path], dict], *, prefix: str) -> None:
+    SPEC_RUNNERS[runtime] = (run, prefix)
 
 
 def run_spec(spec: dict, root: Path | None = None, *, query=None, on_step=None) -> dict:
@@ -126,9 +127,10 @@ def run_spec(spec: dict, root: Path | None = None, *, query=None, on_step=None) 
     from .runtime.claude_code import plugin_dirs_from
     from .sandbox import NO_SCRIPTS, claude_settings, clone
 
-    runner = SPEC_RUNNERS.get(spec.get("runtime") or "")
-    if runner is not None:
-        return runner(spec, Path(root or tempfile.mkdtemp(prefix=f"valxel-{spec['runtime']}-")))
+    extra = SPEC_RUNNERS.get(spec.get("runtime") or "")
+    if extra is not None:
+        run, prefix = extra
+        return run(spec, Path(root or tempfile.mkdtemp(prefix=prefix)))
     if spec.get("version") != VERSION or spec.get("runtime") not in ("claude_code", "codex"):
         raise ValueError("unknown session spec")
     root = Path(root or tempfile.mkdtemp(prefix="valxel-run-"))

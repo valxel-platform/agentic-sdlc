@@ -162,4 +162,4 @@ def run_spec(spec: dict, root: Path) -> dict:
 
 
 # A sandbox's runner runs this spec too (valxel session-runner); the core runner doesn't import this.
-session_runner.register("eval", run_spec)
+session_runner.register("eval", run_spec, prefix="valxel-eval-")
