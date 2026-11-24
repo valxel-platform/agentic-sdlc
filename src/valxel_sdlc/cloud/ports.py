@@ -42,9 +42,16 @@ class AnchorStore(Protocol):
 
 @runtime_checkable
 class ImmutableStore(Protocol):
-    """Write once: `put` of a key that exists raises; nothing deletes before `retain_until`."""
+    """Write once: `put` of a key that exists raises FileExistsError, and no one (the tool
+    included) can change or delete an object until `retain_days` have passed: S3 Object Lock in
+    compliance mode, or Cloud Storage's locked object retention.
 
-    def put(self, key: str, data: bytes, *, retain_days: int) -> None: ...
+    `meta` is the object's own metadata. `scope` names whose object it is (workspace, product):
+    where the cloud can, reading it is limited to that scope (on AWS: tags the bucket policy
+    matches, and the KMS encryption context); everywhere, the key's path names it too."""
+
+    def put(self, key: str, data: bytes, *, retain_days: int, content_type: str = "application/octet-stream",
+            encoding: str = "", meta: dict[str, str] | None = None, scope: dict[str, str] | None = None) -> None: ...
     def get(self, key: str) -> bytes: ...  # KeyError if absent
     def keys(self, prefix: str = "") -> list[str]: ...  # sorted
 

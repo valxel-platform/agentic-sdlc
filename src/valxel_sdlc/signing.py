@@ -44,20 +44,6 @@ class RsaKeySigner:
         return self._key.sign(message, padding.PKCS1v15(), hashes.SHA256())
 
 
-class KmsSigner:
-    def __init__(self, key_id: str, *, client=None, region: str = "") -> None:
-        if client is None:
-            import boto3  # pip install .[aws]
-
-            client = boto3.client("kms", **({"region_name": region} if region else {}))
-        self.key_id, self.client = key_id, client
-
-    def sign(self, message: bytes) -> bytes:
-        got = self.client.sign(KeyId=self.key_id, Message=message, MessageType="RAW",
-                               SigningAlgorithm="RSASSA_PKCS1_V1_5_SHA_256")
-        return got["Signature"]
-
-
 def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
@@ -99,7 +85,9 @@ def github_app_signer(env: Mapping[str, str] | None = None, *, app: str = "deliv
     n = _names(app)
     key_id = env.get(n["kms"], "")
     if key_id:
-        return KmsSigner(key_id, region=env.get("AWS_REGION", ""))
+        from .cloud.aws import signing as aws
+
+        return aws.KmsSigner(key_id, region=env.get("AWS_REGION", ""))
     pem = current(n["pem"], env)
     if not pem and env.get(n["file"]):
         pem = Path(env[n["file"]]).read_text()
@@ -133,3 +121,12 @@ def provisioner_key_reachable(env: Mapping[str, str] | None = None) -> list[str]
     except Exception:
         pass  # the store refuses this process: as it should
     return out
+
+
+def __getattr__(name: str):
+    """Names that moved to valxel_sdlc.cloud.aws.signing (ADR 0010), still importable from here."""
+    if name in ("KmsSigner",):
+        from .cloud.aws import signing
+
+        return getattr(signing, name)
+    raise AttributeError(name)

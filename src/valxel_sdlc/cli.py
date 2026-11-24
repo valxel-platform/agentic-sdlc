@@ -178,7 +178,7 @@ def _verify_anchors(store, log, anchors=None) -> int:
     """Each chain against the heads anchored under Object Lock (audit_anchors.py), when there are."""
     from . import audit_anchors
 
-    anchors = anchors or audit_anchors.S3Anchors.from_env()
+    anchors = anchors or audit_anchors.ObjectAnchors.from_env()
     if anchors is None:
         print("anchors: none configured (VALXEL_AUDIT_ANCHOR_BUCKET): the chains were checked only against themselves")
         return 0

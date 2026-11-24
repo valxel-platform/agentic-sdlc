@@ -19,7 +19,7 @@ import json
 import logging
 import os
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from .cloud.ports import AnchorStore  # the port (ADR 0010)
@@ -62,25 +62,22 @@ class MemoryAnchors:
         return rows[-limit:] if limit else list(rows)
 
 
-class S3Anchors:
-    """anchors/<chain>/<time>.json under Object Lock (COMPLIANCE): kept unchanged for retention_days."""
+class ObjectAnchors:
+    """anchors/<chain>/<time>.json in an ImmutableStore (S3 Object Lock in compliance mode, or Cloud
+    Storage's locked retention): kept unchanged for retention_days."""
 
-    def __init__(self, bucket: str, retention_days: int = 2190, *, s3: Any = None, clock=time.time) -> None:
-        self.bucket, self.retention_days, self._s3, self.clock = bucket, retention_days, s3, clock
+    def __init__(self, store: Any, retention_days: int = 2190, *, clock=time.time) -> None:
+        self.store, self.retention_days, self.clock = store, retention_days, clock
 
     @classmethod
-    def from_env(cls, env=None) -> S3Anchors | None:
+    def from_env(cls, env=None) -> ObjectAnchors | None:
+        from .cloud import immutable_store
+
         e = os.environ if env is None else env
         bucket = e.get("VALXEL_AUDIT_ANCHOR_BUCKET", "")
-        return cls(bucket, int(e.get("VALXEL_AUDIT_ANCHOR_RETENTION_DAYS") or 2190)) if bucket else None
-
-    @property
-    def s3(self) -> Any:
-        if self._s3 is None:
-            import boto3
-
-            self._s3 = boto3.client("s3")
-        return self._s3
+        if not bucket:
+            return None
+        return cls(immutable_store(bucket, env=e), int(e.get("VALXEL_AUDIT_ANCHOR_RETENTION_DAYS") or 2190))
 
     @staticmethod
     def _safe(chain: str) -> str:
@@ -92,26 +89,23 @@ class S3Anchors:
         now = datetime.fromtimestamp(self.clock(), UTC)
         body = json.dumps({**h, "chain": chain, "at": now.isoformat()}, sort_keys=True).encode()
         key = f"anchors/{self._safe(chain)}/{now.strftime('%Y%m%dT%H%M%S%fZ')}.json"
-        self.s3.put_object(Bucket=self.bucket, Key=key, Body=body, ContentType="application/json",
-                           ChecksumAlgorithm="SHA256", ServerSideEncryption="aws:kms", ObjectLockMode="COMPLIANCE",
-                           ObjectLockRetainUntilDate=now + timedelta(days=self.retention_days))
+        self.store.put(key, body, retain_days=self.retention_days, content_type="application/json")
 
     def list(self, chain, limit=0):
-        keys: list[str] = []
-        token = None
-        while True:
-            kw = {"Bucket": self.bucket, "Prefix": f"anchors/{self._safe(chain)}/"}
-            if token:
-                kw["ContinuationToken"] = token
-            page = self.s3.list_objects_v2(**kw)
-            keys += [o["Key"] for o in page.get("Contents") or []]
-            if not page.get("IsTruncated"):
-                break
-            token = page.get("NextContinuationToken")
-        keys.sort()  # the time in the key sorts them
+        keys = self.store.keys(f"anchors/{self._safe(chain)}/")  # the time in the key sorts them
         if limit:
             keys = keys[-limit:]
-        return [json.loads(self.s3.get_object(Bucket=self.bucket, Key=k)["Body"].read()) for k in keys]
+        return [json.loads(self.store.get(k)) for k in keys]
+
+
+class S3Anchors(ObjectAnchors):
+    """ObjectAnchors on an S3 Object Lock bucket, by name (as before ADR 0010)."""
+
+    def __init__(self, bucket: str, retention_days: int = 2190, *, s3: Any = None, clock=time.time) -> None:
+        from .cloud.aws.storage import S3Immutable
+
+        super().__init__(S3Immutable(bucket, s3=s3, clock=clock), retention_days, clock=clock)
+        self.bucket = bucket
 
 
 def chains(workspaces, changes) -> dict[str, list[dict]]:

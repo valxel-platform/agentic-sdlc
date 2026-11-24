@@ -14,7 +14,9 @@ checks against its cloud.
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Mapping
+from typing import Any
 
 CLOUDS = ("aws", "gcp", "azure")
 # Clouds with a full set of adapters. Strict mode refuses any other: a cloud named here before its
@@ -46,3 +48,18 @@ def strict_problems(env: Mapping[str, str] | None = None) -> list[str]:
         return [f"VALXEL_CLOUD is {name}, which has no adapters yet (supported: {', '.join(SUPPORTED)}): "
                 "its secrets, signing, archives and costs would run as stand-ins"]
     return []
+
+
+def immutable_store(bucket: str, *, env: Mapping[str, str] | None = None, client: Any = None, clock=time.time):
+    """The installation's ImmutableStore on `bucket`: S3 Object Lock, or Cloud Storage with locked
+    object retention. `client` is the cloud's storage client (tests pass a fake)."""
+    name = provider(env)
+    if name == "aws":
+        from .aws.storage import S3Immutable
+
+        return S3Immutable(bucket, s3=client, clock=clock)
+    if name == "gcp":
+        from .gcp.storage import GcsImmutable
+
+        return GcsImmutable(bucket, client=client, clock=clock)
+    raise UnknownCloud(f"no immutable store for {name} yet")

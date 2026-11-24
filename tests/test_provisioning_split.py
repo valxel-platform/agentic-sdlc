@@ -13,6 +13,7 @@ import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from valxel_sdlc import signing, strict
+from valxel_sdlc.cloud.aws import signing as aws_signing
 from valxel_sdlc.config import load_settings
 from valxel_sdlc.engine import FeatureEngine
 from valxel_sdlc.provision_queue import (
@@ -144,7 +145,7 @@ def test_failures_come_back_as_failed_steps():
 # ------------------------------------------------------------------ settings and strict mode
 
 def test_the_two_apps_have_their_own_settings(monkeypatch):
-    monkeypatch.setattr(signing, "KmsSigner", lambda key_id, region="": ("kms", key_id))
+    monkeypatch.setattr(aws_signing, "KmsSigner", lambda key_id, region="": ("kms", key_id))
     env = {"VALXEL_GITHUB_APP_ID": "1", "VALXEL_GITHUB_APP_KMS_KEY_ID": "delivery-key",
            "VALXEL_GITHUB_PROVISIONER_APP_ID": "2", "VALXEL_GITHUB_PROVISIONER_APP_KMS_KEY_ID": "prov-key"}
     assert signing.github_app_signer(env) == ("kms", "delivery-key")

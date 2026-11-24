@@ -30,7 +30,6 @@ import hmac
 import os
 import re
 import threading
-import time
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 
@@ -89,46 +88,8 @@ def secret_id(name: str, prefix: str = "valxel") -> str:
     return f"{prefix}/platform/{name}"
 
 
-class AwsSecretsManagerStore:
-    """AWS Secrets Manager: AWSCURRENT and AWSPREVIOUS of `secret_id(name)`, cached for `ttl` seconds.
-    Credentials come from the process's AWS role, never from a secret."""
-
-    def __init__(self, *, prefix: str = "valxel", client=None, region: str = "", ttl: float = 60.0,
-                 clock: Callable[[], float] = time.monotonic) -> None:
-        if client is None:
-            import boto3  # lazy: pip install .[aws]
-
-            client = boto3.client("secretsmanager", **({"region_name": region} if region else {}))
-        self.client, self.prefix, self.ttl, self.clock = client, prefix, ttl, clock
-        self._cache: dict[str, tuple[float, list[str]]] = {}
-        self._lock = threading.Lock()
-
-    def _get(self, sid: str, stage: str) -> str:
-        try:
-            got = self.client.get_secret_value(SecretId=sid, VersionStage=stage)
-        except Exception as exc:  # botocore ClientError: not found, or no such stage
-            code = (getattr(exc, "response", None) or {}).get("Error", {}).get("Code", "")
-            if code in ("ResourceNotFoundException", "InvalidRequestException"):
-                return ""
-            raise
-        return str(got.get("SecretString") or "")
-
-    def versions(self, name: str) -> list[str]:
-        now = self.clock()
-        with self._lock:
-            hit = self._cache.get(name)
-            if hit and hit[0] > now:
-                return list(hit[1])
-        sid = secret_id(name, self.prefix)
-        current = self._get(sid, "AWSCURRENT")
-        found = [current, self._get(sid, "AWSPREVIOUS") if current else ""]
-        with self._lock:
-            self._cache[name] = (now + self.ttl, found)
-        return found
-
-
 STORES = ("env", "files", "aws")
-_aws: dict[tuple[str, str], AwsSecretsManagerStore] = {}
+_aws: dict[tuple[str, str], SecretStore] = {}
 
 
 def store_kind(env: Mapping[str, str] | None = None) -> str:
@@ -147,6 +108,8 @@ def store_for(env: Mapping[str, str] | None = None) -> SecretStore:
     if kind == "aws":
         key = (env.get("VALXEL_SECRET_PREFIX", "") or "valxel", env.get("AWS_REGION", ""))
         if key not in _aws:
+            from .cloud.aws.secrets import AwsSecretsManagerStore
+
             _aws[key] = AwsSecretsManagerStore(prefix=key[0], region=key[1])
         return _aws[key]
     return EnvStore(env)
@@ -275,3 +238,12 @@ def weak_password(password: str) -> str:
     if len(password) < 16:
         return "shorter than 16 characters"
     return ""
+
+
+def __getattr__(name: str):
+    """Names that moved to valxel_sdlc.cloud.aws.secrets (ADR 0010), still importable from here."""
+    if name in ("AwsSecretsManagerStore",):
+        from .cloud.aws import secrets
+
+        return getattr(secrets, name)
+    raise AttributeError(name)
