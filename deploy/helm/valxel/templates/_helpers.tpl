@@ -80,6 +80,13 @@ capabilities:
 {{- if not (has (include "valxel.cloud" .) (list "aws" "gcp" "azure")) -}}
 {{- fail (printf "cloud.provider is aws, gcp or azure, not %q" (include "valxel.cloud" .)) -}}
 {{- end -}}
+{{- if eq (include "valxel.cloud" .) "gcp" -}}
+{{- if not (.Values.cloud.project) -}}{{- fail "cloud.project: the Google Cloud project the tool runs in" -}}{{- end -}}
+{{- if eq .Values.auth.mode "cognito" -}}{{- fail "auth.mode cognito is AWS's: on Google Cloud use oidc (profile google, or your own provider)" -}}{{- end -}}
+{{- range $what, $key := dict "github.appKmsKeyId" .Values.github.appKmsKeyId "github.provisionerKmsKeyId" .Values.github.provisionerKmsKeyId -}}
+{{- if and $key (not (hasPrefix "projects/" $key)) -}}{{- fail (printf "%s must be a Cloud KMS key version: projects/.../cryptoKeyVersions/<n>" $what) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
 {{- if not (hasPrefix "https://" (required "publicUrl: the tool's address, https://..." .Values.publicUrl)) -}}
 {{- fail "publicUrl must be https://: the tool is served over TLS only" -}}
 {{- end -}}
@@ -101,3 +108,13 @@ capabilities:
 {{/* The installation's cloud and region (ADR 0010); awsRegion is the old name for cloud.region. */}}
 {{- define "valxel.cloud" -}}{{ (.Values.cloud | default dict).provider | default "aws" }}{{- end -}}
 {{- define "valxel.cloudRegion" -}}{{ (.Values.cloud | default dict).region | default .Values.awsRegion | default "" }}{{- end -}}
+
+{{/* A bucket by name: s3://name or gs://name accepted, and checked against the cloud. */}}
+{{- define "valxel.bucket" -}}
+{{- $v := .value -}}
+{{- $cloud := include "valxel.cloud" .root -}}
+{{- if hasPrefix "s3://" $v -}}{{- if ne $cloud "aws" -}}{{- fail (printf "%s is an S3 bucket, but cloud.provider is %s" .what $cloud) -}}{{- end -}}{{- $v = trimPrefix "s3://" $v -}}
+{{- else if hasPrefix "gs://" $v -}}{{- if ne $cloud "gcp" -}}{{- fail (printf "%s is a Cloud Storage bucket, but cloud.provider is %s" .what $cloud) -}}{{- end -}}{{- $v = trimPrefix "gs://" $v -}}
+{{- end -}}
+{{- $v | trimSuffix "/" -}}
+{{- end -}}

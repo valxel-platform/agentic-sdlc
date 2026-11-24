@@ -178,8 +178,10 @@ class AwsConnect:
     def __init__(self, *, valxel_account: str, template_url: str, assume: Callable[..., dict] | None = None) -> None:
         self.valxel_account, self.template_url = valxel_account, template_url
         if assume is None:
-            from .cloud.aws.accounts import sts_assume as assume
-        self._assume = assume
+            from .cloud.aws.accounts import sts_assume
+
+            assume = sts_assume
+        self._assume: Callable[..., dict] = assume
 
     @classmethod
     def from_env(cls, env=None) -> AwsConnect | None:

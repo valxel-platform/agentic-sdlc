@@ -9,7 +9,7 @@ Related pages:
 - [the security packet](security-packet.md): what security reviewers ask for;
 - [releases and support](releases.md): versions and how long each is supported.
 
-Plan on about a day for a first install, most of it spent on step 1. The examples use AWS; on another cloud, use its equivalent for each resource.
+Plan on about a day for a first install, most of it spent on step 1. The examples use AWS; [On Google Cloud](#on-google-cloud) says what differs there (ADR 0010: one cloud per installation, and the products it builds use that cloud too).
 
 ## 1. Prepare
 
@@ -129,6 +129,19 @@ Put the SHA-256 of `VALXEL_LLM_GATEWAY_API_KEY` in `gateway.toolKeySha256`. Only
 ```sh
 printf %s "$VALXEL_LLM_GATEWAY_API_KEY" | sha256sum | cut -d' ' -f1
 ```
+
+### On Google Cloud
+
+Set `cloud.provider: gcp`, `cloud.region` and `cloud.project`. What differs from the AWS steps above:
+
+| Resource | On Google Cloud |
+|---|---|
+| Kubernetes | GKE with a GKE Sandbox (gVisor) node pool; its `RuntimeClass` is `gvisor` |
+| Object storage | Three buckets with per-object retention enabled (`gcloud storage buckets create gs://NAME --enable-per-object-retention`), encrypted with a Cloud KMS key (CMEK). The tool writes each object in Locked mode. Give them as `gs://NAME` or `NAME`. |
+| Identities | GKE Workload Identity: annotate each service account with `iam.gke.io/gcp-service-account: <google service account>` (`tool.serviceAccountAnnotations` and its siblings). The API and workers need `roles/cloudkms.signerVerifier` on the delivery App's key and `roles/storage.objectCreator` on the archive and anchor buckets. The provisioner alone needs `roles/cloudkms.signerVerifier` on the Provisioning App's key. The audit sink needs `roles/storage.objectCreator` on the audit archive. |
+| GitHub App keys | Import each App's key into Cloud KMS as an `RSA_SIGN_PKCS1_2048_SHA256` key (`gcloud kms keys versions import`), and give `github.appKmsKeyId` and `github.provisionerKmsKeyId` as key versions: `projects/P/locations/L/keyRings/R/cryptoKeys/K/cryptoKeyVersions/1` |
+| Secrets | Files from the chart's Secrets, as on AWS, or Google Secret Manager (`VALXEL_SECRET_STORE=gcp`): secret `valxel__platform__NAME` for `NAME` |
+| Sign-in | `auth.mode: oidc`, with `VALXEL_OIDC_PROFILE=google` and `VALXEL_OIDC_HOSTED_DOMAIN=<your Workspace domain>`, or your own identity provider. Cognito is AWS's. MCP needs a provider whose access tokens are JWTs: Google's aren't. |
 
 ## 2. Install
 

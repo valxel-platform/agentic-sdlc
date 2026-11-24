@@ -21,7 +21,7 @@ from typing import Any
 CLOUDS = ("aws", "gcp", "azure")
 # Clouds with a full set of adapters. Strict mode refuses any other: a cloud named here before its
 # adapters land would quietly fall back to stand-ins.
-SUPPORTED = ("aws",)
+SUPPORTED = ("aws", "gcp")
 DEFAULT = "aws"
 
 

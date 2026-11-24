@@ -32,6 +32,8 @@ github = ["pyjwt[crypto]>=2.8"]
 integrations = ["mcp>=1.10"]
 # Cost reviews from AWS Cost Explorer.
 aws = ["boto3>=1.35"]
+# Google Cloud: Secret Manager, Cloud KMS and Cloud Storage (valxel_sdlc.cloud.gcp, ADR 0010).
+gcp = ["google-cloud-secret-manager>=2.20", "google-cloud-kms>=3.0", "google-cloud-storage>=2.18"]
 dev = ["pytest>=8", "pytest-cov>=6", "pytest-xdist>=3.6", "httpx>=0.27", "pyjwt[crypto]>=2.8", "mcp>=1.10", "opentelemetry-sdk>=1.27"]
 # The lint gate (scripts/lint_ratchet.py): pinned, since a new version's new findings would fail it.
 lint = ["ruff==0.16.9", "mypy==2.3.1"]

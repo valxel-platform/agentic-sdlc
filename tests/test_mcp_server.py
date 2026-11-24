@@ -162,3 +162,46 @@ def test_intents_are_the_persons_own(client):
     err, mine = tool(client, "intents")
     assert not err, mine
     assert [i["id"] for i in mine] == [s["id"]]
+
+
+OIDC_ISSUER = "https://login.acme.example/oauth2/default"
+
+
+class FakeOidc:
+    """Discovery, keys and userinfo of an OpenID provider whose access tokens are JWTs (RFC 9068)."""
+
+    def open(self, req, timeout=None):
+        url = req.full_url
+        if url == f"{OIDC_ISSUER}/.well-known/openid-configuration":
+            return BytesIO(json.dumps({"issuer": OIDC_ISSUER, "jwks_uri": f"{OIDC_ISSUER}/v1/keys",
+                                       "userinfo_endpoint": f"{OIDC_ISSUER}/v1/userinfo"}).encode())
+        if url == f"{OIDC_ISSUER}/v1/keys":
+            return BytesIO(json.dumps({"keys": [JWK]}).encode())
+        if url == f"{OIDC_ISSUER}/v1/userinfo":
+            claims = jwt.decode(req.headers["Authorization"].split()[1], options={"verify_signature": False})
+            return BytesIO(json.dumps(PEOPLE[claims["sub"]]).encode())
+        raise AssertionError(url)
+
+
+def oidc_token(**over):
+    now = int(time.time())
+    claims = {"iss": OIDC_ISSUER, "sub": "sub-ana", "client_id": "mcp-client", "iat": now, "exp": now + 600, **over}
+    return jwt.encode({k: v for k, v in claims.items() if v is not None}, KEY, algorithm="RS256", headers={"kid": "k1"})
+
+
+def test_any_oidc_provider_with_jwt_access_tokens_can_serve_mcp(monkeypatch):
+    """ADR 0010: MCP doesn't need Cognito; an installation on another cloud uses its own provider."""
+    monkeypatch.setenv("VALXEL_MCP_CLIENT_IDS", "mcp-client")
+    auth = AuthConfig(mode="oidc", secret="x" * 40, public_url="https://testserver", oidc_issuer=OIDC_ISSUER + "/")
+    s = mcp_api.settings_from_env(auth)
+    assert (s["issuer"], s["kind"]) == (OIDC_ISSUER, "oidc")
+    v = mcp_api.PersonVerifier(s["issuer"], s["domain"], s["client_ids"], opener=FakeOidc(), kind="oidc")
+    assert v.person(oidc_token())["email"] == "ana@example.com"
+    assert v.claims(oidc_token(client_id=None, azp="mcp-client"))["sub"] == "sub-ana"
+    for bad, says in ((oidc_token(client_id="other"), "isn't one of"),
+                      (oidc_token(sub="mcp-client"), "not issued to a person")):
+        with pytest.raises(mcp_api.NotAPerson, match=says):
+            v.claims(bad)
+    auth.oidc_profile = "google"
+    with pytest.raises(RuntimeError, match="opaque"):
+        mcp_api.settings_from_env(auth)

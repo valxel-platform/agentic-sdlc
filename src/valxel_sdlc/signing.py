@@ -4,6 +4,8 @@ A `Signer` signs bytes with RSASSA-PKCS1-v1_5 and SHA-256 (RS256, what GitHub re
 
     KmsSigner     AWS KMS, with the App key imported as a sign-only key: the key never leaves KMS,
                   so nothing that reads the tool's memory or files can take it.
+    GcpKmsSigner  Cloud KMS, the same on Google Cloud (VALXEL_CLOUD=gcp): the *_KMS_KEY_ID settings
+                  then name a key version, projects/.../cryptoKeyVersions/<n>.
     RsaKeySigner  a PEM key in memory, for laptops and small self-hosted installs.
 
 Google Cloud KMS, Azure Key Vault and Vault's Transit engine sign RS256 the same way: each is
@@ -85,6 +87,12 @@ def github_app_signer(env: Mapping[str, str] | None = None, *, app: str = "deliv
     n = _names(app)
     key_id = env.get(n["kms"], "")
     if key_id:
+        from .cloud import provider
+
+        if provider(env) == "gcp":
+            from .cloud.gcp.signing import GcpKmsSigner
+
+            return GcpKmsSigner(key_id)
         from .cloud.aws import signing as aws
 
         return aws.KmsSigner(key_id, region=env.get("AWS_REGION", ""))

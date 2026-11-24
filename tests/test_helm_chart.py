@@ -203,5 +203,37 @@ def test_the_installation_names_its_cloud():
     data = _settings()
     assert (data["VALXEL_CLOUD"], data["AWS_REGION"]) == ("aws", "us-east-1")
     assert _settings("cloud.region=eu-west-1")["AWS_REGION"] == "eu-west-1"
-    gcp = _settings("cloud.provider=gcp", "cloud.region=us-central1")
-    assert gcp["VALXEL_CLOUD"] == "gcp" and "AWS_REGION" not in gcp
+    gcp = _settings(*GCP)
+    assert gcp["VALXEL_CLOUD"] == "gcp" and "AWS_REGION" not in gcp and gcp["VALXEL_GCP_PROJECT"] == "acme-valxel"
+
+
+GCP = ("cloud.provider=gcp", "cloud.region=us-central1", "cloud.project=acme-valxel",
+       "github.appKmsKeyId=projects/acme-valxel/locations/global/keyRings/valxel/cryptoKeys/app/cryptoKeyVersions/1",
+       "github.provisionerKmsKeyId=projects/acme-valxel/locations/global/keyRings/valxel/cryptoKeys/prov/"
+       "cryptoKeyVersions/1",
+       "archives.checkpointBucket=gs://acme-checkpoints", "archives.auditAnchorBucket=acme-anchors",
+       "archives.auditArchiveBucket=gs://acme-audit/")
+
+
+def test_on_google_cloud_buckets_and_keys_are_googles():
+    """CP-107: gs:// buckets by name, Cloud KMS key versions, and the audit sink told to use GCS."""
+    docs = _render(*GCP)
+    data = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "valxel-settings")["data"]
+    assert (data["VALXEL_CHECKPOINT_ARCHIVE_BUCKET"], data["VALXEL_AUDIT_ANCHOR_BUCKET"]) == (
+        "acme-checkpoints", "acme-anchors")
+    sink = next(spec for name, spec in _pods(docs) if name == "valxel-audit-sink")
+    env = {e["name"]: e.get("value") for e in sink["containers"][0]["env"]}
+    assert (env["AUDIT_SINK_ARCHIVE_BUCKET"], env["AUDIT_SINK_ARCHIVE_PROVIDER"]) == ("acme-audit", "gcs")
+    aws_env = {e["name"]: e.get("value") for e in next(
+        spec for name, spec in _pods(_render()) if name == "valxel-audit-sink")["containers"][0]["env"]}
+    assert aws_env["AUDIT_SINK_ARCHIVE_PROVIDER"] == "s3"
+
+
+@pytest.mark.parametrize("extra,says", [
+    (("cloud.project=",), "cloud.project"),
+    (("github.appKmsKeyId=arn:aws:kms:us-east-1:1:key/x",), "github.appKmsKeyId must be a Cloud KMS key version"),
+    (("archives.auditAnchorBucket=s3://acme-anchors",), "is an S3 bucket, but cloud.provider is gcp"),
+    (("auth.mode=cognito",), "auth.mode cognito is AWS's"),
+])
+def test_on_google_cloud_it_refuses_aws_settings(extra, says):
+    assert says in _render(*GCP, *extra, ok=False)

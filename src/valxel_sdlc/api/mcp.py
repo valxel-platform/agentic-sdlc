@@ -40,16 +40,24 @@ class NotAPerson(Exception):
 
 @dataclass
 class PersonVerifier:
-    """Checks a Cognito access token and finds the person it was issued to."""
+    """Checks an access token and finds the person it was issued to.
 
-    issuer: str  # https://cognito-idp.<region>.amazonaws.com/<pool id>
-    domain: str  # the pool's managed login domain, for /oauth2/userInfo
+    kind cognito: the platform's Cognito user pool (its JWKS at the issuer, userInfo at its domain).
+    kind oidc: any OpenID provider whose access tokens are JWTs (RFC 9068: Okta, Entra ID, Keycloak,
+    Auth0...), found from its discovery document; the token names its client in `client_id` (or
+    `azp`), and a client acting for itself (sub = client_id) is no person. Google's access tokens
+    are opaque, so a Google-only installation serves no MCP (settings_from_env says so)."""
+
+    issuer: str  # https://cognito-idp.<region>.amazonaws.com/<pool id>, or the OIDC issuer
+    domain: str  # cognito: the pool's managed login domain, for /oauth2/userInfo; oidc: unused
     client_ids: frozenset[str]
     opener: Any = None
+    kind: str = "cognito"
     _keys: dict = field(default_factory=dict)
     _keys_at: float = 0.0
     _people: dict = field(default_factory=dict)  # sha256(token) -> (until, person)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _discovery: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.issuer = self.issuer.rstrip("/")
@@ -61,12 +69,27 @@ class PersonVerifier:
         with self.opener.open(Request(url, headers=headers), timeout=15) as resp:
             return json.loads(resp.read())
 
+    def _endpoint(self, which: str) -> str:
+        """cognito: its fixed URLs; oidc: from the discovery document, whose issuer must match."""
+        if self.kind == "cognito":
+            return {"jwks_uri": f"{self.issuer}/.well-known/jwks.json",
+                    "userinfo_endpoint": f"https://{self.domain}/oauth2/userInfo"}[which]
+        if not self._discovery:
+            got = self._get(f"{self.issuer}/.well-known/openid-configuration")
+            if str(got.get("issuer", "")).rstrip("/") != self.issuer:
+                raise NotAPerson("the identity provider's discovery document names another issuer")
+            self._discovery = got
+        url = str(self._discovery.get(which) or "")
+        if not url.startswith("https://"):
+            raise NotAPerson(f"the identity provider publishes no https {which}")
+        return url
+
     def _key(self, kid: str) -> Any:
         import jwt
 
         with self._lock:
             if kid not in self._keys and time.time() - self._keys_at > 60:
-                self._keys = {k["kid"]: k for k in self._get(f"{self.issuer}/.well-known/jwks.json").get("keys", [])}
+                self._keys = {k["kid"]: k for k in self._get(self._endpoint("jwks_uri")).get("keys", [])}
                 self._keys_at = time.time()
             if kid not in self._keys:
                 raise NotAPerson("signed with a key the user pool doesn't publish")
@@ -84,6 +107,13 @@ class PersonVerifier:
             raise
         except Exception as exc:  # a bad signature, the wrong issuer, expired, not a JWT
             raise NotAPerson(f"the token didn't check out: {type(exc).__name__}") from exc
+        if self.kind == "oidc":
+            client = claims.get("client_id") or claims.get("azp")
+            if client not in self.client_ids:
+                raise NotAPerson("issued to a client that isn't one of Valxel's MCP clients")
+            if str(claims["sub"]) == str(client):
+                raise NotAPerson("not issued to a person")
+            return claims
         if claims.get("token_use") != "access":
             raise NotAPerson("not an access token")
         if claims.get("client_id") not in self.client_ids:
@@ -102,7 +132,7 @@ class PersonVerifier:
             if hit and hit[0] > now:
                 return hit[1]
         claims = self.claims(token)
-        info = self._get(f"https://{self.domain}/oauth2/userInfo", token)
+        info = self._get(self._endpoint("userinfo_endpoint"), token)
         email = str(info.get("email") or "").strip().lower()
         if not email or str(info.get("email_verified")).lower() != "true":
             raise NotAPerson("the person's email address isn't verified")
@@ -124,9 +154,16 @@ def settings_from_env(auth: AuthConfig, var: str = "VALXEL_MCP_CLIENT_IDS", path
     ids = frozenset(c.strip() for c in os.environ.get(var, "").split(",") if c.strip())
     if not ids:
         return None
+    if auth.mode == "oidc" and auth.oidc_issuer:
+        if auth.oidc_profile == "google":
+            raise RuntimeError(f"{var} is set, but Google's access tokens are opaque and can't be checked here: "
+                               "serve MCP through an identity provider that issues JWT access tokens")
+        return {"issuer": auth.oidc_issuer.rstrip("/"), "domain": "", "client_ids": ids, "kind": "oidc",
+                "resource": f"{auth.public_url}{path}"}
     if not (auth.cognito_issuer and auth.cognito_domain):
-        raise RuntimeError(f"{var} needs the Cognito user pool: set VALXEL_COGNITO_ISSUER and VALXEL_COGNITO_DOMAIN")
-    return {"issuer": auth.cognito_issuer, "domain": auth.cognito_domain, "client_ids": ids,
+        raise RuntimeError(f"{var} needs the Cognito user pool (VALXEL_COGNITO_ISSUER and VALXEL_COGNITO_DOMAIN) "
+                           "or OIDC sign-in (VALXEL_AUTH=oidc)")
+    return {"issuer": auth.cognito_issuer, "domain": auth.cognito_domain, "client_ids": ids, "kind": "cognito",
             "resource": f"{auth.public_url}{path}"}
 
 

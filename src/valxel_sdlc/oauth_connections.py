@@ -159,6 +159,11 @@ def vault_for(env=None):
         from .cloud.aws.secrets import AwsVault
 
         return AwsVault(region=env.get("AWS_REGION", ""))
+    if kind == "gcp":
+        from .cloud.gcp import project
+        from .cloud.gcp.secrets import GcpVault
+
+        return GcpVault(project=project(env))
     if kind == "files":
         return FileVault(env.get("VALXEL_SECRETS_DIR", "") or "/run/secrets/valxel")
     log.warning("Tool connection tokens are kept in memory (VALXEL_SECRET_STORE is env): they go when Valxel restarts")

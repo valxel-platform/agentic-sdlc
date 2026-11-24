@@ -181,6 +181,14 @@ class CognitoProvider:
 
 # ------------------------------------------------------------------------ any OIDC provider (T-148)
 
+# Claims profiles (ADR 0010): what a known provider needs beyond the defaults, so a cloud's own
+# sign-in is one setting (VALXEL_OIDC_PROFILE). Google (accounts.google.com, for Google Workspace
+# on Google Cloud) sends email_verified and `hd`, the Workspace domain, which hosted_domain pins;
+# Entra ID sends no email_verified, and the tenant's issuer vouches for its addresses.
+OIDC_PROFILES: dict[str, dict[str, str]] = {
+    "google": {"issuer": "https://accounts.google.com", "label": "Sign in with Google", "email_verified": "claim"},
+    "entra": {"email_verified": "issuer", "groups_claim": "groups"},
+}
 OIDC_STRONG_AMR = {"mfa", "hwk", "swk"}  # RFC 8176: more than one factor, or a hardware or software key
 ALGORITHMS = ["RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512"]
 
@@ -207,6 +215,7 @@ class OIDCProvider:
     email_verified: str = "claim"  # claim | issuer
     step_up_acr: str = ""  # asked for when someone must sign in again with two factors
     strong_acr: tuple[str, ...] = ()  # acr values that mean two factors
+    hosted_domain: str = ""  # Google: only accounts of this Workspace domain (the `hd` claim)
     opener: object = None
     name: str = "oidc"
     _config: dict = field(default_factory=dict)
@@ -254,6 +263,8 @@ class OIDCProvider:
                 q["acr_values"] = self.step_up_acr
         if hint:
             q["login_hint"] = hint
+        if self.hosted_domain:
+            q["hd"] = self.hosted_domain  # Google shows only that domain's accounts; the claim is checked too
         return f"{self.config()['authorization_endpoint']}?{urlencode(q)}"
 
     def _token(self, form: dict) -> dict:
@@ -313,6 +324,9 @@ class OIDCProvider:
         verified = str(claims.get("email_verified")).lower() == "true" or self.email_verified == "issuer"
         if not email or "@" not in email or not verified:
             raise SignInError("Your email address isn't verified, so it can't sign you in")
+        if self.hosted_domain and (str(claims.get("hd") or "").lower() != self.hosted_domain.lower()
+                                   or not email.endswith("@" + self.hosted_domain.lower())):
+            raise SignInError(f"Sign in with your {self.hosted_domain} account")
         amr = {str(a).lower() for a in (claims.get("amr") or [])}
         acr = str(claims.get("acr") or "")
         strong = bool(amr & OIDC_STRONG_AMR) or (bool(acr) and acr in set(self.strong_acr) | {self.step_up_acr} - {""})

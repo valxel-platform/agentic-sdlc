@@ -2,6 +2,8 @@
 
 **Where they come from** (VALXEL_SECRET_STORE), behind one small interface, `SecretStore`:
 
+    gcp    Google Secret Manager, the same names with `__` for `/` (valxel_sdlc.cloud.gcp.secrets),
+           in VALXEL_GCP_PROJECT; the newest enabled version is current, the one before it previous.
     aws    AWS Secrets Manager, read when needed and cached briefly. Each secret is
            `<prefix>/platform/<NAME>`, or `<prefix>/products/<product>/<NAME>` for a product's own
            (Flipt, ServiceNow, metrics), or `<prefix>/orgs/<org>/<NAME>`, so access policies can be
@@ -88,7 +90,7 @@ def secret_id(name: str, prefix: str = "valxel") -> str:
     return f"{prefix}/platform/{name}"
 
 
-STORES = ("env", "files", "aws")
+STORES = ("env", "files", "aws", "gcp")
 _aws: dict[tuple[str, str], SecretStore] = {}
 
 
@@ -111,6 +113,15 @@ def store_for(env: Mapping[str, str] | None = None) -> SecretStore:
             from .cloud.aws.secrets import AwsSecretsManagerStore
 
             _aws[key] = AwsSecretsManagerStore(prefix=key[0], region=key[1])
+        return _aws[key]
+    if kind == "gcp":
+        from .cloud.gcp import project
+
+        key = (env.get("VALXEL_SECRET_PREFIX", "") or "valxel", "gcp:" + project(env))
+        if key not in _aws:
+            from .cloud.gcp.secrets import GcpSecretStore
+
+            _aws[key] = GcpSecretStore(prefix=key[0], project=key[1].removeprefix("gcp:"))
         return _aws[key]
     return EnvStore(env)
 
