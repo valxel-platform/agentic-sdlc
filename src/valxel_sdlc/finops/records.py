@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 STAGES = ("build", "run")
 
 
-CATEGORIES = ("llm", "ci", "test", "build", "environment", "aws", "gcp", "compute", "incident", "people", "platform")
+CATEGORIES = ("llm", "ci", "test", "build", "environment", "aws", "gcp","azure","compute", "incident", "people", "platform")
 
 
 BASES = ("estimate", "metered", "billed", "allocated")
@@ -21,6 +21,7 @@ _FOCUS = {"llm": ("AI and Machine Learning", "Anthropic"), "ci": ("Developer Too
           "test": ("Developer Tools", "GitHub"), "build": ("Developer Tools", "OpenChoreo"),
           "environment": ("Compute", "OpenChoreo"), "aws": ("", "AWS"), "gcp": ("", "Google Cloud"),
           "compute": ("Compute", "OpenChoreo"),
+           "azure": ("", "Microsoft Azure"),
           "incident": ("AI and Machine Learning", "Anthropic"), "people": ("Other", "People"),
           "platform": ("Other", "Valxel platform")}
 
