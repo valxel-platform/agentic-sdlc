@@ -378,8 +378,10 @@ def _resource_lines(ctx: dict, repos: list[dict], provider: str, lines: list[str
     ADR each and a worker reading any stream."""
     types = (ctx.get("aws_catalog") or {}).get("types") or {}
     text = f"{ctx.get('title', '')} {ctx.get('description', '')}"
-    wanted = [(k, t) for k, t in (("DynamoDB", "dynamodb-table"), ("Kinesis", "kinesis-stream"), ("SQS", "sqs-queue"),
-                                  ("S3", "s3-bucket")) if re.search(rf"\b{k}\b", text) and t in types]
+    found = [(re.search(rf"\b({k})\b", text), t) for k, t in (("DynamoDB|Firestore", "key-value-table"),
+                                                            ("Kinesis", "event-stream"), ("SQS", "queue"),
+                                                            ("S3|Cloud Storage", "object-bucket"))]
+    wanted = [(m.group(1), t) for m, t in found if m and t in types]
     if not wanted:
         return []
     record = _slug(ctx["title"]).split("-", 1)[0] or "record"
@@ -387,10 +389,10 @@ def _resource_lines(ctx: dict, repos: list[dict], provider: str, lines: list[str
     workers = [r["name"].split("/", 1)[-1] for r in repos if r["role"] == "event-worker"]
     out, adrs = ["", "## Resources"], []
     for i, (label, kind) in enumerate(wanted, start=1):
-        name = f"{re.sub(r'[^a-z0-9]+', '-', record.lower()).strip('-')}-{kind.split('-')[0]}"
-        params = {"dynamodb-table": "; partition_key=id", "kinesis-stream": "; retention_hours=168"}.get(kind, "")
+        name = f"{re.sub(r'[^a-z0-9]+', '-', record.lower()).strip('-')}-{re.sub(r'[^a-z0-9]', '', label.lower())}"
+        params = {"key-value-table": "; partition_key=id", "event-stream": "; retention_hours=168"}.get(kind, "")
         out.append(f"- {name}: {kind}{params}")
-        out.append(f"  writes, reads: {owner}" if kind != "kinesis-stream" or not workers else
+        out.append(f"  writes, reads: {owner}" if kind != "event-stream" or not workers else
                    f"  writes: {owner}; reads: {', '.join(workers)}")
         adrs.append(f"- ADR-{ctx['feature_id']}-R{i}: Keep {name} in {label} ({kind}): the request needs it and the "
                     "platform defaults don't serve that access pattern")

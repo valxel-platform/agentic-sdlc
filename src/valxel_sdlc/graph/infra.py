@@ -126,7 +126,7 @@ def aws_summary(services, state: FeatureState, snap, ref) -> dict | None:
         return None
     rt = snap.product.runtime or {}
     return resources.summary(services.artifacts.load(ref) if isinstance(ref, dict) else "",
-                             snap.aws_catalog, list(rt.get("pipeline") or PIPELINE), rt.get("aws"))
+                             snap.aws_catalog, list(rt.get("pipeline") or PIPELINE), rt.get("cloud") or rt.get("aws"))
 
 
 def aws_plan(services, state: FeatureState, snap, ref) -> list[dict]:
@@ -143,7 +143,22 @@ def aws_plan(services, state: FeatureState, snap, ref) -> list[dict]:
         return []
     return resources.plan(services.artifacts.load(ref), snap.aws_catalog or {}, _resource_owner(snap),
                           product_id=state["product_id"], feature_id=state["feature_id"],
-                          data_class=snap.product.data_class, code_sandboxes=sandboxes)
+                          data_class=snap.product.data_class, code_sandboxes=sandboxes,
+                          existing=_existing_types(services, snap))
+
+
+def _existing_types(services, snap) -> dict[str, str]:
+    """name -> type of the product's resources OpenChoreo already runs: one made under an old type
+    name keeps it (resources.plan)."""
+    lister = getattr(services.openchoreo, "list_resources", None)
+    rt = snap.product.runtime or {}
+    if not callable(lister) or not rt.get("openchoreo_project"):
+        return {}
+    try:
+        return {r["name"]: r.get("type", "") for r in lister(project=rt["openchoreo_project"],
+                                                              namespace=rt.get("namespace"))}
+    except Exception:  # noqa: BLE001 - an unreadable inventory: new resources get the neutral type
+        return {}
 
 
 def bind_resource(services, state: FeatureState, res: dict, stage: str, *, actor: str, actor_type: str) -> dict:

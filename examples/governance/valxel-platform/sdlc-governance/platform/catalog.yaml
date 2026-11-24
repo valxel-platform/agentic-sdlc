@@ -1,0 +1,408 @@
+# The managed services products may use, and how (constitution VX-19): the platform catalog.
+#
+# Each type is named for what it is, not for a cloud (agentic-sdlc ADR 0010): key-value-table,
+# event-stream, queue... One installation runs on one cloud, and the SDLC tool reads only that
+# cloud's block of each type (`clouds.aws`, `clouds.gcp`): its service, the access behind "reads"
+# and "writes", sizes with planning costs, the alarms it comes with and the emulator for tests. A
+# type without a block for a cloud isn't offered there. What a type is for, its parameters and its
+# outputs are the same on every cloud; a block may narrow a parameter's range where its service
+# does.
+#
+# The architect picks from these types when a feature needs a managed service and writes them in
+# the design's Resources section; G4 approves the choice, its access and its cost. Each type is an
+# OpenChoreo ClusterResourceType backed by a Crossplane Composition per cloud in
+# valxel-platform/platform-resources (aws/, gcp/), which builds in the defaults below (encryption
+# with the product's key, private access, backups, labels). Products may tighten this, never loosen
+# it.
+#
+# Aliases: the AWS names of version 1 (dynamodb-table, sqs-queue...) still read, as their type, so
+# designs and resources made before the rename keep working. Resources that already exist keep
+# their type in OpenChoreo; new ones get the neutral type.
+#
+# Adding a type, or a cloud's block for one, is a pull request here and a Composition there,
+# approved by the platform owner. Cost figures are rough monthly planning numbers per environment
+# (us-east-1, us-central1), for the approver to weigh at G4; they are not quotes.
+#
+# Alarms: every resource gets its type's standard alarms on its cloud, built by its Composition:
+# CloudWatch alarms on AWS (routed to the SDLC tool through EventBridge), Cloud Monitoring alert
+# policies on Google Cloud (routed through a webhook channel). In production a firing alarm opens
+# an incident for the components that use the resource; elsewhere it shows at G6. AWS: an alarm
+# fires when `metric` (in `cloudwatch_namespace`, by `statistic` over `period_s`) is above `above`
+# for `periods` periods in a row. Google Cloud: when `metric` (a Cloud Monitoring metric type, by
+# `aligner` over `period_s`) stays above `above` for `period_s` x `periods`. `says` is what on-call
+# reads.
+version: 2
+
+# Regions a product may run in, per cloud and data class. PHI and payment data stay in these.
+regions:
+  aws:
+    general: [us-east-1, us-east-2, us-west-2, ap-south-1]
+    payments: [us-east-1, us-east-2, us-west-2]
+    phi: [us-east-1, us-east-2, us-west-2, ap-south-1]   # ap-south-1: India data stays in India
+  gcp:
+    general: [us-central1, us-east1, us-east4, us-west1, asia-south1]
+    payments: [us-central1, us-east1, us-east4, us-west1]
+    phi: [us-central1, us-east1, us-east4, us-west1, asia-south1]   # asia-south1: India data stays in India
+
+# Platform defaults first: a cloud service needs a reason the defaults can't meet, written as an
+# ADR. Kafka (VX-16) carries events; Postgres keeps records; the event worker builds read models.
+defaults:
+  events: kafka
+  records: postgres
+
+types:
+  key-value-table:
+    aliases: [dynamodb-table]
+    use_for: "Records read and written by key at any scale with steady single-digit-millisecond latency; spiky or unpredictable traffic; data that expires (TTL)."
+    not_for: "Queries by anything but its keys and indexes, joins, reports or search (Postgres, or an event worker into a search index)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    replaced_by_changing: [partition_key, sort_key]
+    parameters:
+      partition_key: { type: string, required: true }
+      sort_key: { type: string }
+      ttl_attribute: { type: string }
+      indexes: { type: list, help: "secondary indexes joined by +, each name:partition_key[:sort_key]" }
+    outputs: { table: TABLE_NAME, id: TABLE_ID }
+    clouds:
+      aws:
+        service: "Amazon DynamoDB"
+        access:
+          read: [dynamodb:GetItem, dynamodb:BatchGetItem, dynamodb:Query, dynamodb:DescribeTable]
+          write: [dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:BatchWriteItem, dynamodb:ConditionCheckItem]
+        sizes:
+          small: { capacity: on-demand, monthly_usd: 5 }
+          medium: { capacity: on-demand, monthly_usd: 60 }
+          large: { capacity: "provisioned, auto scaling", monthly_usd: 600 }
+        built_in: [KMS encryption with the product key, point-in-time recovery, deletion protection, VPC gateway endpoint]
+        cloudwatch_namespace: AWS/DynamoDB
+        alarms:
+          read-throttled: { metric: ReadThrottleEvents, statistic: Sum, period_s: 300, periods: 2, above: 0, severity: sev3, says: "Reads are throttled: the table needs more capacity, or one key is too hot." }
+          write-throttled: { metric: WriteThrottleEvents, statistic: Sum, period_s: 300, periods: 2, above: 0, severity: sev3, says: "Writes are throttled: the table needs more capacity, or one key is too hot." }
+        emulator: "DynamoDB Local (amazon/dynamodb-local) in Testcontainers"
+      gcp:
+        service: "Firestore (native mode): a database of its own per resource"
+        access:
+          read: [roles/datastore.viewer]
+          write: [roles/datastore.user]
+        sizes:
+          small: { capacity: on-demand, monthly_usd: 3 }
+          medium: { capacity: on-demand, monthly_usd: 50 }
+          large: { capacity: on-demand, monthly_usd: 500 }
+        built_in: [CMEK encryption with the product key, point-in-time recovery, delete protection, private access through Private Google Access]
+        alarms: {}   # Firestore has no throttling metric to watch; a component's failed calls show in its traces
+        emulator: "Firestore emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
+
+  event-stream:
+    aliases: [kinesis-stream]
+    use_for: "High-volume ordered ingest from many producers (devices, sensors, clickstreams) that several consumers read, with replay inside the retention window."
+    not_for: "Domain events between services (Kafka, VX-16); work queues with per-message retries (queue)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    parameters:
+      retention_hours: { type: integer, default: 24, min: 24, max: 8760 }
+    outputs: { stream: STREAM_NAME, id: STREAM_ID }
+    clouds:
+      aws:
+        service: "Amazon Kinesis Data Streams"
+        access:
+          read: [kinesis:GetRecords, kinesis:GetShardIterator, kinesis:DescribeStream, kinesis:DescribeStreamSummary, kinesis:ListShards, kinesis:SubscribeToShard]
+          write: [kinesis:PutRecord, kinesis:PutRecords, kinesis:DescribeStreamSummary]
+        sizes:
+          small: { capacity: 1 shard, monthly_usd: 15 }
+          medium: { capacity: on-demand, monthly_usd: 60 }
+          large: { capacity: on-demand, monthly_usd: 400 }
+        built_in: [KMS encryption with the product key, VPC interface endpoint]
+        cloudwatch_namespace: AWS/Kinesis
+        alarms:
+          consumers-behind: { metric: GetRecords.IteratorAgeMilliseconds, statistic: Maximum, period_s: 300, periods: 3, above: 300000, severity: sev2, says: "A consumer is over five minutes behind; records it doesn't read before retention ends are lost." }
+          write-throttled: { metric: WriteProvisionedThroughputExceeded, statistic: Sum, period_s: 300, periods: 2, above: 0, severity: sev3, says: "Writes are throttled: the stream needs more shards, or one partition key is too hot." }
+        emulator: "LocalStack (Kinesis) in Testcontainers"
+      gcp:
+        service: "Pub/Sub: a topic with message retention, and a subscription per reader (<stream>-<component>) that can seek back"
+        parameters:
+          retention_hours: { max: 744 }   # Pub/Sub keeps a topic's messages up to 31 days
+        access:
+          read: [roles/pubsub.subscriber]
+          write: [roles/pubsub.publisher]
+        sizes:
+          small: { monthly_usd: 10 }
+          medium: { monthly_usd: 60 }
+          large: { monthly_usd: 400 }
+        built_in: [CMEK encryption with the product key, message ordering by key, Private Google Access]
+        alarms:
+          consumers-behind: { metric: pubsub.googleapis.com/subscription/oldest_unacked_message_age, aligner: ALIGN_MAX, period_s: 300, periods: 3, above: 300, severity: sev2, says: "A reader is over five minutes behind; messages it doesn't read before retention ends are lost." }
+        emulator: "Pub/Sub emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
+
+  queue:
+    aliases: [sqs-queue]
+    use_for: "Work handed to one consumer at a time with retries and a dead-letter queue (jobs, webhooks out, slow integrations); ordered per key when order matters."
+    not_for: "Events several services read (Kafka); anything that must be replayed later."
+    data_classes: [general, payments, phi]
+    stateful: false
+    replaced_by_changing: [fifo]
+    parameters:
+      fifo: { type: boolean, default: false, help: "in order per message group (AWS FIFO; Pub/Sub ordering keys)" }
+      visibility_timeout_s: { type: integer, default: 60, min: 0, max: 43200, help: "seconds a received message stays hidden before it is retried" }
+      max_receives: { type: integer, default: 5, min: 1, max: 1000, help: "then the message goes to the dead-letter queue" }
+    outputs: { send_to: QUEUE_SEND_TO, receive_from: QUEUE_RECEIVE_FROM, id: QUEUE_ID }
+    clouds:
+      aws:
+        service: "Amazon SQS (send to and receive from the same queue URL)"
+        access:
+          read: [sqs:ReceiveMessage, sqs:DeleteMessage, sqs:ChangeMessageVisibility, sqs:GetQueueAttributes]
+          write: [sqs:SendMessage, sqs:GetQueueAttributes]
+        sizes:
+          small: { monthly_usd: 1 }
+          medium: { monthly_usd: 10 }
+          large: { monthly_usd: 100 }
+        built_in: [KMS encryption with the product key, a dead-letter queue with an alarm, VPC interface endpoint]
+        cloudwatch_namespace: AWS/SQS
+        alarms:
+          backlog-age: { metric: ApproximateAgeOfOldestMessage, statistic: Maximum, period_s: 300, periods: 3, above: 900, severity: sev3, says: "Messages have waited over 15 minutes: the consumer is slow or down." }
+          dead-letters: { metric: ApproximateNumberOfMessagesVisible, on: dead-letter-queue, statistic: Maximum, period_s: 300, periods: 1, above: 0, severity: sev3, says: "Messages failed every retry and are in the dead-letter queue." }
+        emulator: "LocalStack (SQS) in Testcontainers"
+      gcp:
+        service: "Pub/Sub: a topic to send to and one subscription to receive from, with a dead-letter topic"
+        parameters:
+          visibility_timeout_s: { min: 10, max: 600 }   # the subscription's acknowledgement deadline
+          max_receives: { min: 5, max: 100 }            # Pub/Sub's delivery attempts before the dead-letter topic
+        access:
+          read: [roles/pubsub.subscriber]
+          write: [roles/pubsub.publisher]
+        sizes:
+          small: { monthly_usd: 1 }
+          medium: { monthly_usd: 10 }
+          large: { monthly_usd: 100 }
+        built_in: [CMEK encryption with the product key, a dead-letter topic with an alarm, Private Google Access]
+        alarms:
+          backlog-age: { metric: pubsub.googleapis.com/subscription/oldest_unacked_message_age, aligner: ALIGN_MAX, period_s: 300, periods: 3, above: 900, severity: sev3, says: "Messages have waited over 15 minutes: the consumer is slow or down." }
+          dead-letters: { metric: pubsub.googleapis.com/subscription/num_undelivered_messages, on: dead-letter-queue, aligner: ALIGN_MAX, period_s: 300, periods: 1, above: 0, severity: sev3, says: "Messages failed every retry and are in the dead-letter topic." }
+        emulator: "Pub/Sub emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
+
+  object-bucket:
+    aliases: [s3-bucket]
+    use_for: "Files and documents (uploads, images, exports, clinical documents), large payloads referenced from events, archives."
+    not_for: "Records queried field by field (Postgres or key-value-table)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    parameters:
+      versioning: { type: boolean, default: true }
+      expire_days: { type: integer, help: "delete objects after this many days; empty keeps them" }
+    outputs: { bucket: BUCKET_NAME, id: BUCKET_ID }
+    clouds:
+      aws:
+        service: "Amazon S3"
+        access:
+          read: [s3:GetObject, s3:ListBucket]
+          write: [s3:PutObject, s3:AbortMultipartUpload]
+          delete: [s3:DeleteObject]
+        sizes:
+          small: { monthly_usd: 2 }
+          medium: { monthly_usd: 25 }
+          large: { monthly_usd: 250 }
+        built_in: [KMS encryption with the product key, public access blocked, TLS only, VPC gateway endpoint, access logs]
+        # S3 reports errors only with paid request metrics; a component's failed calls show in its traces.
+        alarms: {}
+        emulator: "LocalStack (S3) in Testcontainers"
+      gcp:
+        service: "Cloud Storage"
+        access:
+          read: [roles/storage.objectViewer]
+          write: [roles/storage.objectCreator]
+          delete: [roles/storage.objectUser]
+        sizes:
+          small: { monthly_usd: 2 }
+          medium: { monthly_usd: 25 }
+          large: { monthly_usd: 250 }
+        built_in: [CMEK encryption with the product key, public access prevented, uniform bucket-level access, Private Google Access, access logs]
+        alarms: {}
+        emulator: "fake-gcs-server (fsouza/fake-gcs-server) in Testcontainers"
+
+  topic:
+    aliases: [sns-topic]
+    use_for: "Fan-out of one message to several subscribers (queues, other services)."
+    not_for: "Events between the product's services (Kafka)."
+    data_classes: [general, payments, phi]   # PHI never in the message itself (VX-18)
+    stateful: false
+    replaced_by_changing: [fifo]
+    parameters:
+      fifo: { type: boolean, default: false }
+    outputs: { topic: TOPIC_ID }
+    clouds:
+      aws:
+        service: "Amazon SNS"
+        use_for: "Notifications out of the product (SMS, mobile push, email) and fan-out to queues."
+        access:
+          write: [sns:Publish]
+        sizes:
+          small: { monthly_usd: 1 }
+          medium: { monthly_usd: 15 }
+          large: { monthly_usd: 150 }
+        built_in: [KMS encryption with the product key, VPC interface endpoint]
+        cloudwatch_namespace: AWS/SNS
+        alarms:
+          failed-deliveries: { metric: NumberOfNotificationsFailed, statistic: Sum, period_s: 300, periods: 2, above: 0, severity: sev3, says: "Messages could not be delivered to a subscriber." }
+        emulator: "LocalStack (SNS) in Testcontainers"
+      gcp:
+        service: "Pub/Sub topic"
+        use_for: "Fan-out of one message to several subscribers. Pub/Sub doesn't send SMS, mobile push or email: a service calls the product's provider (Firebase Cloud Messaging, an SMS provider) for those."
+        access:
+          write: [roles/pubsub.publisher]
+        sizes:
+          small: { monthly_usd: 1 }
+          medium: { monthly_usd: 15 }
+          large: { monthly_usd: 150 }
+        built_in: [CMEK encryption with the product key, Private Google Access]
+        alarms: {}
+        emulator: "Pub/Sub emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
+
+  postgres:
+    aliases: [postgres-crossplane]
+    use_for: "The default for records: relations, transactions, queries, reports."
+    not_for: "Files (object-bucket); key-only access at very large scale (key-value-table)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    replaced_by_changing: [database]
+    parameters:
+      database: { type: string, required: true }
+      version: { type: string, default: "17" }
+    access_by: credentials   # the component gets the database's credentials (outputs), not IAM
+    outputs: { host: DB_HOST, port: DB_PORT, database: DB_NAME, username: DB_USER, password: DB_PASSWORD }
+    clouds:
+      aws:
+        service: "Amazon RDS for PostgreSQL (OpenChoreo's provisioner-crossplane)"
+        access: {}
+        # connections: the most open connections the size takes (approximately RDS's default
+        # max_connections for its memory), checked against the components' pools by the capacity plan.
+        # paused: Aurora Serverless v2 at 0 capacity, which pauses when idle (about 15 s to resume);
+        # for dev and staging only. The prices of paused and medium-ha are estimates until billed.
+        sizes:
+          paused: { capacity: "Aurora Serverless v2, 0 to 2 ACU, pauses when idle", monthly_usd: 5, connections: 180, environments: [dev, staging] }
+          small: { capacity: db.t4g.micro, monthly_usd: 15, connections: 80 }
+          medium: { capacity: db.m7g.large, monthly_usd: 140, connections: 900 }
+          medium-ha: { capacity: "db.m7g.large, Multi-AZ", monthly_usd: 280, connections: 900, multi_az: true }
+          large: { capacity: "db.m7g.xlarge, Multi-AZ", monthly_usd: 560, connections: 1800, multi_az: true }
+        built_in: [KMS encryption, private subnets only, automated backups, point-in-time recovery, deletion protection]
+        # Built by OpenChoreo's provisioner-crossplane module, which creates no alarms yet.
+        alarms: {}
+        emulator: "postgres in Testcontainers"
+      # gcp: Cloud SQL for PostgreSQL, once its Composition is in platform-resources (tracker CP-314).
+
+  cache:
+    aliases: [redis-crossplane]
+    use_for: "Caches, sessions (the BFF), rate limits."
+    not_for: "The only copy of anything."
+    data_classes: [general, payments, phi]
+    stateful: false
+    parameters: {}
+    access_by: credentials
+    outputs: { host: REDIS_HOST, port: REDIS_PORT, password: REDIS_PASSWORD }
+    clouds:
+      aws:
+        service: "Amazon ElastiCache for Valkey (OpenChoreo's provisioner-crossplane)"
+        access: {}
+        sizes:
+          small: { capacity: cache.t4g.micro, monthly_usd: 12 }
+          medium: { capacity: cache.m7g.large, monthly_usd: 120 }
+          large: { capacity: "cache.m7g.large, 2 replicas", monthly_usd: 360 }
+        built_in: [encryption in transit and at rest, private subnets only]
+        # Built by OpenChoreo's provisioner-crossplane module, which creates no alarms yet.
+        alarms: {}
+        emulator: "valkey in Testcontainers"
+      # gcp: Memorystore for Valkey, once its Composition is in platform-resources (tracker CP-315).
+
+  kafka-topic:
+    # Never picked by hand: the SDLC tool writes one per approved data contract (the HLD's
+    # Datasets, ODCS v3), with the contract's owner writing and its consumers reading. Topics,
+    # their access and their dead-letter topic exist only because a contract says so.
+    from_contracts: true
+    use_for: "The product's domain events (VX-16): one topic per data contract, keyed by record id."
+    not_for: "Anything without an approved data contract; work queues with per-message retries (queue); device ingest (event-stream)."
+    data_classes: [general, payments, phi]
+    stateful: true
+    parameters:
+      topic: { type: string, required: true }
+      partitions: { type: integer, default: 6, min: 1, max: 96 }
+      retention_days: { type: integer, default: 7, min: 1, max: 3650 }
+      compacted: { type: boolean, default: false }
+      dead_letter: { type: boolean, default: true }
+    outputs: { topic: TOPIC, bootstrap: BOOTSTRAP, auth: AUTH }
+    clouds:
+      aws:
+        service: "Apache Kafka topic: Amazon MSK in production, Strimzi elsewhere (provider-kafka)"
+        access:
+          read: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:ReadData, kafka-cluster:DescribeGroup, kafka-cluster:AlterGroup]
+          write: [kafka-cluster:Connect, kafka-cluster:DescribeTopic, kafka-cluster:WriteData, kafka-cluster:WriteDataIdempotently]
+        sizes:
+          small: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+          medium: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+          large: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+        built_in: [replication factor 3 and min.insync.replicas 2, a dead-letter topic its readers may write, IAM (MSK) or a SCRAM user per component (Strimzi) with access to this topic only, consumer groups named after the component only]
+        cloudwatch_namespace: AWS/Kafka
+        alarms:
+          consumers-behind: { metric: EstimatedMaxTimeLag, statistic: Maximum, period_s: 300, periods: 3, above: 300, severity: sev2, says: "A consumer group is over five minutes behind on this topic; what it keeps (a store, an index, a report) is stale." }
+        emulator: "Kafka in Testcontainers (the templates' KafkaContainer)"
+      gcp:
+        # Strimzi on GKE in every environment for now; Managed Service for Apache Kafka in
+        # production follows its Composition (tracker CP-307).
+        service: "Apache Kafka topic on the environment's Strimzi cluster (provider-kafka)"
+        access: {}   # a SCRAM user per component (kafka-user) with ACLs on this topic only
+        sizes:
+          small: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+          medium: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+          large: { capacity: a topic on the environment's cluster, monthly_usd: 0 }
+        built_in: [replication factor 3 and min.insync.replicas 2, a dead-letter topic its readers may write, a SCRAM user per component with access to this topic only, consumer groups named after the component only]
+        alarms: {}
+        emulator: "Kafka in Testcontainers (the templates' KafkaContainer)"
+
+  kafka-user:
+    internal: true
+    use_for: "Signing a component in to the environment's Kafka; what it may do is only what each kafka-topic grants."
+    data_classes: [general, payments, phi]
+    stateful: false
+    parameters:
+      component: { type: string, required: true }
+    outputs: { username: KAFKA_USERNAME, secret: KAFKA_SECRET }
+    clouds:
+      aws:
+        service: "One component's Kafka identity: IAM through its workload identity (MSK), a SCRAM user (Strimzi)"
+        access: {}
+        sizes:
+          small: { monthly_usd: 0 }
+        built_in: [a password only in the component's own namespace (Strimzi), no keys at all (MSK)]
+      gcp:
+        service: "One component's Kafka identity: a SCRAM user on the environment's Strimzi cluster"
+        access: {}
+        sizes:
+          small: { monthly_usd: 0 }
+        built_in: [a password only in the component's own namespace]
+
+  # Not chosen in designs: the pipeline creates one per component that reads or writes a cloud
+  # resource, trusted only by the component's Kubernetes service account; each resource's
+  # Composition grants it just its declared access.
+  workload-identity:
+    internal: true
+    use_for: "One component's identity in the cloud, without keys."
+    data_classes: [general, payments, phi]
+    stateful: false
+    parameters:
+      component: { type: string, required: true }
+    clouds:
+      aws:
+        service: "IAM role with EKS Pod Identity"
+        access: {}
+        outputs: { role: AWS_ROLE_ARN }
+        sizes:
+          small: { monthly_usd: 0 }
+        built_in: [a permissions boundary that stops at the product's resources, no keys]
+      gcp:
+        service: "A Google service account bound to the component's Kubernetes service account (GKE Workload Identity)"
+        access: {}
+        outputs: { role: GCP_SERVICE_ACCOUNT }   # the service account's email
+        sizes:
+          small: { monthly_usd: 0 }
+        built_in: [roles granted per resource only, no project-wide roles, no keys]
+
+# Sizes per environment unless the design says otherwise. Lanes and dev stay small.
+environment_sizes: { dev: small, staging: small, production: medium }

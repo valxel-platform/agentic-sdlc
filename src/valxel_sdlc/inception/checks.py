@@ -7,7 +7,7 @@ import re
 
 from ..agents.parse import section
 from ..repo_roles import ROLES
-from ..resources import parse_resources
+from ..resources import cloud_name, resolved
 from . import DATA_CLASSES, ENVIRONMENTS, formats, valid_product_id
 
 _NUMBER = re.compile(r"\d")
@@ -129,13 +129,13 @@ def architecture(text: str, ctx: dict) -> list[str]:
 
     catalog = ctx.get("catalog") or {}
     dc = ctx.get("data_class", "")
-    for r in parse_resources(text):
+    for r in resolved(text, catalog):
         if not r["type"]:
             out.append(f"Resources: '{r['line']}' isn't in the form '- <name>: <type>; key=value'")
             continue
         t = (catalog.get("types") or {}).get(r["type"])
         if t is None or t.get("internal"):
-            out.append(f"{r['name']}: {r['type']} isn't in the platform's AWS catalog")
+            out.append(f"{r['name']}: {r['type']} isn't in the platform's {cloud_name(catalog)} catalog")
             continue
         if dc and dc not in t.get("data_classes", []):
             out.append(f"{r['name']}: {r['type']} may not hold {dc} data")
@@ -168,14 +168,14 @@ def architecture(text: str, ctx: dict) -> list[str]:
     from .. import capacity
 
     named = [c for c in comps if c.get("name")]
-    out += capacity.check_doc(text, named, [r for r in parse_resources(text) if r.get("type")])
+    out += capacity.check_doc(text, named, [r for r in resolved(text, catalog) if r.get("type")])
     if ctx.get("brief"):
         p = capacity.plan(ctx["brief"], text, ctx.get("capacity_platform"), catalog, named,
-                          [r for r in parse_resources(text) if r.get("type")], dc)
+                          [r for r in resolved(text, catalog) if r.get("type")], dc)
         out += p["findings"]
     if dc in ("phi", "payments") and not re.search(r"\baudit", text, re.I):
         out.append(f"{dc} data: say where the audit records go (constitution VX-15)")
-    out += diagrams(text, named, [r["name"] for r in parse_resources(text) if r.get("type")])
+    out += diagrams(text, named, [r["name"] for r in resolved(text, catalog) if r.get("type")])
     return out
 
 

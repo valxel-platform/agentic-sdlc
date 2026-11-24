@@ -17,7 +17,7 @@ from ..agents import structured, untrusted
 from ..agents.context import load_skill, persona
 from ..evaluators.critic import judge, stub_verdict
 from ..gateway import CallTags, PromptLayers
-from ..resources import load_catalog, summary
+from ..resources import load_catalog, read_catalog, summary
 from ..runtime import AgentTask
 from . import DOCS, ENVIRONMENTS, KIND, ROLE, SKILLS, STRICTEST, Vision, checks, formats, rubrics, templates
 
@@ -49,7 +49,8 @@ def platform(services) -> dict:
     src = services.governance.source
     sha = src.resolve(p.org, p.repo, p.ref)
     constitution = src.read(p.org, p.repo, s.platform_constitution_path, sha) or ""
-    catalog = load_catalog(src.read(p.org, p.repo, s.platform_resources_path, sha, optional=True) or "")
+    catalog = load_catalog(read_catalog(lambda path: src.read(p.org, p.repo, path, sha, optional=True),
+                                        s.platform_resources_path))
     from .. import capacity
 
     sizing = capacity.load_platform(src.read(p.org, p.repo, s.platform_capacity_path, sha, optional=True) or "")

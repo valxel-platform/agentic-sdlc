@@ -148,6 +148,27 @@ possibly hostile once it has read anything written outside the tool.
 - **Quality drift:** decisions at the gates label evaluation cases. A model or prompt change must
   match or beat the current one on past cases before it ships.
 
+## On Google Cloud
+
+One installation runs on one cloud (ADR 0010). On Google Cloud the same controls hold, with
+Google's services behind them:
+
+| Control | On AWS | On Google Cloud |
+|---|---|---|
+| Agent sessions | gVisor node pool; CiliumNetworkPolicy (FQDNs) | GKE Sandbox (gVisor); Kubernetes NetworkPolicy on Dataplane V2: sessions reach only the egress proxy and the gateway, and the proxy keeps the allowlist |
+| Tool identity | EKS Pod Identity | GKE Workload Identity: no key files |
+| GitHub App keys | KMS, sign-only, imported | Cloud KMS asymmetric signing keys (HSM), import-only: no process holds key material |
+| Secrets | Secrets Manager or mounted files | Secret Manager (current and previous version) or mounted files |
+| Audit anchors, checkpoint archive, audit archive | S3 Object Lock, compliance mode | Cloud Storage per-object retention, Locked mode: no one can shorten it or delete an object until it ends, the project owner included |
+| Customer accounts | Roles with an external ID, 15-minute sessions | Service accounts Valxel impersonates for 15 minutes per job; each names its workspace and a fingerprint of its external ID, which Valxel checks before use |
+| Products' resources | IAM policies per component, KMS with the product key | IAM roles on each resource per component, CMEK with the product key, labels `valxel_*` |
+| Sign-in | GitHub, Cognito, or your OIDC provider | GitHub, Google Workspace (domain pinned), or your OIDC provider |
+| Model calls | Anthropic through the gateway | Anthropic, or Claude on Vertex AI in your project through the gateway |
+
+What differs: Google Cloud grants most roles to a whole project rather than to labelled
+resources, so give Valxel's connections projects of their own. Cost data comes from the Cloud
+Billing export, which a billing administrator turns on once.
+
 ## Shared responsibility
 
 | The Valxel project | The team running it |
