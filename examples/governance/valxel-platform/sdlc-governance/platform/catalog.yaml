@@ -102,8 +102,10 @@ types:
         emulator: "Firestore emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
       azure:
         service: "Azure Cosmos DB for NoSQL: an account of its own per resource (serverless; autoscale when large)"
-        # An item's time to live is its `ttl` field (seconds), whatever ttl_attribute names: Cosmos DB
-        # reads only that field. The Composition turns per-item TTL on when ttl_attribute is set.
+        # TABLE_NAME is the container's address (https://<account>.documents.azure.com/dbs/data/colls/items);
+        # the sort key, when set, is the second level of a hierarchical partition key. An item's
+        # time to live is its `ttl` field (seconds), whatever ttl_attribute names: Cosmos DB reads
+        # only that field. The Composition turns per-item TTL on when ttl_attribute is set.
         access:
           read: ["cosmos:Cosmos DB Built-in Data Reader"]
           write: ["cosmos:Cosmos DB Built-in Data Contributor"]
@@ -168,7 +170,7 @@ types:
           small: { capacity: 1 throughput unit, monthly_usd: 25 }
           medium: { capacity: "2 throughput units, auto-inflate to 10", monthly_usd: 80 }
           large: { capacity: "4 throughput units, auto-inflate to 20", monthly_usd: 400 }
-        built_in: [customer-managed key encryption with the product key, local (SAS) auth off, public network access off, private endpoint]
+        built_in: [local (SAS) auth off, public network access off, private endpoint, TLS 1.2, Microsoft-managed encryption (customer-managed keys need Premium)]
         monitor_namespace: Microsoft.EventHub/namespaces
         alarms:
           throttled: { metric: ThrottledRequests, aggregation: Total, period_s: 300, periods: 2, above: 0, severity: sev3, says: "Requests are throttled: the namespace needs more throughput units." }
@@ -328,7 +330,7 @@ types:
         alarms: {}
         emulator: "Pub/Sub emulator (gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators) in Testcontainers"
       azure:
-        service: "Azure Service Bus topic: a Standard namespace per resource; subscribers get subscriptions"
+        service: "Azure Service Bus topic: a Standard namespace per resource"
         access:
           write: ["role:Azure Service Bus Data Sender"]
         sizes:
