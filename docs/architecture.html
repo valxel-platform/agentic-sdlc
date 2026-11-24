@@ -247,7 +247,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
         <text class="h-sm" x="932" y="498">Lucid or draw.io</text><text class="s" x="932" y="518">Architecture diagrams for G4</text>
         <text class="h-sm" x="932" y="562">AWS through Crossplane</text><text class="s" x="932" y="582">Resources, alarms, budgets</text>
         <text class="h-sm" x="932" y="626">Backstage catalog</text><text class="s" x="932" y="646">Capabilities registered after Operate</text>
-        <text class="s" x="932" y="690">Each behind an interface; stubbed offline</text>
+        <text class="s" x="932" y="690">Each behind an interface, set by configuration</text>
 
         <!-- Bottom: governance and products -->
         <rect class="box" x="16" y="752" width="560" height="124" rx="8"/>
@@ -295,7 +295,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
         <text class="lbl" x="300" y="912" style="fill: var(--teal)">Running products send signals back: alerts, errors, logs, flag on/off counts</text>
       </svg>
     </div>
-    <figcaption>The tool is one Python service with one Postgres database. Everything outside the dashed frame belongs to the products or to third parties, and the tool reaches each through an interface that has an offline stub, so the whole pipeline runs deterministically in tests.</figcaption>
+    <figcaption>The tool is one Python service with one Postgres database. Everything outside the dashed frame belongs to the products or to third parties, and the tool reaches each through an interface, configured per installation: the real system, or an offline mode in which the whole pipeline runs deterministically for evaluation and tests.</figcaption>
   </figure>
 
   <section aria-labelledby="flows-h">
@@ -350,7 +350,7 @@ td:first-child { font-weight: 600; white-space: nowrap; }
       <div class="rule"><h3>Data class picks the model</h3><p>The gateway only routes PHI and payments work to providers covered for it. The same rule decides which provider OpenChoreo's root-cause agent may use.</p></div>
       <div class="rule"><h3>Production stays human, with two exceptions</h3><p>Promotion to production is a person's decision at G6. The tool may act on its own in only two ways: turn off a recent feature's flag, or roll back a recent release, and only when the policy allows it and the analysis agrees.</p></div>
       <div class="rule"><h3>Threads survive anything</h3><p>LangGraph checkpoints every step in Postgres. Waits on people, CI and deploys are resumable after a restart, and one replica serves live updates.</p></div>
-      <div class="rule"><h3>Every integration is an interface</h3><p>Stub mode runs offline and deterministically; live mode swaps in Claude Code, the Claude API and the real systems one interface at a time.</p></div>
+      <div class="rule"><h3>Every integration is an interface</h3><p>Configuration picks what each one reaches: Claude Code, the Claude API and the real systems in live mode, one interface at a time, or the offline mode, deterministic for evaluation and tests.</p></div>
     </div>
   </section>
 

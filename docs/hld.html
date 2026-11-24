@@ -181,7 +181,7 @@
   <li><strong>Lite mode:</strong> for small customers at the pilot stage. While the product is built, Valxel hosts its dev and staging on the shared plane, for up to 90 days (then go live, pay about $79 a month to extend, or pause). At go-live, a person moves everything to the customer's VM, with the same images and nothing rebuilt. The tool then deploys there as Docker Compose projects over SSH, through <code>ComposeRuntime</code>, which implements the same interface as OpenChoreo. Production can have a VM of its own.</li>
 </ul>
 <p><strong>Self-hosted:</strong> organizations under 250 people and $10M revenue may run the tool themselves for free (BUSL 1.1 with an additional use grant; Apache 2.0 after three years). The same image runs there, with secrets from mounted files or Vault instead of AWS.</p>
-<p><strong>Modes of the tool itself:</strong> <code>stub</code> (offline and deterministic: every integration has a stand-in) and <code>live</code>. <code>VALXEL_STRICT=1</code> refuses to start in production while anything would quietly fall back to a stand-in or an unsafe setting.</p>
+<p><strong>Modes of the tool itself:</strong> <code>live</code>, where every integration reaches its real system, and offline (<code>stub</code>), deterministic for evaluation and tests. <code>VALXEL_STRICT=1</code> refuses to start in production while anything would quietly fall back to a stand-in or an unsafe setting.</p>
 <p class="callout">Pilot-stage cost estimates: about $470 a month for full mode, $115 for one lite VM, $172 with production on its own VM.</p>
 </section>
 
