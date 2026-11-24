@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="920" viewBox="0 0 1200 920" role="img" aria-labelledby="dg-title dg-desc">
         <title id="dg-title">Valxel SDLC, high-level architecture</title>
-        <desc id="dg-desc">People, production signals and GitHub webhooks enter the tool's API. The engine runs three kinds of LangGraph workflows (roadmap, feature pipeline, incidents), which use agents through a model gateway and a production policy, and act through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, work trackers, AWS and the catalog. Governance repos are read and pinned. Products built from the templates are deployed and send signals back.</desc>
+        <desc id="dg-desc">People, production signals and GitHub webhooks enter the tool's API. The engine runs three kinds of LangGraph workflows (roadmap, feature pipeline, incidents), which use agents through a model gateway and a production policy, and act through GitHub, OpenChoreo, Flipt, PagerDuty, ServiceNow, work trackers, your cloud (AWS, Google Cloud or Azure) and the catalog. Governance repos are read and pinned. Products built from the templates are deployed and send signals back.</desc>
         <style>
 svg {
   --bg: #eef2f5;        /* cool drafting paper */
@@ -70,8 +70,8 @@ svg { background: var(--surface); }
         <text class="t" x="32" y="330">Prometheus alerts</text>
         <text class="t" x="32" y="354">Sentry or GlitchTip</text>
         <text class="t" x="32" y="378">OpenChoreo alert rules</text>
-        <text class="t" x="32" y="402">CloudWatch alarms</text>
-        <text class="t" x="32" y="426">AWS Budgets</text>
+        <text class="t" x="32" y="402">Cloud alarms</text>
+        <text class="t" x="32" y="426">Cloud budgets</text>
         <text class="t" x="32" y="450">Support tickets</text>
         <text class="s" x="32" y="486">Tied to a product, given a SEV</text>
 
@@ -85,7 +85,7 @@ svg { background: var(--surface); }
 
         <rect class="tool" x="276" y="56" width="600" height="84" rx="8"/>
         <text class="h" x="292" y="80">API and web app</text>
-        <text class="s" x="452" y="80">FastAPI, React, live updates over SSE, GitHub sign-in</text>
+        <text class="s" x="452" y="80">FastAPI, React, live updates over SSE, GitHub or OIDC sign-in</text>
         <rect class="chip" x="292" y="94" width="136" height="32" rx="6"/><text class="t" x="360" y="115" text-anchor="middle">Decisions inbox</text>
         <rect class="chip" x="436" y="94" width="136" height="32" rx="6"/><text class="t" x="504" y="115" text-anchor="middle">Features</text>
         <rect class="chip" x="580" y="94" width="136" height="32" rx="6"/><text class="t" x="648" y="115" text-anchor="middle">New intent chat</text>
@@ -151,7 +151,7 @@ svg { background: var(--surface); }
         <text class="h-sm" x="932" y="370">ServiceNow</text><text class="s" x="932" y="390">Change receipts</text>
         <text class="h-sm" x="932" y="434">Jira or OpenProject</text><text class="s" x="932" y="454">Epics and initiatives kept in step</text>
         <text class="h-sm" x="932" y="498">Lucid or draw.io</text><text class="s" x="932" y="518">Architecture diagrams for G4</text>
-        <text class="h-sm" x="932" y="562">AWS through Crossplane</text><text class="s" x="932" y="582">Resources, alarms, budgets</text>
+        <text class="h-sm" x="932" y="562">Your cloud through Crossplane</text><text class="s" x="932" y="582">Resources, alarms, budgets</text>
         <text class="h-sm" x="932" y="626">Backstage catalog</text><text class="s" x="932" y="646">Capabilities registered after Operate</text>
         <text class="s" x="932" y="690">Each behind an interface; stubbed offline</text>
 
@@ -164,7 +164,7 @@ svg { background: var(--surface); }
         <text class="h-sm" x="208" y="806">sdlc-governance</text>
         <text class="s" x="208" y="826">Platform constitution</text>
         <text class="s" x="208" y="844">remediation.yaml</text>
-        <text class="s" x="208" y="862">Alert rules, AWS types</text>
+        <text class="s" x="208" y="862">Alert rules, resource types</text>
         <text class="h-sm" x="384" y="806">Product governance</text>
         <text class="s" x="384" y="826">product.yaml, constitution</text>
         <text class="s" x="384" y="844">ADRs, roadmap</text>
