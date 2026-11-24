@@ -1,0 +1,31 @@
+<!DOCTYPE html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#fbfbfc;color:#14171a;font:15px/1.3 Inter,sans-serif;width:1240px}
+.poster{padding:32px 40px 30px}
+h1{font:700 34px/1.05 "Space Grotesk",sans-serif;letter-spacing:-.02em;margin:0 0 4px}
+.lead{margin:0 0 20px;color:#5a5f66;font-size:15px}
+.slab{position:relative;border-radius:12px;padding:12px 14px 12px 128px;border:2px solid var(--edge);background:var(--bg);box-shadow:8px 8px 0 var(--shade);min-height:64px}
+.slab>h2{position:absolute;left:16px;top:14px;margin:0;font:700 24px/1 "Space Grotesk",sans-serif;color:var(--title)}
+.root{--bg:#eaf1ff;--edge:#3b63c4;--shade:#c9d8f8;--title:#1f3f8f;--blk:#a9bff0}
+.seams{--bg:#e3f7ec;--edge:#2e8b5a;--shade:#c2ead4;--title:#1b6b44;--blk:#97d6b4}
+.core{--bg:#fff3e2;--edge:#c98a2b;--shade:#f3dcb8;--title:#8a5a12;--blk:#ebc68f}
+.row{display:grid;gap:8px;grid-template-columns:repeat(5,minmax(0,1fr))}
+.blk{background:#fff;border:1.5px solid var(--blk);border-radius:8px;padding:9px 11px;font:700 15px/1.2 "Space Grotesk",sans-serif;display:flex;align-items:center;min-height:46px;box-shadow:0 1px 0 var(--blk)}
+.blk small{display:block;font:500 12.5px/1.3 Inter,sans-serif;color:#5a5f66;margin-top:3px}
+.seamrow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.scol{display:grid;gap:6px;align-content:start}
+.scol h3{margin:0 0 2px;font:600 14px Inter,sans-serif;color:var(--title)}
+.flow{display:flex;align-items:center;gap:28px;padding:8px 0 8px 128px;font-size:14px;color:#4a4f55}
+.flow div{display:flex;align-items:center;gap:8px}
+.flow b{color:#14171a;font-weight:600}
+</style></head><body><div class="poster" id="poster">
+<h1>Valxel, stacked: capabilities by layer</h1>
+<p class="lead">Each layer builds only on the layers below it.</p>
+<section class="slab root"><h2>Root</h2><div class="row"><div class="blk"><span>Front doors</span></div><div class="blk"><span>Feature engine</span></div><div class="blk"><span>Service wiring</span></div><div class="blk"><span>Self-evaluation</span></div><div class="blk"><span>Lite hosting</span></div></div></section>
+<div class="flow"><div><svg width="18" height="28" viewBox="0 0 18 28"><path d="M9 2V23" stroke="#3a3d41" stroke-width="2.5"/><path d="M2 17L9 26L16 17" fill="none" stroke="#3a3d41" stroke-width="2.5"/></svg><span><b>Wires</b> the seams</span></div><div><svg width="18" height="28" viewBox="0 0 18 28"><path d="M9 2V23" stroke="#3a3d41" stroke-width="2.5" stroke-dasharray="4 3"/><path d="M2 17L9 26L16 17" fill="none" stroke="#3a3d41" stroke-width="2.5"/></svg><span><b>Uses</b> the core directly</span></div></div>
+<section class="slab seams"><h2>Seams</h2><div class="seamrow"><div class="scol"><h3>Intake</h3><div class="blk"><span>Guided intake</span></div><div class="blk"><span>Product inception</span></div></div><div class="scol"><h3>Delivery</h3><div class="blk"><span>Pipeline and gates</span></div><div class="blk"><span>Design previews</span></div><div class="blk"><span>Build, merge and release</span></div><div class="blk"><span>Repos and records</span></div></div><div class="scol"><h3>Roadmap</h3><div class="blk"><span>Initiatives and releases</span></div><div class="blk"><span>Outcome loop</span></div></div><div class="scol"><h3>Ops</h3><div class="blk"><span>Incidents and signals</span></div><div class="blk"><span>Costs and inventory</span></div><div class="blk"><span>Security upkeep</span></div></div></div></section>
+<div class="flow"><div><svg width="18" height="28" viewBox="0 0 18 28"><path d="M9 2V23" stroke="#3a3d41" stroke-width="2.5"/><path d="M2 17L9 26L16 17" fill="none" stroke="#3a3d41" stroke-width="2.5"/></svg><span><b>Build on</b> the core</span></div><div><span><b>Nothing</b> points upward or across seams</span></div></div>
+<section class="slab core"><h2>Core</h2><div class="row"><div class="blk"><span>Agent runtime</span></div><div class="blk"><span>Model gateway</span></div><div class="blk"><span>Checks and quality policy</span></div><div class="blk"><span>Workflow rules</span></div><div class="blk"><span>Governance and records</span></div><div class="blk"><span>Components and resources</span></div><div class="blk"><span>Production rules</span></div><div class="blk"><span>Integrations<small>GitHub, OpenChoreo, Jira, Sentry, PagerDuty, MCP</small></span></div><div class="blk"><span>Cloud ports<small>AWS, Azure, Google Cloud</small></span></div><div class="blk"><span>Trust and access</span></div></div></section>
+</div></body></html>

@@ -14,6 +14,11 @@ replace with the real integration (see [Replacing the stubs](docs/operators.md#r
 **[Architecture](docs/architecture.md)**: how the parts fit together, how a feature and an
 incident move through the tool, and the design rules.
 
+<p align="center"><a href="docs/architecture.md#how-its-stacked"><img src="docs/architecture/capability-layers.png" alt="Valxel's capabilities in three stacked layers: the root (front doors and wiring), four seams (intake, delivery, roadmap, ops) and the shared core. Each layer builds only on the layers below it." width="820"></a></p>
+
+How it's stacked: the root wires the four seams, the seams do the product work, and the core
+supplies what they share. [The same layers in detail](docs/architecture/capability-layers-detailed.png).
+
 ```
 discovery ─G1─ spec ─G2─┬─ design ───────G3─┬─ join ─ provision new repos ─ plan ─ build ─ CI ─[G5 if high risk]─ merge train
                         └─ architecture ─G4─┘    ─ build, deploy dev and staging ─ release ─G6─ production ─ operate
