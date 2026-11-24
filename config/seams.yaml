@@ -7,15 +7,16 @@ seams:
   roadmap: [roadmap, outcomes.read, outcomes.readouts, outcomes.review]  # reading and reviewing goals' metrics
   delivery: [graph, provisioning, provision_queue, repo_standards, changeset_env, environments,
              records, drafts, traceability, design_record, fit, mockups, sketch, prototype, preview, current_screens, screens, scaffolding,
-             dependencies, quality, standard_files,
+             dependencies, quality.sonar, quality.sources, standard_files,
              waits, reconcile, pilot, confidence, independent_review]
-  ops: [ops, finops, upkeep]
+  ops: [ops, finops, upkeep.alerts, upkeep.register, upkeep.service]
 # Shared definitions several seams read, which use no seam themselves: the core's, though their
 # files sit with the seam that first needed them. (Moving the files is churn for no change in what
 # depends on what.) Only add a module here if it imports nothing from a seam.
 core: [template_contract, resources, outcomes, inception.formats, roadmap.record, ops.changes, ops.alert_rules,
        capacity, repo_policy, repo_files, error_tracking_policy, governance.prs, duplicates, performance,
-       sandboxes, jobs, agent_tools, acceptance, ops.cohorts]
+       sandboxes, jobs, agent_tools, acceptance, ops.cohorts,
+       quality, upkeep]  # the packages' own modules: quality and upkeep policy; their sources and services stay in delivery and ops
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # and the tool's health, which measures every seam's agents on real work.
 root: [engine, engine_parts, api, web, cli, services, strict, worksync, run_queue, watcher_jobs, checkpoint_archive,
@@ -44,11 +45,8 @@ targets:
 # listed here that's gone (delete its line). Fix one by moving the shared piece into the core, or
 # by passing it in from the root (services.py) instead of importing it.
 known_breaks:
-  - "config -> quality"  # core -> delivery
   - "evaluators.checks -> design_record"  # core -> delivery
   - "governance.loader -> ops.remediation"  # core -> ops
-  - "governance.manifest -> quality"  # core -> delivery
-  - "governance.manifest -> upkeep"  # core -> ops
   - "graph.gates -> ops.cost"  # delivery -> ops
   - "graph.gates -> ops.rollout"  # delivery -> ops
   - "graph.infra -> finops.views"  # delivery -> ops
@@ -71,7 +69,6 @@ known_breaks:
   - "ops.rollout -> roadmap.graphs"  # ops -> roadmap
   - "outcomes.review -> graph.pipeline"  # roadmap -> delivery
   - "provision_queue -> inception.setup"  # delivery -> intake
-  - "quality -> upkeep"  # delivery -> ops
   - "roadmap.graphs -> graph.pipeline"  # roadmap -> delivery
   - "roadmap.graphs -> ops.remediation"  # roadmap -> ops
   - "roadmap.graphs -> ops.rollout"  # roadmap -> ops
@@ -79,7 +76,4 @@ known_breaks:
   - "roadmap.views -> ops.correlate"  # roadmap -> ops
   - "roadmap.views -> ops.signals"  # roadmap -> ops
   - "session_runner -> code_eval_runner"  # core -> root
-  - "upkeep -> quality"  # ops -> delivery
-  - "upkeep.alerts -> quality"  # ops -> delivery
-  - "upkeep.service -> quality"  # ops -> delivery
   - "upkeep.service -> repo_standards"  # ops -> delivery
