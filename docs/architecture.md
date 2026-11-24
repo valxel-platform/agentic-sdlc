@@ -21,6 +21,23 @@ The GitHub Pages site also has a branded [high-level design](hld.html) and the
 Where the parts run, on a laptop and in a customer's cluster, and what each may reach:
 [deployment diagrams](architecture/README.md).
 
+## How it's stacked
+
+The tool has three layers, and each builds only on the ones below it. The **root** holds the
+front doors (API, web console, A2A and MCP) and wires everything together. Four **seams** do the
+product work (intake, delivery, the roadmap and operations), each independent of the others. The
+**core** supplies what every layer shares: running agents, the model gateway, checks, workflow
+rules, governance, integrations, and ports to AWS, Azure and Google Cloud.
+
+![Valxel's capabilities in three stacked layers. Root: front doors, feature engine, service wiring, self-evaluation, lite hosting. Seams: intake (guided intake, product inception), delivery (pipeline and gates, design previews, build, merge and release, repos and records), roadmap (initiatives and releases, outcome loop) and ops (incidents and signals, costs and inventory, security upkeep). Core: agent runtime, model gateway, checks and quality policy, workflow rules, governance and records, components and resources, production rules, integrations, cloud ports for AWS, Azure and Google Cloud, trust and access.](architecture/capability-layers.png)
+
+The same layers with what each capability does:
+[capability-layers-detailed.png](architecture/capability-layers-detailed.png).
+
+The rule that keeps them apart is enforced, not only drawn: `config/seams.yaml` places every module
+in a layer and `tests/test_seams.py` fails on any import that points upward or across seams
+([ADR 0005](adr/0005-one-deployable-with-enforced-seams.md)).
+
 ## How work moves through it
 
 **Idea to production**: one feature thread, across every repo it touches.
@@ -84,5 +101,7 @@ Where the parts run, on a laptop and in a customer's cluster, and what each may 
 ## Keeping this current
 
 Update this page, `architecture.svg` and `architecture.html` in the same pull request as any change
-that adds, removes or moves a part of the tool shown here. The [deployment diagrams](architecture/README.md) follow the
+that adds, removes or moves a part of the tool shown here. A new or moved capability also updates
+the [capability layers](architecture/README.md#capability-layers): edit the two HTML sources and
+re-render the PNGs. The [deployment diagrams](architecture/README.md) follow the
 same rule for changes to the Compose bundles, the Helm chart or the network policy.

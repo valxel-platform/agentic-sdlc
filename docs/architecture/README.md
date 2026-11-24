@@ -1,6 +1,6 @@
-# Deployment diagrams
+# Architecture diagrams
 
-Where each part of the tool runs, on a developer's laptop and in production. The
+How the tool is stacked, and where each part runs, on a developer's laptop and in production. The
 [architecture overview](../architecture.md) shows what the parts do; these show where they live and
 what may talk to what.
 
@@ -9,6 +9,9 @@ what may talk to what.
 | [deployment-laptop.png](deployment-laptop.png) | The laptop tier (`valxel dev up`, [ADR 0007](../adr/0007-deployment-tiers.md)) |
 | [deployment-cluster.png](deployment-cluster.png) | The cluster tier: the Helm chart in [`deploy/helm/valxel`](../../deploy/helm/valxel/README.md) in a customer's cloud account |
 | [deployment.drawio](deployment.drawio) | Both, editable: open it in [draw.io](https://app.diagrams.net) (File → Open), one page per tier |
+| [capability-layers.png](capability-layers.png) | The capability layers: root, seams and core, names only |
+| [capability-layers-detailed.png](capability-layers-detailed.png) | The same, with what each capability does |
+| [capability-layers.html](capability-layers.html), [capability-layers-detailed.html](capability-layers-detailed.html) | Their sources: edit, then run [render_layers.py](render_layers.py) |
 
 Colors: purple is the tool, amber a security boundary, teal data, green the products, gray outside
 systems.
@@ -50,3 +53,16 @@ the provisioning worker signs through KMS.
 Change `deployment.drawio` and re-export both PNGs in the same pull request as any change to the
 Compose bundles, the Helm chart or the network policy that adds, removes or moves a part or a
 connection shown here.
+
+## Capability layers
+
+![Valxel's capabilities in three stacked layers: the root, four seams and the shared core.](capability-layers.png)
+
+- **Root:** the front doors (API, web console, A2A and MCP), the feature engine that starts and
+  resumes every thread, service wiring, the tool's evals of its own agents, and lite hosting.
+- **Seams:** intake, delivery, the roadmap and ops. Each uses only itself and the core, never another
+  seam.
+- **Core:** shared by every layer. It imports no seam.
+- Colors: blue is the root, green the seams, amber the core.
+- The groupings follow the modules' own descriptions and `config/seams.yaml`; the
+  [detailed version](capability-layers-detailed.png) lists what each capability does.
