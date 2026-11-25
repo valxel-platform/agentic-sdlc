@@ -12,6 +12,16 @@ duplicate, skipped or parked), and nothing broke the contract (refused by the pr
 consumer). Anything else holds the release: the agents fix the repos it points at, and people decide
 when the tries run out, as for any staging failure. In production the contract-broken alert rule
 watches for the same breaks.
+
+Connectors that pull from a source (integration.yaml `pull:`) also log, per source, how its runs
+went (counts only):
+
+    valxel.pulls {"test-catalog":{"runs":2,"succeeded":2,"failed":0,"seen":41,"published":40,"parked":1}}
+
+For each source the HLD's Integrations line approves: a record parked (it broke its contract or
+its handler) or a source that ran in staging and never succeeded holds the release. A source that
+didn't run in staging isn't exercised, as for a dataset nobody published. What a pull published
+reaches the valxel.datasets reconciliation above like any producer's events.
 """
 
 from __future__ import annotations
@@ -21,21 +31,22 @@ import json
 from .outcomes.instrumentation import _since
 
 MARKER = "valxel.datasets"
+PULLS = "valxel.pulls"
 RECEIVED = ("applied", "duplicate", "skipped", "parked")
 
 
-def parse(entries) -> dict[str, dict[str, dict[str, int]]]:
-    """[(component, line)] -> component -> dataset -> outcome -> count, summed."""
+def parse(entries, marker: str = MARKER) -> dict[str, dict[str, dict[str, int]]]:
+    """[(component, line)] -> component -> dataset (or pull source) -> outcome -> count, summed."""
     out: dict[str, dict[str, dict[str, int]]] = {}
     for component, text in entries:
-        i = text.find(MARKER)
+        i = text.find(marker)
         if i < 0:
             continue
         try:
-            rec = json.loads(text[i + len(MARKER):].strip())
+            rec = json.loads(text[i + len(marker):].strip())
         except ValueError:
             try:
-                rec = json.loads(json.loads(text).get("message", "").split(MARKER, 1)[1].strip())
+                rec = json.loads(json.loads(text).get("message", "").split(marker, 1)[1].strip())
             except (ValueError, AttributeError, IndexError, TypeError):
                 continue
         if not isinstance(rec, dict):
@@ -78,11 +89,31 @@ def problems(contracts: list[dict], counts: dict[str, dict[str, dict[str, int]]]
     return out
 
 
-def staging_check(services, state: dict, contracts: list[dict], environment: str) -> dict:
-    """{"checked", "environment", "datasets", "problems": [{"repo", "dataset", "message"}], "why"?}"""
+def pull_problems(sources: dict[str, list[str]], counts: dict[str, dict[str, dict[str, int]]]) -> list[dict]:
+    """What a connector's pull runs in staging say must be fixed: [{"repo", "dataset", "message"}]
+    ("dataset" holds the pull source)."""
+    out = []
+    for repo, names in sorted(sources.items()):
+        mine = counts.get(repo.split("/", 1)[-1]) or {}
+        for name in names:
+            row = mine.get(name) or {}
+            if row.get("parked"):
+                out.append({"repo": repo, "dataset": name,
+                            "message": f"pull {name} parked {row['parked']} of {row.get('seen', 0)} records "
+                                       "(contract or handler)"})
+            if row.get("runs") and not row.get("succeeded"):
+                out.append({"repo": repo, "dataset": name,
+                            "message": f"pull {name} failed all {row['runs']} of its runs in staging"})
+    return out
+
+
+def staging_check(services, state: dict, contracts: list[dict], environment: str,
+                  pulls: dict[str, list[str]] | None = None) -> dict:
+    """{"checked", "environment", "datasets", "pulls", "problems": [{"repo", "dataset", "message"}], "why"?}"""
+    pulls = {r: list(n) for r, n in (pulls or {}).items() if n}
     base = {"checked": False, "environment": environment, "datasets": [str(c.get("id")) for c in contracts],
-            "problems": []}
-    if not contracts:
+            "pulls": sorted(f"{r.split('/', 1)[-1]}/{n}" for r, ns in pulls.items() for n in ns), "problems": []}
+    if not contracts and not pulls:
         return {**base, "why": "the design names no data contracts"}
     faults = int((state.get("simulate_faults") or {}).get("datasets", 0))
     logs = getattr(services, "cohort_logs", None)
@@ -99,20 +130,29 @@ def staging_check(services, state: dict, contracts: list[dict], environment: str
         from datetime import datetime, timezone
 
         rt = services.snapshot(state["product_id"]).product.runtime or {}
-        entries = logs.entries(namespace=rt.get("namespace") or "default", project=rt.get("openchoreo_project") or "",
-                               environment=environment, since=_since(state), until=datetime.now(timezone.utc),
-                               phrase=MARKER)
+        until = datetime.now(timezone.utc)
+
+        def read(phrase: str):
+            return logs.entries(namespace=rt.get("namespace") or "default",
+                                project=rt.get("openchoreo_project") or "", environment=environment,
+                                since=_since(state), until=until, phrase=phrase)
+
+        entries = read(MARKER) if contracts else []
+        pulled = read(PULLS) if pulls else []
     except Exception as exc:  # noqa: BLE001 - reported at G6, not a failure of the feature
         return {**base, "why": f"couldn't read the logs: {type(exc).__name__}: {exc}"[:200]}
-    return {**base, "checked": True, "problems": problems(contracts, parse(entries))}
+    found = problems(contracts, parse(entries)) + pull_problems(pulls, parse(pulled, PULLS))
+    return {**base, "checked": True, "problems": found}
 
 
 def describe(check: dict) -> str:
-    if not check or not check.get("datasets"):
+    if not check or not (check.get("datasets") or check.get("pulls")):
         return ""
     if not check.get("checked"):
         return f"Datasets not reconciled: {check.get('why', '')}"
     if check["problems"]:
         return "Datasets don't reconcile in staging: " + "; ".join(
             f"{p['repo'].split('/', 1)[-1]} {p['message']}" for p in check["problems"])
-    return f"All {len(check['datasets'])} datasets reconcile in {check['environment']}"
+    parts = [f"{len(check['datasets'])} datasets"] if check.get("datasets") else []
+    parts += [f"{len(check['pulls'])} pull sources"] if check.get("pulls") else []
+    return f"All {' and '.join(parts)} reconcile in {check['environment']}"

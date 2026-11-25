@@ -104,10 +104,13 @@ sequenceDiagram
                                 event worker for work that reacts to events.)
 ## Integrations                (only with a connector repo: who's on the other side and what may cross; approved at G4)
 - <org>/<repo>: <vendor>; data <general|payments|phi>; baa <yes|no>; webhooks <name, ...|none>; calls <host, ...|none>;
-  auth <oauth2-client-credentials|api-key|mtls|none>
+  auth <oauth2-client-credentials|api-key|mtls|none>[; pulls <name>:<http-cursor|object-store:<bucket>>, ...]
                                (PHI needs baa yes. Hosts by name: no scheme, wildcard or IP. A connector with webhooks
                                 is external in Endpoints, only for /webhooks/<name>; without them, none. Only a
-                                connector talks to a third party: others reach it through data contracts.)
+                                connector talks to a third party: others reach it through data contracts. pulls:
+                                the sources it polls when the vendor can't call it; an http-cursor source is read
+                                through its 'calls' hosts. Only http-cursor and object-store: anything else
+                                (SharePoint, Confluence, Drive, Spark, an orchestrator) is flagged, not improvised.)
 ## Channels                    (only with a channel repo: where people talk to the product and what's said there; approved at G4)
 - <org>/<repo>: <slack|teams|sms|email> <full|notice> [baa]; ...
                                (full sends the text; notice sends a sign-in notice. In a PHI product, full needs

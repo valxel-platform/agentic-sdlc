@@ -136,3 +136,68 @@ def test_the_connector_role_is_registered_everywhere_roles_are_listed():
     assert catalog_info.TYPES["connector"] == "service" and "/webhooks/<name>" in SECURITY["connector"]
     assert "connector" in AUDITED_ROLES and "connector" in FLAGGED_ROLES
     assert "connector" in template_contract.roles_with("post-deploy")
+
+
+PULLS = "; pulls test-catalog:http-cursor, protocols:object-store:example-labs-drop"
+PULL_HLD = "## Integrations\n" + LINE.rstrip("\n") + PULLS + "\n"
+PULL_YAML = YAML + """pull:
+  - name: test-catalog
+    adapter: http-cursor
+    request: { path: /v1/tests }
+  - name: protocols
+    adapter: object-store
+    store: { kind: s3, bucket: example-labs-drop }
+    deletions: full-listing
+"""
+
+
+def test_approved_pull_sources_parse_and_the_coder_is_told_exactly_which():
+    assert connectors.design_findings(PULL_HLD, REPOS) == []
+    [line] = connectors.parse_integrations(PULL_HLD)
+    assert line["pulls"] == [{"name": "test-catalog", "adapter": "http-cursor", "bucket": ""},
+                             {"name": "protocols", "adapter": "object-store", "bucket": "example-labs-drop"}]
+    said = connectors.coder_instruction(PULL_HLD, REPO)
+    assert ("pull: exactly these sources: test-catalog (http-cursor); protocols (object-store, bucket "
+            "example-labs-drop)") in said
+    assert "@pull handler each" in said and "contracts/" in said
+    assert connectors.coder_instruction(HLD, REPO).endswith("No pull: section.")
+    assert connectors.pull_sources(PULL_HLD) == {REPO: ["test-catalog", "protocols"]}
+    assert connectors.pull_sources(HLD) == {}
+
+
+@pytest.mark.parametrize("pulls,says", [
+    ("pulls notes:graph-sharepoint", "isn't one the platform team has approved"),
+    ("pulls notes", "adapter '?'"),
+    ("pulls notes:object-store", "name the bucket it reads"),
+    ("pulls notes:object-store:bad_bucket", "name the bucket it reads"),
+    ("pulls notes:http-cursor:a-bucket", "names no bucket"),
+    ("pulls no_tes:http-cursor", "name each source once"),
+    ("pulls a:http-cursor, a:http-cursor", "name each source once"),
+])
+def test_unapproved_or_vague_pull_sources_are_refused_at_g4(pulls, says):
+    findings = connectors.design_findings(f"## Integrations\n- {REPO}: {LINE.split(': ', 1)[1].rstrip()}; {pulls}\n",
+                                          REPOS)
+    assert any(says in f for f in findings), findings
+
+
+def test_an_http_pull_needs_its_hosts_and_a_pull_only_connector_is_allowed():
+    no_hosts = (f"## Integrations\n- {REPO}: example-labs; data general; baa no; webhooks none; calls none; "
+                "auth none; pulls a:http-cursor\n")
+    assert any("name them under 'calls'" in f for f in connectors.design_findings(no_hosts, REPOS))
+    files_only = no_hosts.replace("a:http-cursor", "a:object-store:drop-bucket")
+    assert connectors.design_findings(files_only, REPOS) == []
+
+
+def test_the_branch_may_not_pull_more_than_the_design():
+    [line] = connectors.parse_integrations(PULL_HLD)
+    assert connectors.config_findings(PULL_YAML, line) == []
+    extra = PULL_YAML + "  - name: everything\n    adapter: http-cursor\n    request: { path: /v1/all }\n"
+    assert any("pulls 'everything', a source the HLD doesn't approve" in f
+               for f in connectors.config_findings(extra, line))
+    swapped = PULL_YAML.replace("adapter: http-cursor", "adapter: object-store")
+    assert any("reads test-catalog with 'object-store'" in f for f in connectors.config_findings(swapped, line))
+    other = PULL_YAML.replace("bucket: example-labs-drop", "bucket: someone-elses")
+    assert any("from bucket 'someone-elses'" in f for f in connectors.config_findings(other, line))
+    assert "pull must be a list" in connectors.config_findings(YAML + "pull: nope\n", line)[-1]
+    [plain] = connectors.parse_integrations(HLD)
+    assert any("a source the HLD doesn't approve" in f for f in connectors.config_findings(PULL_YAML, plain))

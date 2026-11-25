@@ -7,7 +7,12 @@ processor) for the product. What it may do is approved at G4 and then enforced t
                      that crosses, whether a business associate agreement is signed, the webhooks
                      the vendor calls, the hosts the connector calls and how it authenticates:
                      '- acme-emr/emr-labs: example-labs; data phi; baa yes; webhooks lab-results;
-                     calls api.example-labs.com, auth.example-labs.com; auth oauth2-client-credentials'
+                     calls api.example-labs.com, auth.example-labs.com; auth oauth2-client-credentials;
+                     pulls test-catalog:http-cursor, protocols:object-store:example-labs-drop'
+                     `pulls` (optional) names the sources the connector polls, each with its adapter
+                     (and, for object-store, the bucket). An http-cursor source is read through the
+                     hosts under `calls`. Only the adapters the platform team has approved (ADAPTERS)
+                     pass G4.
   integration.yaml   the repo's own file, which the coder writes from that line. The build fails
                      when the file on the branch allows more than the line (config_findings).
   the platform       on every deploy the tool reads integration.yaml at the deployed commit and
@@ -26,6 +31,10 @@ ROLE = "connector"
 PATH = "integration.yaml"
 DATA_CLASSES = ("general", "payments", "phi")
 AUTHS = ("oauth2-client-credentials", "api-key", "mtls", "none")
+# Pull adapters in template-integration that the platform team has approved. A new one (Graph,
+# Confluence, Drive) is added here only with the platform team's approval, after the template has it.
+ADAPTERS = ("http-cursor", "object-store")
+_BUCKET = re.compile(r"^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$")
 _LINE = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)\s*:\s*(.+?)\s*$", re.M)
 _NAME = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _HOST = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$")
@@ -54,6 +63,26 @@ def check_host(host: str) -> str:
     return ""
 
 
+def _pulls(value: str, problems: list[str]) -> list[dict]:
+    out, seen = [], set()
+    for item in _list(value):
+        name, _, rest = item.partition(":")
+        adapter, _, bucket = rest.partition(":")
+        name, adapter, bucket = name.strip(), adapter.strip(), bucket.strip()
+        if not _NAME.match(name) or name in seen:
+            problems.append(f"pull '{item}': name each source once (lowercase, dashes), as <name>:<adapter>")
+        seen.add(name)
+        if adapter not in ADAPTERS:
+            problems.append(f"pull {name}: adapter '{adapter or '?'}' isn't one the platform team has approved "
+                            f"({', '.join(ADAPTERS)}); a new adapter is theirs to approve")
+        elif adapter == "object-store" and not _BUCKET.match(bucket):
+            problems.append(f"pull {name}: name the bucket it reads, as {name}:object-store:<bucket>")
+        elif adapter == "http-cursor" and bucket:
+            problems.append(f"pull {name}: an http-cursor source names no bucket; its hosts are under 'calls'")
+        out.append({"name": name, "adapter": adapter, "bucket": bucket})
+    return out
+
+
 def parse_integrations(hld: str) -> list[dict]:
     """'## Integrations' lines: repo -> vendor, data class, baa, webhooks, hosts, auth (and problems)."""
     from .agents.parse import section
@@ -70,6 +99,9 @@ def parse_integrations(hld: str) -> list[dict]:
                 "baa": fields.get("baa", "").lower() in ("yes", "true"), "webhooks": _list(fields.get("webhooks", "")),
                 "hosts": _list(fields.get("calls", "")), "auth": fields.get("auth", "").lower(), "problems": []}
         p = line["problems"]
+        line["pulls"] = _pulls(fields.get("pulls", ""), p)
+        if any(x["adapter"] == "http-cursor" for x in line["pulls"]) and not line["hosts"]:
+            p.append("an http-cursor pull is read through the hosts it calls: name them under 'calls'")
         if not _NAME.match(vendor):
             p.append("name the vendor first (lowercase, dashes)")
         if line["data"] not in DATA_CLASSES:
@@ -86,8 +118,8 @@ def parse_integrations(hld: str) -> list[dict]:
             p.append(f"auth none can't carry {line['data']} data")
         if line["auth"] not in ("", "none") and not line["hosts"]:
             p.append(f"auth {line['auth']} but 'calls none': name the hosts it calls, or auth none")
-        if not line["webhooks"] and not line["hosts"]:
-            p.append("nothing crosses: name its webhooks or the hosts it calls")
+        if not line["webhooks"] and not line["hosts"] and not line["pulls"]:
+            p.append("nothing crosses: name its webhooks, the hosts it calls or the sources it pulls")
         out.append(line)
     return out
 
@@ -105,7 +137,8 @@ def design_findings(hld: str, repos: list[dict]) -> list[str]:
     for repo in sorted(connectors - named):
         out.append(f"{repo} is a connector: say what crosses under '## Integrations' ('- {repo}: <vendor>; data "
                    "<general|payments|phi>; baa <yes|no>; webhooks <name, ...|none>; calls <host, ...|none>; "
-                   "auth <oauth2-client-credentials|api-key|mtls|none>')")
+                   "auth <oauth2-client-credentials|api-key|mtls|none>'; optionally "
+                   "'pulls <name>:<adapter>[:<bucket>], ...')")
     return out
 
 
@@ -137,7 +170,24 @@ def coder_instruction(hld: str, repo: str) -> str:
             f"mounted secret; outbound allowed_hosts exactly {hosts} with auth {line['auth']}. Secret names only, "
             "never values. Map the vendor's shapes in src/integration/mapping.py to and from the datasets' "
             "contracts: ids and codes, no more of a record than the contract allows. No other component calls "
-            "this vendor (VX-17).")
+            "this vendor (VX-17)." + _pull_instruction(line))
+
+
+def _pull_instruction(line: dict) -> str:
+    if not line.get("pulls"):
+        return " No pull: section."
+    named = "; ".join(f"{x['name']} ({x['adapter']}" + (f", bucket {x['bucket']}" if x["bucket"] else "") + ")"
+                      for x in line["pulls"])
+    return (f" pull: exactly these sources: {named}. One @pull handler each in mapping.py, returning Emit for "
+            "a record and Delete for one the source says is gone; set deletions (tombstone, or full-listing for "
+            "an object store) and backfill_from, and permissions_field when the dataset carries who may see a "
+            "record. Each dataset a source feeds needs its contract under contracts/.")
+
+
+def pull_sources(hld: str) -> dict[str, list[str]]:
+    """repo -> the pull sources its approved Integrations line names (for staging reconciliation)."""
+    return {x["repo"]: [p["name"] for p in x["pulls"]] for x in parse_integrations(hld)
+            if not x["problems"] and x["pulls"]}
 
 
 def _config(text: str) -> dict | None:
@@ -174,6 +224,29 @@ def config_findings(text: str, line: dict) -> list[str]:
     auth = str((outbound.get("auth") or {}).get("type") or ("none" if not outbound else ""))
     if outbound and auth != line["auth"]:
         out.append(f"{line['repo']}: {PATH} authenticates with {auth!r}; the HLD approved {line['auth']}")
+    return out + _pull_findings(raw, line)
+
+
+def _pull_findings(raw: dict, line: dict) -> list[str]:
+    approved = {x["name"]: x for x in line.get("pulls") or []}
+    pulls = raw.get("pull") or []
+    if not isinstance(pulls, list):
+        return [f"{line['repo']}: {PATH}: pull must be a list of sources"]
+    out = []
+    for p in pulls:
+        if not isinstance(p, dict):
+            continue
+        name, adapter = str(p.get("name") or ""), str(p.get("adapter") or "")
+        want = approved.get(name)
+        if want is None:
+            out.append(f"{line['repo']}: {PATH} pulls {name!r}, a source the HLD doesn't approve")
+            continue
+        if adapter != want["adapter"]:
+            out.append(f"{line['repo']}: {PATH} reads {name} with {adapter!r}; the HLD approved {want['adapter']}")
+        store = p.get("store")
+        bucket = str(store.get("bucket") or "") if isinstance(store, dict) else ""
+        if want["adapter"] == "object-store" and bucket != want["bucket"]:
+            out.append(f"{line['repo']}: {PATH} reads {name} from bucket {bucket!r}; the HLD approved {want['bucket']}")
     return out
 
 

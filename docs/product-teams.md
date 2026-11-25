@@ -319,23 +319,31 @@ the product calls the vendor, and the vendor calls nothing else. They meet as da
 
 The design names what may cross under `## Integrations`:
 `- <org>/<repo>: <vendor>; data <general|payments|phi>; baa <yes|no>; webhooks <name, ...|none>;
-calls <host, ...|none>; auth <oauth2-client-credentials|api-key|mtls|none>`.
+calls <host, ...|none>; auth <oauth2-client-credentials|api-key|mtls|none>`, and, for a connector that
+polls a source the vendor can't push from, `; pulls <name>:http-cursor, <name>:object-store:<bucket>`.
 
 **G4 refuses:**
 - PHI without `baa yes`;
 - hosts given as URLs, wildcards, IP addresses or platform-internal names;
 - `auth none` for PHI or payments;
-- a connector with no line, or a line for a repo that isn't a connector.
+- a connector with no line, or a line for a repo that isn't a connector;
+- a pull adapter the platform team hasn't approved (today `http-cursor` and `object-store`), an
+  object-store source without its bucket, or an http-cursor source with no hosts under `calls`.
 
 In Endpoints, a connector is `external` exactly when it receives webhooks, and needs no ADR for it.
 
 What's approved is enforced three times (`connectors.py`):
 - **Coder.** The coder writes the line into `integration.yaml`.
 - **Build.** The build fails when the file on the branch allows more than the line: another host,
-  another webhook, a lower data class, other auth.
+  another webhook, a lower data class, other auth, another pull source, adapter or bucket.
 - **Deploy.** On every deploy, the tool reads `integration.yaml` at the deployed commit. It sets the
   binding's `webhookPaths`, the only routes the gateway exposes, and its `egressHosts`, the only
   hosts its FQDN egress policy allows (example type `deployment/connector`).
+
+In staging, each approved pull source is reconciled from the connector's `valxel.pulls` line
+(`reconcile.py`): a parked record, or a source whose every run failed, holds the release like a
+dataset that doesn't reconcile. What a pull published is reconciled with its consumers through
+`valxel.datasets`.
 
 Vendor secrets are mounted files, never environment variables. Its post-deploy suite checks from
 outside that:
