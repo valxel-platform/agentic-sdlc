@@ -14,9 +14,9 @@
 version: 1
 
 groups:
-  all: [provider, event-worker, knowledge, reporting, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, consumer, bff, mobile, library, acceptance]
+  all: [provider, event-worker, knowledge, reporting, transform, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, consumer, bff, mobile, library, acceptance]
   # Built into an image and run by OpenChoreo.
-  deployed: [provider, event-worker, knowledge, reporting, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, consumer, bff]
+  deployed: [provider, event-worker, knowledge, reporting, transform, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, consumer, bff]
 
 capabilities:
   # --- security
@@ -59,13 +59,13 @@ capabilities:
     marker: "(?i)opentelemetry"
   error-reports:
     area: observability
-    roles: [provider, event-worker, knowledge, reporting, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, consumer, bff, mobile]
+    roles: [provider, event-worker, knowledge, reporting, transform, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, consumer, bff, mobile]
     says: "unhandled errors to Sentry or GlitchTip, tagged with the component so the tool routes the issue"
     marker: "(?i)sentry"
   json-logs:
     area: observability
     # A web app's container only serves files; its errors are reported from the browser (error-reports).
-    roles: [provider, event-worker, knowledge, reporting, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, bff]
+    roles: [provider, event-worker, knowledge, reporting, transform, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, bff]
     says: "one JSON object a line, the exception under error.stack_trace (the platform's alert rules read it)"
     marker: "(?i)stack_trace|logstash|ecs"
   post-deploy:
@@ -80,12 +80,12 @@ capabilities:
   conformance:
     area: observability
     # A web app is static files served to a browser: its behaviour is its e2e suite's (post-deploy).
-    roles: [provider, event-worker, knowledge, reporting, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, bff]
+    roles: [provider, event-worker, knowledge, reporting, transform, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, bff]
     says: "the built image, run as the platform runs it, emits a valid audit record, sends spans, counts product events and reads flags (conformance.yaml; CI's Conformance step)"
     marker: "conformance\\.py image"
   audit:
     area: audit
-    roles: [provider, knowledge, reporting, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, bff]
+    roles: [provider, knowledge, reporting, transform, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, bff]
     says: "who did what to which records, as valxel.audit.v1 events to the product's audit topic, ids only"
     # The exact event type (audit_event.type below), so a template that sends another can't pass.
     marker: "valxel\\.audit\\.v1"
@@ -106,6 +106,16 @@ capabilities:
     roles: [provider, event-worker, knowledge, job, connector, document-intake, channel, mcp-server, code-sandbox, agent, consumer, mobile, bff]
     says: "users (or items) with the flag on against off, counted so the tool can stop a release that hurts"
     marker: "(?i)flag_cohorts|FlagCohort"
+  data-classes:
+    area: audit
+    roles: [transform]
+    says: "every model column's data class traced through its SQL; a downgrade fails the PR check and the run (transform-check)"
+    marker: "DEIDENTIFY"
+  run-evidence:
+    area: audit
+    roles: [transform]
+    says: "each run's manifest, results, data-class report and counts kept, and a valxel.transform.run line staging reconciles"
+    marker: "valxel\\.transform\\.run"
   dataset-counts:
     area: business-metrics
     roles: [provider, event-worker, knowledge, reporting, connector, document-intake, channel]
@@ -137,6 +147,7 @@ audit_event:
     valxel-platform/template-knowledge: src/knowledge/audit.py
     valxel-platform/template-mcp-server: src/mcp_server/audit.py
     valxel-platform/template-reporting: src/reporting/audit.py
+    valxel-platform/template-transform: src/job/audit.py
     valxel-platform/template-service: src/main/java/com/valxel/service/audit/Auditor.java
 
 # Files another repo keeps a copy of, byte for byte, because a rule there is generated from it.

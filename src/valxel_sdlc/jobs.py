@@ -1,4 +1,5 @@
-"""Scheduled jobs (role `job`, valxel-platform/template-job): their schedules at G4 and on deploy.
+"""Scheduled jobs (role `job`, valxel-platform/template-job, and role `transform`, which runs on the
+same harness from template-transform): their schedules at G4 and on deploy.
 
 A job runs as an OpenChoreo `cronjob/scheduled-task` component. Its schedule lives in two places
 that must agree:
@@ -23,6 +24,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 ROLE = "job"
+ROLES = ("job", "transform")  # every role that runs as a cronjob/scheduled-task with a job.yaml
 PATH = "job.yaml"
 _BOUNDS = ((0, 59), (0, 23), (1, 31), (1, 12), (0, 7))
 _FIELDS = ("minute", "hour", "day of month", "month", "day of week")
@@ -71,14 +73,14 @@ def parse_schedules(hld: str) -> list[dict]:
 
 def design_findings(hld: str, repos: list[dict]) -> list[str]:
     """G4: every job repo the design changes or adds has a usable schedule with a reason."""
-    jobs = {r["name"] for r in repos if r.get("role") == ROLE}
+    jobs = {r["name"] for r in repos if r.get("role") in ROLES}
     lines = parse_schedules(hld)
     out = []
     named = set()
     for s in lines:
         named.add(s["repo"])
         if s["repo"] not in jobs:
-            out.append(f"Schedules: {s['repo']} isn't a job repo in this design (role job)")
+            out.append(f"Schedules: {s['repo']} isn't a job or transform repo in this design")
         if s["problem"]:
             out.append(f"Schedules: {s['repo']}: {s['problem']}")
         if len(s["why"].split()) < 3:

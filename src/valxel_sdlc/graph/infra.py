@@ -71,7 +71,7 @@ def _apply_capacity(services, snap, target: dict, env: str, *, repo: str = "", r
     pipeline = list(target.get("pipeline") or [])
     name = "production" if pipeline and env == pipeline[-1] else env
     extra: dict = {}
-    if repo and role == jobs.ROLE:
+    if repo and role in jobs.ROLES:
         extra = jobs.read_configs(services.github, repo, ref, name)
     elif repo and role == connectors.ROLE:
         extra = connectors.read_configs(services.github, repo, ref)

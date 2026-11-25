@@ -553,6 +553,10 @@ SECURITY = {
                   " generalize what a de-identified destination gets, never send a secret field, and set tenant on"
                   " every table that has one; reporting-admin check must pass. Reports read through"
                   " reporting_reader with row-level security; Kafka as this component's own identity (VX-17)."),
+    "transform": (" Models read only the sources.yml the tool gives; every column declares its data class and"
+                  " transform-check passes; marts are published only by the run (never by hand), readable by"
+                  " reporting_reader with row-level security by tenant; the tokenize key and the database URL are"
+                  " mounted files, never in SQL, profiles or logs (VX-17)."),
     "job": (" job.yaml's schedule and time zone are the HLD's Schedules line for this repo; the work covers"
             " run.window_start to run.window_end, is safe to run twice over the same window (upserts keyed by"
             " the item, or a record of what was sent), calls run.check() between items and changes nothing on"
@@ -644,11 +648,32 @@ def contracts_instruction(ctx: dict, task: dict) -> str:
 
 def schedule_instruction(ctx: dict, task: dict) -> str:
     """A job's schedule from the approved HLD, for its job.yaml (jobs.py)."""
-    if task.get("role") != "job":
+    from ..jobs import ROLES, coder_instruction
+
+    if task.get("role") not in ROLES:
         return ""
-    from ..jobs import coder_instruction
 
     return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
+
+
+def pipelines_instruction(ctx: dict, task: dict) -> str:
+    """A transform's sources.yml, warehouse and marts, or a reporting repo's table names a transform
+    reads, from the approved HLD (pipelines.py)."""
+    if task.get("role") not in ("transform", "reporting"):
+        return ""
+    from ..pipelines import coder_instruction
+
+    return coder_instruction(ctx.get("hld_text") or "", task.get("repo", ""))
+
+
+def pipelines_findings(services, ctx: dict, results: dict) -> list[str]:
+    """Deterministic: a transform's branch stays within its Pipelines line; a reporting branch a
+    transform reads names its tables."""
+    if not any(r.get("role") in ("transform", "reporting") for r in results.values()):
+        return []
+    from ..pipelines import build_findings
+
+    return build_findings(services.github, ctx.get("hld_text") or "", results)
 
 
 def channels_instruction(ctx: dict, task: dict) -> str:
@@ -860,7 +885,7 @@ def coder_tail(ctx: dict, task: dict, fix: list[str], mine: list[dict], live: bo
           + ux_instruction(ctx, task)
           + acceptance_instruction(ctx, task) + security_instruction(ctx, task)
           + resources_instruction(ctx, task) + retrieval.instruction(ctx, task)
-          + contracts_instruction(ctx, task) + schedule_instruction(ctx, task)
+          + contracts_instruction(ctx, task) + schedule_instruction(ctx, task) + pipelines_instruction(ctx, task)
           + integration_instruction(ctx, task) + sandbox_instruction(ctx, task)
           + documents_instruction(ctx, task) + channels_instruction(ctx, task) + agent_tools_instruction(ctx, task)
           + " The summary is the PR description: what changed, and every flag, audit record and event"
@@ -1207,6 +1232,7 @@ def build_build_subgraph(services):
         findings += instrumentation_findings(s["ctx"], results)
         findings += integration_findings(services, s["ctx"], results)
         findings += documents_findings(services, s["ctx"], results)
+        findings += pipelines_findings(services, s["ctx"], results)
         findings += channels_findings(services, s["ctx"], results)
         findings += agent_tools_findings(services, s["ctx"], results)
         lines = [f"# Build: {s['ctx']['title']}", "", "## Pull requests"]

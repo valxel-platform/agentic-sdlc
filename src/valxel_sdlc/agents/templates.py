@@ -254,7 +254,7 @@ def architecture(ctx: dict, defective: bool) -> str:
                   f"- {record}.read: {record} (who opened which {record}, through which service)",
                   f"- {record}.change: {record} (who changed it, on whose behalf, approved by whom)"]
     lines += ["", "## Endpoints", *_endpoint_lines(repos)]
-    jobs = [r for r in repos if r["role"] == "job"]
+    jobs = [r for r in repos if r["role"] in ("job", "transform")]
     if jobs:
         lines += ["", "## Schedules"] + [f"- {r['name']}: 15 3 * * * America/Chicago; runs {_slug(ctx['title'])} "
                                          "for the day before" for r in jobs]
@@ -471,6 +471,7 @@ def plan(ctx: dict, defective: bool) -> str:
             "knowledge": ["knowledge.yaml", "evals/questions.yaml"],
             "reporting": ["reporting.yaml"],
             "job": ["job.yaml", "src/job/work.py", "tests/test_work.py"],
+            "transform": ["transform.yaml", "dbt/models/sources.yml", "dbt/models/marts/marts.yml"],
             "connector": ["integration.yaml", "src/integration/mapping.py", "tests/test_mapping.py"],
             "code-sandbox": ["workload.yaml", "tests/test_server.py"],
             "document-intake": ["intake.yaml", "contracts/lock.yaml", "tests/test_api.py"],
@@ -562,7 +563,7 @@ def _endpoint_lines(repos: list[dict]) -> list[str]:
     for r in repos:
         if r["role"] in ("library", "acceptance"):
             continue
-        vis = {"bff": "external", "event-worker": "none", "mobile": "none", "job": "none",
+        vis = {"bff": "external", "event-worker": "none", "mobile": "none", "job": "none", "transform": "none",
                "connector": "external", "channel": "external"}.get(r["role"], "project")
         targets = calls.get(r["role"], [])
         out.append(f"- {r['name']}: {vis}" + (f"; calls {', '.join(targets)}" if targets else ""))

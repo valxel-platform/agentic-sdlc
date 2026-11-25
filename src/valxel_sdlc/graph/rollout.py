@@ -29,6 +29,7 @@ def datasets_staging(services, state: FeatureState) -> dict:
     (valxel_sdlc.reconcile)."""
     from ..connectors import pull_sources
     from ..datasets import parse_hld
+    from ..pipelines import parse_pipelines
     from ..reconcile import staging_check
 
     ref = (state.get("artifacts") or {}).get("HLD")
@@ -36,7 +37,9 @@ def datasets_staging(services, state: FeatureState) -> dict:
     contracts = parse_hld(hld)[0] if hld else []
     rt = services.feature_snapshot(state).product.runtime or {}
     env = env_for("staging", tuple(rt.get("pipeline") or PIPELINE)) or "staging"
-    return staging_check(services, state, contracts, env, pulls=pull_sources(hld) if hld else {})
+    transforms = [p["repo"] for p in parse_pipelines(hld) if not p["problems"]] if hld else []
+    return staging_check(services, state, contracts, env, pulls=pull_sources(hld) if hld else {},
+                         transforms=transforms)
 
 
 def instrumentation_staging(services, state: FeatureState) -> dict:

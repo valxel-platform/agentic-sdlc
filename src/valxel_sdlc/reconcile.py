@@ -22,6 +22,15 @@ For each source the HLD's Integrations line approves: a record parked (it broke 
 its handler) or a source that ran in staging and never succeeded holds the release. A source that
 didn't run in staging isn't exercised, as for a dataset nobody published. What a pull published
 reaches the valxel.datasets reconciliation above like any producer's events.
+
+Transforms (the HLD's Pipelines section) log one line per run:
+
+    valxel.transform.run {"component":"emr-transform","published":true,"tests":{"passed":9,"failed":0},
+                          "control_totals":3,"classes_ok":true,...}
+
+A transform that ran in staging and never published, or any run whose data-class check failed (a
+column below the data it's made from, past CI), holds the release. What did publish is reported
+with its tests and control totals, for G6.
 """
 
 from __future__ import annotations
@@ -32,6 +41,7 @@ from .outcomes.instrumentation import _since
 
 MARKER = "valxel.datasets"
 PULLS = "valxel.pulls"
+TRANSFORMS = "valxel.transform.run"
 RECEIVED = ("applied", "duplicate", "skipped", "parked")
 
 
@@ -107,13 +117,60 @@ def pull_problems(sources: dict[str, list[str]], counts: dict[str, dict[str, dic
     return out
 
 
+def transform_runs(entries) -> dict[str, dict[str, int]]:
+    """[(component, line)] -> component -> runs, published, tests passed and failed, control totals,
+    and runs whose data-class check failed."""
+    out: dict[str, dict[str, int]] = {}
+    for component, text in entries:
+        i = text.find(TRANSFORMS + " ")
+        if i < 0:
+            continue
+        try:
+            rec = json.loads(text[i + len(TRANSFORMS):].strip())
+        except ValueError:
+            try:
+                rec = json.loads(json.loads(text).get("message", "").split(TRANSFORMS + " ", 1)[1].strip())
+            except (ValueError, AttributeError, IndexError, TypeError):
+                continue
+        if not isinstance(rec, dict):
+            continue
+        row = out.setdefault(str(component), {"runs": 0, "published": 0, "tests_passed": 0, "tests_failed": 0,
+                                              "control_totals": 0, "classes_failed": 0})
+        raw_tests = rec.get("tests")
+        tests: dict = raw_tests if isinstance(raw_tests, dict) else {}
+        row["runs"] += 1
+        row["published"] += 1 if rec.get("published") is True else 0
+        row["tests_passed"] += int(tests.get("passed") or 0) if rec.get("published") else 0
+        row["tests_failed"] += int(tests.get("failed") or 0)
+        row["control_totals"] += int(rec.get("control_totals") or 0) if rec.get("published") else 0
+        row["classes_failed"] += 1 if rec.get("classes_ok") is False else 0
+    return out
+
+
+def transform_problems(transforms: list[str], runs: dict[str, dict[str, int]]) -> list[dict]:
+    out = []
+    for repo in sorted(transforms):
+        row = runs.get(repo.split("/", 1)[-1]) or {}
+        if row.get("classes_failed"):
+            out.append({"repo": repo, "dataset": "transform",
+                        "message": f"{row['classes_failed']} run(s) failed the data-class check in staging: a column "
+                                   "below the data it's made from"})
+        if row.get("runs") and not row.get("published"):
+            out.append({"repo": repo, "dataset": "transform",
+                        "message": f"ran {row['runs']} time(s) in staging and never published: its tests, control "
+                                   "totals or build failed"})
+    return out
+
+
 def staging_check(services, state: dict, contracts: list[dict], environment: str,
-                  pulls: dict[str, list[str]] | None = None) -> dict:
+                  pulls: dict[str, list[str]] | None = None, transforms: list[str] | None = None) -> dict:
     """{"checked", "environment", "datasets", "pulls", "problems": [{"repo", "dataset", "message"}], "why"?}"""
     pulls = {r: list(n) for r, n in (pulls or {}).items() if n}
+    transforms = sorted(set(transforms or []))
     base = {"checked": False, "environment": environment, "datasets": [str(c.get("id")) for c in contracts],
-            "pulls": sorted(f"{r.split('/', 1)[-1]}/{n}" for r, ns in pulls.items() for n in ns), "problems": []}
-    if not contracts and not pulls:
+            "pulls": sorted(f"{r.split('/', 1)[-1]}/{n}" for r, ns in pulls.items() for n in ns),
+            "transforms": [t.split("/", 1)[-1] for t in transforms], "problems": []}
+    if not contracts and not pulls and not transforms:
         return {**base, "why": "the design names no data contracts"}
     faults = int((state.get("simulate_faults") or {}).get("datasets", 0))
     logs = getattr(services, "cohort_logs", None)
@@ -139,14 +196,18 @@ def staging_check(services, state: dict, contracts: list[dict], environment: str
 
         entries = read(MARKER) if contracts else []
         pulled = read(PULLS) if pulls else []
+        ran = read(TRANSFORMS) if transforms else []
     except Exception as exc:  # noqa: BLE001 - reported at G6, not a failure of the feature
         return {**base, "why": f"couldn't read the logs: {type(exc).__name__}: {exc}"[:200]}
-    found = problems(contracts, parse(entries)) + pull_problems(pulls, parse(pulled, PULLS))
-    return {**base, "checked": True, "problems": found}
+    runs = transform_runs(ran)
+    found = (problems(contracts, parse(entries)) + pull_problems(pulls, parse(pulled, PULLS))
+             + transform_problems(transforms, runs))
+    quality = {t.split("/", 1)[-1]: runs[t.split("/", 1)[-1]] for t in transforms if t.split("/", 1)[-1] in runs}
+    return {**base, "checked": True, "problems": found, "quality": quality}
 
 
 def describe(check: dict) -> str:
-    if not check or not (check.get("datasets") or check.get("pulls")):
+    if not check or not (check.get("datasets") or check.get("pulls") or check.get("transforms")):
         return ""
     if not check.get("checked"):
         return f"Datasets not reconciled: {check.get('why', '')}"
@@ -155,4 +216,9 @@ def describe(check: dict) -> str:
             f"{p['repo'].split('/', 1)[-1]} {p['message']}" for p in check["problems"])
     parts = [f"{len(check['datasets'])} datasets"] if check.get("datasets") else []
     parts += [f"{len(check['pulls'])} pull sources"] if check.get("pulls") else []
-    return f"All {' and '.join(parts)} reconcile in {check['environment']}"
+    parts += [f"{len(check['transforms'])} transforms"] if check.get("transforms") else []
+    quality = "".join(
+        f"; {name} published {q['published']} of {q['runs']} runs, {q['tests_passed']} tests and "
+        f"{q['control_totals']} control totals passed"
+        for name, q in sorted((check.get("quality") or {}).items()))
+    return f"All {' and '.join(parts)} reconcile in {check['environment']}{quality}"
