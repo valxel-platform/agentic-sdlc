@@ -33,9 +33,9 @@ Every release has notes on its GitHub release page, with:
 - the three image digests and the chart version;
 - what changed, for operators and for product teams;
 - any new or changed values, and their defaults;
-- a **migration note**, if the database changes: what changes, whether a rollback needs the
-  snapshot (see [rolling back](self-hosted.md#4-upgrade)), and roughly how long the change takes
-  on a large install;
+- a **migration note**, if the database changes: what it adds, and roughly how long the change
+  takes on a large install. A release only adds to the schema, so rolling back needs no snapshot
+  (ADR 0012); a removal ships in a later release, and its note says which release stopped using it;
 - security fixes, with their CVE or advisory ids.
 
 ## Upgrading

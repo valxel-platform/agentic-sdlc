@@ -182,3 +182,40 @@ class FakeSignals:
                  "severity": "sev3", "title": str(payload.get("name") or ""), "detail": "",
                  "fingerprint": f"{self.kind}:{payload.get('name')}", "url": "", "at": datetime.now(UTC).isoformat(),
                  "labels": {}}]
+
+
+class MemoryCopies:
+    """DatabaseCopies in memory: copies of named instances, each with a host and a password."""
+
+    def __init__(self, sources: dict[str, dict] | None = None) -> None:
+        self.sources = sources if sources is not None else {"tool-db": {"user": "postgres"}}
+        self.copies: dict[str, dict] = {}
+        self.deleted: list[str] = []
+
+    def copy(self, source: str, name: str) -> dict:
+        if source not in self.sources:
+            raise KeyError(f"no instance {source}")
+        if name in self.copies:
+            raise FileExistsError(f"{name} already exists")
+        self.copies[name] = {"host": f"{name}.internal", "port": 5432, "user": self.sources[source]["user"],
+                             "source": source, "password": ""}
+        return {k: self.copies[name][k] for k in ("host", "port", "user")}
+
+    def set_password(self, name: str, user: str) -> str:
+        import secrets
+
+        self.copies[name]["password"] = secrets.token_urlsafe(16)
+        return str(self.copies[name]["password"])
+
+    def delete(self, name: str) -> None:
+        if self.copies.pop(name, None) is not None:
+            self.deleted.append(name)
+
+
+class MemoryReports:
+    def __init__(self) -> None:
+        self.objects: dict[str, tuple[bytes, str]] = {}
+
+    def put(self, key: str, data: bytes, content_type: str = "application/json") -> None:
+        self.objects[key] = (data, content_type)
+

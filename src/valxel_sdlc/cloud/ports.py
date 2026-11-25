@@ -12,6 +12,8 @@ in-memory one for each, and `conformance.py` the behavior every implementation m
     CostSource         what a product's features and components cost (ops.cost, finops)
     ResourceInventory  which cloud resources a product owns, by its labels or tags (ops.inventory)
     SignalSource       a cloud's alarms, budget alerts and findings, parsed into signals (ops.signals)
+    DatabaseCopies     a throwaway copy of the tool's managed Postgres, as of now (the release rehearsal)
+    ReportStore        a plain object, written over, for a reader outside the cloud (the release rehearsal)
 
 The first four and CostSource were already interfaces; they live here now, and the modules that
 used them re-export them under the same names. CostSource's cloud methods are cloud_costs and
@@ -101,5 +103,24 @@ class SignalSource(Protocol):
     def parse(self, payload: dict) -> list[dict]: ...  # ops.signals' shape; [] if not this kind
 
 
+@runtime_checkable
+class DatabaseCopies(Protocol):
+    """Copies of a managed Postgres instance, for the release rehearsal (valxel_sdlc.rehearsal):
+    RDS point-in-time restore, a Cloud SQL clone, an Azure Flexible Server point-in-time restore.
+    `source` and `name` are the cloud's own names for an instance (an RDS identifier, a Cloud SQL
+    instance, a Flexible Server); a copy lands beside its source, in its network."""
+
+    def copy(self, source: str, name: str) -> dict: ...  # restored and ready: {"host", "port", "user"}
+    def set_password(self, name: str, user: str) -> str: ...  # a new one, returned and never stored
+    def delete(self, name: str) -> None: ...  # gone or going; nothing to do if it isn't there
+
+
+@runtime_checkable
+class ReportStore(Protocol):
+    """Plain objects someone outside the cloud reads, written over each time (rehearsal reports)."""
+
+    def put(self, key: str, data: bytes, content_type: str = "application/json") -> None: ...
+
+
 PORTS = (SecretStore, Signer, AnchorStore, ImmutableStore, IdentityProvider, CloudAccounts, CostSource,
-         ResourceInventory, SignalSource)
+         ResourceInventory, SignalSource, DatabaseCopies, ReportStore)
