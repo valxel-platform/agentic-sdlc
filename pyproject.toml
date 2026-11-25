@@ -44,7 +44,7 @@ azure = ["azure-identity>=1.19", "azure-keyvault-secrets>=4.9", "azure-keyvault-
 dev = ["pytest>=8", "pytest-cov>=6", "pytest-xdist>=3.6", "httpx>=0.27", "pyjwt[crypto]>=2.8", "mcp>=1.10", "opentelemetry-sdk>=1.27",
        "moto[server]>=5.1"]  # tests/test_aws_emulated.py: the AWS adapters against moto (CP-116)
 # The lint gate (scripts/lint_ratchet.py): pinned, since a new version's new findings would fail it.
-lint = ["ruff==0.16.9", "mypy==2.3.1"]
+lint = ["ruff==0.17.6", "mypy==2.4.1"]
 
 [project.scripts]
 valxel = "valxel_sdlc.cli:main"
