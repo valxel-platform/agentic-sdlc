@@ -31,7 +31,9 @@ Every release keeps the database usable by the image before it.
   with that release, so the exception is reviewed and visible.
 - **Stored data follows the same rule.** A new field in stored JSON (feature state, checkpoints,
   documents) is optional, and code reads past fields it doesn't know. A change to what an existing
-  field means gets a new field instead.
+  field means gets a new field instead. The same goes for columns: code that reads `SELECT *` keeps
+  the columns it knows, since a newer release may have added some (the usage ledger didn't, and the
+  release rehearsal found it).
 - **Dependencies count.** A major version of `langgraph-checkpoint-postgres` (or anything else that
   migrates the database) is upgraded like a contraction: in a release of its own, after checking
   the previous image runs against its migrated tables.
