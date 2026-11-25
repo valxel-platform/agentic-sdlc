@@ -337,8 +337,9 @@ CAPS = [
         "trust",
         "Trust and access",
         "Workspaces and tenancy, secrets and signing, audit trail and anchors, artifacts, telemetry and safe "
-        "mode, the tool's own hosting tiers.",
+        "mode, the tool's own hosting tiers and the releases it proposes for itself.",
         [
+            "release_proposals",
             "workspaces",
             "tenancy",
             "billing",
