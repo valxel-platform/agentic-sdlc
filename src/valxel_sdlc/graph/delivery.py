@@ -289,7 +289,7 @@ def make_env_wait(services, stage: str, ok: str, retry: str):
                                      missing=list(check.get("missing") or [])))
                 # Did every event published reach every consumer, with none breaking its contract?
                 reset["datasets_check"] = recon = datasets_staging(services, state)
-                if recon.get("datasets") or recon.get("pulls"):
+                if recon.get("datasets") or recon.get("pulls") or recon.get("transforms"):
                     from ..reconcile import describe as describe_datasets
 
                     evs.append(event("staging_wait", "datasets", describe_datasets(recon),

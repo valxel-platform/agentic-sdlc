@@ -123,3 +123,39 @@ def test_the_staging_check_reads_pull_runs_for_the_designs_pull_sources():
     ok = reconcile.staging_check(services(Logs()), state, [notes()], "staging",
                                  pulls={"acme-emr/emr-labs": ["test-catalog"]})
     assert reconcile.describe(ok) == "All 1 datasets and 1 pull sources reconcile in staging"
+
+
+TRANSFORM_LINE = "valxel.transform.run"
+
+
+def run_line(component, **rec):
+    base = {"component": component, "published": True, "tests": {"passed": 9, "failed": 0}, "control_totals": 3,
+            "classes_ok": True}
+    return (component, f"{TRANSFORM_LINE} {json.dumps({**base, **rec})}")
+
+
+def test_transform_runs_are_summed_and_a_failed_class_check_or_nothing_published_holds_the_release():
+    rows = [run_line("emr-transform"), run_line("emr-transform", published=False, tests={"passed": 8, "failed": 1}),
+            run_line("emr-marts", published=False), run_line("emr-marts", published=False, classes_ok=False),
+            ("emr-transform", "something else")]
+    runs = reconcile.transform_runs(rows)
+    assert runs["emr-transform"] == {"runs": 2, "published": 1, "tests_passed": 9, "tests_failed": 1,
+                                     "control_totals": 3, "classes_failed": 0}
+    found = reconcile.transform_problems(["acme-emr/emr-transform", "acme-emr/emr-marts", "acme-emr/quiet"], runs)
+    assert [(p["repo"], p["message"].split(":")[0]) for p in found] == [
+        ("acme-emr/emr-marts", "1 run(s) failed the data-class check in staging"),
+        ("acme-emr/emr-marts", "ran 2 time(s) in staging and never published"),
+    ]
+
+
+def test_the_staging_check_reports_each_transforms_tests_and_control_totals_for_g6():
+    state = {"product_id": "EMR", "events": [{"node": "deploy_staging", "at": "2026-11-16T10:00:00+00:00"}]}
+
+    class Runs:
+        def entries(self, **kw):
+            return [run_line("emr-transform")] if kw["phrase"] == TRANSFORM_LINE else []
+
+    check = reconcile.staging_check(services(Runs()), state, [], "staging", transforms=["acme-emr/emr-transform"])
+    assert check["checked"] and check["transforms"] == ["emr-transform"] and check["problems"] == []
+    assert reconcile.describe(check) == ("All 1 transforms reconcile in staging; emr-transform published 1 of 1 "
+                                         "runs, 9 tests and 3 control totals passed")

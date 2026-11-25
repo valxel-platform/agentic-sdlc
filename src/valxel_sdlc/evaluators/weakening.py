@@ -6,11 +6,18 @@ AI-DLC puts it as "quality targets are inputs, not suggestions". The coder's per
 check makes it stick: it compares each changed file on the task's branch with the default branch
 and reports what was weakened. A finding sends the work back to the coder; when weakening is the
 right call, the people at the gate decide (the finding names exactly what changed).
+
+A transform's dbt model files (dbt/models/**.yml) have two checks of their own to weaken: a
+column's `data_class` lowered (or dropped), which lets more sensitive data reach a mart under a
+lesser class, and a `valxel_control_total` removed from a model (pipelines.py, template-transform).
+Either goes to the people at the gate, never on the reviewer's say-so.
 """
 
 from __future__ import annotations
 
 import re
+
+import yaml
 
 # Lines that skip, disable or silence a check, by language and tool.
 SUPPRESSIONS: dict[str, re.Pattern] = {
@@ -51,6 +58,45 @@ def _added(old: str, new: str) -> list[str]:
     return out
 
 
+DBT_MODELS = re.compile(r"(^|/)dbt/models/.+\.ya?ml$")
+CLASS_RANK = {c: i for i, c in enumerate(("none", "pii", "financial", "phi", "secret"))}
+
+
+def _dbt(text: str) -> tuple[dict[tuple[str, str], str], dict[str, int]]:
+    """(model, column) -> data_class, and model -> control totals, from a dbt .yml."""
+    try:
+        doc = yaml.safe_load(text or "") or {}
+    except yaml.YAMLError:
+        return {}, {}
+    classes: dict[tuple[str, str], str] = {}
+    totals: dict[str, int] = {}
+    for m in doc.get("models") or [] if isinstance(doc, dict) else []:
+        if not isinstance(m, dict):
+            continue
+        name = str(m.get("name"))
+        for c in m.get("columns") or []:
+            if isinstance(c, dict):
+                classes[(name, str(c.get("name")))] = str((c.get("meta") or {}).get("data_class") or "")
+        tests = m.get("data_tests") or m.get("tests") or []
+        totals[name] = sum(1 for t in tests if isinstance(t, dict) and "valxel_control_total" in t)
+    return classes, totals
+
+
+def _dbt_weakening(path: str, old: str, new: str) -> list[str]:
+    out = []
+    (was, was_totals), (now, now_totals) = _dbt(old), _dbt(new)
+    for (model, col), before in sorted(was.items()):
+        after = now.get((model, col))
+        if after is None and model not in {m for m, _ in now}:
+            continue  # the model moved or went: transform-check and the marts check see it
+        if before in CLASS_RANK and (after not in CLASS_RANK or CLASS_RANK[after] < CLASS_RANK[before]):
+            out.append(f"{path}: lowers {model}.{col}'s data class from {before} to {after or 'nothing'}")
+    for model, n in sorted(was_totals.items()):
+        if model in now_totals and now_totals[model] < n:
+            out.append(f"{path}: removes a control total from {model}")
+    return out
+
+
 def _thresholds(text: str) -> dict[str, list[float]]:
     found: dict[str, list[float]] = {}
     for key, num in THRESHOLDS.findall(text):
@@ -77,6 +123,8 @@ def compare(path: str, old: str | None, new: str | None) -> list[str]:
         removed = len(TEST_CASE.findall(old)) - len(TEST_CASE.findall(new))
         if removed > 0:
             out.append(f"{path}: removes {removed} test case{'s' if removed > 1 else ''}")
+    if DBT_MODELS.search(path) and old:
+        out += _dbt_weakening(path, old, new)
     if CONFIG_FILE.search(path) and old:
         before, after = _thresholds(old), _thresholds(new)
         for key, values in before.items():

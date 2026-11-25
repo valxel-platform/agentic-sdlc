@@ -246,6 +246,9 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     from ..jobs import design_findings as schedule_findings
 
     out += schedule_findings(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
+    from ..pipelines import design_findings as pipeline_findings
+
+    out += pipeline_findings(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
     from ..connectors import design_findings as integration_findings
 
     out += integration_findings(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
@@ -281,7 +284,8 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     return out
 
 
-RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge", "reporting", "job",
+RUNTIME_ROLES = ("provider", "event-worker", "consumer", "agent", "mcp-server", "knowledge", "reporting", "transform",
+                 "job",
                  "connector", "code-sandbox", "document-intake",
                  "channel")
 

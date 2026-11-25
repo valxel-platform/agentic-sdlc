@@ -115,6 +115,7 @@ platform_repos:
   valxel-platform/template-mcp-server: { kind: template, role: mcp-server }
   valxel-platform/template-knowledge: { kind: template, role: knowledge }
   valxel-platform/template-reporting: { kind: template, role: reporting }
+  valxel-platform/template-transform: { kind: template, role: transform }
   valxel-platform/template-job: { kind: template, role: job }
   valxel-platform/template-integration: { kind: template, role: connector }
   valxel-platform/template-code-sandbox: { kind: template, role: code-sandbox }
@@ -166,6 +167,15 @@ roles:
     template: valxel-platform/template-reporting
     required_checks: [unit, CodeQL]  # unit runs reporting-admin check and the row-level security tests
     openchoreo: { component_type: deployment/worker, workflow: docker }
+  # Marts over reporting's tables (the design "Data pipelines on Valxel"): dbt models run on the job
+  # harness's schedule, built in a schema of their own and published only when every dbt test,
+  # control total and data-class check passes. The HLD's Pipelines section approves what each
+  # transform reads, its warehouse and its marts with their classes at G4 (valxel_sdlc.pipelines);
+  # the tool writes its dbt/models/sources.yml from those datasets. Scheduled like a job.
+  transform:
+    template: valxel-platform/template-transform
+    required_checks: [unit, CodeQL]  # unit builds every model on Postgres, the deletion proof and transform-check
+    openchoreo: { component_type: cronjob/scheduled-task, workflow: docker }
   # Work due at a time, not in reply to a request or an event: reminders, reconciliations,
   # retention purges, report builds. OpenChoreo runs it as a CronJob; the tool sets its schedule,
   # time zone, time limit and suspend flag per environment from the repo's job.yaml on every deploy
