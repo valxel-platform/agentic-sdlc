@@ -249,6 +249,9 @@ def _architecture(text: str, ctx: dict) -> list[str]:
     from ..pipelines import design_findings as pipeline_findings
 
     out += pipeline_findings(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
+    from ..pipelines import login_findings
+
+    out += login_findings(text, ctx.get("aws_catalog") or {})
     from ..connectors import design_findings as integration_findings
 
     out += integration_findings(text, repos + [r for r in new if r["name"] not in {x["name"] for x in repos}])
