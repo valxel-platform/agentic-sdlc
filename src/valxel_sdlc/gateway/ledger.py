@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import threading
 from collections import defaultdict
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Iterable, Protocol
 
 
@@ -141,10 +141,12 @@ class PostgresLedger:
         args = {"feature_id": feature_id, "product_id": product_id, "since": since}
         with self.pool.connection() as conn:
             rows = conn.execute(sql, args).fetchall()
+        known = {f.name for f in fields(UsageRecord)}
         out = []
         for r in rows:
-            r = dict(r)
-            r.pop("id", None)
+            # Only the columns this release knows: a newer release may have added some, and rolling
+            # back to this one has to keep working (ADR 0012).
+            r = {k: v for k, v in dict(r).items() if k in known}
             r["ts"] = r["ts"].isoformat() if hasattr(r["ts"], "isoformat") else r["ts"]
             r["est_cost_usd"] = float(r["est_cost_usd"])
             r["duration_s"] = float(r.get("duration_s") or 0.0)
