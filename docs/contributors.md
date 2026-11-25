@@ -13,6 +13,7 @@ Back to the [README](../README.md).
 - [The pilot: measuring the 85/15 goal](#the-pilot-measuring-the-8515-goal)
 - [How the design maps to code](#how-the-design-maps-to-code)
 - [Decisions](#decisions)
+- [Changing the schema](#changing-the-schema)
 - [Layout](#layout)
 
 ## Prompt practices borrowed from AWS's AI-DLC
@@ -326,7 +327,18 @@ rubber-stamping shows against the 85/15 goal.
 **G3 and G4 are decided as a pair.** They wait in the same graph step, so a `revise` at one takes
 effect once the other is also decided. An earlier approval of the other gate still counts.
 
-## Layout
+## Changing the schema
+
+Every release has to run with the database the next one leaves behind, so that reverting an image
+is the whole rollback ([ADR 0012](adr/0012-every-release-rolls-back-one-image.md)). The tool
+brings its schema up to date as it starts, so:
+
+- Add, don't change: new tables, columns that allow NULL or have a default, indexes, all with
+  `IF NOT EXISTS`. New fields in stored JSON are optional, and code reads past ones it doesn't know.
+- Drop, rename, retype or tighten something only in a later release than the one that stopped
+  using it, and list the statement in `config/schema-contractions.yaml` with that release.
+- `tests/test_schema_rollback.py` fails on anything else in `src/`.
+
 
 ```
 config/            knowledge.yaml (design knowledge sources), repos.yaml (golden path for new repos), quality.yaml (test and security suites, floors per data class), tools.yaml (MCP servers, tools allowed per data class), registry.yaml (governance repo per product, platform limits), models.yaml (role registry)

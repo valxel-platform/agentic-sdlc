@@ -1,0 +1,12 @@
+# Schema changes the previous image couldn't run against, each made on purpose (ADR 0012).
+#
+# A release only expands the schema: new tables, new nullable columns or columns with a default,
+# new indexes. Reverting to the previous image then works, because that image ignores what it
+# doesn't know. Dropping, renaming, retyping or tightening something is the contract step: it ships
+# in a later release than the one that stopped using it, so the image before it never needs it.
+# tests/test_schema_rollback.py fails on any such statement in src/ that isn't listed here.
+#
+#   - match: "ALTER TABLE valxel_usage DROP COLUMN IF EXISTS old_field"   # the statement, as in the code
+#     file: src/valxel_sdlc/gateway/ledger.py
+#     reason: unused since 0.9.0 (abc1234), which is the release before this one
+contractions: []
