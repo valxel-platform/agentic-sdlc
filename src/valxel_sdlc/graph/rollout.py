@@ -25,15 +25,18 @@ def _goal_events(services, state: FeatureState) -> list[dict]:
 
 
 def datasets_staging(services, state: FeatureState) -> dict:
-    """The design's data contracts, reconciled in staging (valxel_sdlc.reconcile)."""
+    """The design's data contracts and its connectors' pull sources, reconciled in staging
+    (valxel_sdlc.reconcile)."""
+    from ..connectors import pull_sources
     from ..datasets import parse_hld
     from ..reconcile import staging_check
 
     ref = (state.get("artifacts") or {}).get("HLD")
-    contracts = parse_hld(services.artifacts.load(ref))[0] if ref else []
+    hld = services.artifacts.load(ref) if ref else ""
+    contracts = parse_hld(hld)[0] if hld else []
     rt = services.feature_snapshot(state).product.runtime or {}
     env = env_for("staging", tuple(rt.get("pipeline") or PIPELINE)) or "staging"
-    return staging_check(services, state, contracts, env)
+    return staging_check(services, state, contracts, env, pulls=pull_sources(hld) if hld else {})
 
 
 def instrumentation_staging(services, state: FeatureState) -> dict:

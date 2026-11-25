@@ -136,3 +136,147 @@ def test_the_connector_role_is_registered_everywhere_roles_are_listed():
     assert catalog_info.TYPES["connector"] == "service" and "/webhooks/<name>" in SECURITY["connector"]
     assert "connector" in AUDITED_ROLES and "connector" in FLAGGED_ROLES
     assert "connector" in template_contract.roles_with("post-deploy")
+
+
+
+PULLS = "; pulls test-catalog:http-cursor, protocols:object-store:lab-drop"
+BUCKET = "\n## Resources\n- lab-drop: object-bucket; expire_days=30\n  reads: emr-labs\n"
+PULL_HLD = "## Integrations\n" + LINE.rstrip("\n") + PULLS + "\n" + BUCKET
+PULL_YAML = YAML + """pull:
+  - name: test-catalog
+    adapter: http-cursor
+    request: { path: /v1/tests }
+  - name: protocols
+    adapter: object-store
+    store: { kind: s3, resource: lab-drop }
+    deletions: full-listing
+"""
+
+
+def test_approved_pull_sources_parse_and_the_coder_is_told_exactly_which():
+    assert connectors.design_findings(PULL_HLD, REPOS) == []
+    [line] = connectors.parse_integrations(PULL_HLD)
+    assert line["pulls"] == [{"name": "test-catalog", "adapter": "http-cursor", "resource": ""},
+                             {"name": "protocols", "adapter": "object-store", "resource": "lab-drop"}]
+    said = connectors.coder_instruction(PULL_HLD, REPO)
+    assert ("pull: exactly these sources: test-catalog (http-cursor); protocols (object-store, store "
+            "{kind: s3, resource: lab-drop})") in said
+    assert "@pull handler each" in said and "never by bucket name" in said
+    assert connectors.coder_instruction(HLD, REPO).endswith("No pull: section.")
+    assert connectors.pull_sources(PULL_HLD) == {REPO: ["test-catalog", "protocols"]}
+    assert connectors.pull_sources(HLD) == {}
+
+
+@pytest.mark.parametrize("pulls,says", [
+    ("pulls notes:graph-sharepoint", "isn't one the platform team has approved"),
+    ("pulls notes", "adapter '?'"),
+    ("pulls notes:object-store", "name the object-bucket in Resources it reads"),
+    ("pulls notes:object-store:Bad_Name", "name the object-bucket in Resources it reads"),
+    ("pulls notes:http-cursor:a-bucket", "names no bucket"),
+    ("pulls no_tes:http-cursor", "name each source once"),
+    ("pulls a:http-cursor, a:http-cursor", "name each source once"),
+])
+def test_unapproved_or_vague_pull_sources_are_refused_at_g4(pulls, says):
+    findings = connectors.design_findings(f"## Integrations\n- {REPO}: {LINE.split(': ', 1)[1].rstrip()}; {pulls}\n",
+                                          REPOS)
+    assert any(says in f for f in findings), findings
+
+
+def test_an_object_store_pull_reads_a_bucket_bound_to_the_connector():
+    hld = "## Integrations\n" + LINE.rstrip("\n") + PULLS + "\n"
+    assert any("lab-drop, which isn't an object-bucket in Resources" in f
+               for f in connectors.design_findings(hld, REPOS))
+    queue = hld + "\n## Resources\n- lab-drop: queue\n  reads: emr-labs\n"
+    assert any("isn't an object-bucket" in f for f in connectors.design_findings(queue, REPOS))
+    theirs = hld + "\n## Resources\n- lab-drop: object-bucket\n  reads: emr-api\n"
+    assert any("doesn't give emr-labs read on it" in f for f in connectors.design_findings(theirs, REPOS))
+
+
+def test_an_http_pull_needs_its_hosts_and_a_pull_only_connector_is_allowed():
+    no_hosts = (f"## Integrations\n- {REPO}: example-labs; data general; baa no; webhooks none; calls none; "
+                "auth none; pulls a:http-cursor\n")
+    assert any("name them under 'calls'" in f for f in connectors.design_findings(no_hosts, REPOS))
+    files_only = no_hosts.replace("a:http-cursor", "a:object-store:lab-drop") + BUCKET
+    assert connectors.design_findings(files_only, REPOS) == []
+
+
+def test_the_branch_may_not_pull_more_than_the_design():
+    [line] = connectors.parse_integrations(PULL_HLD)
+    assert connectors.config_findings(PULL_YAML, line) == []
+    extra = PULL_YAML + "  - name: everything\n    adapter: http-cursor\n    request: { path: /v1/all }\n"
+    assert any("pulls 'everything', a source the HLD doesn't approve" in f
+               for f in connectors.config_findings(extra, line))
+    swapped = PULL_YAML.replace("adapter: http-cursor", "adapter: object-store")
+    assert any("reads test-catalog with 'object-store'" in f for f in connectors.config_findings(swapped, line))
+    named = PULL_YAML.replace("resource: lab-drop", "bucket: someone-elses")
+    assert any("the HLD approved the bound resource lab-drop" in f for f in connectors.config_findings(named, line))
+    assert "pull must be a list" in connectors.config_findings(YAML + "pull: nope\n", line)[-1]
+    [plain] = connectors.parse_integrations(HLD)
+    assert any("a source the HLD doesn't approve" in f for f in connectors.config_findings(PULL_YAML, plain))
+
+
+class Bindings:
+    def __init__(self, outputs, broken=False):
+        self.outputs, self.broken, self.asked = outputs, broken, []
+
+    def resource_bindings_of(self, *, name, project, namespace=None):
+        self.asked.append((name, project, namespace))
+        if self.broken:
+            raise RuntimeError("control plane down")
+        return [{"env": env, "outputs": outs} for env, outs in self.outputs.get(name, {}).items()]
+
+
+def test_the_deploy_opens_the_connector_to_its_bound_buckets_endpoint_and_its_identity_only():
+    from types import SimpleNamespace
+
+    snap = SimpleNamespace(aws_catalog={"types": {"workload-identity": {"egress": {"cidrs": ["169.254.170.23/32"]}}}})
+    host = "emr-lab-drop-7f.s3.us-east-1.amazonaws.com"
+    oc = Bindings({"lab-drop": {"staging": [{"name": "bucket", "value": "emr-lab-drop-7f"},
+                                            {"name": "endpoint", "value": host}],
+                                "production": [{"name": "endpoint", "value": "other.s3.us-east-1.amazonaws.com"}]},
+                   "evil": {"staging": [{"name": "endpoint", "value": "https://anywhere.test/*"}]}})
+    services = SimpleNamespace(openchoreo=oc)
+    target = {"project": "emr", "namespace": "acme"}
+    got = connectors.bucket_egress(services, snap, target, "staging", ["lab-drop", "evil"])
+    assert got == {"egressHosts": ["emr-lab-drop-7f.s3.us-east-1.amazonaws.com"], "egressCIDRs": ["169.254.170.23/32"]}
+    assert oc.asked[0] == ("lab-drop", "emr", "acme")
+    assert connectors.bucket_egress(services, snap, target, "staging", []) == {}
+    down = SimpleNamespace(openchoreo=Bindings({}, broken=True))
+    only_identity = {"egressCIDRs": ["169.254.170.23/32"]}
+    assert connectors.bucket_egress(down, snap, target, "staging", ["lab-drop"]) == only_identity
+
+
+def test_the_resources_an_object_store_pull_reads_come_from_the_deployed_file():
+    from types import SimpleNamespace
+
+    gh = SimpleNamespace(get_file=lambda **kw: PULL_YAML)
+    assert connectors.pull_resources(gh, REPO, "abc") == ["lab-drop"]
+    broken = SimpleNamespace(get_file=lambda **kw: (_ for _ in ()).throw(RuntimeError("404")))
+    assert connectors.pull_resources(broken, REPO, "abc") == []
+
+
+def test_a_deploy_adds_the_bound_buckets_endpoint_and_the_identitys_credentials_to_the_connectors_egress(services):
+    from pathlib import Path
+
+    from valxel_sdlc.resources import load_catalog
+
+    catalog = Path(__file__).parent.parent / "examples/governance/valxel-platform/sdlc-governance/platform/catalog.yaml"
+    CATALOG = load_catalog(catalog.read_text(), "aws")
+
+    services.github.files[(REPO, "abc123", "integration.yaml")] = PULL_YAML
+    oc = services.openchoreo
+    oc.resource_bindings += [{"name": "lab-drop", "env": env, "release": "lab-drop-r1", "size": "small"}
+                             for env in ("dev", "staging")]
+    oc.resource_outputs = {("lab-drop", "staging"): [{"name": "endpoint",
+                                                       "value": "emr-lab-drop.s3.us-east-1.amazonaws.com"}]}
+    target = {"component": "emr-labs", "project": "emr", "namespace": None,
+              "pipeline": ("dev", "staging", "production")}
+    snap = type("Snap", (), {"capacity": {}, "aws_catalog": CATALOG})()
+    _apply_capacity(services, snap, target, "staging", repo=REPO, role="connector", ref="abc123")
+    applied = oc.binding_configs[("emr-labs", "staging")]["configs"]
+    assert applied["egressHosts"] == ["api.example-labs.test", "auth.example-labs.test",
+                                      "emr-lab-drop.s3.us-east-1.amazonaws.com"]
+    assert applied["egressCIDRs"] == ["169.254.170.23/32"]  # the EKS Pod Identity agent (catalog)
+    _apply_capacity(services, snap, target, "dev", repo=REPO, role="connector", ref="abc123")
+    dev = oc.binding_configs[("emr-labs", "dev")]["configs"]
+    assert "emr-lab-drop.s3.us-east-1.amazonaws.com" not in dev["egressHosts"]  # not published in dev

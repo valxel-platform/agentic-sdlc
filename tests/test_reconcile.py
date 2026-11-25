@@ -79,3 +79,47 @@ def test_without_a_log_source_the_check_says_so_or_shows_a_requested_gap():
     assert "no log source" in reconcile.staging_check(none, state, [notes()], "staging")["why"]
     gap = reconcile.staging_check(none, {**state, "simulate_faults": {"datasets": 1}}, [notes()], "staging")
     assert gap["checked"] and gap["problems"][0]["repo"] == "valxel-emr/emr-knowledge"
+
+
+PULLS = "valxel.pulls"
+SOURCES = {"acme-emr/emr-labs": ["test-catalog", "protocols"]}
+
+
+def pull_line(component, rec):
+    return (component, f"{PULLS} {json.dumps(rec)}")
+
+
+def test_pull_runs_are_summed_per_source_and_a_parked_record_or_a_source_that_never_succeeded_holds_the_release():
+    rows = [pull_line("emr-labs", {"test-catalog": {"runs": 1, "succeeded": 1, "seen": 5, "parked": 1}}),
+            pull_line("emr-labs", {"test-catalog": {"runs": 1, "succeeded": 1, "seen": 3}}),
+            pull_line("emr-labs", {"protocols": {"runs": 2, "failed": 2}}),
+            ("emr-labs", f'{LINE} {json.dumps({"emr.lab-test": {"published": 7}})}')]
+    counts = reconcile.parse(rows, PULLS)
+    assert counts["emr-labs"]["test-catalog"] == {"runs": 2, "succeeded": 2, "seen": 8, "parked": 1}
+    assert "emr.lab-test" not in counts["emr-labs"]  # the datasets line is counted separately
+    found = [p["message"] for p in reconcile.pull_problems(SOURCES, counts)]
+    assert found == ["pull test-catalog parked 1 of 8 records (contract or handler)",
+                     "pull protocols failed all 2 of its runs in staging"]
+    assert reconcile.pull_problems(SOURCES, {}) == []  # not run in staging: not exercised
+
+
+def test_the_staging_check_reads_pull_runs_for_the_designs_pull_sources():
+    state = {"product_id": "EMR", "events": [{"node": "deploy_staging", "at": "2026-11-16T10:00:00+00:00"}]}
+
+    class Both:
+        def __init__(self):
+            self.phrases = []
+
+        def entries(self, **kw):
+            self.phrases.append(kw["phrase"])
+            return [pull_line("emr-labs", {"protocols": {"runs": 1, "failed": 1}})] if kw["phrase"] == PULLS else []
+
+    logs = Both()
+    check = reconcile.staging_check(services(logs), state, [], "staging", pulls=SOURCES)
+    assert logs.phrases == [PULLS] and check["checked"]
+    assert check["pulls"] == ["emr-labs/protocols", "emr-labs/test-catalog"]
+    assert [p["dataset"] for p in check["problems"]] == ["protocols"]
+    assert "emr-labs pull protocols failed all 1 of its runs" in reconcile.describe(check)
+    ok = reconcile.staging_check(services(Logs()), state, [notes()], "staging",
+                                 pulls={"acme-emr/emr-labs": ["test-catalog"]})
+    assert reconcile.describe(ok) == "All 1 datasets and 1 pull sources reconcile in staging"

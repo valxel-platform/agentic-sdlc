@@ -7,7 +7,14 @@ processor) for the product. What it may do is approved at G4 and then enforced t
                      that crosses, whether a business associate agreement is signed, the webhooks
                      the vendor calls, the hosts the connector calls and how it authenticates:
                      '- acme-emr/emr-labs: example-labs; data phi; baa yes; webhooks lab-results;
-                     calls api.example-labs.com, auth.example-labs.com; auth oauth2-client-credentials'
+                     calls api.example-labs.com, auth.example-labs.com; auth oauth2-client-credentials;
+                     pulls test-catalog:http-cursor, protocols:object-store:lab-drop'
+                     `pulls` (optional) names the sources the connector polls, each with its adapter.
+                     An http-cursor source is read through the hosts under `calls`. An object-store
+                     source reads a bucket bound to the connector: an object-bucket in the design's
+                     Resources that the connector reads (here lab-drop), so the platform gives it the
+                     identity and the grant, and the deploy opens its egress to that bucket's endpoint
+                     only. Only the adapters the platform team has approved (ADAPTERS) pass G4.
   integration.yaml   the repo's own file, which the coder writes from that line. The build fails
                      when the file on the branch allows more than the line (config_findings).
   the platform       on every deploy the tool reads integration.yaml at the deployed commit and
@@ -26,6 +33,10 @@ ROLE = "connector"
 PATH = "integration.yaml"
 DATA_CLASSES = ("general", "payments", "phi")
 AUTHS = ("oauth2-client-credentials", "api-key", "mtls", "none")
+# Pull adapters in template-integration that the platform team has approved. A new one (Graph,
+# Confluence, Drive) is added here only with the platform team's approval, after the template has it.
+ADAPTERS = ("http-cursor", "object-store")
+BUCKET_TYPES = ("object-bucket", "s3-bucket")
 _LINE = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)\s*:\s*(.+?)\s*$", re.M)
 _NAME = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _HOST = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$")
@@ -54,6 +65,27 @@ def check_host(host: str) -> str:
     return ""
 
 
+def _pulls(value: str, problems: list[str]) -> list[dict]:
+    out, seen = [], set()
+    for item in _list(value):
+        name, _, rest = item.partition(":")
+        adapter, _, resource = rest.partition(":")
+        name, adapter, resource = name.strip(), adapter.strip(), resource.strip()
+        if not _NAME.match(name) or name in seen:
+            problems.append(f"pull '{item}': name each source once (lowercase, dashes), as <name>:<adapter>")
+        seen.add(name)
+        if adapter not in ADAPTERS:
+            problems.append(f"pull {name}: adapter '{adapter or '?'}' isn't one the platform team has approved "
+                            f"({', '.join(ADAPTERS)}); a new adapter is theirs to approve")
+        elif adapter == "object-store" and not _NAME.match(resource):
+            problems.append(f"pull {name}: name the object-bucket in Resources it reads, as "
+                            f"{name}:object-store:<resource>")
+        elif adapter == "http-cursor" and resource:
+            problems.append(f"pull {name}: an http-cursor source names no bucket; its hosts are under 'calls'")
+        out.append({"name": name, "adapter": adapter, "resource": resource})
+    return out
+
+
 def parse_integrations(hld: str) -> list[dict]:
     """'## Integrations' lines: repo -> vendor, data class, baa, webhooks, hosts, auth (and problems)."""
     from .agents.parse import section
@@ -70,6 +102,9 @@ def parse_integrations(hld: str) -> list[dict]:
                 "baa": fields.get("baa", "").lower() in ("yes", "true"), "webhooks": _list(fields.get("webhooks", "")),
                 "hosts": _list(fields.get("calls", "")), "auth": fields.get("auth", "").lower(), "problems": []}
         p = line["problems"]
+        line["pulls"] = _pulls(fields.get("pulls", ""), p)
+        if any(x["adapter"] == "http-cursor" for x in line["pulls"]) and not line["hosts"]:
+            p.append("an http-cursor pull is read through the hosts it calls: name them under 'calls'")
         if not _NAME.match(vendor):
             p.append("name the vendor first (lowercase, dashes)")
         if line["data"] not in DATA_CLASSES:
@@ -86,8 +121,8 @@ def parse_integrations(hld: str) -> list[dict]:
             p.append(f"auth none can't carry {line['data']} data")
         if line["auth"] not in ("", "none") and not line["hosts"]:
             p.append(f"auth {line['auth']} but 'calls none': name the hosts it calls, or auth none")
-        if not line["webhooks"] and not line["hosts"]:
-            p.append("nothing crosses: name its webhooks or the hosts it calls")
+        if not line["webhooks"] and not line["hosts"] and not line["pulls"]:
+            p.append("nothing crosses: name its webhooks, the hosts it calls or the sources it pulls")
         out.append(line)
     return out
 
@@ -105,7 +140,29 @@ def design_findings(hld: str, repos: list[dict]) -> list[str]:
     for repo in sorted(connectors - named):
         out.append(f"{repo} is a connector: say what crosses under '## Integrations' ('- {repo}: <vendor>; data "
                    "<general|payments|phi>; baa <yes|no>; webhooks <name, ...|none>; calls <host, ...|none>; "
-                   "auth <oauth2-client-credentials|api-key|mtls|none>')")
+                   "auth <oauth2-client-credentials|api-key|mtls|none>'; optionally "
+                   "'pulls <name>:<adapter>[:<resource>], ...')")
+    return out + _bound_bucket_findings(hld)
+
+
+def _bound_bucket_findings(hld: str) -> list[str]:
+    """An object-store pull reads an object-bucket the design's Resources bind to the connector."""
+    from .resources import parse_resources
+
+    buckets = {r["name"]: r for r in parse_resources(hld) if r["type"] in BUCKET_TYPES}
+    out = []
+    for line in parse_integrations(hld):
+        short = line["repo"].rsplit("/", 1)[-1]
+        for p in line["pulls"]:
+            if p["adapter"] != "object-store" or not p["resource"]:
+                continue
+            b = buckets.get(p["resource"])
+            if b is None:
+                out.append(f"Integrations: {line['repo']}: pull {p['name']} reads {p['resource']}, which isn't an "
+                           "object-bucket in Resources: add it there, with 'reads: " + short + "'")
+            elif "read" not in (b["access"].get(short) or set()):
+                out.append(f"Integrations: {line['repo']}: pull {p['name']} reads {p['resource']}, but Resources "
+                           f"doesn't give {short} read on it: add 'reads: {short}'")
     return out
 
 
@@ -137,7 +194,73 @@ def coder_instruction(hld: str, repo: str) -> str:
             f"mounted secret; outbound allowed_hosts exactly {hosts} with auth {line['auth']}. Secret names only, "
             "never values. Map the vendor's shapes in src/integration/mapping.py to and from the datasets' "
             "contracts: ids and codes, no more of a record than the contract allows. No other component calls "
-            "this vendor (VX-17).")
+            "this vendor (VX-17)." + _pull_instruction(line))
+
+
+def _pull_instruction(line: dict) -> str:
+    if not line.get("pulls"):
+        return " No pull: section."
+    named = "; ".join(f"{x['name']} ({x['adapter']}"
+                      + (f", store {{kind: s3, resource: {x['resource']}}}" if x["resource"] else "") + ")"
+                      for x in line["pulls"])
+    return (f" pull: exactly these sources: {named}. One @pull handler each in mapping.py, returning Emit for "
+            "a record and Delete for one the source says is gone; set deletions (tombstone, or full-listing for "
+            "an object store) and backfill_from, and permissions_field when the dataset carries who may see a "
+            "record. Each dataset a source feeds needs its contract under contracts/. An object-store source "
+            "names its bucket by resource, never by bucket name: the bucket comes from the resource's binding, "
+            "which workload.yaml's dependencies bind.")
+
+
+def bucket_egress(services, snap, target: dict, env: str, resources: list[str]) -> dict:
+    """The egress a connector's object-store pulls need in `env`: each bound bucket's published
+    endpoint (an object-bucket output, platform-resources), and where its workload identity gets
+    credentials (the catalog's workload-identity `egress`). {"egressHosts": [...], "egressCIDRs": [...]};
+    empty when it reads no bucket. A bucket not yet bound in `env`, or one built before buckets
+    published an endpoint, adds nothing: the pull fails and shows as needing attention until it's
+    bound and the connector is deployed again."""
+    if not resources:
+        return {}
+    catalog = getattr(snap, "aws_catalog", None) or {}
+    identity = ((catalog.get("types") or {}).get("workload-identity") or {}).get("egress") or {}
+    hosts = {str(h) for h in identity.get("hosts") or []}
+    cidrs = {str(c) for c in identity.get("cidrs") or []}
+    of = getattr(services.openchoreo, "resource_bindings_of", None)
+    for name in resources:
+        try:
+            bindings = of(name=name, project=target["project"], namespace=target.get("namespace")) if of else []
+        except Exception:  # noqa: BLE001 - the deploy goes on; the pull shows as needing attention
+            bindings = []
+        for b in bindings:
+            if b.get("env") != env:
+                continue
+            for o in b.get("outputs") or []:
+                value = str(o.get("value") or "").lower()
+                if o.get("name") == "endpoint" and _HOST.match(value):
+                    hosts.add(value)
+    out: dict = {}
+    if hosts:
+        out["egressHosts"] = sorted(hosts)
+    if cidrs:
+        out["egressCIDRs"] = sorted(cidrs)
+    return out
+
+
+def pull_resources(github, repo: str, ref: str) -> list[str]:
+    """The bound resources integration.yaml's object-store pulls read, at the deployed commit."""
+    try:
+        raw = yaml.safe_load(github.get_file(repo=repo, path=PATH, ref=ref or "") or "") or {}
+    except Exception:  # noqa: BLE001 - unreadable: no pull egress, as with read_configs
+        return []
+    pulls = raw.get("pull") if isinstance(raw, dict) else None
+    return sorted({str(p["store"]["resource"]) for p in pulls or [] if isinstance(p, dict)
+                   and p.get("adapter") == "object-store" and isinstance(p.get("store"), dict)
+                   and p["store"].get("resource")})
+
+
+def pull_sources(hld: str) -> dict[str, list[str]]:
+    """repo -> the pull sources its approved Integrations line names (for staging reconciliation)."""
+    return {x["repo"]: [p["name"] for p in x["pulls"]] for x in parse_integrations(hld)
+            if not x["problems"] and x["pulls"]}
 
 
 def _config(text: str) -> dict | None:
@@ -174,6 +297,30 @@ def config_findings(text: str, line: dict) -> list[str]:
     auth = str((outbound.get("auth") or {}).get("type") or ("none" if not outbound else ""))
     if outbound and auth != line["auth"]:
         out.append(f"{line['repo']}: {PATH} authenticates with {auth!r}; the HLD approved {line['auth']}")
+    return out + _pull_findings(raw, line)
+
+
+def _pull_findings(raw: dict, line: dict) -> list[str]:
+    approved = {x["name"]: x for x in line.get("pulls") or []}
+    pulls = raw.get("pull") or []
+    if not isinstance(pulls, list):
+        return [f"{line['repo']}: {PATH}: pull must be a list of sources"]
+    out = []
+    for p in pulls:
+        if not isinstance(p, dict):
+            continue
+        name, adapter = str(p.get("name") or ""), str(p.get("adapter") or "")
+        want = approved.get(name)
+        if want is None:
+            out.append(f"{line['repo']}: {PATH} pulls {name!r}, a source the HLD doesn't approve")
+            continue
+        if adapter != want["adapter"]:
+            out.append(f"{line['repo']}: {PATH} reads {name} with {adapter!r}; the HLD approved {want['adapter']}")
+        store = p.get("store")
+        resource = str(store.get("resource") or "") if isinstance(store, dict) else ""
+        if want["adapter"] == "object-store" and resource != want["resource"]:
+            out.append(f"{line['repo']}: {PATH} reads {name} from {resource or 'a bucket named in the file'!r}; "
+                       f"the HLD approved the bound resource {want['resource']} (store.resource)")
     return out
 
 

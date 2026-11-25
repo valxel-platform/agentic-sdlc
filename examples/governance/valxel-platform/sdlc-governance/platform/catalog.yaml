@@ -249,7 +249,10 @@ types:
     parameters:
       versioning: { type: boolean, default: true }
       expire_days: { type: integer, help: "delete objects after this many days; empty keeps them" }
-    outputs: { bucket: BUCKET_NAME, id: BUCKET_ID }
+    # endpoint: the one host the bucket is reached at (AWS <bucket>.s3.<region>.amazonaws.com, Google
+    # Cloud storage.googleapis.com, Azure <account>.blob.core.windows.net). A component whose egress is
+    # allowlisted by name (a connector) is opened to it, and only it, for each bucket it's bound to.
+    outputs: { bucket: BUCKET_NAME, id: BUCKET_ID, endpoint: BUCKET_ENDPOINT }
     clouds:
       aws:
         service: "Amazon S3"
@@ -514,7 +517,9 @@ types:
 
   # Not chosen in designs: the pipeline creates one per component that reads or writes a cloud
   # resource, trusted only by the component's Kubernetes service account; each resource's
-  # Composition grants it just its declared access.
+  # Composition grants it just its declared access. `egress` is where a component gets its
+  # credentials (`cidrs`, `hosts`): a component whose egress is allowlisted (a connector) is opened
+  # to these whenever it holds an identity.
   workload-identity:
     internal: true
     use_for: "One component's identity in the cloud, without keys."
@@ -527,6 +532,7 @@ types:
         service: "IAM role with EKS Pod Identity"
         access: {}
         outputs: { role: AWS_ROLE_ARN }
+        egress: { cidrs: [169.254.170.23/32] }   # the EKS Pod Identity agent on each node
         sizes:
           small: { monthly_usd: 0 }
         built_in: [a permissions boundary that stops at the product's resources, no keys]
@@ -534,6 +540,7 @@ types:
         service: "A Google service account bound to the component's Kubernetes service account (GKE Workload Identity)"
         access: {}
         outputs: { role: GCP_SERVICE_ACCOUNT }   # the service account's email
+        egress: { cidrs: [169.254.169.254/32] }   # the GKE metadata server
         sizes:
           small: { monthly_usd: 0 }
         built_in: [roles granted per resource only, no project-wide roles, no keys]
@@ -541,6 +548,7 @@ types:
         service: "A user-assigned managed identity federated to the component's Kubernetes service account (AKS Workload Identity)"
         access: {}
         outputs: { role: AZURE_CLIENT_ID }   # the identity's client ID
+        egress: { hosts: [login.microsoftonline.com] }   # Entra ID, which exchanges the projected token
         sizes:
           small: { monthly_usd: 0 }
         built_in: [roles assigned per resource only, no subscription-wide roles, no secrets]
