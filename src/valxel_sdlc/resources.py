@@ -48,7 +48,8 @@ from .agents.parse import section
 
 ACCESS_VERBS = {"reads": "read", "writes": "write", "deletes": "delete", "publishes": "write"}
 # Roles that run in the platform and may hold a cloud identity.
-AWS_ROLES = ("provider", "event-worker", "agent", "mcp-server", "knowledge", "bff", "reporting", "job", "document-intake")
+AWS_ROLES = ("provider", "event-worker", "agent", "mcp-server", "knowledge", "bff", "reporting", "job", "document-intake",
+             "connector")  # a connector only for the buckets its object-store pulls read (connectors.py)
 IDENTITY_TYPE = "workload-identity"
 KAFKA_USER_TYPE = "kafka-user"
 # A code-sandbox component's sandboxes (platform-resources: code-runner): not a catalog type, never
@@ -339,6 +340,9 @@ def check(hld: str, repos: list[dict], ctx: dict) -> list[str]:
             elif roles[comp] not in AWS_ROLES:
                 out.append(f"{name}: {comp} is a {roles[comp]}, which runs outside the platform and holds no cloud "
                            "identity; reach the data through a service (VX-19)")
+            elif roles[comp] == "connector" and (kind not in ("object-bucket", "s3-bucket") or set(access) != {"read"}):
+                out.append(f"{name}: {comp} is a connector, which may only read an object-bucket its pulls name; "
+                           "what it brings in reaches the product as events (data contracts)")
             bad = sorted(a for a in access if a.startswith("?"))
             if bad:
                 out.append(f"{name}: '{bad[0][1:]}' is not an access; use reads, writes or deletes")

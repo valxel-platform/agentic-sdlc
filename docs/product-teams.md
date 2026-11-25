@@ -320,7 +320,11 @@ the product calls the vendor, and the vendor calls nothing else. They meet as da
 The design names what may cross under `## Integrations`:
 `- <org>/<repo>: <vendor>; data <general|payments|phi>; baa <yes|no>; webhooks <name, ...|none>;
 calls <host, ...|none>; auth <oauth2-client-credentials|api-key|mtls|none>`, and, for a connector that
-polls a source the vendor can't push from, `; pulls <name>:http-cursor, <name>:object-store:<bucket>`.
+polls a source the vendor can't push from, `; pulls <name>:http-cursor, <name>:object-store:<resource>`.
+An object-store source reads a bucket bound to the connector: an `object-bucket` under Resources
+with `reads: <connector>`. The platform gives the connector a workload identity with read on that
+bucket and nothing else, and the deploy opens its egress to that bucket's endpoint (an output of
+the bucket) and to where its identity gets credentials (the catalog's `workload-identity` egress).
 
 **G4 refuses:**
 - PHI without `baa yes`;
@@ -328,17 +332,21 @@ polls a source the vendor can't push from, `; pulls <name>:http-cursor, <name>:o
 - `auth none` for PHI or payments;
 - a connector with no line, or a line for a repo that isn't a connector;
 - a pull adapter the platform team hasn't approved (today `http-cursor` and `object-store`), an
-  object-store source without its bucket, or an http-cursor source with no hosts under `calls`.
+  object-store source whose resource isn't an object-bucket the connector reads, or an
+  http-cursor source with no hosts under `calls`;
+- a connector with any other access under Resources: it reads buckets, nothing else.
 
 In Endpoints, a connector is `external` exactly when it receives webhooks, and needs no ADR for it.
 
 What's approved is enforced three times (`connectors.py`):
 - **Coder.** The coder writes the line into `integration.yaml`.
 - **Build.** The build fails when the file on the branch allows more than the line: another host,
-  another webhook, a lower data class, other auth, another pull source, adapter or bucket.
+  another webhook, a lower data class, other auth, another pull source or adapter, or a bucket
+  named in the file instead of the bound resource.
 - **Deploy.** On every deploy, the tool reads `integration.yaml` at the deployed commit. It sets the
   binding's `webhookPaths`, the only routes the gateway exposes, and its `egressHosts`, the only
-  hosts its FQDN egress policy allows (example type `deployment/connector`).
+  hosts its FQDN egress policy allows (example type `deployment/connector`), adding each bound
+  bucket's endpoint in that environment and its identity's credential endpoints (`egressCIDRs`).
 
 In staging, each approved pull source is reconciled from the connector's `valxel.pulls` line
 (`reconcile.py`): a parked record, or a source whose every run failed, holds the release like a

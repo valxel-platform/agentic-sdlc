@@ -361,3 +361,13 @@ def test_the_code_sandboxes_coder_binds_the_pool_and_defines_no_sandbox():
     text = coder_instruction("", "acme-farm/farm-calc")
     assert "SANDBOX_EXECUTOR=kubernetes" in text and "ref: farm-calc-runner" in text
     assert "pool: SANDBOX_SANDBOX_TEMPLATE" in text and "Never define a SandboxTemplate" in text
+
+
+def test_a_connector_may_only_read_a_bucket():
+    repos = [*REPOS, {"name": "o/farm-labs", "role": "connector"}]
+    ok = resources.check(hld("- lab-drop: object-bucket\n  reads: farm-labs", ""), repos, ctx(repos=repos))
+    assert not any("farm-labs" in f for f in ok), ok
+    for body in ("- lab-drop: object-bucket\n  reads, writes: farm-labs",
+                 "- jobs: queue\n  reads: farm-labs"):
+        found = resources.check(hld(body, ""), repos, ctx(repos=repos))
+        assert any("is a connector, which may only read an object-bucket" in f for f in found), found
