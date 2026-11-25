@@ -39,7 +39,7 @@ def test_missing_wrong_or_unexplained_schedules_are_refused():
     bad = jobs.design_findings("## Schedules\n- acme-farm/farm-reminders: 15 3 * * MON; x\n"
                                "- acme-farm/farm-api: 0 * * * *; polls every hour for news\n", REPOS)
     assert any("MON" in f for f in bad) and any("say what the job does" in f for f in bad)
-    assert any("farm-api isn't a job repo" in f for f in bad)
+    assert any("farm-api isn't a job or transform repo" in f for f in bad)
     assert "isn't '<five cron fields>" in jobs.design_findings(
         "## Schedules\n- acme-farm/farm-reminders: daily at 3; reminders for the day\n", REPOS)[0]
 

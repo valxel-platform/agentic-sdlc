@@ -290,6 +290,7 @@ CAPS = [
             "connectors",
             "documents",
             "jobs",
+            "pipelines",
             "store",
             "sandboxes",
             "agent_tools",

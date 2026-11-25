@@ -7,6 +7,9 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
   knowledge   retrieval over the product's own records for its agents: an index kept from the
               product's events, searched as MCP tools, filtered by who is asking (valxel_sdlc.retrieval)
   reporting   the product's data contracts into reporting tables and filtered topics (template-reporting)
+  transform   dbt models over reporting's tables into marts, run on a schedule and published only when
+              every test, control total and data-class check passes; after the reporting repos whose
+              tables it reads (template-transform, valxel_sdlc.pipelines)
   job         work that runs on a schedule and exits: a CronJob with a run lock, run history and
               catch-up after missed runs; job.yaml holds its schedule (valxel_sdlc.jobs)
   document-intake  takes documents from people: checked uploads (size, format by content, malware),
@@ -29,6 +32,6 @@ guard it and in which order a feature's changes to it merge and deploy (dependen
 
 from __future__ import annotations
 
-ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "job", "connector", "document-intake", "channel", "mcp-server", "code-sandbox", "agent", "consumer", "bff", "mobile", "acceptance")
+ROLES = ("library", "provider", "event-worker", "knowledge", "reporting", "transform", "job", "connector", "document-intake", "channel", "mcp-server", "code-sandbox", "agent", "consumer", "bff", "mobile", "acceptance")
 REPO_ORDER = {role: i for i, role in enumerate(ROLES)}
 ROLE_PATTERN = "|".join(ROLES)

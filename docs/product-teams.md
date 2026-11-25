@@ -308,6 +308,47 @@ or dataset, or more fields. Alert rules: `intake-malware-found` (critical),
 `intake-checks-unavailable`, `intake-documents-failed`. The platform runs ClamAV
 (`clamav.platform-security`) for every product with an intake.
 
+### Transforms: marts from the product's data
+
+A transform repo (role `transform`, from `template-transform`) turns the raw tables a reporting
+repo loads into marts that reports and outputs read. It is dbt models, run on the job harness's
+schedule. Each run builds every model in a schema of its own and runs dbt's tests, the template's
+control totals and the data-class check. It publishes only when everything passed; until then,
+readers keep the last good marts. It's scheduled like a job (its line under `## Schedules`, after
+the loads it reads), and it deploys after the reporting repos whose tables it reads.
+
+**At G4**, the HLD's `## Pipelines` section gives each transform one line:
+`- <org>/<repo>: reads <dataset>[ as <table>], ...; warehouse postgres; marts <name>:<data class>, ...`
+and optionally `; shares <mart> with <destination>, ...`. The check (`valxel_sdlc.pipelines`) refuses:
+- a dataset that isn't a contract under `## Datasets`, or whose contract doesn't list the
+  transform under its consumers: marts are built only from approved datasets;
+- a dataset no reporting repo in the design loads, or loads without the fields the transform reads;
+- a warehouse the template doesn't run on (Postgres for now; Snowflake follows);
+- a mart shared outside the product with a class above `none`;
+- a design that reaches for Spark, Databricks, Flink, Beam, Airflow, Dagster, Prefect or
+  streaming joins. These are flagged as unsupported, with the reason, rather than improvised.
+  If the product needs one, that's an ADR for the platform team. A line that rules one out
+  ("no Spark") isn't a finding.
+
+**At build**, the tool generates the transform's `dbt/models/sources.yml` from the contracts: one
+table per dataset it reads, only the fields it may read, each column with its data class. Models
+can read only those. The reporting coder is told the table names. After the coders, the build
+fails when:
+- `sources.yml` isn't exactly the generated file;
+- `transform.yaml` names another warehouse;
+- a mart isn't in the line, or an approved one isn't built;
+- a mart declares a column above its approved class, or has no control total;
+- a reporting branch a transform reads doesn't name its table.
+
+Inside the repo, `transform-check` (in the required `unit` check) traces every column through the
+SQL and fails one declared below the data it's made from. Lowering a column's `data_class`, or
+removing a control total, counts as weakening a check: it goes to the people at the gate, never on
+the reviewer's say-so.
+
+**In staging**, each run logs a `valxel.transform.run` line. A transform that ran and never
+published, or a run that failed the data-class check, holds the release with the dataset problems.
+G6 shows each transform's published runs, tests and control totals.
+
 ### Connectors to third parties
 
 A lab, a payer, a CRM or a payment processor is reached through one `connector` repo. Nothing else in

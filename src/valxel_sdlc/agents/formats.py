@@ -102,6 +102,15 @@ sequenceDiagram
                                (numbers only, e.g. '15 3 * * * America/Chicago'; its work covers the time since its last
                                 success and must be safe to run twice. Choose a job for work due at a time; an
                                 event worker for work that reacts to events.)
+## Pipelines                   (only with a transform repo: what it reads and publishes; approved at G4)
+- <org>/<repo>: reads <dataset>[ as <table>], ...; warehouse postgres; marts <name>:<data class>, ...
+  [; shares <mart> with <destination>, ...]
+                               (each dataset is a contract under Datasets that lists the transform under consumers,
+                                and a reporting repo here loads it as <table> (default: the name after the product,
+                                emr.notes -> notes). A mart's class is the highest any of its columns may carry.
+                                Only a mart of class none is shared outside the product. The transform also needs
+                                its Schedules line, after the loads it reads. No Spark, streaming engines or
+                                orchestrators: flag the need instead.)
 ## Integrations                (only with a connector repo: who's on the other side and what may cross; approved at G4)
 - <org>/<repo>: <vendor>; data <general|payments|phi>; baa <yes|no>; webhooks <name, ...|none>; calls <host, ...|none>;
   auth <oauth2-client-credentials|api-key|mtls|none>[; pulls <name>:<http-cursor|object-store:<resource>>, ...]
