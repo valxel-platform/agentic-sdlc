@@ -39,6 +39,13 @@ def work(tmp_path, monkeypatch):
     return tmp_path / "work"
 
 
+def test_a_reports_name_is_the_one_the_pr_check_computes():
+    # platform-foundation scripts/check-releases.py names it the same way; its test has this value too.
+    pins = ("data:\n  sdlc_tool_image: ghcr.io/valxel-platform/agentic-sdlc:main@sha256:aaa\n"
+            "  llm_gateway_image: ghcr.io/valxel-shared-services/ss-llm-gateway:main@sha256:bbb\n")
+    assert R.key(pins, pins.replace("sha256:aaa", "sha256:ccc")) == "1a9a9f560816aeabdcbe8f2484afab20"
+
+
 def test_a_report_is_named_by_its_images():
     reordered = CURRENT.replace("  # the tool\n", "").replace("# a comment", "# another")
     assert R.key(CURRENT, CANDIDATE) == R.key(reordered, CANDIDATE)
