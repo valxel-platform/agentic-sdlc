@@ -296,3 +296,29 @@ def test_pilot_effort_and_the_ledgers_new_columns_persist():
         got = PostgresEffortStore(pool).events(fid)
         assert [e["kind"] for e in got] == ["asked", "pr_review"] and got[1]["minutes"] == 10.0
         assert got[1]["detail"] == {"state": "approved"} and PostgresEffortStore(pool).asked_at(fid, "i1")
+
+
+def test_usage_reads_past_columns_a_newer_release_added():
+    # Rolling back (ADR 0012): the release before reads the ledger after a newer one added a column.
+    # Found by the release rehearsal: the 2026-11-20 image failed on served_model.
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
+
+    from valxel_sdlc.gateway import PostgresLedger
+    from valxel_sdlc.gateway.ledger import UsageRecord
+
+    fid = f"FARM-FEAT-{uuid.uuid4().hex[:8]}"
+    with ConnectionPool(DB, kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}) as pool:
+        ledger = PostgresLedger(pool)
+        with pool.connection() as conn:
+            conn.execute("ALTER TABLE valxel_usage ADD COLUMN IF NOT EXISTS from_a_newer_release TEXT DEFAULT 'x'")
+        try:
+            ledger.record(UsageRecord(ts="2026-11-25T10:00:00+00:00", product_id="FARM", feature_id=fid, phase="spec",
+                                      role="spec", runtime="generic", provider="anthropic", model="m", workspace="w",
+                                      input_tokens=1, cache_creation_input_tokens=0, cache_read_input_tokens=0,
+                                      output_tokens=1, cache_ttl="1h", prompt_version="v1"))
+            [row] = ledger.records(fid)
+            assert row.feature_id == fid and not hasattr(row, "from_a_newer_release")
+        finally:
+            with pool.connection() as conn:
+                conn.execute("ALTER TABLE valxel_usage DROP COLUMN IF EXISTS from_a_newer_release")
