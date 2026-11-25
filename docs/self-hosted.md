@@ -200,6 +200,14 @@ Upgrade one release at a time, in order: no skipping versions. Before upgrading:
 3. Take a database snapshot of all three databases. If the release has a migration note, also
    copy the artifacts volume.
 
+To rehearse it first (recommended for a release with a migration note), run the new release
+against a copy of the tool's database, without touching it: `valxel rehearse` in the new image
+copies the database through your cloud (an RDS point-in-time restore, a Cloud SQL clone or an Azure
+Flexible Server point-in-time restore), starts the running release, the new one and the running
+one again against the copy, deletes the copy, and writes a report. Its steps and the permissions
+it needs are in `valxel_sdlc/rehearsal.py`; with `REHEARSAL_DATABASE_URL` it runs against any
+Postgres you've restored yourself.
+
 Then:
 
 ```sh
@@ -211,10 +219,10 @@ The API and workers roll one pod at a time. A worker that is stopped finishes it
 
 Afterwards, run checks 1 to 3 from section 3.
 
-**Rolling back** (`helm rollback valxel`) is safe across releases with no migration note. Across
-one with a migration note, the new schema stays after the rollback. In that case, restore the
-snapshot first, then roll back. Work done in between is lost, so roll forward with a fix when
-you can.
+**Rolling back** (`helm rollback valxel`) needs no database step: each release only adds to the
+schema, so the release before it runs against the new one ([ADR 0012](adr/0012-every-release-rolls-back-one-image.md)).
+Restore the snapshot only if a release went wrong in a way rolling back can't fix; work done since
+it is lost, so roll forward with a fix when you can.
 
 Upgrade Kubernetes, OpenChoreo, Cilium, Strimzi and Agent Sandbox separately from the tool,
 never at the same time.

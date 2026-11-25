@@ -163,3 +163,30 @@ def signal_source(src, *, firing: dict, resolved: dict, unrelated: dict) -> list
     if fired and cleared and fired[0]["fingerprint"] != cleared[0]["fingerprint"]:
         out.append("firing and resolved must share a fingerprint, so one resolves the other")
     return out
+
+
+def database_copies(copies, *, source: str, name: str = "valxel-rehearsal-conformance") -> list[str]:
+    """Copy, set a password, delete, delete again: what the release rehearsal does with a copy."""
+    problems = _shape(copies, ports.DatabaseCopies)
+    got = copies.copy(source, name)
+    if not {"host", "port", "user"} <= set(got):
+        problems.append(f"copy() returned {sorted(got)}, not host, port and user")
+    password = copies.set_password(name, got.get("user", ""))
+    if not isinstance(password, str) or len(password) < 16:
+        problems.append("set_password() didn't return a new password of 16 characters or more")
+    if copies.set_password(name, got.get("user", "")) == password:
+        problems.append("set_password() returned the same password twice")
+    copies.delete(name)
+    try:
+        copies.delete(name)
+    except Exception as exc:  # noqa: BLE001 - any error is the problem
+        problems.append(f"deleting a copy that's gone raised {type(exc).__name__}")
+    return problems
+
+
+def report_store(store, *, key: str = "conformance/report.json") -> list[str]:
+    problems = _shape(store, ports.ReportStore)
+    store.put(key, b'{"n": 1}')
+    store.put(key, b'{"n": 2}')  # written over, not refused
+    return problems
+

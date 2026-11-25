@@ -82,6 +82,49 @@ def immutable_store(bucket: str, *, env: Mapping[str, str] | None = None, client
     raise UnknownCloud(f"no immutable store for {name} yet")
 
 
+def database_copies(env: Mapping[str, str] | None = None):
+    """The installation's DatabaseCopies (the release rehearsal): RDS point-in-time copies in
+    AWS_REGION, Cloud SQL clones in VALXEL_GCP_PROJECT, or Flexible Server restores beside
+    REHEARSAL_SOURCE (the source server's resource id)."""
+    env = env if env is not None else os.environ
+    name = provider(env)
+    if name == "aws":
+        from .aws.rehearsal import RdsCopies
+
+        return RdsCopies(env.get("AWS_REGION") or env.get("AWS_DEFAULT_REGION") or "",
+                         instance_class=env.get("REHEARSAL_INSTANCE_CLASS", ""))
+    if name == "gcp":
+        from . import gcp
+        from .gcp.rehearsal import CloudSqlCopies
+
+        return CloudSqlCopies(gcp.project(env))
+    if name == "azure":
+        from .azure.rehearsal import FlexibleServerCopies
+
+        return FlexibleServerCopies(env.get("REHEARSAL_SOURCE", ""))
+    raise UnknownCloud(f"no database copies for {name} yet")
+
+
+def report_store(bucket: str, *, env: Mapping[str, str] | None = None, client: Any = None):
+    """The installation's ReportStore on `bucket`: S3, Cloud Storage (gs://NAME or NAME), or a Blob
+    Storage container (https://<account>.blob.core.windows.net/<container>)."""
+    env = env if env is not None else os.environ
+    name = provider(env)
+    if name == "aws":
+        from .aws.rehearsal import S3Reports
+
+        return S3Reports(bucket, region=env.get("AWS_REGION", ""), client=client)
+    if name == "gcp":
+        from .gcp.rehearsal import GcsReports
+
+        return GcsReports(bucket, client=client)
+    if name == "azure":
+        from .azure.rehearsal import BlobReports
+
+        return BlobReports(bucket, client=client)
+    raise UnknownCloud(f"no report store for {name} yet")
+
+
 # Tags and labels (ADR 0010). AWS and Azure tags are free-form (`valxel:feature` = `FARM-FEAT-1`). Google Cloud
 # labels allow only lowercase letters, digits, `_` and `-`, up to 63 characters: `valxel:feature`
 # becomes `valxel_feature` and its value `farm-feat-1`. Valxel's ids are uppercase letters, digits
