@@ -117,7 +117,8 @@ class Check:
             return [f"workers: none ready behind {host}"]
         out = []
         for ip in ips:
-            code, h = self._json(f"http://{ip}:{port or 8082}/healthz")
+            where = f"[{ip}]" if ":" in ip else ip  # an IPv6 pod's address goes in brackets
+            code, h = self._json(f"http://{where}:{port or 8082}/healthz")
             if code != 200 or not h.get("ok"):
                 out.append(f"workers: {ip} answered {code}")
             elif self.image and h.get("image") and h["image"] != self.image:
