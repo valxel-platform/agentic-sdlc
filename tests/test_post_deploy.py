@@ -206,7 +206,8 @@ def served():
 def test_probes_over_real_http_and_dns(served, monkeypatch):
     port, answers = served
     monkeypatch.setattr("valxel_sdlc.post_deploy._strict", lambda: False)
-    c = Check(api=f"http://127.0.0.1:{port}", workers=f"localhost:{port}", image=NEW)
+    # 127.0.0.1 through the real resolver: localhost can be ::1 too, where the server isn't listening
+    c = Check(api=f"http://127.0.0.1:{port}", workers=f"127.0.0.1:{port}", image=NEW)
     assert c.probe() == []  # the watcher's body isn't JSON: read as nothing wrong to say
     answers["/"] = (404, "")
     answers["/healthz"] = (503, {"ok": False})
