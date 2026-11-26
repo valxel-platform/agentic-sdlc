@@ -226,7 +226,9 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         from ... import strict
 
         return {"ok": True, "mode": eng().services.settings.mode, "auth": auth.mode,
-                "delivery": os.environ.get("VALXEL_DELIVERY", "stub"), "strict": strict.enabled()}
+                "delivery": os.environ.get("VALXEL_DELIVERY", "stub"), "strict": strict.enabled(),
+                # The image this replica runs, when the deployment says (the post-deploy check).
+                "image": os.environ.get("VALXEL_IMAGE", "")}
 
     @api.get("/healthz/watcher")
     def watcher_health() -> dict:

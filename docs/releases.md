@@ -62,6 +62,14 @@ rehearse it, a person merges it, and the deployment's GitOps rolls it out.
    branch, commits the file, and opens the release PR or updates the open one. Images published
    while a PR is open join it; once it's merged or closed, the next image starts a new one.
 
+Once a merged release is deployed and its rollout is healthy, `valxel post-deploy` watches it for
+15 minutes (`VALXEL_POST_DEPLOY_WINDOW_S`). Every minute it probes the API (`/api/healthz` from the
+new image, `VALXEL_IMAGE`, in the strict mode it's configured for), the watcher's housekeeping, the
+web app and every worker pod; over the window it applies the tool's own alert thresholds (the API's
+5xx ratio, failed agent sessions, queue wait, audit backlog). It changes nothing. It marks the
+commit that deployed the release `valxel/post-deploy`, and if the check fails it opens a revert PR
+(`release/revert`) putting back the pins from before, for a person to merge.
+
 To turn it on, set `VALXEL_RELEASE_REPO` (chart: `tool.releaseRepo`) to the deployment repository,
 and install the Delivery GitHub App on it and on the three image repositories (it already has the
 permissions and the `status` event). Rolling back never involves the tool: revert the release PR.

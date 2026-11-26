@@ -57,9 +57,10 @@ CAPS = [
         "selfeval",
         "Self-evaluation",
         "Replays the tool's own agents on real cases: config evals, coder and reviewer evals, injection suites,"
-        " drift and health; and rehearses its own releases against a copy of its database.",
+        " drift and health; rehearses its own releases against a copy of its database, and watches them once"
+        " deployed.",
         ["evals", "code_evals", "code_eval_runner", "coder_injection", "injection", "drift", "health", "what_changed",
-         "rehearsal"],
+         "rehearsal", "post_deploy"],
     ),
     (
         "root",
