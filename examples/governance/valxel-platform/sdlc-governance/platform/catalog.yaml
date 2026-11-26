@@ -553,5 +553,44 @@ types:
           small: { monthly_usd: 0 }
         built_in: [roles assigned per resource only, no subscription-wide roles, no secrets]
 
+  # A login of its own in a product database, for one component: a transform. Not chosen in
+  # designs: the SDLC tool makes one per transform when it deploys, from the approved design (the
+  # tables and columns it may read come from the data contracts its Pipelines line reads), and binds
+  # it with the component. provider-sql builds it inside the database through the ProviderConfig the
+  # database's own Composition makes (<database>-sql-admin), so the admin credentials never leave it
+  # and the component never sees them. It gets its own login's credentials and a tokenize key.
+  postgres-login:
+    internal: true
+    use_for: "A transform's own login: SELECT on exactly the columns its contracts give it, its own schemas, nothing else."
+    not_for: "Anything a design picks: the tool makes it per transform."
+    data_classes: [general, payments, phi]
+    stateful: false
+    parameters:
+      database: { type: string, required: true }
+      login: { type: string, required: true }
+      reads: { type: array }
+      createSchemas: { type: boolean, default: false }
+      breakGlass: { type: boolean, default: false }
+    access_by: credentials
+    outputs: { host: DB_HOST, port: DB_PORT, database: DB_NAME, username: DB_USER, password: DB_PASSWORD, tokenize_key: TOKENIZE_KEY }
+    clouds:
+      # No aws block yet: the database there is OpenChoreo's postgres-crossplane, which doesn't make
+      # the <database>-sql-admin ProviderConfig. To add and check on a real AWS data plane (tracker
+      # CP-127); until then a design with a Postgres transform on AWS fails G4.
+      gcp:
+        service: "A PostgreSQL role made with provider-sql in the product's Cloud SQL database"
+        access: {}
+        sizes:
+          small: { monthly_usd: 0 }
+        built_in: [no superuser, createdb, createrole, replication or bypassrls, column-level SELECT only, a password made by the provider]
+        alarms: {}
+      azure:
+        service: "A PostgreSQL role made with provider-sql in the product's flexible server database"
+        access: {}
+        sizes:
+          small: { monthly_usd: 0 }
+        built_in: [no superuser, createdb, createrole, replication or bypassrls, column-level SELECT only, a password made by the provider]
+        alarms: {}
+
 # Sizes per environment unless the design says otherwise. Lanes and dev stay small.
 environment_sizes: { dev: small, staging: small, production: medium }

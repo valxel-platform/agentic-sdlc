@@ -462,7 +462,8 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
          code_sandboxes: list[str] | tuple = (), existing: dict[str, str] | None = None) -> list[dict]:
     """The OpenChoreo Resources to create: one per entry (and per data contract's topic), plus a
     workload identity per component that needs IAM access, a Kafka identity per component a
-    contract names, and the platform's sandboxes (code-runner) for each code-sandbox component.
+    contract names, a login of its own per Postgres transform (pipelines.logins), and the
+    platform's sandboxes (code-runner) for each code-sandbox component.
     `owner_target(component)` -> (project, namespace) of the component. `existing`: name -> type of
     the resources OpenChoreo already runs; one made under an alias keeps that type, so the
     rename never replaces it. Tags are written as the cloud spells them (labels on Google Cloud)."""
@@ -518,6 +519,18 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
                     "parameters": {"component": comp, "tags": tags_for(cloud, {"valxel:product": product_id,
                                                                                "valxel:data-class": data_class})},
                     "sizes": {}, "outputs": dict(user_type.get("outputs") or {})})
+    from .pipelines import LOGIN_TYPE, logins
+
+    login_type = (catalog.get("types") or {}).get(LOGIN_TYPE) or {}
+    for login in logins(hld, catalog):
+        comp = login["component"]
+        project, namespace = owner_target(comp)
+        ids.append({"name": login["name"], "type": LOGIN_TYPE, "project": project, "namespace": namespace,
+                    "owner": comp, "stateful": False,
+                    "parameters": {**login["parameters"],
+                                   "tags": tags_for(cloud, {"valxel:product": product_id,
+                                                            "valxel:data-class": data_class})},
+                    "sizes": {}, "outputs": dict(login_type.get("outputs") or {})})
     for comp in sorted(set(code_sandboxes)):
         project, namespace = owner_target(comp)
         ids.append({"name": f"{comp}-runner", "type": CODE_RUNNER_TYPE, "project": project, "namespace": namespace,
