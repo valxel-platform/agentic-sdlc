@@ -425,7 +425,10 @@ def serve_health(worker: Worker, port: int) -> Any:
                 self.end_headers()
                 return
             ok = worker.healthy()
-            body = {"ok": ok, "worker": worker.me, "running": len(worker.held)}
+            import os
+
+            body = {"ok": ok, "worker": worker.me, "running": len(worker.held),
+                    "image": os.environ.get("VALXEL_IMAGE", "")}  # the post-deploy check
             try:
                 from .tenancy import PLATFORM, bound
 

@@ -23,10 +23,11 @@ core: [template_contract, resources, outcomes, inception.formats, roadmap.record
        finops.records, finops.views]
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # the tool's health, which measures every seam's agents on real work; and the release rehearsal,
-# which starts the whole tool against a copy of its database.
+# which starts the whole tool against a copy of its database; and the post-deploy check, which
+# watches the deployed tool through its engine.
 root: [engine, engine_parts, api, web, cli, services, strict, worksync, run_queue, watcher_jobs, checkpoint_archive,
        lite, evals, code_evals, code_eval_runner, coder_injection, injection, health, drift, what_changed,
-       rehearsal]
+       rehearsal, post_deploy]
 # The cloud rule (ADR 0010): a cloud's SDK is imported only in cloud/<provider>/, that cloud's
 # adapters; the core reaches a cloud through valxel_sdlc.cloud.ports. `known` would list debt; there
 # is none (CP-101 moved the last boto3 calls into cloud/aws/), and tests/test_seams.py fails on a new one.

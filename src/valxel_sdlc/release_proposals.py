@@ -88,6 +88,7 @@ class Proposer:
     path: str = "gitops/clusters/tools/releases.yaml"
     branch: str = "release/valxel-images"
     wait_s: float = 120.0
+    revert_branch: str = "release/revert"
 
     @staticmethod
     def from_env(github, cluster, env=None) -> Proposer | None:
@@ -150,6 +151,48 @@ class Proposer:
                                      body=self._body(main, proposed, source, commit, run), files=[self.path],
                                      labels=[], reopen_merged=False)
             return {"pr": pr.get("url"), "number": pr.get("number"), "changed": changed}
+        finally:
+            lease.release()
+
+    def deployed(self) -> str:
+        """The commit that last changed the pins on the default branch: the release now deployed."""
+        shas = self.github.file_commits(repo=self.repo, path=self.path, limit=1)
+        return shas[0] if shas else ""
+
+    def revert(self, reasons: list[str]) -> dict:
+        """Propose going back to the pins before the release now deployed (a post-deploy check
+        failed): a PR on its own branch, for a person to merge, like any release."""
+        lease = self._lease()
+        if lease is None:
+            raise TimeoutError(f"another release proposal held {LOCK} for {self.wait_s:.0f}s")
+        try:
+            shas = self.github.file_commits(repo=self.repo, path=self.path, limit=2)
+            if len(shas) < 2:
+                return {"ignored": f"{self.path} has no earlier release to go back to"}
+            running = self.github.get_file(repo=self.repo, path=self.path, ref=shas[0]) or ""
+            before = self.github.get_file(repo=self.repo, path=self.path, ref=shas[1]) or ""
+            moves = self._moves(running, before)
+            if not moves:
+                return {"ignored": "the release before pins the same images"}
+            self.github.reset_branch(repo=self.repo, branch=self.revert_branch,
+                                     sha=self.github.head_sha(repo=self.repo))
+            self.github.put_file(repo=self.repo, branch=self.revert_branch, path=self.path, content=before,
+                                 message=f"Revert the release in {shas[0][:7]}: its post-deploy check failed")
+            rows = [f"| `{k}` | `{_short(now['digest'])}` | `{_short(was['digest'])}` |" for k, now, was in moves]
+            body = "\n".join([
+                f"The post-deploy check of the release in {shas[0][:7]} failed:", "",
+                *[f"- {r}" for r in reasons], "",
+                "This puts back the pins from before it.", "",
+                "| Pin | Deployed | Back to |", "| --- | --- | --- |", *rows, "",
+                "Merging rolls it back (Flux, within its interval). If the failure isn't the release's, close "
+                "this PR. A schema change the release made stays, and the earlier images run against it "
+                "(ADR 0012).", "",
+                "_Opened by the Valxel SDLC tool's post-deploy check. It doesn't merge it._",
+            ])
+            names = ", ".join(now["repo"].split("/", 1)[1] for _, now, _ in moves)
+            pr = self.github.open_pr(repo=self.repo, branch=self.revert_branch, title=f"Revert release {names}",
+                                     body=body, files=[self.path], labels=[], reopen_merged=False)
+            return {"pr": pr.get("url"), "number": pr.get("number"), "reverts": shas[0]}
         finally:
             lease.release()
 
