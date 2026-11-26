@@ -566,6 +566,9 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     src.add_argument("--product", help="Product id; reads catalog.json from its acceptance repo (GitHub App)")
     src.add_argument("--catalog", help="A local catalog.json")
     a.add_argument("--json", action="store_true")
+    rh = sub.add_parser("rehearse", help="A step of the release rehearsal: a release against a copy of the tool's "
+                                         "database (valxel_sdlc.rehearsal)")
+    rh.add_argument("step", nargs=argparse.REMAINDER, help="serve | install | sql LABEL | copy | smoke LABEL | done")
     g = sub.add_parser("glitchtip-token", help="The token for a product's GlitchTip webhook URL")
     g.add_argument("product")
     st = sub.add_parser("signals-token", help="A sender's signals token: a product's (Alertmanager, OpenChoreo, "
@@ -686,6 +689,10 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
     al.add_argument("workspace", nargs="?", default="")
     al.add_argument("mode", nargs="?", default="full", choices=["lite", "full"])
     args = p.parse_args(argv)
+    if args.cmd == "rehearse":
+        from .rehearsal import main as rehearse
+
+        return rehearse(args.step)
     if args.cmd == "aws-local":
         return _aws_local(args)
     if args.cmd == "lessons-check":

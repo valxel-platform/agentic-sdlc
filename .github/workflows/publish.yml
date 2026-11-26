@@ -28,6 +28,7 @@ jobs:
       packages: write
       id-token: write       # keyless signing and provenance
       attestations: write
+      statuses: write       # announce the image to the tool (last step)
     env:
       IMAGE: ghcr.io/valxel-platform/agentic-sdlc
     steps:
@@ -98,4 +99,14 @@ jobs:
             echo "Published \`$IMAGE@$DIGEST\` (tags: $TAGS), signed, with its SBOM and provenance."
             echo "Pin the digest in deployments."
           } >> "$GITHUB_STEP_SUMMARY"
-
+      # Last, once the image is signed and attested: a commit status naming its digest. The tool
+      # proposes the release when it sees it (valxel_sdlc.release_proposals): only main's images.
+      - name: Announce the image
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -f state=success -f context=valxel/image
+          -f description="$DIGEST" -f target_url="$RUN" --silent

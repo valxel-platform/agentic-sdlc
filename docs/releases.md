@@ -33,9 +33,9 @@ Every release has notes on its GitHub release page, with:
 - the three image digests and the chart version;
 - what changed, for operators and for product teams;
 - any new or changed values, and their defaults;
-- a **migration note**, if the database changes: what changes, whether a rollback needs the
-  snapshot (see [rolling back](self-hosted.md#4-upgrade)), and roughly how long the change takes
-  on a large install;
+- a **migration note**, if the database changes: what it adds, and roughly how long the change
+  takes on a large install. A release only adds to the schema, so rolling back needs no snapshot
+  (ADR 0012); a removal ships in a later release, and its note says which release stopped using it;
 - security fixes, with their CVE or advisory ids.
 
 ## Upgrading
@@ -46,7 +46,30 @@ Every release has notes on its GitHub release page, with:
 - The tool applies its database changes when it starts. Take a snapshot first (the
   [upgrade steps](self-hosted.md#4-upgrade)).
 
-## Support
+## Following main
+
+A deployment that runs `main`'s images rather than releases (Valxel's own tools cluster does) can
+have the tool propose each one. The tool only proposes; the deployment's own checks verify and
+rehearse it, a person merges it, and the deployment's GitOps rolls it out.
+
+1. Each image's publish workflow, once the image from `main` is signed and attested, posts a
+   commit status `valxel/image` whose description is the digest.
+2. The status reaches the tool's webhook. The tool reads the pins on the deployment repository's
+   default branch (`VALXEL_RELEASE_FILE`, a file of `<name>: ghcr.io/<owner>/<repo>:main@sha256:...`
+   lines), moves that repository's pin to the new digest, and keeps any other update the open
+   release PR already proposes.
+3. It resets the release branch (`VALXEL_RELEASE_BRANCH`, `release/valxel-images`) to the default
+   branch, commits the file, and opens the release PR or updates the open one. Images published
+   while a PR is open join it; once it's merged or closed, the next image starts a new one.
+
+To turn it on, set `VALXEL_RELEASE_REPO` (chart: `tool.releaseRepo`) to the deployment repository,
+and install the Delivery GitHub App on it and on the three image repositories (it already has the
+permissions and the `status` event). Rolling back never involves the tool: revert the release PR.
+If the tool can't propose (it's down, or a release broke this), edit the pins by hand on the release
+branch.
+
+The deployment repository should protect its default branch and require a review the tool's App
+can't give, so that proposing stays all it can do.
 
 Adopted 2026-11-23. Valxel's source is public under the Business Source License 1.1
 ([LICENSE](../LICENSE), [ADR 0006](adr/0006-business-source-license.md)), free for individuals,
