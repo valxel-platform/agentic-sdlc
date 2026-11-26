@@ -23,6 +23,15 @@ pipelines on Valxel" says why.
                above its approved class, and each has a control total. That the SQL keeps every
                column at least as sensitive as its inputs is the template's own check
                (transform-check, in the repo's required unit check).
+  deploy       each Postgres transform gets a login of its own (catalog type postgres-login,
+               platform-resources): made in the database the reporting repos it reads load into,
+               with SELECT on exactly the columns its contracts give it (and _updated_at), CREATE for
+               its own schemas and a break-glass role it administers (`logins`, which
+               resources.plan adds). It's bound to the component with fixed variable names
+               (LOGIN_ENV), which template-transform reads; the database owner's credentials never
+               reach it. A Postgres transform on a cloud without postgres-login, or whose datasets
+               aren't loaded into exactly one postgres resource of the design, fails G4
+               (`login_findings`).
   staging      reconcile.py reads each transform's valxel.transform.run lines.
 """
 
@@ -36,11 +45,19 @@ import yaml
 from .datasets import CLASSES, RANK, consumers, extensions, fields, parse_hld
 
 ROLE = "transform"
+LOGIN_TYPE = "postgres-login"
+DATABASE_TYPE = "postgres"
+SOURCE_SCHEMA = "public"  # where reporting loads its tables (transform.yaml source_schema)
+# postgres-login's outputs -> what template-transform reads (its Settings).
+LOGIN_ENV = {"host": "TRANSFORM_PG_HOST", "port": "TRANSFORM_PG_PORT", "database": "TRANSFORM_PG_DATABASE",
+             "username": "TRANSFORM_PG_USER", "password": "TRANSFORM_PG_PASSWORD",
+             "tokenize_key": "TRANSFORM_TOKENIZE_KEY"}
 REPORTING = "reporting"
 WAREHOUSES = ("postgres",)  # snowflake comes with template-transform's second step (CP-126)
 SOURCES = "dbt/models/sources.yml"
 CONFIG = "transform.yaml"
 REPORTING_CONFIG = "reporting.yaml"
+WORKLOAD = "workload.yaml"
 _LINE = re.compile(r"^- ([A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+)\s*:\s*(.+?)\s*$", re.M)
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 _DEST = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
@@ -223,6 +240,97 @@ def scope_findings(hld: str) -> list[str]:
     return out
 
 
+def login_resource(repo: str) -> str:
+    """The transform's login, as an OpenChoreo Resource: '<component>-login'."""
+    return f"{_short(repo)}-login"
+
+
+def login_role(repo: str) -> str:
+    """The login's role name in the database: the component's name as a SQL name."""
+    name = re.sub(r"[^a-z0-9_]", "_", _short(repo).lower())
+    return (name if name[:1].isalpha() else f"t_{name}")[:50]
+
+
+def _databases(line: dict, contracts: dict[str, dict], entries: list[dict]) -> list[dict]:
+    """The design's postgres resources that a repo loading one of the line's datasets uses."""
+    comp = _short(line["repo"])
+    out = []
+    for e in entries:
+        if e["type"] != DATABASE_TYPE:
+            continue
+        loaders = {_short(c) for c in e["access"]} - {comp}
+        datasets = [contracts[r["dataset"]] for r in line["reads"] if r["dataset"] in contracts]
+        if any(_short(k) in loaders and v for c in datasets for k, v in consumers(c).items()):
+            out.append(e)
+    return out
+
+
+def _login_reads(line: dict, contracts: dict[str, dict]) -> list[dict]:
+    reads = []
+    for read in line["reads"]:
+        c = contracts.get(read["dataset"])
+        if c is None:
+            continue
+        props = fields(c)
+        cols = [f for f in _reads(c, line["repo"]) if f in props]
+        reads.append({"schema": SOURCE_SCHEMA, "table": read["table"], "columns": [*cols, "_updated_at"]})
+    return reads
+
+
+def logins(hld: str, catalog: dict) -> list[dict]:
+    """One login per Postgres transform whose line holds: component, resource name, and the
+    postgres-login parameters (database, login, reads, createSchemas, breakGlass)."""
+    from .resources import resolved
+
+    if LOGIN_TYPE not in (catalog.get("types") or {}):
+        return []
+    contracts = {str(c.get("id")): c for c in parse_hld(hld)[0]}
+    entries = resolved(hld, catalog)
+    out = []
+    for line in parse_pipelines(hld):
+        if line["problems"] or line["warehouse"] != "postgres":
+            continue
+        dbs = _databases(line, contracts, entries)
+        if len(dbs) != 1 or "database" not in dbs[0]["params"]:
+            continue
+        out.append({"component": _short(line["repo"]), "name": login_resource(line["repo"]),
+                    "database_resource": dbs[0]["name"],
+                    "parameters": {"database": str(dbs[0]["params"]["database"]), "login": login_role(line["repo"]),
+                                   "reads": _login_reads(line, contracts), "createSchemas": True,
+                                   "breakGlass": True}})
+    return out
+
+
+def login_findings(hld: str, catalog: dict) -> list[str]:
+    """G4: a Postgres transform can get a login of its own here, in exactly one database."""
+    from .resources import cloud_name, resolved
+
+    lines = [p for p in parse_pipelines(hld) if not p["problems"] and p["warehouse"] == "postgres"]
+    if not lines or not catalog.get("types"):
+        return []
+    if LOGIN_TYPE not in catalog["types"]:
+        return [f"Pipelines: {', '.join(p['repo'] for p in lines)}: a Postgres transform signs in with a login of "
+                f"its own (postgres-login), which the platform doesn't offer on {cloud_name(catalog)} yet"]
+    contracts = {str(c.get("id")): c for c in parse_hld(hld)[0]}
+    entries = resolved(hld, catalog)
+    out = []
+    for line in lines:
+        dbs = _databases(line, contracts, entries)
+        if len(dbs) != 1:
+            found = ", ".join(e["name"] for e in dbs) or "none"
+            out.append(f"Pipelines: {line['repo']} reads from the database its reporting repos load into: exactly one "
+                       f"postgres resource under '## Resources' must be used by them (found: {found})")
+        elif "database" not in dbs[0]["params"]:
+            out.append(f"Pipelines: {line['repo']}: {dbs[0]['name']} needs its database= parameter")
+    return out
+
+
+def login_snippet(repo: str) -> str:
+    """The transform's workload.yaml entry for its login."""
+    lines = [f"    - ref: {login_resource(repo)}", "      envBindings:"]
+    return "\n".join(lines + [f"        {out}: {env}" for out, env in LOGIN_ENV.items()])
+
+
 def sources_yml(hld: str, repo: str) -> str:
     """The transform's dbt/models/sources.yml, from the approved contracts: one source table per
     dataset it reads, only the fields it may read, each with its data class."""
@@ -275,7 +383,10 @@ def coder_instruction(hld: str, repo: str) -> str:
                 " or an aggregate under valxel_min_group(11)); every mart has a valxel_control_total against what"
                 " it's built from; an incremental model removes what's gone at the source with the quoted"
                 " valxel_deletions hook. uv run transform-check must pass.\n\n"
-                f"```yaml\n{sources_yml(hld, repo)}```\n")
+                f"```yaml\n{sources_yml(hld, repo)}```\n"
+                + (f"It signs in with a login of its own, made when it deploys (never the database owner's)."
+                   f" workload.yaml binds it under dependencies.resources exactly so:\n\n```yaml\n"
+                   f"{login_snippet(repo)}\n```\n" if mine["warehouse"] == "postgres" else ""))
     tables = sorted({(r["table"], r["dataset"]) for p in lines if not p["problems"] for r in p["reads"]})
     if not tables:
         return ""
@@ -375,6 +486,27 @@ def _reporting_findings(tid: str, text: str, tables: list[tuple[str, str]]) -> l
             for table, dataset in tables if have.get(table) != dataset]
 
 
+def workload_findings(text: str, repo: str) -> list[str]:
+    """The transform's workload.yaml binds its own login, under the variables the template reads,
+    and no other database: the owner's credentials (a postgres resource) never reach it."""
+    try:
+        doc = yaml.safe_load(text or "") or {}
+    except yaml.YAMLError:
+        return [f"{WORKLOAD} doesn't parse"]
+    deps = ((doc.get("dependencies") or {}).get("resources") or []) if isinstance(doc, dict) else []
+    refs = {str(d.get("ref")): d for d in deps if isinstance(d, dict)}
+    want = login_resource(repo)
+    out = []
+    if want not in refs:
+        out.append(f"{WORKLOAD} must bind {want} under dependencies.resources (its own login)")
+    elif (refs[want].get("envBindings") or {}) != LOGIN_ENV:
+        out.append(f"{WORKLOAD}: {want}'s envBindings must be exactly {LOGIN_ENV}")
+    others = sorted(r for r in refs if r != want)
+    if others:
+        out.append(f"{WORKLOAD} binds {', '.join(others)}: a transform binds only its own login")
+    return out
+
+
 def build_findings(github, hld: str, results: dict) -> list[str]:
     """After the coders: each transform branch stays within its Pipelines line, and each reporting
     branch a transform reads names the tables the transform's sources.yml points at."""
@@ -399,6 +531,8 @@ def build_findings(github, hld: str, results: dict) -> list[str]:
             built = _marts(github, repo, ref, lines[repo]["marts"])
             out += [f"{tid}: {f}" for f in config_findings(
                 read(repo, SOURCES, ref), read(repo, CONFIG, ref), built, lines[repo], sources_yml(hld, repo))]
+            if lines[repo]["warehouse"] == "postgres":
+                out += [f"{tid}: {f}" for f in workload_findings(read(repo, WORKLOAD, ref), repo)]
         elif r.get("role") == REPORTING:
             mine = [(t, d) for t, d in tables if d in contracts and _reads(contracts[d], repo)]
             if mine:

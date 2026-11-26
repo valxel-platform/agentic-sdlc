@@ -163,6 +163,7 @@ def branch(**override: str | None) -> GitHub:
         (TRANSFORM, "dbt/models/marts/notes_signed.sql"): "select 1",
         (TRANSFORM, "dbt/models/marts/notes_by_clinic_year.sql"): "select 1",
         (REPORTING, "reporting.yaml"): "tables:\n  notes: { from: emr.notes, key: note_id }\n",
+        (TRANSFORM, "workload.yaml"): "dependencies:\n  resources:\n" + pipelines.login_snippet(TRANSFORM) + "\n",
     }
     for path, text in override.items():
         key = next(k for k in files if k[1].endswith(path.replace("__", "/").replace("_dot_", ".")))
@@ -261,3 +262,63 @@ def test_lowering_a_data_class_or_dropping_a_control_total_is_weakening():
     assert compare(path, MARTS, no_total) == [f"{path}: removes a control total from notes_signed"]
     assert compare("models/other.yml", raised, MARTS) == []  # only a transform's dbt models
     assert compare(path, MARTS, "models: [") == []  # unreadable: transform-check and the marts check see it
+
+
+# A transform's own login (postgres-login), made at deploy.
+from pathlib import Path  # noqa: E402
+
+from valxel_sdlc import resources  # noqa: E402
+
+CATALOG_TEXT = (Path(__file__).resolve().parents[1]
+                / "examples/governance/valxel-platform/sdlc-governance/platform/catalog.yaml").read_text()
+DB = "## Resources\n- emr-db: postgres; database=emr_reports\n  writes: emr-reporting\n"
+
+
+def catalog(cloud: str = "gcp") -> dict:
+    return resources.load_catalog(CATALOG_TEXT, cloud)
+
+
+def test_a_postgres_transform_gets_a_login_with_only_its_columns():
+    [login] = pipelines.logins(hld(extra=DB), catalog())
+    assert login["component"] == "emr-transform" and login["name"] == "emr-transform-login"
+    assert login["database_resource"] == "emr-db"
+    assert login["parameters"] == {
+        "database": "emr_reports", "login": "emr_transform", "createSchemas": True, "breakGlass": True,
+        "reads": [{"schema": "public", "table": "notes",
+                   "columns": ["note_id", "patient_id", "signed_at", "clinic_id", "_updated_at"]}]}
+    assert pipelines.login_findings(hld(extra=DB), catalog()) == []
+
+
+def test_the_login_is_planned_and_bound_with_the_variables_the_template_reads():
+    planned = resources.plan(hld(extra=DB), catalog(), lambda c: ("emr", "dp-emr"), product_id="emr",
+                             feature_id="emr-feat-1", data_class="phi")
+    [login] = [r for r in planned if r["type"] == "postgres-login"]
+    assert login["name"] == "emr-transform-login" and login["owner"] == "emr-transform"
+    assert login["parameters"]["database"] == "emr_reports" and "tags" in login["parameters"]
+    assert set(login["outputs"]) == set(pipelines.LOGIN_ENV)
+    told = pipelines.coder_instruction(hld(extra=DB), TRANSFORM)
+    assert "- ref: emr-transform-login" in told and "password: TRANSFORM_PG_PASSWORD" in told
+
+
+def test_a_transform_without_one_database_or_without_postgres_login_fails_g4():
+    assert any("found: none" in f for f in pipelines.login_findings(hld(), catalog()))
+    two = DB + "- emr-db2: postgres; database=other\n  writes: emr-reporting\n"
+    assert any("found: emr-db, emr-db2" in f for f in pipelines.login_findings(hld(extra=two), catalog()))
+    [aws] = pipelines.login_findings(hld(extra=DB), catalog("aws"))
+    assert "doesn't offer on AWS yet" in aws
+    assert pipelines.logins(hld(extra=DB), catalog("aws")) == []
+
+
+@pytest.mark.parametrize("workload,says", [
+    ("dependencies:\n  resources:\n    - ref: emr-transform-login\n      envBindings:\n"
+     + "".join(f"        {o}: {e}\n" for o, e in pipelines.LOGIN_ENV.items()), None),
+    ("dependencies:\n  resources: []\n", "must bind emr-transform-login"),
+    ("dependencies:\n  resources:\n    - ref: emr-transform-login\n      envBindings:\n        host: DB_HOST\n",
+     "envBindings must be exactly"),
+    ("dependencies:\n  resources:\n    - ref: emr-transform-login\n      envBindings:\n"
+     + "".join(f"        {o}: {e}\n" for o, e in pipelines.LOGIN_ENV.items())
+     + "    - ref: emr-db\n      envBindings:\n        password: DB_PASSWORD\n", "binds only its own login"),
+])
+def test_the_transforms_workload_binds_only_its_own_login(workload, says):
+    found = pipelines.workload_findings(workload, TRANSFORM)
+    assert (found == []) if says is None else any(says in f for f in found), found
