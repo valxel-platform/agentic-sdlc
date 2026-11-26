@@ -111,7 +111,12 @@ def repo_settings_body(merge: dict, default_branch: str, description: str | None
 
 
 class GitHub(Protocol):
-    def open_pr(self, *, repo: str, branch: str, title: str, body: str, files: list[str], labels: list[str]) -> dict: ...
+    # The branch's open PR, updated; else a new one. reopen_merged: a merged PR from the same branch
+    # counts as its PR (a feature branch); False for a branch reused for each release.
+    def open_pr(self, *, repo: str, branch: str, title: str, body: str, files: list[str], labels: list[str],
+                reopen_merged: bool = True) -> dict: ...
+    # Point the branch at sha, creating it if missing, whatever it held (valxel_sdlc.release_proposals).
+    def reset_branch(self, *, repo: str, branch: str, sha: str) -> None: ...
     # sha: the head the gates approved; GitHub refuses the merge if the branch has moved since.
     def merge(self, *, repo: str, number: int, actor: str, sha: str = "") -> dict: ...
     def put_file(self, *, repo: str, branch: str, path: str, content: str, message: str) -> dict: ...
@@ -192,7 +197,17 @@ class StubGitHub:
         self._seq = itertools.count(100)
         self._lock = threading.Lock()
 
-    def open_pr(self, *, repo, branch, title, body, files, labels) -> dict:
+    def reset_branch(self, *, repo, branch, sha) -> None:
+        # The branch holds what main holds (the stub keeps no history).
+        with self._lock:
+            for key in [k for k in self.files if k[0] == repo and k[1] == branch]:
+                del self.files[key]
+            for (r, b, path), content in list(self.files.items()):
+                if r == repo and b == "main":
+                    self.files[(repo, branch, path)] = content
+            self.resets = [*getattr(self, "resets", []), (repo, branch, sha)]
+
+    def open_pr(self, *, repo, branch, title, body, files, labels, reopen_merged=True) -> dict:
         with self._lock:
             for pr in self.prs.values():  # one open PR per head branch, as on GitHub
                 if pr["repo"] == repo and pr["branch"] == branch and pr["state"] == "open":
@@ -540,10 +555,17 @@ class GitHubRest:
         self._call("DELETE", repo, f"/contents/{qpath}", {"message": message, "sha": current["sha"], "branch": branch})
         return True
 
-    def open_pr(self, *, repo, branch, title, body, files, labels) -> dict:
+    def reset_branch(self, *, repo, branch, sha) -> None:
+        ref = f"/git/refs/heads/{quote(branch, safe='')}"
+        if self._call("GET", repo, f"/git/ref/heads/{quote(branch, safe='')}", ok404=True):
+            self._call("PATCH", repo, ref, {"sha": sha, "force": True})
+        else:
+            self._call("POST", repo, "/git/refs", {"ref": f"refs/heads/{branch}", "sha": sha})
+
+    def open_pr(self, *, repo, branch, title, body, files, labels, reopen_merged=True) -> dict:
         org = repo.split("/", 1)[0]
         found = self._call("GET", repo, f"/pulls?state=all&head={quote(org)}:{quote(branch, safe='')}")
-        live = [p for p in found or [] if p["state"] == "open" or p.get("merged_at")]
+        live = [p for p in found or [] if p["state"] == "open" or (reopen_merged and p.get("merged_at"))]
         if live:
             pr = live[0]
             if pr["state"] == "open" and (pr["title"] != title or (pr.get("body") or "") != body):

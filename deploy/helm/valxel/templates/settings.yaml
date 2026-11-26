@@ -108,6 +108,9 @@ data:
   {{- with .Values.tool.configRepo }}
   VALXEL_CONFIG_REPO: {{ . | quote }}
   {{- end }}
+  {{- with .Values.tool.releaseRepo }}
+  VALXEL_RELEASE_REPO: {{ . | quote }}
+  {{- end }}
   {{- with .Values.tool.openchoreo.tokenUrl }}
   VALXEL_OPENCHOREO_TOKEN_URL: {{ . | quote }}
   {{- end }}

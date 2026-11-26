@@ -91,6 +91,7 @@ tool:
   workerConcurrency: 4
   governanceRepo: ""                # VALXEL_GOVERNANCE_REPO, if not the default
   configRepo: ""                    # VALXEL_CONFIG_REPO: config changes replayed against past work
+  releaseRepo: ""                   # VALXEL_RELEASE_REPO: propose main's images there (docs/releases.md#following-main)
   openchoreo:
     tokenUrl: ""                    # their Thunder/IdP token endpoint
     consoleUrl: ""

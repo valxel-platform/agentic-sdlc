@@ -522,6 +522,14 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                              requested_by=(pr.get("user") or {}).get("login", ""))
             return {"event": "pull_request", "eval_run": run["id"]}
         kind = request.headers.get("x-github-event", "")
+        if kind == "status" and event.get("context") == "valxel/image":
+            # A publish workflow signed a new image: propose its release (valxel_sdlc.release_proposals).
+            from ...release_proposals import Proposer
+
+            proposer = Proposer.from_env(eng().services.github, eng().cluster)
+            if proposer is None:
+                return {"event": kind, "release": "off"}
+            return {"event": kind, "release": await run_in_threadpool(proposer.on_status, event)}
         reviewed = (await run_in_threadpool(_on_pull_request, event) if kind == "pull_request" and pr.get("number")
                     else None)
         from ...upkeep.alerts import EVENTS as ALERT_EVENTS
