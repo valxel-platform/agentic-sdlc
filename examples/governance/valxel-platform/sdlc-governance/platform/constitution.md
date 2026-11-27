@@ -1,6 +1,6 @@
 ---
 name: platform
-version: 1.8.1
+version: 1.9.0
 ---
 # Valxel platform constitution
 
@@ -44,3 +44,4 @@ Apps on people's devices:
 Cloud services:
 
 - **VX-19** A feature uses a managed service of its installation's cloud only from the platform catalog's managed services (`catalog.yaml`), declared in its design with what it is for, who may read or write it, and why the platform defaults don't serve; G4 approves the services, their access and their cost. Each component reaches only what it declared, through its own identity and never with keys. Resources are created and changed only through OpenChoreo, per environment, in the product's own cloud account or project and allowed regions; production changes follow G6, and deleting or replacing stored data needs a person. (Policy, Test)
+- **VX-20** The SDLC tool reaches a customer's cloud only through roles the customer's own account grants it (the stack or Tofu the customer runs), limited to resources tagged for their workspace and removable by the customer at any time; with those roles it may deploy to every environment, production after G6. Its agents keep to VX-3. The platform holds no customer data and no long-lived customer secrets: the tool reads only metadata, tags and costs, never data; platform components in the data plane sign in to the customer's services with their own identity; and database logins, the platform's included, are made without passwords the platform stores, wherever the cloud supports it. (Policy)
