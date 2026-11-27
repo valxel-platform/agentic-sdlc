@@ -290,3 +290,86 @@ def test_lists_come_under_any_key_1_3_names_them_with():
     assert _condition({"status": "Ready"}, "Ready") == "True"
     assert _condition({"status": "ResourcesNotReady"}, "Ready") == "False"
     assert _condition({"status": {"conditions": [{"type": "Ready", "status": "True"}]}}, "Ready") == "True"
+
+
+# ---------------------------------------------------------------- the mesh: the platform's definitions
+PROJECT = yaml.safe_load((OC / "project-type.yaml").read_text())
+
+
+def _rendered(project_type, rid):
+    return next(r["template"] for r in project_type["spec"]["resources"] if r["id"] == rid)
+
+
+def test_every_product_namespace_is_meshed_strict_and_denies_by_default():
+    assert PROJECT["kind"] == "ClusterProjectType" and PROJECT["metadata"]["name"] == "valxel"
+    ns = _rendered(PROJECT, "cell-namespace")
+    assert "istio.io/dataplane-mode" in str(ns["metadata"]["labels"])
+    assert _rendered(PROJECT, "strict-mtls")["spec"]["mtls"]["mode"] == "STRICT"
+    deny = _rendered(PROJECT, "allow-nothing")
+    assert deny["kind"] == "AuthorizationPolicy" and not deny.get("spec")
+    scrape = _rendered(PROJECT, "metrics-collector")["spec"]["rules"]
+    assert scrape == [{"from": [{"source": {"namespaces": ["observability"]}}],
+                      "to": [{"operation": {"ports": ["8081"]}}]}]  # the collector reaches the metrics port only
+
+
+def test_every_component_runs_as_its_own_service_account():
+    for name, t in TYPES.items():
+        assert _pod(t)["spec"]["serviceAccountName"] == "${metadata.componentName}", name
+        sas = [r["template"] for r in t["spec"]["resources"] if r["template"]["kind"] == "ServiceAccount"]
+        assert [s["metadata"]["name"] for s in sas] == ["${metadata.componentName}"], name
+
+
+def test_each_component_allows_only_its_declared_callers():
+    for name, t in TYPES.items():
+        props = t["spec"]["parameters"]["openAPIV3Schema"]["properties"]
+        assert props["allowedCallers"]["default"] == [] and props["fromIngress"]["default"] is False, name
+        callers = next(r for r in t["spec"]["resources"] if r["id"] == "mesh-callers")
+        assert "includeWhen" in callers, name  # nothing declared: no rule, so allow-nothing holds
+        rules = callers["template"]["spec"]["rules"]
+        assert "metadata.namespace" in rules and "c.component" in rules, name  # callers in the same namespace only
+        assert '"notPorts": ["8081"]' in rules, name  # the gateway never reaches the metrics port
+
+
+class ProjectApi:
+    name = "openchoreo"
+
+    def __init__(self):
+        self.calls, self.params = [], {"dataClass": "phi"}
+
+    def tool_names(self):
+        return ["get_project", "list_projects", "create_project", "get_component", "patch_component"]
+
+    def tool_schema(self, tool):
+        props = {"create_project": {"namespace_name", "project_name", "deployment_pipeline", "type_name",
+                                    "type_kind"},
+                 "patch_component": {"namespace_name", "component_name", "parameters"}}.get(
+            tool, {"namespace_name", "project_name", "component_name"})
+        return {"properties": {k: {"type": "string"} for k in props}}
+
+    def call(self, tool, args):
+        self.calls.append((tool, args))
+        if tool in ("get_project",):
+            raise McpError("not found")
+        if tool == "list_projects":
+            return {"projects": []}
+        if tool == "get_component":
+            return {"spec": {"parameters": dict(self.params)}}
+        if tool == "patch_component":
+            self.params = args["parameters"]
+        return {}
+
+
+def test_projects_are_created_with_the_platforms_project_type():
+    api = ProjectApi()
+    assert OpenChoreoMcp(api, default_namespace="acme").ensure_project(project="pay", pipeline="p") == "created"
+    created = next(a for t, a in api.calls if t == "create_project")
+    assert created["type_name"] == "valxel" and created["type_kind"] == "ClusterProjectType"
+
+
+def test_setting_mesh_parameters_keeps_the_components_others():
+    api = ProjectApi()
+    oc = OpenChoreoMcp(api, default_namespace="acme")
+    callers = [{"component": "bff", "ports": [8080]}]
+    assert oc.set_parameters(component="api", parameters={"allowedCallers": callers}, project="pay") == "updated"
+    assert api.params == {"dataClass": "phi", "allowedCallers": callers}  # patch replaces all: merged first
+    assert oc.set_parameters(component="api", parameters={"allowedCallers": callers}, project="pay") == "unchanged"

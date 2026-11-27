@@ -1,8 +1,8 @@
 # OpenChoreo platform pieces for capacity plans
 
 Applied once by the platform owners to the shared control plane. Written for OpenChoreo 1.3.3: the
-component types are built on 1.3.3's own (samples/getting-started), and both files pass 1.3.3's CRD
-schemas. Dry-run them on your installation before applying.
+component types and the project type are built on 1.3.3's own (samples/getting-started), and the
+files pass 1.3.3's CRD schemas. Dry-run them on your installation before applying.
 
 - `component-types.yaml`: one type per kind of repo that repos.yaml names: `service` (services, BFFs,
   MCP servers, LLM gateways), `web-app`, `worker` (no endpoints), `agent`, `code-sandbox`,
@@ -32,6 +32,22 @@ schemas. Dry-run them on your installation before applying.
     path from repos.yaml `openchoreo.metrics`: Spring's actuator for the Java templates, `/metrics`
     otherwise. A cluster without that collector just drops the spans.
   - Each builds only with the platform's `docker` workflow.
+  - **Mesh callers.** Every component runs as its own service account, named for the component, so
+    the mesh knows who is calling. Each type takes `allowedCallers` (`[{component, ports}]`) and
+    `fromIngress`, and renders them as an Istio AuthorizationPolicy: only the listed components, in
+    the same namespace (so dev can't call staging when both share a cluster), on those ports; the
+    gateway reaches only a component with `fromIngress`, and never its metrics port. With neither
+    set there is no rule, and the project type's deny-all holds.
+  - **The rules are the product's, not the platform's.** Each product's security repo (`<prefix>security`
+    in the product's org, made at the product gate from `template-security`) declares `calls` in
+    `security.yaml`. Its security owners review it, and its CI runs platform-security's checker.
+    When it merges, the Valxel SDLC sets each component's `allowedCallers` and `fromIngress`
+    (valxel_sdlc.product_security), and the next release takes them through dev, staging and
+    production with the code.
+- `project-type.yaml`: the `valxel` ClusterProjectType. The Valxel SDLC creates every product
+  project with it. Each environment's namespace joins the ambient mesh, with mTLS STRICT, a deny-all
+  AuthorizationPolicy, and one allowance: the data plane's metrics collector (namespace
+  `observability`) may reach port 8081. Everything else is a component's own `allowedCallers`.
 - `autoscaler.yaml`: the `autoscaler` ClusterTrait, a HorizontalPodAutoscaler on CPU. The tool adds
   an instance to each component whose plan has a range (`<component>-autoscaler`) and sets its
   minimum and maximum per environment.

@@ -184,6 +184,18 @@ class ComposeRuntime:
             return [t["instanceName"] for t in add]
         return self._change(fn)
 
+    def set_parameters(self, *, component, parameters, project=None, namespace=None) -> str:
+        """Kept with the component: Compose has no mesh, so the callers are a record, not a rule."""
+        def fn(data):
+            c = data["components"].get(component)
+            if c is None:
+                raise LookupError(f"no component {component!r}")
+            have = c.setdefault("parameters", {})
+            merged = {**have, **parameters}
+            c["parameters"] = merged
+            return "unchanged" if merged == have else "updated"
+        return self._change(fn)
+
     def run_workflow(self, *, component, ref, kind, project=None, namespace=None) -> dict:
         def fn(data):
             c = data["components"].get(component) or {}

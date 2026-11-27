@@ -1,0 +1,76 @@
+# The platform's project type: what every product environment's namespace gets (generated with
+# component-types.yaml by agentic-sdlc .github/scripts/openchoreo_component_types.py).
+apiVersion: openchoreo.dev/v1alpha1
+kind: ClusterProjectType
+metadata:
+  name: valxel
+  annotations:
+    openchoreo.dev/display-name: Valxel product
+    openchoreo.dev/description: 'Each environment''s namespace in the mesh: mTLS STRICT, deny by default, the metrics
+      collector to the management port only'
+  labels:
+    openchoreo.dev/name: valxel
+spec:
+  environmentConfigs:
+    openAPIV3Schema:
+      type: object
+      properties:
+        namespaceLabels:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+        namespaceAnnotations:
+          type: object
+          additionalProperties:
+            type: string
+          default: {}
+  resources:
+  - id: cell-namespace
+    template:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: ${metadata.namespace}
+        labels: '${oc_merge(oc_merge(metadata.labels, environmentConfigs.namespaceLabels), {"istio.io/dataplane-mode":
+          "ambient"})}'
+        annotations: ${environmentConfigs.namespaceAnnotations}
+  - id: strict-mtls
+    template:
+      apiVersion: security.istio.io/v1
+      kind: PeerAuthentication
+      metadata:
+        name: strict-mtls
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        mtls:
+          mode: STRICT
+  - id: allow-nothing
+    template:
+      apiVersion: security.istio.io/v1
+      kind: AuthorizationPolicy
+      metadata:
+        name: allow-nothing
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec: {}
+  - id: metrics-collector
+    template:
+      apiVersion: security.istio.io/v1
+      kind: AuthorizationPolicy
+      metadata:
+        name: metrics-collector
+        namespace: ${metadata.namespace}
+        labels: ${metadata.labels}
+      spec:
+        action: ALLOW
+        rules:
+        - from:
+          - source:
+              namespaces:
+              - observability
+          to:
+          - operation:
+              ports:
+              - '8081'
