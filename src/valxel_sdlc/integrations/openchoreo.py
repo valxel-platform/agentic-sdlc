@@ -31,6 +31,8 @@ from .mcp_client import McpError, McpTools, fit_args, pick_tool
 log = logging.getLogger(__name__)
 
 PIPELINE = ("dev", "staging", "production")
+# Every product project is created with the platform's ClusterProjectType (platform/openchoreo/project-type.yaml).
+PROJECT_TYPE = "valxel"
 
 
 class OpenChoreo(Protocol):
@@ -59,6 +61,10 @@ class OpenChoreo(Protocol):
     # the instance names added.
     def ensure_traits(self, *, component: str, traits: list[dict], project: str | None = None,
                       namespace: str | None = None) -> list[str]: ...
+    # Merges `parameters` into the component's type parameters, keeping the others; the change takes
+    # effect with the component's next release, promoted like any other. Returns "updated" or "unchanged".
+    def set_parameters(self, *, component: str, parameters: dict, project: str | None = None,
+                       namespace: str | None = None) -> str: ...
     # Operations: what a component is doing in an environment, and putting its previous release back.
     def observe(self, *, component: str, env: str, project: str | None = None, namespace: str | None = None,
                 minutes: int = 60) -> dict: ...  # {"available", "logs": [str], "metrics": {...}}
@@ -150,6 +156,16 @@ class StubOpenChoreo:
                                                    "parameters": dict(parameters or {})})
         return "created" if new else "exists"
 
+    def set_parameters(self, *, component, parameters, project=None, namespace=None) -> str:
+        with self._lock:
+            c = self.components.get(component)
+            if c is None:
+                raise LookupError(f"no component {component!r}")
+            merged = {**c["parameters"], **parameters}
+            changed = merged != c["parameters"]
+            c["parameters"] = merged
+        return "updated" if changed else "unchanged"
+
     def ensure_traits(self, *, component, traits, project=None, namespace=None) -> list[str]:
         from ..ops.alert_rules import missing
 
@@ -197,7 +213,7 @@ class StubOpenChoreo:
     def ensure_project(self, *, project, pipeline, namespace=None) -> str:
         with self._lock:
             new = project not in self.projects
-            self.projects.setdefault(project, {"pipeline": pipeline, "namespace": namespace})
+            self.projects.setdefault(project, {"pipeline": pipeline, "namespace": namespace, "type": PROJECT_TYPE})
         return "created" if new else "exists"
 
     def ensure_environment(self, *, name, data_plane, production, actor, namespace=None, labels=None) -> str:
@@ -551,6 +567,17 @@ class OpenChoreoMcp:
                                               ("traits",): have + add})
         return [t["instanceName"] for t in add]
 
+    def set_parameters(self, *, component, parameters, project=None, namespace=None) -> str:
+        """patch_component replaces the whole parameters object, so read it and merge first."""
+        scope = self._scope(component, project, namespace)
+        comp = self._call(("get_component",), scope) or {}
+        have = dict(_get(comp, "spec.parameters", "parameters") or {})
+        merged = {**have, **parameters}
+        if merged == have:
+            return "unchanged"
+        self._call(("patch_component",), {_NS: scope[_NS], _COMPONENT: scope[_COMPONENT], ("parameters",): merged})
+        return "updated"
+
     def _latest_release(self, component, project, namespace) -> str:
         comp = self._call(("get_component",), self._scope(component, project, namespace))
         latest = _get(comp, "status.latestRelease.name", "latestRelease.name", "latest_release")
@@ -631,7 +658,10 @@ class OpenChoreoMcp:
         scope = {**self._ns(namespace), _PROJECT: project}
         if self._get_or_find(("get_project",), "list_projects", scope, project, namespace):
             return "exists"
-        self._call(("create_project",), {**scope, ("deployment_pipeline", "deploymentPipeline", "pipeline"): pipeline})
+        self._call(("create_project",), {**scope, ("deployment_pipeline", "deploymentPipeline", "pipeline"): pipeline,
+                                          # The platform's project type: each environment's namespace in the
+                                          # mesh, mTLS STRICT, deny by default (platform/openchoreo/project-type.yaml)
+                                          ("type_name",): PROJECT_TYPE, ("type_kind",): "ClusterProjectType"})
         return "created"
 
     def ensure_environment(self, *, name, data_plane, production, actor, namespace=None, labels=None) -> str:

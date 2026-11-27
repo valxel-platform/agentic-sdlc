@@ -186,6 +186,18 @@ class QueuedProvisioner:
                                "run setup again once it has")
         raise RuntimeError((req["result"] or {}).get("why") or (req["result"] or {}).get("error") or req["status"])
 
+    def create_security_repo(self, *, product_id: str, repo: str, description: str, inception_id: str) -> str:
+        """The product's security repo, from the platform's template (valxel_sdlc.product_security)."""
+        req = self._await(self.queue.submit(kind="security_repo", key=f"security:{product_id}:{repo}",
+                                            payload={"product_id": product_id, "repo": repo, "private": True,
+                                                     "description": description, "inception_id": inception_id}))
+        if req["status"] == "done":
+            return (req["result"] or {}).get("result", "created")
+        if req["status"] in ("queued", "running"):
+            raise TimeoutError(f"the provisioning worker hasn't created {repo} yet (request {req['id']}); "
+                               "run setup again once it has")
+        raise RuntimeError((req["result"] or {}).get("why") or (req["result"] or {}).get("error") or req["status"])
+
     def done(self, request_ids: list[str]) -> bool:
         return all((self.queue.get(i) or {}).get("status") in ("done", "refused", "failed") for i in request_ids)
 
@@ -200,7 +212,7 @@ def check(engine, req: dict) -> str:
     """Why the worker refuses a request, or "" when governance backs it."""
     services = engine.services
     p = req["payload"]
-    if req["kind"] == "governance_repo":  # a new product: its inception's product gate approved it
+    if req["kind"] in ("governance_repo", "security_repo"):  # a new product: its product gate approved it
         from .inception.formats import ids
 
         state = engine._state(p.get("inception_id") or "")
@@ -210,8 +222,10 @@ def check(engine, req: dict) -> str:
                    for d in state.get("gate_decisions") or []):
             return f"{p['inception_id']} has no approved product gate"
         want = ids(state.get("brief") or "")
-        if (want["product_id"], want["governance_repo"]) != (p["product_id"], p["repo"]):
-            return f"{p['repo']} isn't the governance repo {p['inception_id']} approved ({want['governance_repo']})"
+        kind = req["kind"]
+        if (want["product_id"], want[kind]) != (p["product_id"], p["repo"]):
+            what = kind.split("_")[0]
+            return f"{p['repo']} isn't the {what} repo {p['inception_id']} approved ({want[kind]})"
         return ""
     try:
         entry = services.settings.entry(p["product_id"])
@@ -249,6 +263,11 @@ def run_one(engine, queue: ProvisionQueue, provisioner, github) -> dict | None:
         p = req["payload"]
         if req["kind"] == "governance_repo":
             result = {"result": github.create_repo(repo=p["repo"], template=None, private=p["private"],
+                                                   description=p["description"])}
+        elif req["kind"] == "security_repo":
+            from .product_security import template
+
+            result = {"result": github.create_repo(repo=p["repo"], template=template(), private=p["private"],
                                                    description=p["description"])}
         else:
             services = engine.services

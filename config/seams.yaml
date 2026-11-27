@@ -19,7 +19,7 @@ seams:
 core: [template_contract, resources, outcomes, inception.formats, roadmap.record, ops.changes, ops.alert_rules,
        capacity, repo_policy, repo_files, error_tracking_policy, governance.prs, duplicates, performance,
        sandboxes, jobs, agent_tools, acceptance, ops.cohorts, quality, upkeep, ops.rollout,
-       environments, design_record, ops.remediation, ops.correlate, ops.cost_plan, ops.firing,
+       environments, product_security, design_record, ops.remediation, ops.correlate, ops.cost_plan, ops.firing,
        finops.records, finops.views]
 # The root also holds the evals: they replay every seam's agents (evals, code_evals, injection cases);
 # the tool's health, which measures every seam's agents on real work; and the release rehearsal,
