@@ -254,5 +254,6 @@ def ids(brief: str) -> dict:
     p = product(brief)
     return {"product_id": p["id"], "org": p["org"], "prefix": p["prefix"], "budget_usd": p["budget_usd"],
             "data_class": data_class(brief)[0] or "general",
-            "governance_repo": f"{p['org']}/{p['prefix']}governance"}
+            "governance_repo": f"{p['org']}/{p['prefix']}governance",
+            "security_repo": f"{p['org']}/{p['prefix']}security"}
 

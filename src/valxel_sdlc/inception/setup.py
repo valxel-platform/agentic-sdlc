@@ -242,6 +242,18 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
             product_id=i["product_id"], repo=gov, private=False, description=description, inception_id=thread_id)
             if callable(queued) else gh.create_repo(repo=gov, template=None, private=False, description=description)})
 
+    if not vision.existing:
+        sec = i["security_repo"]
+        sec_description = (f"{vision.name}: security (security.yaml: who may call whom in the mesh, clients "
+                           "and scopes; reviewed by the product's security owners)")
+        queued_sec = getattr(services.provisioner, "create_security_repo", None)
+        from ..product_security import template as security_template
+
+        step("security_repo", lambda: {"repo": sec, "result": queued_sec(
+            product_id=i["product_id"], repo=sec, description=sec_description, inception_id=thread_id)
+            if callable(queued_sec) else gh.create_repo(repo=sec, template=security_template(), private=True,
+                                                        description=sec_description)})
+
     def governance_pr() -> dict:
         for path, content in files.items():
             gh.put_file(repo=gov, branch=BRANCH, path=path, content=content, message=f"{thread_id}: {path}")

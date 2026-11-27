@@ -417,6 +417,7 @@ def make_gate(gate: str, services):
             update["events"].append(note)
             if not update["flag"] and (warn := launch_flag_warning(services, state)):
                 update["events"].append(event("g4", "launch_without_flag", warn))
+            update["events"].append(_propose_calls(services, state, ref))
         if gate == "g6":
             release = dict(state.get("release", {}))
             # Every feature reaches production behind a flag. In a launch group it stays off until the
@@ -831,3 +832,16 @@ def launch_flag_warning(services, state: FeatureState) -> str:
     return (f"This feature is in launch {rel['id']}, which ships its features dark behind flags, but "
             f"{state['product_id']} has no flag service: it will wait after staging until the launch is "
             "approved, like a train. Set up the product's flags, or move it to a train or on its own.")
+
+
+def _propose_calls(services, state, ref) -> dict:
+    """The design's new calls, proposed to the product's security repo (valxel_sdlc.product_security)."""
+    from ..product_security import propose
+
+    try:
+        out = propose(services, state["product_id"], state["feature_id"], services.artifacts.load(ref) if ref else "")
+    except Exception as exc:  # noqa: BLE001 - the gate stands; the calls can be added by hand
+        return event("g4", "mesh_calls_not_proposed", f"{type(exc).__name__}: {exc}"[:500])
+    if out.get("url"):
+        return event("g4", "mesh_calls_proposed", out["url"], calls=len(out["calls"]))
+    return event("g4", "mesh_calls_unchanged", out.get("why") or "the security repo already allows them")

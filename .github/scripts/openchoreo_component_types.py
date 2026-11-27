@@ -376,6 +376,106 @@ types.append(ctype(
                                     + tmp_volume("128Mi") + "}"}}}}}}}]
     + res(task, *CONFIG_IDS)))
 
+# --- the mesh (Istio ambient): the platform defines the rules, each product declares its callers ---
+# Every component runs as its own service account, named after the component, so its mesh identity
+# is cluster.local/ns/<its environment's namespace>/sa/<component>. The project type (below) makes
+# each environment's namespace mTLS STRICT and deny-by-default; each component then allows only the
+# callers its product declares in its security repo (<pid>-security/mesh.yaml, applied by the Valxel
+# SDLC as the `allowedCallers` and `fromIngress` parameters), from the same namespace: dev's BFF can't
+# call staging's service, even on one cluster. Callers never reach the management port (8081); only
+# the data plane's metrics collector does (the project type's rule).
+MESH_PARAMS = {
+    "allowedCallers": {
+        "type": "array", "default": [],
+        "description": "Components of this product allowed to call this one, and on which ports (the product's "
+                       "security repo, mesh.yaml; set by the Valxel SDLC)",
+        "items": {"type": "object", "required": ["component", "ports"], "properties": {
+            "component": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"},
+            "ports": {"type": "array", "minItems": 1,
+                      "items": {"type": "integer", "minimum": 1, "maximum": 65535}}}}},
+    "fromIngress": {"type": "boolean", "default": False,
+                    "description": "Reachable from the platform's gateway (the product's BFF only)"},
+}
+CALLERS = {"id": "mesh-callers", "includeWhen": "${size(parameters.allowedCallers) > 0 || parameters.fromIngress}",
+           "template": {
+    "apiVersion": "security.istio.io/v1", "kind": "AuthorizationPolicy",
+    "metadata": {"name": "${metadata.componentName}-callers", "namespace": "${metadata.namespace}",
+                 "labels": "${metadata.labels}"},
+    "spec": {"selector": {"matchLabels": "${metadata.podSelectors}"}, "action": "ALLOW",
+             "rules": '${parameters.allowedCallers.map(c, {"from": [{"source": {"principals": ["cluster.local/ns/" + '
+                      'metadata.namespace + "/sa/" + c.component]}}], "to": [{"operation": {"ports": c.ports.map(p, '
+                      'string(p))}}]}) + (parameters.fromIngress ? [{"from": [{"source": {"namespaces": '
+                      '[gateway.ingress.external.namespace]}}], "to": [{"operation": {"notPorts": ["8081"]}}]}] : [])}'}}}
+SA = "${metadata.componentName}"
+
+
+def meshed(t):
+    """Gives a type its own service account (named after the component), the callers parameters and
+    the rule that allows them."""
+    spec = t["spec"]
+    spec["parameters"]["openAPIV3Schema"]["properties"].update(MESH_PARAMS)
+    res = spec["resources"]
+    if not any(r["template"]["kind"] == "ServiceAccount" for r in res):
+        res.append({"id": "serviceaccount", "template": {"apiVersion": "v1", "kind": "ServiceAccount", "metadata": {
+            "name": SA, "namespace": "${metadata.namespace}", "labels": "${metadata.labels}"}}})
+    for r in res:
+        tpl = r["template"]
+        if tpl["kind"] == "ServiceAccount":
+            tpl["metadata"]["name"] = SA
+        if tpl["kind"] == "RoleBinding":
+            for subject in tpl["subjects"]:
+                if subject["kind"] == "ServiceAccount":
+                    subject["name"] = SA
+        if tpl["kind"] == "Deployment":
+            tpl["spec"]["template"]["spec"]["serviceAccountName"] = SA
+        if tpl["kind"] == "CronJob":
+            tpl["spec"]["jobTemplate"]["spec"]["template"]["spec"]["serviceAccountName"] = SA
+    res.append(CALLERS)
+    return t
+
+
+types = [meshed(t) for t in types]
+
+# Each environment's namespace, from OpenChoreo's default project type: in the mesh (ambient), mTLS
+# STRICT, nothing allowed unless a component allows it, and the data plane's metrics collector
+# (namespace `observability`) to the management port only. The Valxel SDLC creates every product's
+# OpenChoreo project with this type.
+project_base = yaml.safe_load((OC / "samples/getting-started/cluster-project-types/default.yaml").read_text())
+NS = "${metadata.namespace}"
+project_type = {
+    "apiVersion": "openchoreo.dev/v1alpha1", "kind": "ClusterProjectType",
+    "metadata": {"name": "valxel", "annotations": {
+        "openchoreo.dev/display-name": "Valxel product",
+        "openchoreo.dev/description": "Each environment's namespace in the mesh: mTLS STRICT, deny by default, "
+                                      "the metrics collector to the management port only"},
+        "labels": {"openchoreo.dev/name": "valxel"}},
+    "spec": {
+        "environmentConfigs": project_base["spec"]["environmentConfigs"],
+        "resources": [
+            {"id": "cell-namespace", "template": {**project_base["spec"]["resources"][0]["template"], "metadata": {
+                **project_base["spec"]["resources"][0]["template"]["metadata"],
+                "labels": '${oc_merge(oc_merge(metadata.labels, environmentConfigs.namespaceLabels), '
+                          '{"istio.io/dataplane-mode": "ambient"})}'}}},
+            {"id": "strict-mtls", "template": {
+                "apiVersion": "security.istio.io/v1", "kind": "PeerAuthentication",
+                "metadata": {"name": "strict-mtls", "namespace": NS, "labels": "${metadata.labels}"},
+                "spec": {"mtls": {"mode": "STRICT"}}}},
+            {"id": "allow-nothing", "template": {
+                "apiVersion": "security.istio.io/v1", "kind": "AuthorizationPolicy",
+                "metadata": {"name": "allow-nothing", "namespace": NS, "labels": "${metadata.labels}"},
+                "spec": {}}},
+            {"id": "metrics-collector", "template": {
+                "apiVersion": "security.istio.io/v1", "kind": "AuthorizationPolicy",
+                "metadata": {"name": "metrics-collector", "namespace": NS, "labels": "${metadata.labels}"},
+                "spec": {"action": "ALLOW", "rules": [{
+                    "from": [{"source": {"namespaces": ["observability"]}}],
+                    "to": [{"operation": {"ports": ["8081"]}}]}]}}},
+        ]}}
+(OUT.parent / "project-type.yaml").write_text(
+    "# The platform's project type: what every product environment's namespace gets (generated with\n"
+    "# component-types.yaml by agentic-sdlc .github/scripts/openchoreo_component_types.py).\n"
+    + yaml.safe_dump(project_type, sort_keys=False, width=110))
+
 HEADER = """\
 # The platform's component types, one per kind of repo (repos.yaml `openchoreo.component_type`).
 # Built on OpenChoreo 1.3.3's own types (samples/getting-started/component-types): the image from
@@ -383,7 +483,8 @@ HEADER = """\
 # and dependencies injected as 1.3 does. The platform adds, everywhere: zero-downtime rollouts, zone
 # spread, a disruption budget from 2 pods, graceful shutdown, health probes, and the repo's role as
 # the pods' `valxel.io/role` label (the `role` parameter, set by the Valxel SDLC at registration),
-# which the network policies select on. Each type takes `replicas` and `resources` per environment,
+# which the network policies select on; its own service account and mesh rule, allowing the callers
+# its product declares (`allowedCallers`, `fromIngress`). Each type takes `replicas` and `resources` per environment,
 # set by the Valxel SDLC from the product's runtime/capacity.yaml; no CPU limit, deliberately.
 #
 # agent, code-sandbox, connector and scheduled-task are also locked down: non-root, read-only root

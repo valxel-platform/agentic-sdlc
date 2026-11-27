@@ -530,6 +530,9 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             if proposer is None:
                 return {"event": kind, "release": "off"}
             return {"event": kind, "release": await run_in_threadpool(proposer.on_status, event)}
+        from ...product_security import on_push  # a merge to a product's security repo sets its mesh rules
+
+        mesh = await run_in_threadpool(on_push, eng().services, kind, event)
         reviewed = (await run_in_threadpool(_on_pull_request, event) if kind == "pull_request" and pr.get("number")
                     else None)
         from ...upkeep.alerts import EVENTS as ALERT_EVENTS
@@ -547,6 +550,7 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         waiting = set(eng().waiting_on_external())
         poked = [fid for fid in sorted(features & waiting if features else waiting) if eng().poke(fid)]
         return {"event": request.headers.get("x-github-event", ""), "resumed": poked,
-                **({"independent_review": reviewed} if reviewed else {})}
+                **({"independent_review": reviewed} if reviewed else {}),
+                **({"mesh": mesh} if mesh else {})}
 
     return api
