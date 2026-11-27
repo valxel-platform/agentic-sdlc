@@ -555,8 +555,9 @@ SECURITY = {
                   " reporting_reader with row-level security; Kafka as this component's own identity (VX-17)."),
     "transform": (" Models read only the sources.yml the tool gives; every column declares its data class and"
                   " transform-check passes; marts are published only by the run (never by hand), readable by"
-                  " reporting_reader with row-level security by tenant; the tokenize key and the database URL are"
-                  " mounted files, never in SQL, profiles or logs (VX-17)."),
+                  " reporting_reader with row-level security by tenant; it signs in as its own workload identity"
+                  " (no password) and tokenizes through the database's function, whose key never reaches it"
+                  " (VX-17, VX-20)."),
     "job": (" job.yaml's schedule and time zone are the HLD's Schedules line for this repo; the work covers"
             " run.window_start to run.window_end, is safe to run twice over the same window (upserts keyed by"
             " the item, or a record of what was sent), calls run.check() between items and changes nothing on"
