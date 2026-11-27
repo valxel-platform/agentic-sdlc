@@ -52,7 +52,7 @@ SOURCE_SCHEMA = "public"  # where reporting loads its tables (transform.yaml sou
 # postgres-login's outputs: names only, never a secret (VX-20). The transform signs in as its own
 # workload identity with a token, and tokenizes through the database's function.
 LOGIN_ENV = {"host": "TRANSFORM_PG_HOST", "port": "TRANSFORM_PG_PORT", "database": "TRANSFORM_PG_DATABASE",
-             "username": "TRANSFORM_PG_USER", "auth": "TRANSFORM_PG_AUTH",
+             "username": "TRANSFORM_PG_USER", "auth": "TRANSFORM_PG_AUTH", "role": "TRANSFORM_PG_ROLE",
              "break_glass_role": "TRANSFORM_BREAK_GLASS_ROLE", "tokenize_function": "TRANSFORM_TOKENIZE_FUNCTION"}
 REPORTING = "reporting"
 WAREHOUSES = ("postgres",)  # snowflake comes with template-transform's second step (CP-126)

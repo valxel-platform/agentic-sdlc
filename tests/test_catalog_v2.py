@@ -97,7 +97,12 @@ def test_postgres_is_made_as_the_clouds_resource_type(catalog, existing, made_as
     out = resources.plan(hld(body), catalog, lambda comp: ("farm", None), product_id="FARM", feature_id="FARM-FEAT-7",
                          data_class="general", existing=existing)
     [r] = [r for r in out if r["name"] == "records"]
-    assert r["type"] == made_as and r["outputs"]["password"] == "DB_PASSWORD"
+    assert r["type"] == made_as
+    if catalog is GCP:  # no password (VX-20): farm-api gets a login of its own instead
+        assert "password" not in r["outputs"]
+        assert [x["name"] for x in out if x["type"] == "postgres-login"] == ["farm-api-records-login"]
+    else:
+        assert r["outputs"]["password"] == "DB_PASSWORD"
 
 
 def test_a_products_projects_are_checked():

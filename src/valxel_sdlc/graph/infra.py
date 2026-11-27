@@ -145,12 +145,14 @@ def aws_plan(services, state: FeatureState, snap, ref) -> list[dict]:
         return []
     sandboxes = [r.name.split("/", 1)[-1] for lane in snap.lanes().values() for r in lane.repos
                  if r.role == CODE_SANDBOX]
+    reporting = [r.name.split("/", 1)[-1] for lane in snap.lanes().values() for r in lane.repos
+                 if r.role == "reporting"]
     if not snap.aws_catalog and not sandboxes:
         return []
     return resources.plan(services.artifacts.load(ref), snap.aws_catalog or {}, _resource_owner(snap),
                           product_id=state["product_id"], feature_id=state["feature_id"],
                           data_class=snap.product.data_class, code_sandboxes=sandboxes,
-                          existing=_existing_types(services, snap))
+                          existing=_existing_types(services, snap), reporting=reporting)
 
 
 def _existing_types(services, snap) -> dict[str, str]:

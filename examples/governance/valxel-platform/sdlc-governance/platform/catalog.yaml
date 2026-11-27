@@ -354,7 +354,9 @@ types:
     parameters:
       database: { type: string, required: true }
       version: { type: string, default: "17" }
-    access_by: credentials   # the component gets the database's credentials (outputs), not IAM
+    # On AWS the component gets the database's credentials (outputs) until RDS logins exist; on
+    # Google Cloud and Azure a login of its own (the cloud blocks' access_by: login).
+    access_by: credentials
     outputs: { host: DB_HOST, port: DB_PORT, database: DB_NAME, username: DB_USER, password: DB_PASSWORD }
     clouds:
       aws:
@@ -379,6 +381,11 @@ types:
       gcp:
         service: "Cloud SQL for PostgreSQL (Enterprise edition): an instance per resource, private IP only"
         access: {}
+        # No password (VX-20): each component that uses the database signs in with a login of its own
+        # (postgres-login, made by the SDLC tool), as its own workload identity. The database itself
+        # says only where it is.
+        access_by: login
+        outputs: { host: DB_HOST, port: DB_PORT, database: DB_NAME }
         # connections: max_connections, which the Composition sets for the size. No paused size: Cloud
         # SQL doesn't stop itself when idle, so dev and staging use small. Prices are estimates for
         # us-central1 (compute and 20 GB of SSD) until billed.
@@ -395,6 +402,10 @@ types:
       azure:
         service: "Azure Database for PostgreSQL flexible server: a server of its own per resource, private access only"
         access: {}
+        # No password (VX-20): as on Google Cloud, a login per component (postgres-login); password
+        # sign-in is off on the server.
+        access_by: login
+        outputs: { host: DB_HOST, port: DB_PORT, database: DB_NAME }
         # connections: max_connections, which the Composition sets for the size. No paused size: a
         # flexible server can be stopped by hand, not when idle. Prices are estimates for eastus.
         sizes:
@@ -553,29 +564,31 @@ types:
           small: { monthly_usd: 0 }
         built_in: [roles assigned per resource only, no subscription-wide roles, no secrets]
 
-  # A login of its own in a product database, for one component: a transform. Not chosen in
-  # designs: the SDLC tool makes one per transform when it deploys, from the approved design (the
-  # tables and columns it may read come from the data contracts its Pipelines line reads), and binds
-  # it with the component. The platform's db-logins controller makes it in the database, signing in
+  # A login of its own in a product database, for one component. Not chosen in designs: the SDLC tool
+  # makes one for each component that uses a postgres resource (access owner when it writes, reader
+  # when it only reads) and for each transform (exactly the columns its data contracts give it), and
+  # binds it with the component. The platform's db-logins controller makes it in the database, signing in
   # as the database's IAM or Entra admin with short-lived tokens; the component signs in as its own
   # workload identity. No password anywhere (constitution VX-20). Its tokenize function's key is made
   # in the database and never leaves it.
   postgres-login:
     internal: true
-    use_for: "A transform's own login: SELECT on exactly the columns its contracts give it, its own schemas, nothing else."
-    not_for: "Anything a design picks: the tool makes it per transform."
+    use_for: "A component's own login to a product database: owner (acts as <database>_owner, which owns the tables), reader (<database>_reader), or a transform's exact columns."
+    not_for: "Anything a design picks: the tool makes one per component that uses the database."
     data_classes: [general, payments, phi]
     stateful: false
     parameters:
       database: { type: string, required: true }
       login: { type: string, required: true }
       component: { type: string, required: true }
+      access: { type: string, default: columns }   # owner | reader | columns
+      grantRoles: { type: array }                  # NOLOGIN roles an owner may grant (reporting_reader)
       reads: { type: array }
       createSchemas: { type: boolean, default: false }
       breakGlass: { type: boolean, default: false }
       tokenize: { type: boolean, default: false }
     access_by: identity   # the component signs in as its own workload identity, with a token
-    outputs: { host: DB_HOST, port: DB_PORT, database: DB_NAME, username: DB_USER, auth: DB_AUTH, break_glass_role: BREAK_GLASS_ROLE, tokenize_function: TOKENIZE_FUNCTION }
+    outputs: { host: DB_HOST, port: DB_PORT, database: DB_NAME, username: DB_USER, auth: DB_AUTH, role: DB_ROLE, break_glass_role: BREAK_GLASS_ROLE, tokenize_function: TOKENIZE_FUNCTION }
     clouds:
       # No aws block yet: RDS IAM sign-in needs one grant from the master user, and the database
       # there is OpenChoreo's postgres-crossplane. To add and check on a real AWS data plane (tracker
