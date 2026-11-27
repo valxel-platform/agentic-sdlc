@@ -97,6 +97,23 @@ def _dbt_weakening(path: str, old: str, new: str) -> list[str]:
     return out
 
 
+def _expert_determination(path: str, old: str, new: str) -> list[str]:
+    """Recording an Expert Determination lets tokens count as de-identifying (template-transform):
+    a person's decision, never an agent's, so any change to it is flagged for one."""
+    def value(text: str) -> str:
+        try:
+            doc = yaml.safe_load(text or "") or {}
+        except yaml.YAMLError:
+            return ""
+        return str(doc.get("expert_determination") or "").strip() if isinstance(doc, dict) else ""
+
+    before, after = value(old), value(new)
+    if after != before and after:
+        return [f"{path}: records an expert_determination ({after[:80]}): tokens would count as de-identified;"
+                " only a person records one"]
+    return []
+
+
 def _thresholds(text: str) -> dict[str, list[float]]:
     found: dict[str, list[float]] = {}
     for key, num in THRESHOLDS.findall(text):
@@ -125,6 +142,8 @@ def compare(path: str, old: str | None, new: str | None) -> list[str]:
             out.append(f"{path}: removes {removed} test case{'s' if removed > 1 else ''}")
     if DBT_MODELS.search(path) and old:
         out += _dbt_weakening(path, old, new)
+    if path.rsplit("/", 1)[-1] == "transform.yaml":
+        out += _expert_determination(path, old, new)
     if CONFIG_FILE.search(path) and old:
         before, after = _thresholds(old), _thresholds(new)
         for key, values in before.items():

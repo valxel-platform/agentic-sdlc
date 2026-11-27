@@ -284,6 +284,7 @@ def test_a_postgres_transform_gets_a_login_with_only_its_columns():
     assert login["database_resource"] == "emr-db"
     assert login["parameters"] == {
         "database": "emr_reports", "login": "emr_transform", "createSchemas": True, "breakGlass": True,
+        "component": "emr-transform", "tokenize": True,
         "reads": [{"schema": "public", "table": "notes",
                    "columns": ["note_id", "patient_id", "signed_at", "clinic_id", "_updated_at"]}]}
     assert pipelines.login_findings(hld(extra=DB), catalog()) == []
@@ -297,7 +298,7 @@ def test_the_login_is_planned_and_bound_with_the_variables_the_template_reads():
     assert login["parameters"]["database"] == "emr_reports" and "tags" in login["parameters"]
     assert set(login["outputs"]) == set(pipelines.LOGIN_ENV)
     told = pipelines.coder_instruction(hld(extra=DB), TRANSFORM)
-    assert "- ref: emr-transform-login" in told and "password: TRANSFORM_PG_PASSWORD" in told
+    assert "- ref: emr-transform-login" in told and "auth: TRANSFORM_PG_AUTH" in told and "PASSWORD" not in told
 
 
 def test_a_transform_without_one_database_or_without_postgres_login_fails_g4():
@@ -322,3 +323,12 @@ def test_a_transform_without_one_database_or_without_postgres_login_fails_g4():
 def test_the_transforms_workload_binds_only_its_own_login(workload, says):
     found = pipelines.workload_findings(workload, TRANSFORM)
     assert (found == []) if says is None else any(says in f for f in found), found
+
+
+def test_only_a_person_records_an_expert_determination():
+    from valxel_sdlc.evaluators import weakening
+
+    old = "name: emr-transform\nwarehouse: postgres\n"
+    [found] = weakening.compare("transform.yaml", old, old + "expert_determination: ED-2027-01 (Dr. Q)\n")
+    assert "only a person records one" in found
+    assert weakening.compare("transform.yaml", old, old + "schema: transform\n") == []

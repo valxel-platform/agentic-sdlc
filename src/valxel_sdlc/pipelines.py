@@ -49,9 +49,11 @@ LOGIN_TYPE = "postgres-login"
 DATABASE_TYPE = "postgres"
 SOURCE_SCHEMA = "public"  # where reporting loads its tables (transform.yaml source_schema)
 # postgres-login's outputs -> what template-transform reads (its Settings).
+# postgres-login's outputs: names only, never a secret (VX-20). The transform signs in as its own
+# workload identity with a token, and tokenizes through the database's function.
 LOGIN_ENV = {"host": "TRANSFORM_PG_HOST", "port": "TRANSFORM_PG_PORT", "database": "TRANSFORM_PG_DATABASE",
-             "username": "TRANSFORM_PG_USER", "password": "TRANSFORM_PG_PASSWORD",
-             "tokenize_key": "TRANSFORM_TOKENIZE_KEY"}
+             "username": "TRANSFORM_PG_USER", "auth": "TRANSFORM_PG_AUTH",
+             "break_glass_role": "TRANSFORM_BREAK_GLASS_ROLE", "tokenize_function": "TRANSFORM_TOKENIZE_FUNCTION"}
 REPORTING = "reporting"
 WAREHOUSES = ("postgres",)  # snowflake comes with template-transform's second step (CP-126)
 SOURCES = "dbt/models/sources.yml"
@@ -183,8 +185,9 @@ def _share_findings(line: dict) -> list[str]:
         cls = line["marts"].get(share["mart"], "")
         if cls in RANK and RANK[cls] > RANK["none"]:
             out.append(f"Pipelines: {line['repo']} shares {share['mart']} ({cls}) with {share['destination']}: only "
-                       "a mart of class none leaves the product. De-identify it in the models (valxel_tokenize, "
-                       "valxel_generalize_year, an aggregate under valxel_min_group) and give it class none")
+                       "a mart of class none leaves the product. De-identify it in the models "
+                       "(valxel_generalize_year, an aggregate under valxel_min_group; valxel_tokenize only with "
+                       "a recorded Expert Determination) and give it class none")
     return out
 
 
@@ -296,6 +299,7 @@ def logins(hld: str, catalog: dict) -> list[dict]:
         out.append({"component": _short(line["repo"]), "name": login_resource(line["repo"]),
                     "database_resource": dbs[0]["name"],
                     "parameters": {"database": str(dbs[0]["params"]["database"]), "login": login_role(line["repo"]),
+                                   "component": _short(line["repo"]), "tokenize": True,
                                    "reads": _login_reads(line, contracts), "createSchemas": True,
                                    "breakGlass": True}})
     return out
@@ -379,12 +383,13 @@ def coder_instruction(hld: str, repo: str) -> str:
                 f" transform.yaml's warehouse is {mine['warehouse']}. Build exactly these marts under"
                 f" dbt/models/marts/ (<name>.sql), each declared in marts.yml: {marts}.{shared}"
                 " Every model column declares meta.data_class, at least as"
-                " sensitive as what it's made from (de-identify only with valxel_tokenize, valxel_generalize_year"
-                " or an aggregate under valxel_min_group(11)); every mart has a valxel_control_total against what"
-                " it's built from; an incremental model removes what's gone at the source with the quoted"
-                " valxel_deletions hook. uv run transform-check must pass.\n\n"
+                " sensitive as what it's made from (de-identify only with valxel_generalize_year or an aggregate"
+                " under valxel_min_group(11); a valxel_tokenize column keeps its source's class unless"
+                " transform.yaml records an expert_determination, which only a person adds); every mart has a"
+                " valxel_control_total against what it's built from; an incremental model removes what's gone"
+                " at the source with the quoted valxel_deletions hook. uv run transform-check must pass.\n\n"
                 f"```yaml\n{sources_yml(hld, repo)}```\n"
-                + (f"It signs in with a login of its own, made when it deploys (never the database owner's)."
+                + (f"It signs in as its own workload identity with a login made when it deploys: no password."
                    f" workload.yaml binds it under dependencies.resources exactly so:\n\n```yaml\n"
                    f"{login_snippet(repo)}\n```\n" if mine["warehouse"] == "postgres" else ""))
     tables = sorted({(r["table"], r["dataset"]) for p in lines if not p["problems"] for r in p["reads"]})
