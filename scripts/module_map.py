@@ -284,7 +284,7 @@ CAPS = [
         "components",
         "Components and resources",
         "What a product is built from: component roles and their template contract, cloud resources, capacity, "
-        "environments, the mesh rules each product's security repo declares, datasets.",
+        "environments and their data planes, the mesh rules each product's security repo declares, datasets.",
         [
             "template_contract",
             "repo_roles",
@@ -299,6 +299,7 @@ CAPS = [
             "resources",
             "capacity",
             "environments",
+            "dataplanes",
             "product_security",
             "catalog_info",
             "datasets",

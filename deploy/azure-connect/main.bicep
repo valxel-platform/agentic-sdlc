@@ -72,9 +72,9 @@ var role = {
   managedIdentityOperator: 'f1a07417-d97a-45cb-824c-7a7467783830'
   rbacAdministrator: 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
   aksRbacClusterAdmin: 'b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b'
-  keyVaultCryptoOfficer: '14b46e9e-c2b7-41b4-b07b-48a6ebf60603'
-  keyVaultCryptoUser: '12338af0-0e69-4776-bea7-57ae8d297424'
-  keyVaultSecretsUser: '4633458b-17de-408a-b874-0445c86b69e6'
+  cryptoOfficer: '14b46e9e-c2b7-41b4-b07b-48a6ebf60603'
+  cryptoUser: '12338af0-0e69-4776-bea7-57ae8d297424'
+  secretsReader: '4633458b-17de-408a-b874-0445c86b69e6'
   dnsZoneContributor: 'befefa01-2a29-4197-83a8-272ff33ce314'
   storageBlobDataContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 }
@@ -96,16 +96,16 @@ var delegation = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/wr
 // reading secrets).
 var deployRoles = mode == 'lite'
   ? [role.virtualMachineContributor, role.networkContributor, role.managedIdentityOperator]
-  : [role.contributor, role.aksRbacClusterAdmin, role.keyVaultCryptoOfficer]
+  : [role.contributor, role.aksRbacClusterAdmin, role.cryptoOfficer]
 
 // Full mode: the data plane's identities and their roles on the subscription.
 var platformRoles = mode == 'full'
   ? [
       { name: 'aks', role: role.networkContributor }
-      { name: 'aks', role: role.keyVaultCryptoUser }
+      { name: 'aks', role: role.cryptoUser }
       { name: 'crossplane', role: role.contributor }
       { name: 'cert-manager', role: role.dnsZoneContributor }
-      { name: 'external-secrets', role: role.keyVaultSecretsUser }
+      { name: 'external-secrets', role: role.secretsReader }
     ]
   : []
 var platformNames = mode == 'full' ? ['aks', 'crossplane', 'db-logins', 'cert-manager', 'external-secrets'] : []

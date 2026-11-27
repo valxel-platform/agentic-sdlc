@@ -37,7 +37,7 @@ GOOD = """- field-state: dynamodb-table; partition_key=field_id, indexes=by-farm
 def test_the_catalog_and_the_products_accounts_are_checked():
     assert "workload-identity" in CATALOG["types"] and CATALOG["types"]["workload-identity"]["internal"]
     assert resources.check_aws(AWS, "general", ["dev", "staging", "production"], CATALOG) == []
-    same = {"region": "eu-west-1", "accounts": {"dev": "1" * 12, "staging": "1" * 12, "production": "x"}}
+    same = {"region": "eu-west-1", "accounts": {"dev": "1" * 12, "staging": "x", "production": "x"}}
     problems = resources.check_aws(same, "payments", ["dev", "staging", "production"], CATALOG)
     assert any("not allowed for payments" in p for p in problems)
     assert any("accounts.production" in p for p in problems) and any("its own AWS account" in p for p in problems)
