@@ -53,6 +53,9 @@ class Vision:
     attachments_text: str = ""
     research_depth: str = "quick"                       # quick | thorough | own (valxel_sdlc.research)
     workspace: str = ""                                 # a self-serve workspace's own product: its Product group decides
+    # Where it runs (cloud/onboarding.py): {provider, region, accounts: {non_production, production}}, or
+    # {provider, later: True} when the accounts come after inception.
+    cloud: dict = field(default_factory=dict)
 
     @staticmethod
     def from_markdown(text: str, *, org: str = "", product_id: str = "", existing: bool = False) -> "Vision":
@@ -83,6 +86,12 @@ class Vision:
             parts += ["", f"Budget for the first year of features: ${self.budget_usd:,.0f}"]
         if self.product_id:
             parts += ["", f"{'Existing' if self.existing else 'Proposed'} product id: {self.product_id}"]
+        if self.cloud.get("provider"):
+            from ..cloud import onboarding
+
+            region = self.cloud.get("region")
+            where = onboarding.name(self.cloud["provider"]) + (f", {region}" if region else "")
+            parts += ["", f"Runs on: {where} (the installation's cloud; managed services from its catalog only)"]
         return "\n".join(parts)
 
 

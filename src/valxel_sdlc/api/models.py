@@ -243,6 +243,8 @@ class DraftIn(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     org: str | None = Field(default=None, max_length=100)
     budget_usd: float | None = Field(default=None, ge=0)
+    cloud: str | None = Field(default=None, max_length=300, description="A new product's cloud accounts: 'later', or "
+                              "'non-production: <id>, production: <id>, region: <region>'")
 
 
 class SafeModeIn(BaseModel):

@@ -1,0 +1,37 @@
+{{- if .Values.planes.enabled }}
+# The tool builds products' data planes as Jobs in its own namespace (dataplanes.py): it may make and
+# read those Jobs and the ConfigMap each one reads, and read their pods' logs. Nothing else: the Job's
+# pod runs as the tool's service account, whose cloud identity the customers' connect templates trust.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "valxel.name" . }}-build-planes
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "valxel.name" . }}-build-planes
+  labels: {{- include "valxel.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "valxel.name" . }}-build-planes
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "valxel.name" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

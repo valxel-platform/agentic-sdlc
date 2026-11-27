@@ -128,6 +128,18 @@ archives:
   auditArchiveRetentionDays: 2190
 
 # --- Agent sessions: each one a sandbox (Agent Sandbox) under gVisor, in a namespace of its own.
+# Products' own data planes on Google Cloud and Azure: the tool builds them at the product gate in the
+# customer's accounts, as a Job running platform-foundation's plane-builder (agentic-sdlc dataplanes.py).
+# Off: the product gate proposes cluster files to the infrastructure repo instead (as on AWS).
+planes:
+  enabled: false
+  builderImage: ""                  # ghcr.io/valxel-platform/plane-builder:main@sha256:...
+  dbLoginsImage: ""                 # ghcr.io/valxel-platform/db-logins:main@sha256:...
+  domain: ""                        # planes answer at <plane>.<this>, delegated by each customer
+  controlPlaneDomain: ""            # OpenChoreo's control plane; plane agents dial cluster-gateway.<this>
+  acmeEmail: ""
+  adminCidrs: []                    # the tool's egress addresses: the only ones besides the customer's that reach a plane's API
+
 sessions:
   namespace: valxel-sessions
   createNamespace: true

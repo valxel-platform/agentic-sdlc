@@ -726,9 +726,19 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
 
         services = build_services(load_settings(mode=args.mode))
         try:  # a lite product is hosted on the shared plane until it goes live
-            mode = (services.snapshot(args.product).product.runtime or {}).get("mode") or "full"
+            runtime = services.snapshot(args.product).product.runtime or {}
         except Exception:
-            mode = "full"
+            runtime = {}
+        mode = runtime.get("mode") or "full"
+        if mode != "lite" and (runtime.get("cloud") or {}).get("provider") in ("gcp", "azure"):
+            from .dataplanes import build as build_planes
+
+            built = build_planes(services, product_id=args.product, cloud=runtime["cloud"], approver=args.approver)
+            for plane, st in (built.get("planes") or {}).items():
+                print(f"{plane}: {st['state']}" + (f" ({st['why']})" if st.get("why") else "")
+                      + (f" {st['pr']}" if st.get("pr") else ""))
+            for why in built.get("waiting") or []:
+                print(f"waiting: {why}")
         out = environments(services, product_id=args.product, approver=args.approver, mode=mode)
         print(out.get("why") or f"Created for {out['approved_by']}: " + ", ".join(f"{k} {v}" for k, v in out["created"].items()))
         return 0 if not out.get("waiting") else 2

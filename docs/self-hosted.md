@@ -146,6 +146,18 @@ Set `cloud.provider: gcp`, `cloud.region` and `cloud.project`. What differs from
 | Signals | Cloud Monitoring webhook channels to `/api/signals/cloud-monitoring?token=...`, Security Command Center's Pub/Sub push to `/api/signals/scc?token=...` (each project's token: `valxel signals-token project <id>`), and budgets' Pub/Sub push to `/api/signals/gcp-budgets?token=<the platform token>` |
 | Sign-in | `auth.mode: oidc`, with `VALXEL_OIDC_PROFILE=google` and `VALXEL_OIDC_HOSTED_DOMAIN=<your Workspace domain>`, or your own identity provider. Cognito is AWS's. MCP needs a provider whose access tokens are JWTs: Google's aren't. |
 
+### Products' data planes (Google Cloud and Azure)
+
+On those clouds the tool builds each product's two data planes itself at the product gate, in the
+customer's own project or subscription (docs/product-teams.md, "Its cloud accounts"). Turn it on with
+`planes.enabled=true` and give it platform-foundation's `plane-builder` image and platform-resources'
+`db-logins` image (both by digest), the domain planes answer under, OpenChoreo's control plane
+domain, a Let's Encrypt contact and the tool's egress addresses (the only addresses besides the
+customer's that may reach a plane's API). The chart then lets the tool's service account make Jobs
+and ConfigMaps in its namespace and read their pods' logs, and nothing else; each Job runs as that
+service account, whose cloud identity the customers' connect templates trust. Set
+`VALXEL_INFRA_REPO` so the tool can propose each plane's registration with the control plane.
+
 ## 2. Install
 
 Find the release's image digests in its release notes (see [releases](releases.md)). Check their signatures before installing:

@@ -187,9 +187,13 @@ def check_cloud(cloud: dict | None, data_class: str, pipeline: list[str], catalo
             out.append(f"{field}.accounts.{env} must be the environment's 12-digit AWS account id")
         elif provider == "azure" and not SUBSCRIPTION_ID.fullmatch(value):
             out.append(f"{field}.accounts.{env} must be the environment's Azure subscription ID (a lowercase GUID)")
-    if len({str(accounts.get(e)) for e in pipeline}) < len(pipeline):
+    # Dev and staging may share the non-production account (they share its data plane); production
+    # always has its own.
+    prod = str(accounts.get("production") or "")
+    if prod and any(str(accounts.get(e)) == prod for e in pipeline if e != "production"):
         noun = {"gcp": "project", "azure": "subscription"}.get(provider, "account")
-        out.append(f"{field}.accounts: each environment needs its own {CLOUD_NAMES.get(provider, provider)} {noun}")
+        out.append(f"{field}.accounts: production needs its own {CLOUD_NAMES.get(provider, provider)} {noun}, apart "
+                   "from the non-production environments'")
     return out
 
 

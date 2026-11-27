@@ -69,13 +69,13 @@ def tenant_of(subscription: str) -> str:
     return ""
 
 
-def federated_token(tenant: str, client_id: str, token_file: str) -> str:
-    """A token for `client_id` in `tenant`, for Azure Resource Manager, traded for the tool's own
-    projected service-account token (the 'azure' extra)."""
+def federated_token(tenant: str, client_id: str, token_file: str, scope: str = SCOPE) -> str:
+    """A token for `client_id` in `tenant`, for Azure Resource Manager (or `scope`), traded for the
+    tool's own projected service-account token (the 'azure' extra)."""
     from azure.identity import ClientAssertionCredential
 
     cred = ClientAssertionCredential(tenant, client_id, lambda: Path(token_file).read_text().strip())
-    return str(cred.get_token(SCOPE).token)
+    return str(cred.get_token(scope).token)
 
 
 def arm_get(path: str, token: str, api_version: str = IDENTITY_API) -> dict:
@@ -141,11 +141,14 @@ class AzureConnect:
                 + "--parameters " + " ".join(f"{k}={v}" for k, v in params.items())
                 + " --query properties.outputs.connection.value -o json")
 
-    def token(self, account: str, job: str, reach: dict | None = None) -> str:
-        """A token for one job's identity in the subscription."""
+    def token(self, account: str, job: str, reach: dict | None = None, scope: str = "") -> str:
+        """A token for one job's identity in the subscription: for Azure Resource Manager, or `scope`
+        (an AKS cluster's API, for the data plane's registration)."""
         reach = reach or self.reach_of(account)
         if not reach.get("tenant") or not reach.get(f"{job}_client_id"):
             raise RuntimeError(f"No Azure connection for {account}: connect it from the workspace's page")
+        if scope and scope != SCOPE:
+            return federated_token(reach["tenant"], reach[f"{job}_client_id"], self.token_file, scope)
         return self._exchange(reach["tenant"], reach[f"{job}_client_id"])
 
     def check(self, workspace: str, *, account: str, external_id: str, deploy_client_id: str = "",

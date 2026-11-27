@@ -577,6 +577,29 @@ marks superseded ones, and logs the change in the overview. People merge it.
 
 ## Product inception: from a vision to a roadmap
 
+**Its cloud accounts.** Every product runs on the installation's cloud (ADR 0010): a Valxel on Google
+Cloud builds every product on Google Cloud. So the front door doesn't ask which cloud; after the
+GitHub org it says which one and asks whether the product has its two accounts (projects on Google
+Cloud, subscriptions on Azure): one for non-production (dev and staging share its data plane) and one
+for production. Three answers:
+
+- **I have them:** the two IDs and the region, as `non-production: <id>, production: <id>, region:
+  <region>`. They become product.yaml's `runtime.cloud` at the product gate.
+- **Help me create them:** Valxel can't open cloud accounts (that takes a person, a payment method and
+  the cloud's terms), so it gives the cloud's own sign-up and create pages and the steps
+  (`valxel_sdlc/cloud/onboarding.py`; also `GET /api/cloud/onboarding`), then asks for the IDs.
+- **Set them up later:** inception goes on; the product gate waits for `runtime.cloud`.
+
+Each account is then connected in **full mode** from the connections page (Cloud Shell runs
+`deploy/gcp-connect` or `deploy/azure-connect`, which also makes the data plane's own identities with
+their roles, and a bucket or storage account for its state). On Google Cloud and Azure the product
+gate then **builds the two data planes itself** (`valxel_sdlc/dataplanes.py`): a Job in the tool's
+cluster runs platform-foundation's plane-builder (`tofu/stacks/product-plane-<cloud>`) acting as the
+account's `valxel-deploy` identity, with the state in the customer's account; when a plane is up the
+tool opens a pull request registering it with the control plane, and the customer delegates the
+plane's domain to the name servers it shows. `valxel environments --product <PID>` reports each
+plane and carries on. On AWS the gate still proposes cluster files to the infrastructure repo.
+
 A new product, or an existing one that never had a product-level design, starts with three
 documents, each written by an agent, checked by machine and by the critic, and revised until both
 pass (`valxel_sdlc/inception/`):
