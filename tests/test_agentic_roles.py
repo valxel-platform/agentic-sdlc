@@ -60,10 +60,10 @@ def test_new_agent_and_mcp_server_repos_are_planned_with_their_checks():
     assert agent["openchoreo"]["component_type"] == "deployment/agent"
     from valxel_sdlc.provisioning import component_parameters
 
-    assert component_parameters(agent["openchoreo"], "phi") == {"isolation": "gvisor"}
-    assert component_parameters(agent["openchoreo"], "payments") == {"isolation": "gvisor"}
-    assert component_parameters(agent["openchoreo"], "general") == {"isolation": "standard"}
-    assert component_parameters(plan(Product, proposals[0], standards)["openchoreo"], "phi") == {}
+    assert component_parameters(agent["openchoreo"], "phi") == {"dataClass": "phi", "isolation": "gvisor"}
+    assert component_parameters(agent["openchoreo"], "payments") == {"dataClass": "payments", "isolation": "gvisor"}
+    assert component_parameters(agent["openchoreo"], "general") == {"dataClass": "general", "isolation": "standard"}
+    assert component_parameters(plan(Product, proposals[0], standards)["openchoreo"], "phi") == {"dataClass": "phi"}
     assert "agent" in agent["topics"]
     mcp = plan(Product, proposals[0], standards)
     assert mcp["template"] == "valxel-platform/template-mcp-server"

@@ -165,10 +165,17 @@ class RepoProvisioner:
 
 
 def component_parameters(oc: dict, data_class: str, role: str = "") -> dict:
-    """The component type's parameters the role sets: the repo's role, which its pods carry as
-    `valxel.io/role` for the network policies (platform/openchoreo/component-types.yaml); and for an
-    agent, how isolated its pods run (repos.yaml `isolation` per data class: gvisor for PHI and
-    payments, standard otherwise)."""
+    """The component type's parameters the role sets (platform/openchoreo/component-types.yaml):
+    the repo's role, which its pods carry as `valxel.io/role` for the network policies; the
+    product's data class, which every span carries so the collectors keep content out of stores it
+    may not reach; where the data plane scrapes its metrics (repos.yaml `openchoreo.metrics`:
+    `port`, `path`, `scrape`); and for an agent, how isolated its pods run (repos.yaml `isolation`
+    per data class: gvisor for PHI and payments, standard otherwise)."""
     iso = oc.get("isolation")
+    raw = oc.get("metrics")
+    metrics: dict = raw if isinstance(raw, dict) else {}
+    keys = {"scrape": "metricsScrape", "port": "metricsPort", "path": "metricsPath"}
     return {**({"role": role} if role else {}),
+            **({"dataClass": data_class} if data_class else {}),
+            **{keys[k]: v for k, v in metrics.items() if k in keys},
             **({"isolation": iso.get(data_class, "standard")} if isinstance(iso, dict) else {})}

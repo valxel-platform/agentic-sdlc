@@ -22,6 +22,15 @@ schemas. Dry-run them on your installation before applying.
     PHI and payments connectors. Data planes running them need the gVisor RuntimeClass (`gvisor`).
   - Each type takes `replicas` and `resources` per environment, set by the Valxel SDLC from the
     product's runtime/capacity.yaml.
+  - **Telemetry, the same on every cloud.** Every container sends OTLP/HTTP to
+    `otel-collector.observability` in its data plane (platform-foundation
+    `gitops/apps/product-telemetry`), with `OTEL_SERVICE_NAME` and resource attributes naming the
+    image it runs (`service.version`), the environment, the product and its data class. Products
+    can't point their traces elsewhere. Long-running pods carry `prometheus.io/scrape`, `port` and
+    `path` annotations for the data plane's metrics collector. Every template serves metrics on the
+    management port, 8081, the only port the mesh lets the collector reach. The Valxel SDLC sets the
+    path from repos.yaml `openchoreo.metrics`: Spring's actuator for the Java templates, `/metrics`
+    otherwise. A cluster without that collector just drops the spans.
   - Each builds only with the platform's `docker` workflow.
 - `autoscaler.yaml`: the `autoscaler` ClusterTrait, a HorizontalPodAutoscaler on CPU. The tool adds
   an instance to each component whose plan has a range (`<component>-autoscaler`) and sets its

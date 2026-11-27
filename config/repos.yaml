@@ -136,7 +136,8 @@ roles:
   provider:
     template: valxel-platform/template-service
     required_checks: [unit, contract, CodeQL]
-    openchoreo: { component_type: deployment/service, workflow: docker }
+    # Spring's actuator; on the management port (8081), as every template's metrics are
+    openchoreo: { component_type: deployment/service, workflow: docker, metrics: { path: /actuator/prometheus } }
   consumer:
     template: valxel-platform/template-web
     required_checks: [unit, contract, CodeQL]
@@ -147,7 +148,7 @@ roles:
     required_checks: [unit, CodeQL]          # unit runs the integration tests (Postgres and Kafka in containers)
     # No public endpoint, only health and metrics. If your OpenChoreo has no worker type, define one
     # (a Deployment with no Endpoint) or use deployment/service.
-    openchoreo: { component_type: deployment/worker, workflow: docker }
+    openchoreo: { component_type: deployment/worker, workflow: docker, metrics: { path: /actuator/prometheus } }
   mcp-server:
     template: valxel-platform/template-mcp-server
     required_checks: [unit, CodeQL]
@@ -229,7 +230,7 @@ roles:
   bff:
     template: valxel-platform/template-bff
     required_checks: [unit, CodeQL]          # unit runs the sign-in flow against a fake realm and Redis
-    openchoreo: { component_type: deployment/service, workflow: docker }
+    openchoreo: { component_type: deployment/service, workflow: docker, metrics: { path: /actuator/prometheus } }
   # An iOS and Android app (React Native, Expo; offline-first). Not deployed: each stage asks the
   # repo's release workflow to build it (test builds and Maestro in dev and staging, TestFlight and
   # Play's internal track in staging, the stores in production), then the Play rollout widens
