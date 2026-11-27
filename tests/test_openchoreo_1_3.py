@@ -109,9 +109,73 @@ def test_the_build_takes_1_3s_repository_and_ends_in_generate_workload():
 
 
 def test_the_tool_registers_each_repo_with_its_role():
-    assert component_parameters({}, "general", "bff") == {"role": "bff"}
+    assert component_parameters({}, "general", "bff") == {"role": "bff", "dataClass": "general"}
     agent = {"isolation": {"phi": "gvisor"}}
-    assert component_parameters(agent, "phi", "agent") == {"role": "agent", "isolation": "gvisor"}
+    assert component_parameters(agent, "phi", "agent") == {
+        "role": "agent", "dataClass": "phi", "isolation": "gvisor"}
+
+
+def test_the_tool_tells_each_component_where_its_metrics_are():
+    java = {"metrics": {"port": 8081, "path": "/actuator/prometheus"}}
+    assert component_parameters(java, "general", "provider") == {
+        "role": "provider", "dataClass": "general", "metricsPort": 8081, "metricsPath": "/actuator/prometheus"}
+    assert component_parameters({"metrics": {"scrape": False, "other": 1}}, "general")["metricsScrape"] is False
+    assert "other" not in component_parameters({"metrics": {"other": 1}}, "general")
+    assert component_parameters({"metrics": "nonsense"}, "general") == {"dataClass": "general"}
+    # The Java templates serve Spring's actuator; the rest serve /metrics on 8080, the default.
+    roles = yaml.safe_load((ROOT / "config/repos.yaml").read_text())["roles"]
+    by_template = {r["template"].rsplit("/", 1)[-1]: (r.get("openchoreo") or {}).get("metrics") for r in roles.values()
+                   if isinstance(r, dict) and r.get("template")}
+    assert by_template["template-service"] == {"port": 8081, "path": "/actuator/prometheus"}
+    assert by_template["template-bff"] == {"port": 8081, "path": "/actuator/prometheus"}
+    assert by_template["template-event-worker"] == {"port": 8080, "path": "/actuator/prometheus"}
+    assert by_template["template-agent"] is None
+
+
+def test_every_container_sends_its_telemetry_to_the_data_planes_collector():
+    """OTLP goes to the collector platform-foundation runs in each data plane (gitops/apps/
+    product-telemetry), and every span names its component, image, environment, product and data
+    class, so a trace leads back to the release and the feature that built it."""
+    collector = "http://otel-collector.observability.svc.cluster.local:4318"
+    for name, t in TYPES.items():
+        for c in _containers(t):
+            env = c["env"]
+            assert env.startswith("${dependencies.toContainerEnvs() + [") and env.rstrip().endswith("}"), name
+            for var in ("OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_PROTOCOL", "OTEL_SERVICE_NAME",
+                        "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT", "OTEL_COLLECTOR_URL",
+                        "OTEL_RESOURCE_ATTRIBUTES"):
+                assert f'"name": "{var}"' in env, (name, var)
+            assert f'"{collector}"' in env and f'"{collector}/v1/traces"' in env, name
+            for attr in ('"service.version=" + workload.container.image', '",deployment.environment.name=" + '
+                         'metadata.environmentName', '",valxel.product=" + metadata.projectName',
+                         '",valxel.data_class=" + parameters.dataClass'):
+                assert attr in env, (name, attr)
+        props = t["spec"]["parameters"]["openAPIV3Schema"]["properties"]
+        assert props["dataClass"]["enum"] == ["general", "payments", "phi"]
+        assert props["dataClass"]["default"] == "general"
+
+
+def test_long_running_pods_are_annotated_for_the_metrics_scraper():
+    for name, t in TYPES.items():
+        props = t["spec"]["parameters"]["openAPIV3Schema"]["properties"]
+        assert props["metricsPort"]["default"] == 8080 and props["metricsPath"]["default"] == "/metrics", name
+        scrape = props["metricsScrape"]["default"]
+        assert scrape is (name not in ("web-app", "scheduled-task")), name  # nginx has no metrics; jobs end
+        if t["spec"]["workloadType"] != "deployment":
+            continue
+        pod = next(r for r in t["spec"]["resources"] if r["id"] == "deployment")["template"]["spec"]["template"]
+        assert pod["metadata"]["annotations"] == {
+            "prometheus.io/scrape": '${parameters.metricsScrape ? "true" : "false"}',
+            "prometheus.io/port": "${string(parameters.metricsPort)}",
+            "prometheus.io/path": "${parameters.metricsPath}"}, name
+
+
+def _containers(t):
+    for r in t["spec"]["resources"]:
+        spec = r["template"].get("spec") or {}
+        pod = (spec.get("template") or spec.get("jobTemplate", {}).get("spec", {}).get("template") or {}).get("spec")
+        if pod:
+            yield from pod["containers"]
 
 
 class Observer:

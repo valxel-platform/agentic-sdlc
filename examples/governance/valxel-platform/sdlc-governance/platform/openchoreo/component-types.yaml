@@ -53,6 +53,27 @@ spec:
           default: ''
           description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
             carry it as valxel.io/role for the network policies
+        dataClass:
+          type: string
+          enum:
+          - general
+          - payments
+          - phi
+          default: general
+          description: The product's data class, set by the Valxel SDLC at registration; on every span, so the collectors
+            keep content out of stores it may not reach
+        metricsScrape:
+          type: boolean
+          default: true
+        metricsPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8080
+        metricsPath:
+          type: string
+          pattern: ^/[A-Za-z0-9/_.-]*$
+          default: /metrics
   environmentConfigs:
     openAPIV3Schema:
       type: object
@@ -110,6 +131,10 @@ spec:
         template:
           metadata:
             labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+            annotations:
+              prometheus.io/scrape: '${parameters.metricsScrape ? "true" : "false"}'
+              prometheus.io/port: ${string(parameters.metricsPort)}
+              prometheus.io/path: ${parameters.metricsPath}
           spec:
             securityContext:
               runAsNonRoot: true
@@ -133,7 +158,13 @@ spec:
 
                 '
               resources: ${environmentConfigs.resources}
-              env: ${dependencies.toContainerEnvs()}
+              env: '${dependencies.toContainerEnvs() + [{"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "http://otel-collector.observability.svc.cluster.local:4318"},
+                {"name": "OTEL_EXPORTER_OTLP_PROTOCOL", "value": "http/protobuf"}, {"name": "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"}, {"name": "OTEL_COLLECTOR_URL",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318"}, {"name": "OTEL_SERVICE_NAME",
+                "value": metadata.componentName}, {"name": "OTEL_RESOURCE_ATTRIBUTES", "value": "service.version="
+                + workload.container.image + ",deployment.environment.name=" + metadata.environmentName + ",valxel.product="
+                + metadata.projectName + ",valxel.data_class=" + parameters.dataClass}]}'
               envFrom: ${configurations.toContainerEnvFrom()}
               volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
               securityContext:
@@ -365,6 +396,27 @@ spec:
           default: ''
           description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
             carry it as valxel.io/role for the network policies
+        dataClass:
+          type: string
+          enum:
+          - general
+          - payments
+          - phi
+          default: general
+          description: The product's data class, set by the Valxel SDLC at registration; on every span, so the collectors
+            keep content out of stores it may not reach
+        metricsScrape:
+          type: boolean
+          default: false
+        metricsPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8080
+        metricsPath:
+          type: string
+          pattern: ^/[A-Za-z0-9/_.-]*$
+          default: /metrics
   environmentConfigs:
     openAPIV3Schema:
       type: object
@@ -422,6 +474,10 @@ spec:
         template:
           metadata:
             labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+            annotations:
+              prometheus.io/scrape: '${parameters.metricsScrape ? "true" : "false"}'
+              prometheus.io/port: ${string(parameters.metricsPort)}
+              prometheus.io/path: ${parameters.metricsPath}
           spec:
             securityContext:
               runAsNonRoot: true
@@ -445,7 +501,13 @@ spec:
 
                 '
               resources: ${environmentConfigs.resources}
-              env: ${dependencies.toContainerEnvs()}
+              env: '${dependencies.toContainerEnvs() + [{"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "http://otel-collector.observability.svc.cluster.local:4318"},
+                {"name": "OTEL_EXPORTER_OTLP_PROTOCOL", "value": "http/protobuf"}, {"name": "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"}, {"name": "OTEL_COLLECTOR_URL",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318"}, {"name": "OTEL_SERVICE_NAME",
+                "value": metadata.componentName}, {"name": "OTEL_RESOURCE_ATTRIBUTES", "value": "service.version="
+                + workload.container.image + ",deployment.environment.name=" + metadata.environmentName + ",valxel.product="
+                + metadata.projectName + ",valxel.data_class=" + parameters.dataClass}]}'
               envFrom: ${configurations.toContainerEnvFrom()}
               volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
               securityContext:
@@ -630,6 +692,27 @@ spec:
           default: ''
           description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
             carry it as valxel.io/role for the network policies
+        dataClass:
+          type: string
+          enum:
+          - general
+          - payments
+          - phi
+          default: general
+          description: The product's data class, set by the Valxel SDLC at registration; on every span, so the collectors
+            keep content out of stores it may not reach
+        metricsScrape:
+          type: boolean
+          default: true
+        metricsPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8080
+        metricsPath:
+          type: string
+          pattern: ^/[A-Za-z0-9/_.-]*$
+          default: /metrics
   environmentConfigs:
     openAPIV3Schema:
       type: object
@@ -687,6 +770,10 @@ spec:
         template:
           metadata:
             labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+            annotations:
+              prometheus.io/scrape: '${parameters.metricsScrape ? "true" : "false"}'
+              prometheus.io/port: ${string(parameters.metricsPort)}
+              prometheus.io/path: ${parameters.metricsPath}
           spec:
             securityContext:
               runAsNonRoot: true
@@ -710,7 +797,13 @@ spec:
 
                 '
               resources: ${environmentConfigs.resources}
-              env: ${dependencies.toContainerEnvs()}
+              env: '${dependencies.toContainerEnvs() + [{"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "http://otel-collector.observability.svc.cluster.local:4318"},
+                {"name": "OTEL_EXPORTER_OTLP_PROTOCOL", "value": "http/protobuf"}, {"name": "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"}, {"name": "OTEL_COLLECTOR_URL",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318"}, {"name": "OTEL_SERVICE_NAME",
+                "value": metadata.componentName}, {"name": "OTEL_RESOURCE_ATTRIBUTES", "value": "service.version="
+                + workload.container.image + ",deployment.environment.name=" + metadata.environmentName + ",valxel.product="
+                + metadata.projectName + ",valxel.data_class=" + parameters.dataClass}]}'
               envFrom: ${configurations.toContainerEnvFrom()}
               volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
               securityContext:
@@ -842,6 +935,27 @@ spec:
           default: ''
           description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
             carry it as valxel.io/role for the network policies
+        dataClass:
+          type: string
+          enum:
+          - general
+          - payments
+          - phi
+          default: general
+          description: The product's data class, set by the Valxel SDLC at registration; on every span, so the collectors
+            keep content out of stores it may not reach
+        metricsScrape:
+          type: boolean
+          default: true
+        metricsPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8080
+        metricsPath:
+          type: string
+          pattern: ^/[A-Za-z0-9/_.-]*$
+          default: /metrics
         isolation:
           type: string
           enum:
@@ -919,6 +1033,10 @@ spec:
         template:
           metadata:
             labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+            annotations:
+              prometheus.io/scrape: '${parameters.metricsScrape ? "true" : "false"}'
+              prometheus.io/port: ${string(parameters.metricsPort)}
+              prometheus.io/path: ${parameters.metricsPath}
           spec:
             automountServiceAccountToken: false
             runtimeClassName: '${parameters.isolation == "gvisor" ? "gvisor" : oc_omit()}'
@@ -945,8 +1063,14 @@ spec:
 
                 '
               resources: ${environmentConfigs.resources}
-              env: '${dependencies.toContainerEnvs() + [{"name": "AGENT_ALLOWED_TOOLS", "value": environmentConfigs.allowedTools},
-                {"name": "AGENT_READ_ONLY_TOOLS", "value": environmentConfigs.readOnlyTools}]}'
+              env: '${dependencies.toContainerEnvs() + [{"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "http://otel-collector.observability.svc.cluster.local:4318"},
+                {"name": "OTEL_EXPORTER_OTLP_PROTOCOL", "value": "http/protobuf"}, {"name": "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"}, {"name": "OTEL_COLLECTOR_URL",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318"}, {"name": "OTEL_SERVICE_NAME",
+                "value": metadata.componentName}, {"name": "OTEL_RESOURCE_ATTRIBUTES", "value": "service.version="
+                + workload.container.image + ",deployment.environment.name=" + metadata.environmentName + ",valxel.product="
+                + metadata.projectName + ",valxel.data_class=" + parameters.dataClass}] + [{"name": "AGENT_ALLOWED_TOOLS",
+                "value": environmentConfigs.allowedTools}, {"name": "AGENT_READ_ONLY_TOOLS", "value": environmentConfigs.readOnlyTools}]}'
               envFrom: ${configurations.toContainerEnvFrom()}
               volumeMounts: '${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()
                 + [{"name": "tmp", "mountPath": "/tmp"}]}'
@@ -1225,6 +1349,27 @@ spec:
           default: ''
           description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
             carry it as valxel.io/role for the network policies
+        dataClass:
+          type: string
+          enum:
+          - general
+          - payments
+          - phi
+          default: general
+          description: The product's data class, set by the Valxel SDLC at registration; on every span, so the collectors
+            keep content out of stores it may not reach
+        metricsScrape:
+          type: boolean
+          default: true
+        metricsPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8080
+        metricsPath:
+          type: string
+          pattern: ^/[A-Za-z0-9/_.-]*$
+          default: /metrics
   environmentConfigs:
     openAPIV3Schema:
       type: object
@@ -1328,6 +1473,10 @@ spec:
         template:
           metadata:
             labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+            annotations:
+              prometheus.io/scrape: '${parameters.metricsScrape ? "true" : "false"}'
+              prometheus.io/port: ${string(parameters.metricsPort)}
+              prometheus.io/path: ${parameters.metricsPath}
           spec:
             serviceAccountName: ${metadata.name}
             securityContext:
@@ -1353,8 +1502,14 @@ spec:
 
                 '
               resources: ${environmentConfigs.resources}
-              env: '${dependencies.toContainerEnvs() + [{"name": "SANDBOX_EXECUTOR", "value": "kubernetes"}, {"name":
-                "SANDBOX_SANDBOX_TEMPLATE", "value": "code-runner"}]}'
+              env: '${dependencies.toContainerEnvs() + [{"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "http://otel-collector.observability.svc.cluster.local:4318"},
+                {"name": "OTEL_EXPORTER_OTLP_PROTOCOL", "value": "http/protobuf"}, {"name": "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"}, {"name": "OTEL_COLLECTOR_URL",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318"}, {"name": "OTEL_SERVICE_NAME",
+                "value": metadata.componentName}, {"name": "OTEL_RESOURCE_ATTRIBUTES", "value": "service.version="
+                + workload.container.image + ",deployment.environment.name=" + metadata.environmentName + ",valxel.product="
+                + metadata.projectName + ",valxel.data_class=" + parameters.dataClass}] + [{"name": "SANDBOX_EXECUTOR",
+                "value": "kubernetes"}, {"name": "SANDBOX_SANDBOX_TEMPLATE", "value": "code-runner"}]}'
               envFrom: ${configurations.toContainerEnvFrom()}
               volumeMounts: ${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()}
               securityContext:
@@ -1570,6 +1725,27 @@ spec:
           default: ''
           description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
             carry it as valxel.io/role for the network policies
+        dataClass:
+          type: string
+          enum:
+          - general
+          - payments
+          - phi
+          default: general
+          description: The product's data class, set by the Valxel SDLC at registration; on every span, so the collectors
+            keep content out of stores it may not reach
+        metricsScrape:
+          type: boolean
+          default: true
+        metricsPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8080
+        metricsPath:
+          type: string
+          pattern: ^/[A-Za-z0-9/_.-]*$
+          default: /metrics
   environmentConfigs:
     openAPIV3Schema:
       type: object
@@ -1657,6 +1833,10 @@ spec:
         template:
           metadata:
             labels: '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
+            annotations:
+              prometheus.io/scrape: '${parameters.metricsScrape ? "true" : "false"}'
+              prometheus.io/port: ${string(parameters.metricsPort)}
+              prometheus.io/path: ${parameters.metricsPath}
           spec:
             automountServiceAccountToken: false
             runtimeClassName: '${environmentConfigs.dataClass == "general" ? oc_omit() : "gvisor"}'
@@ -1683,7 +1863,13 @@ spec:
 
                 '
               resources: ${environmentConfigs.resources}
-              env: ${dependencies.toContainerEnvs()}
+              env: '${dependencies.toContainerEnvs() + [{"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "http://otel-collector.observability.svc.cluster.local:4318"},
+                {"name": "OTEL_EXPORTER_OTLP_PROTOCOL", "value": "http/protobuf"}, {"name": "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"}, {"name": "OTEL_COLLECTOR_URL",
+                "value": "http://otel-collector.observability.svc.cluster.local:4318"}, {"name": "OTEL_SERVICE_NAME",
+                "value": metadata.componentName}, {"name": "OTEL_RESOURCE_ATTRIBUTES", "value": "service.version="
+                + workload.container.image + ",deployment.environment.name=" + metadata.environmentName + ",valxel.product="
+                + metadata.projectName + ",valxel.data_class=" + parameters.dataClass}]}'
               envFrom: ${configurations.toContainerEnvFrom()}
               volumeMounts: '${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()
                 + [{"name": "tmp", "mountPath": "/tmp"}, {"name": "vendor-secrets", "mountPath": "/var/run/secrets/valxel",
@@ -1943,6 +2129,27 @@ spec:
           default: ''
           description: The repo's role in repos.yaml, set by the Valxel SDLC when it registers the component; pods
             carry it as valxel.io/role for the network policies
+        dataClass:
+          type: string
+          enum:
+          - general
+          - payments
+          - phi
+          default: general
+          description: The product's data class, set by the Valxel SDLC at registration; on every span, so the collectors
+            keep content out of stores it may not reach
+        metricsScrape:
+          type: boolean
+          default: false
+        metricsPort:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 8080
+        metricsPath:
+          type: string
+          pattern: ^/[A-Za-z0-9/_.-]*$
+          default: /metrics
   environmentConfigs:
     openAPIV3Schema:
       type: object
@@ -2042,7 +2249,14 @@ spec:
 
                     '
                   resources: ${environmentConfigs.resources}
-                  env: '${dependencies.toContainerEnvs() + [{"name": "JOB_ENVIRONMENT", "value": environmentConfigs.environment}]}'
+                  env: '${dependencies.toContainerEnvs() + [{"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "http://otel-collector.observability.svc.cluster.local:4318"},
+                    {"name": "OTEL_EXPORTER_OTLP_PROTOCOL", "value": "http/protobuf"}, {"name": "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT",
+                    "value": "http://otel-collector.observability.svc.cluster.local:4318/v1/traces"}, {"name": "OTEL_COLLECTOR_URL",
+                    "value": "http://otel-collector.observability.svc.cluster.local:4318"}, {"name": "OTEL_SERVICE_NAME",
+                    "value": metadata.componentName}, {"name": "OTEL_RESOURCE_ATTRIBUTES", "value": "service.version="
+                    + workload.container.image + ",deployment.environment.name=" + metadata.environmentName + ",valxel.product="
+                    + metadata.projectName + ",valxel.data_class=" + parameters.dataClass}] + [{"name": "JOB_ENVIRONMENT",
+                    "value": environmentConfigs.environment}]}'
                   envFrom: ${configurations.toContainerEnvFrom()}
                   volumeMounts: '${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()
                     + [{"name": "tmp", "mountPath": "/tmp"}]}'

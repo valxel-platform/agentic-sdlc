@@ -59,6 +59,40 @@ POD_BASELINE = {"runAsNonRoot": True, "seccompProfile": {"type": "RuntimeDefault
 CONTAINER_BASELINE = {"allowPrivilegeEscalation": False, "capabilities": {"drop": ["ALL"]}}
 LABELS = '${oc_merge(metadata.podSelectors, {"valxel.io/role": parameters.role})}'
 
+# Telemetry, the same on every cloud: each container sends OTLP/HTTP to its data plane's collector
+# (platform-foundation gitops/apps/product-telemetry), which samples each trace once and sends it on
+# to the cloud's trace store. Every span names the component, the image it runs (the release), the
+# environment, the product and its data class, so the SDLC tool can walk from a trace to the
+# release, the feature and the agent sessions that built it. Set here, not by products: a product's
+# own configuration can't point its traces elsewhere.
+COLLECTOR = "http://otel-collector.observability.svc.cluster.local:4318"
+TELEMETRY_ENV = (
+    '[{"name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "' + COLLECTOR + '"}, '
+    '{"name": "OTEL_EXPORTER_OTLP_PROTOCOL", "value": "http/protobuf"}, '
+    # Spring Boot's own property (template-service, template-bff, template-event-worker)
+    '{"name": "MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT", "value": "' + COLLECTOR + '/v1/traces"}, '
+    # template-web's nginx forwards the browser's spans here (docker/31-otel.sh)
+    '{"name": "OTEL_COLLECTOR_URL", "value": "' + COLLECTOR + '"}, '
+    '{"name": "OTEL_SERVICE_NAME", "value": metadata.componentName}, '
+    '{"name": "OTEL_RESOURCE_ATTRIBUTES", "value": "service.version=" + workload.container.image'
+    ' + ",deployment.environment.name=" + metadata.environmentName + ",valxel.product=" + metadata.projectName'
+    ' + ",valxel.data_class=" + parameters.dataClass}]')
+
+TELEMETRY_PARAMS = {
+    "dataClass": {"type": "string", "enum": ["general", "payments", "phi"], "default": "general",
+                  "description": "The product's data class, set by the Valxel SDLC at registration; on every "
+                                 "span, so the collectors keep content out of stores it may not reach"},
+    # App metrics: the data plane's metrics collector scrapes pods annotated prometheus.io/scrape.
+    # The Valxel SDLC sets port and path from repos.yaml `openchoreo.metrics` (Spring's actuator
+    # for the Java templates, /metrics for the Python ones).
+    "metricsScrape": {"type": "boolean", "default": True},
+    "metricsPort": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 8080},
+    "metricsPath": {"type": "string", "pattern": "^/[A-Za-z0-9/_.-]*$", "default": "/metrics"},
+}
+SCRAPE = {"prometheus.io/scrape": '${parameters.metricsScrape ? "true" : "false"}',
+          "prometheus.io/port": "${string(parameters.metricsPort)}",
+          "prometheus.io/path": "${parameters.metricsPath}"}
+
 
 def container(*, env_extra="", mounts_extra="", probes=None, hardened=False):
     c = {
@@ -68,7 +102,7 @@ def container(*, env_extra="", mounts_extra="", probes=None, hardened=False):
         "command": "${has(workload.container.command) ? workload.container.command : oc_omit()}\n",
         "args": "${has(workload.container.args) ? workload.container.args : oc_omit()}\n",
         "resources": "${environmentConfigs.resources}",
-        "env": "${dependencies.toContainerEnvs()" + (f" + {env_extra}" if env_extra else "") + "}",
+        "env": "${dependencies.toContainerEnvs() + " + TELEMETRY_ENV + (f" + {env_extra}" if env_extra else "") + "}",
         "envFrom": "${configurations.toContainerEnvFrom()}",
         "volumeMounts": "${configurations.toContainerVolumeMounts() + dependencies.toContainerVolumeMounts()"
                         + (f" + {mounts_extra}" if mounts_extra else "") + "}",
@@ -103,7 +137,7 @@ def deployment(*, c, volumes_extra="", grace=30, hardened=False, token=True, run
         "spec": {"replicas": "${environmentConfigs.replicas}",
                  "strategy": {"type": "RollingUpdate", "rollingUpdate": {"maxSurge": 1, "maxUnavailable": 0}},
                  "selector": {"matchLabels": "${metadata.podSelectors}"},
-                 "template": {"metadata": {"labels": LABELS}, "spec": pod}}}}
+                 "template": {"metadata": {"labels": LABELS, "annotations": SCRAPE}, "spec": pod}}}}
 
 
 PDB = {"id": "pdb", "includeWhen": "${environmentConfigs.replicas >= 2}", "template": {
@@ -121,7 +155,8 @@ def ctype(name, description, *, workload="deployment", env, resources, validatio
     spec = {"workloadType": workload, "allowedWorkflows": WORKFLOWS, "allowedTraits": traits}
     if validations:
         spec["validations"] = list(validations)
-    spec["parameters"] = {"openAPIV3Schema": {"type": "object", "properties": {**ROLE_PARAM, **(params or {})}}}
+    spec["parameters"] = {"openAPIV3Schema": {"type": "object", "properties": {
+        **ROLE_PARAM, **TELEMETRY_PARAMS, **(params or {})}}}
     spec["environmentConfigs"] = env
     spec["resources"] = resources
     return {"apiVersion": "openchoreo.dev/v1alpha1", "kind": "ClusterComponentType",
@@ -156,6 +191,7 @@ types.append(ctype(
 # --- web-app: the 1.3 web application, with the platform's rollout and spread -----------------
 types.append(ctype(
     "web-app", "A web front end served to browsers (repos.yaml role web)",
+    params={"metricsScrape": {**TELEMETRY_PARAMS["metricsScrape"], "default": False}},
     env=schema(cpu="100m", mem="128Mi"),
     validations=[v for v in web["spec"].get("validations", [])],
     resources=[deployment(c=container())] + res(web, "service", "httproute-external", "httproute-internal")
@@ -319,6 +355,7 @@ types.append(ctype(
     "scheduled-task", "A product's scheduled job: runs once and exits; runs never overlap, a failed run isn't "
                       "retried, and one that couldn't start within 10 minutes is skipped (repos.yaml role job)",
     workload="cronjob", traits=[{"kind": "ClusterTrait", "name": "observability-alert-rule"}],
+    params={"metricsScrape": {**TELEMETRY_PARAMS["metricsScrape"], "default": False}},
     validations=list(task["spec"].get("validations") or []),
     env=task_env,
     resources=[{"id": "cronjob", "template": {
