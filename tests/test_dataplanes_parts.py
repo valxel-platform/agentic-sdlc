@@ -111,7 +111,8 @@ def test_the_agent_ca_is_read_from_the_new_cluster():
     http = FakeHttp({("GET", secret): Resp(body={"data": {"ca.crt": base64.b64encode(pem.encode()).decode()}})})
     assert dataplanes.read_agent_ca("gcp", {"endpoint": "1.2.3.4"}, "tok", http=http) == pem
     assert http.calls == [("GET", secret)]
-    assert dataplanes.read_agent_ca("azure", {"endpoint": "https://x.hcp.azmk8s.io:443"}, "tok", http=FakeHttp({})) == ""
+    aks = {"endpoint": "https://x.hcp.azmk8s.io:443"}
+    assert dataplanes.read_agent_ca("azure", aks, "tok", http=FakeHttp({})) == ""
     empty = FakeHttp({("GET", secret): Resp(body={"data": {}})})
     assert dataplanes.read_agent_ca("gcp", {"endpoint": "1.2.3.4"}, "tok", http=empty) == ""
 
