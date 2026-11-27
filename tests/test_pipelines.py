@@ -293,8 +293,8 @@ def test_a_postgres_transform_gets_a_login_with_only_its_columns():
 def test_the_login_is_planned_and_bound_with_the_variables_the_template_reads():
     planned = resources.plan(hld(extra=DB), catalog(), lambda c: ("emr", "dp-emr"), product_id="emr",
                              feature_id="emr-feat-1", data_class="phi")
-    [login] = [r for r in planned if r["type"] == "postgres-login"]
-    assert login["name"] == "emr-transform-login" and login["owner"] == "emr-transform"
+    [login] = [r for r in planned if r["type"] == "postgres-login" and r["owner"] == "emr-transform"]
+    assert login["name"] == "emr-transform-login"
     assert login["parameters"]["database"] == "emr_reports" and "tags" in login["parameters"]
     assert set(login["outputs"]) == set(pipelines.LOGIN_ENV)
     told = pipelines.coder_instruction(hld(extra=DB), TRANSFORM)
@@ -332,3 +332,28 @@ def test_only_a_person_records_an_expert_determination():
     [found] = weakening.compare("transform.yaml", old, old + "expert_determination: ED-2027-01 (Dr. Q)\n")
     assert "only a person records one" in found
     assert weakening.compare("transform.yaml", old, old + "schema: transform\n") == []
+
+
+# Every component that uses a database where it has no password (VX-20) gets a login of its own.
+STORE = ("## Resources\n- emr-db: postgres; database=emr_reports\n  writes: emr-reporting\n"
+         "  reads: emr-api\n")
+
+
+def test_each_component_that_uses_a_database_gets_its_own_login():
+    planned = resources.plan(hld(extra=STORE), catalog(), lambda c: ("emr", "dp-emr"), product_id="emr",
+                             feature_id="emr-feat-1", data_class="phi", reporting=["emr-reporting"])
+    by = {r["name"]: r for r in planned if r["type"] == "postgres-login"}
+    rep, api = by["emr-reporting-emr-db-login"], by["emr-api-emr-db-login"]
+    assert rep["parameters"]["access"] == "owner" and rep["parameters"]["grantRoles"] == ["reporting_reader"]
+    assert rep["parameters"]["tokenize"] and rep["parameters"]["login"] == "emr_reporting_emr_db"
+    assert api["parameters"]["access"] == "reader" and api["parameters"]["grantRoles"] == []
+    assert "emr-transform-login" in by  # the transform's columns login, as before
+    snippet = resources.workload_snippet(hld(extra=STORE), catalog(), "emr-api")
+    assert "- ref: emr-api-emr-db-login" in snippet and "password" not in snippet.lower()
+    assert "role: EMR_DB_ROLE" in snippet and "- ref: emr-db\n" not in snippet
+    told = resources.instruction({"hld_text": hld(extra=STORE), "aws_catalog": catalog()}, {"repo": "org/emr-api"})
+    assert "no password (VX-20)" in told and "SET ROLE" in told
+
+
+def test_on_aws_components_still_bind_the_database_itself():
+    assert pipelines and resources.store_logins(hld(extra=STORE), catalog("aws")) == []

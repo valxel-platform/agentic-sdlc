@@ -463,11 +463,14 @@ def _entries(hld: str, catalog: dict) -> list[dict]:
 
 
 def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: str, data_class: str,
-         code_sandboxes: list[str] | tuple = (), existing: dict[str, str] | None = None) -> list[dict]:
+         code_sandboxes: list[str] | tuple = (), existing: dict[str, str] | None = None,
+         reporting: list[str] | tuple = ()) -> list[dict]:
     """The OpenChoreo Resources to create: one per entry (and per data contract's topic), plus a
     workload identity per component that needs IAM access, a Kafka identity per component a
-    contract names, a login of its own per Postgres transform (pipelines.logins), and the
-    platform's sandboxes (code-runner) for each code-sandbox component.
+    contract names, a login of its own per Postgres transform (pipelines.logins) and, where the
+    database type says access_by login (no password, VX-20), per component that uses a database
+    (store_logins; `reporting`: the reporting components, whose owner login may grant
+    reporting_reader), and the platform's sandboxes (code-runner) for each code-sandbox component.
     `owner_target(component)` -> (project, namespace) of the component. `existing`: name -> type of
     the resources OpenChoreo already runs; one made under an alias keeps that type, so the
     rename never replaces it. Tags are written as the cloud spells them (labels on Google Cloud)."""
@@ -526,7 +529,7 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
     from .pipelines import LOGIN_TYPE, logins
 
     login_type = (catalog.get("types") or {}).get(LOGIN_TYPE) or {}
-    for login in logins(hld, catalog):
+    for login in [*logins(hld, catalog), *store_logins(hld, catalog, reporting)]:
         comp = login["component"]
         project, namespace = owner_target(comp)
         ids.append({"name": login["name"], "type": LOGIN_TYPE, "project": project, "namespace": namespace,
@@ -545,6 +548,37 @@ def plan(hld: str, catalog: dict, owner_target, *, product_id: str, feature_id: 
     return ids + out
 
 
+def login_name(component: str, resource: str) -> str:
+    """A component's own login to a database resource, as an OpenChoreo Resource."""
+    return f"{component}-{resource}-login"
+
+
+def store_logins(hld: str, catalog: dict, reporting: list[str] | tuple = ()) -> list[dict]:
+    """A login per component that uses a database whose type says access_by login (VX-20): owner
+    when it writes, reader when it only reads. A reporting component's owner login may grant
+    reporting_reader (its report logins)."""
+    from .pipelines import LOGIN_TYPE
+
+    types = catalog.get("types") or {}
+    if LOGIN_TYPE not in types:
+        return []
+    out = []
+    for e in _entries(hld, catalog):
+        t = types.get(e["type"]) or {}
+        if t.get("access_by") != "login" or "database" not in e["params"]:
+            continue
+        for comp, actions in sorted(e["access"].items()):
+            owner = bool(set(actions) & {"write", "delete"})
+            role = re.sub(r"[^a-z0-9_]", "_", f"{comp}_{e['name']}".lower())[:40].rstrip("_")
+            out.append({"component": comp, "name": login_name(comp, e["name"]), "database_resource": e["name"],
+                        "parameters": {"database": str(e["params"]["database"]),
+                                       "login": role if role[:1].isalpha() else f"l_{role}"[:40],
+                                       "component": comp, "access": "owner" if owner else "reader",
+                                       "grantRoles": ["reporting_reader"] if owner and comp in reporting else [],
+                                       "tokenize": comp in reporting}})
+    return out
+
+
 def env_name(resource: str, output: str) -> str:
     return re.sub(r"[^A-Z0-9]+", "_", f"{resource}_{output}".upper()).strip("_")
 
@@ -558,6 +592,11 @@ def workload_snippet(hld: str, catalog: dict, component: str) -> str:
         if t is None or component not in e["access"]:
             continue
         kafka = kafka or bool(t.get("from_contracts"))
+        if t.get("access_by") == "login":  # its own login, not the database (VX-20); same variable names
+            login = (catalog.get("types") or {}).get("postgres-login") or {}
+            lines += [f"    - ref: {login_name(component, e['name'])}", "      envBindings:"]
+            lines += [f"        {out}: {env_name(e['name'], out)}" for out in (login.get("outputs") or {})]
+            continue
         lines += [f"    - ref: {e['name']}", "      envBindings:"]
         lines += [f"        {out}: {env_name(e['name'], out)}" for out in (t.get("outputs") or {})]
     user = (catalog.get("types") or {}).get(KAFKA_USER_TYPE)
@@ -610,6 +649,17 @@ def instruction(ctx: dict, task: dict) -> str:
                " OpenTelemetry's AWS SDK instrumentation on the client (Java: opentelemetry-aws-sdk-2.2's"
                " AwsSdkTelemetry interceptor, as the event worker template's StoreConfig does; Python:"
                " opentelemetry-instrumentation-botocore), so the calls show in OpenChoreo's traces.")
+    logins = [e for e in used if ((catalog.get("types") or {}).get(e["type"]) or {}).get("access_by") == "login"]
+    if logins:
+        how += "".join(
+            f" {e['name']} has no password (VX-20): sign in as {env_name(e['name'], 'username')} with a short-lived"
+            f" token from the pod's identity as the password ({env_name(e['name'], 'auth')} gcp-iam: Application"
+            " Default Credentials with the scope https://www.googleapis.com/auth/sqlservice.login; azure-entra:"
+            " DefaultAzureCredential for https://ossrdbms-aad.database.windows.net/.default), TLS required, a fresh"
+            f" token for each new connection; then, when {env_name(e['name'], 'role')} is set, SET ROLE to it before"
+            " anything else, so what you create belongs to the database's owner role. Never a password or URL in"
+            " configuration."
+            for e in logins)
     return f" This component uses {names} (VX-19). Add to workload.yaml:\n{snippet}\n" + how + topics
 
 
