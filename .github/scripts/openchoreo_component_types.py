@@ -82,11 +82,12 @@ TELEMETRY_PARAMS = {
     "dataClass": {"type": "string", "enum": ["general", "payments", "phi"], "default": "general",
                   "description": "The product's data class, set by the Valxel SDLC at registration; on every "
                                  "span, so the collectors keep content out of stores it may not reach"},
-    # App metrics: the data plane's metrics collector scrapes pods annotated prometheus.io/scrape.
-    # The Valxel SDLC sets port and path from repos.yaml `openchoreo.metrics` (Spring's actuator
-    # for the Java templates, /metrics for the Python ones).
+    # App metrics: the data plane's metrics collector scrapes pods annotated prometheus.io/scrape, on
+    # the management port every template serves them on (8081; the mesh lets the collector reach
+    # that port only). The Valxel SDLC sets the path from repos.yaml `openchoreo.metrics` (Spring's
+    # /actuator/prometheus for the Java templates; /metrics, the default, for the Python ones).
     "metricsScrape": {"type": "boolean", "default": True},
-    "metricsPort": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 8080},
+    "metricsPort": {"type": "integer", "minimum": 1, "maximum": 65535, "default": 8081},
     "metricsPath": {"type": "string", "pattern": "^/[A-Za-z0-9/_.-]*$", "default": "/metrics"},
 }
 SCRAPE = {"prometheus.io/scrape": '${parameters.metricsScrape ? "true" : "false"}',

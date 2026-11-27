@@ -27,9 +27,10 @@ schemas. Dry-run them on your installation before applying.
     `gitops/apps/product-telemetry`), with `OTEL_SERVICE_NAME` and resource attributes naming the
     image it runs (`service.version`), the environment, the product and its data class. Products
     can't point their traces elsewhere. Long-running pods carry `prometheus.io/scrape`, `port` and
-    `path` annotations for the data plane's metrics collector; the Valxel SDLC sets the port and path
-    from repos.yaml `openchoreo.metrics` (Spring's actuator for the Java templates, `/metrics` on 8080
-    otherwise). A cluster without that collector just drops the spans.
+    `path` annotations for the data plane's metrics collector. Every template serves metrics on the
+    management port, 8081, the only port the mesh lets the collector reach. The Valxel SDLC sets the
+    path from repos.yaml `openchoreo.metrics`: Spring's actuator for the Java templates, `/metrics`
+    otherwise. A cluster without that collector just drops the spans.
   - Each builds only with the platform's `docker` workflow.
 - `autoscaler.yaml`: the `autoscaler` ClusterTrait, a HorizontalPodAutoscaler on CPU. The tool adds
   an instance to each component whose plan has a range (`<component>-autoscaler`) and sets its

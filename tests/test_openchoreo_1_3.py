@@ -116,19 +116,21 @@ def test_the_tool_registers_each_repo_with_its_role():
 
 
 def test_the_tool_tells_each_component_where_its_metrics_are():
-    java = {"metrics": {"port": 8081, "path": "/actuator/prometheus"}}
+    java = {"metrics": {"path": "/actuator/prometheus"}}
     assert component_parameters(java, "general", "provider") == {
-        "role": "provider", "dataClass": "general", "metricsPort": 8081, "metricsPath": "/actuator/prometheus"}
+        "role": "provider", "dataClass": "general", "metricsPath": "/actuator/prometheus"}
+    assert component_parameters({"metrics": {"port": 9464}}, "general")["metricsPort"] == 9464
     assert component_parameters({"metrics": {"scrape": False, "other": 1}}, "general")["metricsScrape"] is False
     assert "other" not in component_parameters({"metrics": {"other": 1}}, "general")
     assert component_parameters({"metrics": "nonsense"}, "general") == {"dataClass": "general"}
-    # The Java templates serve Spring's actuator; the rest serve /metrics on 8080, the default.
+    # Every template serves metrics on the management port (8081, the default); the Java ones at
+    # Spring's actuator path, the rest at /metrics (the default).
     roles = yaml.safe_load((ROOT / "config/repos.yaml").read_text())["roles"]
     by_template = {r["template"].rsplit("/", 1)[-1]: (r.get("openchoreo") or {}).get("metrics") for r in roles.values()
                    if isinstance(r, dict) and r.get("template")}
-    assert by_template["template-service"] == {"port": 8081, "path": "/actuator/prometheus"}
-    assert by_template["template-bff"] == {"port": 8081, "path": "/actuator/prometheus"}
-    assert by_template["template-event-worker"] == {"port": 8080, "path": "/actuator/prometheus"}
+    for java in ("template-service", "template-bff", "template-event-worker"):
+        assert by_template[java] == {"path": "/actuator/prometheus"}, java
+    assert all("port" not in (m or {}) for m in by_template.values())
     assert by_template["template-agent"] is None
 
 
@@ -158,7 +160,7 @@ def test_every_container_sends_its_telemetry_to_the_data_planes_collector():
 def test_long_running_pods_are_annotated_for_the_metrics_scraper():
     for name, t in TYPES.items():
         props = t["spec"]["parameters"]["openAPIV3Schema"]["properties"]
-        assert props["metricsPort"]["default"] == 8080 and props["metricsPath"]["default"] == "/metrics", name
+        assert props["metricsPort"]["default"] == 8081 and props["metricsPath"]["default"] == "/metrics", name
         scrape = props["metricsScrape"]["default"]
         assert scrape is (name not in ("web-app", "scheduled-task")), name  # nginx has no metrics; jobs end
         if t["spec"]["workloadType"] != "deployment":
