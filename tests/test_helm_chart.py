@@ -280,3 +280,20 @@ def test_on_azure_containers_keys_and_workload_identity_are_azures():
 ])
 def test_on_azure_it_refuses_other_clouds_settings(extra, says):
     assert says in _render(*AZURE, *extra, ok=False)
+
+
+def test_building_data_planes_lets_the_tool_make_jobs_and_nothing_more():
+    off = _render()
+    assert not [d for d in off if d["kind"] == "Role" and d["metadata"]["name"].endswith("-build-planes")]
+    sets = ("planes.enabled=true", "planes.builderImage=ghcr.io/valxel-platform/plane-builder:main@sha256:" + "a" * 64,
+            "planes.dbLoginsImage=ghcr.io/valxel-platform/db-logins:main@sha256:" + "b" * 64,
+            "planes.domain=planes.example.com", "planes.controlPlaneDomain=cp.example.com",
+            "planes.acmeEmail=ops@example.com", "planes.adminCidrs={203.0.113.10/32}")
+    docs = _render(*sets)
+    role = next(d for d in docs if d["kind"] == "Role" and d["metadata"]["name"].endswith("-build-planes"))
+    assert {r["resources"][0]: tuple(r["verbs"]) for r in role["rules"]} == {
+        "jobs": ("create", "get", "delete"), "configmaps": ("create", "delete"), "pods": ("list",),
+        "pods/log": ("get",)}
+    settings = next(d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"].endswith("-settings"))
+    assert settings["data"]["VALXEL_PLANE_ADMIN_CIDRS"] == "203.0.113.10/32"
+    assert "planes.builderImage" in _render("planes.enabled=true", ok=False)
