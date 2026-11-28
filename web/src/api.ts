@@ -1661,7 +1661,43 @@ export interface Inventory {
   problems: string[];
 }
 
+/** The Support page (valxel_sdlc.support): links that open a product's Grafana or MLflow, signed in by the tool. */
+export interface SupportLink {
+  to: "grafana" | "mlflow";
+  label: string;
+  detail: string;
+  href: string;
+  role?: "Viewer" | "Editor";
+  plane?: "prod" | "nonprod";
+}
+export interface SupportProduct {
+  product: string;
+  name: string;
+  links: SupportLink[];
+}
+export interface SupportSettings {
+  product: string;
+  mlflow_groups: string[];
+  version: number;
+  by?: string;
+  at?: string;
+  groups: { slug: string; name: string }[];
+}
+export interface SupportDetail {
+  product: string;
+  links: SupportLink[];
+  grafana_role: string;
+  mlflow: boolean;
+  settings?: SupportSettings;
+}
+
 export const api = {
+  support: () => request<{ products: SupportProduct[]; configured: boolean }>("GET", "/support"),
+  supportProduct: (id: string) => request<SupportDetail>("GET", `/support/${encodeURIComponent(id)}`),
+  setSupport: (id: string, mlflowGroups: string[]) =>
+    request<SupportSettings>("PUT", `/support/${encodeURIComponent(id)}/settings`, {
+      mlflow_groups: mlflowGroups,
+    }),
   changes: (productId: string, since?: string) =>
     request<ChangeRecord[]>(
       "GET",

@@ -341,11 +341,13 @@ CAPS = [
         "core",
         "trust",
         "Trust and access",
-        "Workspaces and tenancy, secrets and signing, audit trail and anchors, artifacts, telemetry and safe "
+        "Workspaces and tenancy, who may support a product, secrets and signing, audit trail and anchors, "
+        "artifacts, telemetry and safe "
         "mode, the tool's own hosting tiers and the releases it proposes for itself.",
         [
             "release_proposals",
             "workspaces",
+            "support",
             "tenancy",
             "billing",
             "secret_ring",

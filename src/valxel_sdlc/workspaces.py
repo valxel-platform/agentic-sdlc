@@ -9,6 +9,8 @@ creates and invites; a person matches one by their GitHub login or verified emai
     gates      per product, which groups approve each gate: approvers "group:<workspace>/<group>"
                added to the product's own (product.yaml), versioned, and pinned by each feature
                when it starts (pins["groups"]), as governance is pinned by commit
+    support    per product, which groups may open its agent traces in MLflow (valxel_sdlc.support):
+               none until an admin grants it, versioned
     audit      every change: who, when, what
 
 Membership is read on every request, so a member removed from a group can't approve on their next
@@ -31,7 +33,7 @@ from . import append_only
 
 ROLES = ("viewer", "member", "approver", "admin", "owner")
 GATES = ("g0", "g1", "g2", "g3", "g4", "g5", "g6", "security", "oncall")
-DEFAULT_GROUPS = ("Product", "Design", "Architecture", "Security", "Release", "On-call")
+DEFAULT_GROUPS = ("Product", "Design", "Architecture", "Security", "Release", "On-call", "Support")
 STATUSES = ("invited", "active", "suspended")
 
 
@@ -303,7 +305,15 @@ class Workspaces:
     def ensure(self, workspace: str, actor: str = "valxel") -> dict:
         """The workspace, created (no owner) the first time a product names it: existing deployments
         become workspaces with nothing else changed."""
-        return self.get(workspace) or self.create(workspace, name=workspace, actor=actor, plan="self-hosted")
+        ws = self.get(workspace)
+        if ws is None:
+            return self.create(workspace, name=workspace, actor=actor, plan="self-hosted")
+        for g in DEFAULT_GROUPS:  # a default group added since the workspace was made (Support)
+            if self.group(workspace, slug(g)) is None:
+                self.store.put("group", workspace, slug(g), {"workspace": workspace, "slug": slug(g), "name": g,
+                                                             "members": []})
+                self.store.audit(workspace, actor, "group.create", {"group": slug(g), "default": True})
+        return ws
 
     def bootstrap_owner(self, workspace: str, who: dict, *, actor: str = "valxel-cli") -> dict:
         """An owner for a workspace that has none (an existing deployment's): created if missing, in
@@ -486,6 +496,9 @@ class Workspaces:
                 if any(group in gs for gs in (self.mapping(pid) or {}).get("gates", {}).values())]
         if used:
             raise WorkspaceError(f"{group} approves gates on {', '.join(used)}: change those first")
+        traces = [pid for pid in self.products(workspace) if group in self.support(pid).get("mlflow_groups", [])]
+        if traces:
+            raise WorkspaceError(f"{group} may open agent traces on {', '.join(traces)}: change that first")
         self.store.delete("group", workspace, group)
         self.store.audit(workspace, actor, "group.delete", {"group": group})
 
@@ -518,6 +531,34 @@ class Workspaces:
                  "gates": {g: sorted(set(v)) for g, v in gates.items() if v}, "by": actor, "at": now()}
             self.store.put("gates", ws, f"{product_id}:{m['version']:06d}", m)
         self.store.audit(ws, actor, "gates.set", {"product": product_id, "version": m["version"], "gates": m["gates"]})
+        return m
+
+    # ------------------------------------------------------------------ support access
+
+    def support(self, product_id: str) -> dict:
+        """The product's support settings, latest version: which groups may open its agent traces
+        in MLflow (prompts and tool data, for products whose data class allows content). Empty until an
+        admin grants it."""
+        ws = self.workspace_of(product_id)
+        versions = [m for m in self.store.list("support", ws) if m.get("product") == product_id] if ws else []
+        return max(versions, key=lambda m: m["version"]) if versions else {"product": product_id, "mlflow_groups": [],
+                                                                            "version": 0}
+
+    def set_support(self, product_id: str, *, mlflow_groups: list[str], actor: str) -> dict:
+        ws = self.workspace_of(product_id)
+        if not ws:
+            raise WorkspaceError(f"Unknown product {product_id}")
+        have = {g["slug"] for g in self.groups(ws)}
+        missing = sorted(set(mlflow_groups) - have)
+        if missing:
+            raise WorkspaceError(f"No such groups: {', '.join(missing)}")
+        with self._lock:
+            cur = self.support(product_id)
+            m = {"product": product_id, "version": cur["version"] + 1, "mlflow_groups": sorted(set(mlflow_groups)),
+                 "by": actor, "at": now()}
+            self.store.put("support", ws, f"{product_id}:{m['version']:06d}", m)
+        self.store.audit(ws, actor, "support.set", {"product": product_id, "version": m["version"],
+                                                    "mlflow_groups": m["mlflow_groups"]})
         return m
 
     def approvers(self, product_id: str, version: int | None = None) -> dict[str, list[str]]:

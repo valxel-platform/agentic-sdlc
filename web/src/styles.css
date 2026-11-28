@@ -3878,3 +3878,12 @@ table.quality tfoot td {
   word-break: break-all;
   margin: 0;
 }
+
+/* Support: one line per link, the button then what it opens. */
+.support-links {
+  list-style: none;
+  margin: 0.5rem 0 1rem;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
