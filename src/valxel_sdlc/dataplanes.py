@@ -41,7 +41,11 @@ AKS_SERVER_APP = "6dae42f8-4368-4678-94ff-3960e28e3630"  # AKS's Entra server ap
 AGENT_SECRET = ("openchoreo-data-plane", "cluster-agent-tls")
 
 
-def plane_name(product_id: str, kind: str) -> str:
+def plane_name(product_id: str, kind: str, cloud: dict | None = None) -> str:
+    """The product's own cluster, or, when it shares, its workspace's (cloud/onboarding.py)."""
+    c = cloud or {}
+    if c.get("placement") == "shared" and c.get("workspace"):
+        return onboarding.shared_plane(c["workspace"], kind)
     return f"{product_id.lower()}-{KINDS[kind]}"
 
 
@@ -74,10 +78,13 @@ def missing_settings(s: dict) -> list[str]:
 def plane_vars(product_id: str, kind: str, cloud: dict, s: dict, *, zones: int = 3) -> dict:
     """terraform.tfvars.json for tofu/stacks/product-plane-<cloud>."""
     provider = cloud["provider"]
-    name = plane_name(product_id, kind)
+    name = plane_name(product_id, kind, cloud)
     prod = kind == "production"
+    shared = cloud.get("placement") == "shared" and cloud.get("workspace")
     out: dict[str, Any] = {
-        "name": name, "product": product_id.lower(), "env": KINDS[kind],
+        # A shared cluster is the workspace's: its own resources carry the workspace, each product's
+        # resources their product (the catalog tags them).
+        "name": name, "product": (cloud["workspace"] if shared else product_id).lower()[:63], "env": KINDS[kind],
         "domain": f"{name}.{s['domain']}", "control_plane_domain": s["control_plane_domain"],
         "acme_email": s["acme_email"], "admin_cidrs": s["admin_cidrs"], "gitops_branch": s["gitops_branch"],
         # Non-production: spot, one zone; production: never spot, the region's zones.
@@ -259,7 +266,7 @@ def build(services, *, product_id: str, cloud: dict | None, approver: str, zones
     planes: dict[str, dict] = {}
     waiting: list[str] = []
     for kind, account in accounts.items():
-        name = plane_name(product_id, kind)
+        name = plane_name(product_id, kind, cloud)
         rec = _connection(conns, provider, account)
         if not rec or (rec.get("reach") or {}).get("mode") != "full":
             noun = onboarding.noun(provider)

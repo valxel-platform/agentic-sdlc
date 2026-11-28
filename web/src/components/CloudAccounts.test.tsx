@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Draft, IntakeSession } from "../api";
-import { CloudAccounts } from "./CloudAccounts";
+import { DraftCloudAccounts as CloudAccounts, WorkspaceCloudAccounts } from "./CloudAccounts";
 
 const apiMock = vi.hoisted(() => ({
   intakeDraft: vi.fn(),
@@ -11,6 +11,8 @@ const apiMock = vi.hoisted(() => ({
   awsLaunch: vi.fn(),
   azureLaunch: vi.fn(),
   connectionPoll: vi.fn(),
+  workspaceCloudAccounts: vi.fn(),
+  setWorkspaceCloudAccounts: vi.fn(),
 }));
 vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api")>();
@@ -70,6 +72,12 @@ const GIVEN = {
 beforeEach(() => {
   Object.values(apiMock).forEach((m) => m.mockReset());
   apiMock.connections.mockResolvedValue([]);
+  apiMock.workspaceCloudAccounts.mockResolvedValue({
+    cloud: "gcp",
+    name: "Google Cloud",
+    noun: "project",
+    planes: { non_production: "acme-nonprod", production: "acme-prod" },
+  });
   vi.spyOn(window, "open").mockImplementation(() => null);
 });
 afterEach(() => vi.useRealTimers());
@@ -161,5 +169,52 @@ describe("CloudAccounts", () => {
     fireEvent.click(screen.getAllByText("Connect")[0]);
     expect(await screen.findByText("Sign in to AWS account 111111111111")).toBeInTheDocument();
     expect(apiMock.awsLaunch).toHaveBeenCalledWith("acme", "full", "us-east-1", "111111111111");
+  });
+
+  it("offers the workspace's shared clusters first when it has them", async () => {
+    apiMock.workspaceCloudAccounts.mockResolvedValue({
+      cloud: "gcp",
+      name: "Google Cloud",
+      noun: "project",
+      accounts: { non_production: "acme-np", production: "acme-p" },
+      region: "us-central1",
+      planes: { non_production: "acme-nonprod", production: "acme-prod" },
+    });
+    apiMock.intakeDraft.mockResolvedValue(session({ cloud: "shared", placement: "shared" }));
+    render(<CloudAccounts s={session()} ws="acme" disabled={false} onSaved={vi.fn()} />);
+    const share = await screen.findByLabelText("Share acme's clusters (cheapest)");
+    expect(screen.queryByLabelText("Non-production project")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Its own projects"));
+    await waitFor(() => expect(apiMock.intakeDraft).toHaveBeenLastCalledWith("s1", { cloud: "dedicated" }));
+    expect(screen.getByLabelText("Non-production project")).toBeInTheDocument();
+    fireEvent.click(share);
+    await waitFor(() => expect(apiMock.intakeDraft).toHaveBeenLastCalledWith("s1", { cloud: "shared" }));
+    expect(screen.getByText(/PHI or payments data always gets its own/)).toBeInTheDocument();
+  });
+
+  it("lets a workspace admin set the shared accounts", async () => {
+    apiMock.setWorkspaceCloudAccounts.mockResolvedValue({
+      cloud: "gcp",
+      name: "Google Cloud",
+      noun: "project",
+      accounts: { non_production: "acme-np", production: "acme-p" },
+      region: "us-central1",
+      planes: { non_production: "acme-nonprod", production: "acme-prod" },
+    });
+    render(<WorkspaceCloudAccounts ws="acme" admin />);
+    expect(await screen.findByText("Shared projects")).toBeInTheDocument();
+    expect(screen.getByText(/acme-nonprod and acme-prod/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Set them up later")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Non-production project"), { target: { value: "acme-np" } });
+    fireEvent.change(screen.getByLabelText("Production project"), { target: { value: "acme-p" } });
+    fireEvent.change(screen.getByLabelText("Region"), { target: { value: "us-central1" } });
+    fireEvent.blur(screen.getByLabelText("Region"));
+    await waitFor(() =>
+      expect(apiMock.setWorkspaceCloudAccounts).toHaveBeenCalledWith(
+        "acme",
+        "non-production: acme-np, production: acme-p, region: us-central1",
+      ),
+    );
+    expect(await screen.findAllByText("Connect")).toHaveLength(2);
   });
 });

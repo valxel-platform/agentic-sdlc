@@ -99,6 +99,7 @@ def size_said(text: str) -> str:
 
 
 CLOUD_OPTIONS = ("I have them", "Help me create them", "Set them up later")
+PLACEMENT_OPTIONS = ("Share the workspace's clusters", "Its own accounts", "Set them up later")
 
 
 def installation_cloud() -> str:
@@ -112,16 +113,21 @@ def installation_cloud() -> str:
 
 
 def set_cloud(d: Draft, value) -> None:
-    """A new product's cloud accounts from the draft editor: 'later', or the two IDs and the region."""
+    """A new product's cloud accounts from the draft editor: 'later', 'shared' (the workspace's
+    clusters), 'dedicated' (its own, IDs to come), or the two IDs and the region."""
     if value in ("", None, "later"):
         d.cloud, d.cloud_accounts, d.region = ("later" if value else ""), {}, ""
+        return
+    if value in ("shared", "dedicated"):
+        d.placement = value
+        d.cloud, d.cloud_accounts, d.region = ("shared" if value == "shared" else ""), {}, ""
         return
     from .cloud import onboarding
 
     got, why = onboarding.parse(installation_cloud(), str(value))
     if not got:
         raise ValueError(why)
-    d.cloud, d.cloud_accounts, d.region = "given", got["accounts"], got["region"]
+    d.cloud, d.cloud_accounts, d.region, d.placement = "given", got["accounts"], got["region"], "dedicated"
 
 
 RESEARCH_SAID = {"quick": "quick", "thorough": "thorough", "own": "own", "my own": "own", "done": "own"}
@@ -199,9 +205,10 @@ class Draft:
     budget_usd: float = 0.0  # product: the first year's features (optional)
     # product: its cloud accounts (cloud/onboarding.py). "given" with cloud_accounts and region, or
     # "later" (the product gate waits for them).
-    cloud: str = ""
+    cloud: str = ""  # "given" (its own accounts), "shared" (the workspace's), or "later"
     cloud_accounts: dict = field(default_factory=dict)  # {"non_production": id, "production": id}
     region: str = ""
+    placement: str = ""  # "shared" or "dedicated" (cloud/onboarding.py), once chosen
 
     @property
     def experience_done(self) -> bool:
@@ -445,12 +452,21 @@ class IntakeAgent:
         s.awaiting = ""
         return ""
 
-    @staticmethod
-    def _sized_question(s: IntakeSession, f: str) -> tuple[str, list[str]]:
+    def _shared(self, s: IntakeSession) -> dict:
+        """The workspace's shared accounts, when it has them (its admin sets them once)."""
+        from .cloud import onboarding
+
+        wsx = getattr(self.services, "workspaces", None)
+        return onboarding.shared_accounts(wsx.get(s.workspace) or {}) if (wsx is not None and s.workspace) else {}
+
+    def _sized_question(self, s: IntakeSession, f: str) -> tuple[str, list[str]]:
         if f == "cloud":
             from .cloud import onboarding
 
-            return onboarding.ask(installation_cloud(), s.draft.name or "The product"), list(CLOUD_OPTIONS)
+            name = s.draft.name or "The product"
+            if self._shared(s) and s.draft.placement != "dedicated":
+                return onboarding.ask_placement(installation_cloud(), name, s.workspace), list(PLACEMENT_OPTIONS)
+            return onboarding.ask(installation_cloud(), name), list(CLOUD_OPTIONS)
         question, options = SIZED_QUESTIONS[s.draft.size][f]
         return question, list(options)
 
@@ -497,7 +513,9 @@ class IntakeAgent:
             from .cloud import onboarding
 
             cloud = installation_cloud()
-            where = (f"It runs on {onboarding.name(cloud)} in {d.region}: non-production in "
+            where = (f"It shares {s.workspace}'s clusters on {onboarding.name(cloud)} (unless its brief finds PHI or "
+                     "payments data: then it needs accounts of its own)." if d.cloud == "shared" else
+                     f"It runs on {onboarding.name(cloud)} in {d.region}: non-production in "
                      f"{d.cloud_accounts.get('non_production')}, production in {d.cloud_accounts.get('production')}. "
                      "Connect each from the Cloud accounts box: Valxel fills in the template."
                      if d.cloud == "given" else
@@ -607,6 +625,23 @@ class IntakeAgent:
             d.problem = f"{d.problem.rstrip()}\n\n{text.strip()}"
         return ""
 
+    def _answer_placement(self, s: IntakeSession, t: str) -> str | None:
+        """Shared or its own, when the workspace has shared accounts: '' once shared, the next
+        question when its own, None when the answer isn't about placement."""
+        from .cloud import onboarding
+
+        d = s.draft
+        if not self._shared(s) or d.placement == "dedicated":
+            return None
+        if re.search(r"\bshar", t):
+            d.cloud, d.placement, d.cloud_accounts, d.region = "shared", "shared", {}, ""
+            return ""
+        if re.search(r"\b(own|dedicated|separate)\b", t):
+            d.placement = "dedicated"
+            s.awaiting, s.options = "cloud", list(CLOUD_OPTIONS)
+            return onboarding.ask(installation_cloud(), d.name or "The product")
+        return None
+
     def _answer_cloud(self, s: IntakeSession, text: str) -> str:
         """The product's cloud accounts: given, later, or how to make them. Returns a reply to stop
         at ('' once answered)."""
@@ -615,8 +650,11 @@ class IntakeAgent:
         d, cloud, t = s.draft, installation_cloud(), text.strip().lower()
         got, why = onboarding.parse(cloud, text)
         if got:
-            d.cloud, d.cloud_accounts, d.region = "given", got["accounts"], got["region"]
+            d.cloud, d.cloud_accounts, d.region, d.placement = "given", got["accounts"], got["region"], "dedicated"
             return ""
+        placed = self._answer_placement(s, t)
+        if placed is not None:
+            return placed
         if re.search(r"\b(later|not yet|skip|after)\b", t):
             d.cloud, d.cloud_accounts, d.region = "later", {}, ""
             return ""

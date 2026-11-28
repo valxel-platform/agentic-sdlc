@@ -1,46 +1,70 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type CloudGuide, type IntakeSession } from "../api";
+import { api, type CloudGuide, type IntakeSession, type WorkspaceClouds } from "../api";
 
 const POLL_MS = 10_000;
 const POLL_FOR_MS = 30 * 60_000;
 const LABEL: Record<string, string> = { non_production: "Non-production", production: "Production" };
+const NAME: Record<string, string> = { aws: "AWS", gcp: "Google Cloud", azure: "Azure" };
+const NOUN: Record<string, string> = { aws: "account", gcp: "project", azure: "subscription" };
 const EXAMPLE: Record<string, { np: string; p: string; region: string }> = {
   aws: { np: "111111111111", p: "222222222222", region: "us-east-1" },
   gcp: { np: "acme-cln-nonprod", p: "acme-cln-prod", region: "us-central1" },
   azure: { np: "1b2c3d4e-…-0001", p: "1b2c3d4e-…-0002", region: "eastus2" },
 };
 
+type Cloud = "aws" | "gcp" | "azure";
 type Connect = { state: "idle" | "opened" | "connected" | "error"; command?: string; note?: string };
+export interface CloudValue {
+  cloud: "" | "given" | "later" | "shared";
+  cloud_accounts: { non_production?: string; production?: string };
+  region: string;
+}
 
 /**
- * A new product's two cloud accounts, on the front door's draft (cloud/onboarding.py): the IDs and
- * the region, the cloud's own pages for making them, and a Connect for each that opens the connect
- * template already filled in for that account. Valxel then checks it by itself until it connects.
+ * Two cloud accounts (non-production and production) and their region (cloud/onboarding.py): a new
+ * product's own, or a workspace's shared ones. The cloud's own pages for making them, and a Connect
+ * for each that opens the connect template already filled in for that account; Valxel then checks
+ * it by itself until it connects. For a new product in a workspace with shared accounts, the first
+ * choice is whether to share the workspace's clusters (the default, and cheapest) or have its own.
  */
 export function CloudAccounts({
-  s,
+  cloud,
   ws,
+  value,
+  productName,
   disabled,
-  onSaved,
+  onSave,
+  sharedIn = "",
+  allowLater = true,
+  missing = false,
 }: {
-  s: IntakeSession;
+  cloud: Cloud;
   ws: string;
+  value: CloudValue;
+  productName: string;
   disabled: boolean;
-  onSaved: (next: IntakeSession) => void;
+  /** "later", "shared", "dedicated", "" or "non-production: <id>, production: <id>, region: <region>" */
+  onSave: (text: string) => Promise<void>;
+  /** The workspace whose shared clusters this product may use, when it has them. */
+  sharedIn?: string;
+  allowLater?: boolean;
+  missing?: boolean;
 }) {
-  const cloud = s.cloud ?? "aws";
-  const d = s.draft;
-  const [np, setNp] = useState(d.cloud_accounts?.non_production ?? "");
-  const [p, setP] = useState(d.cloud_accounts?.production ?? "");
-  const [region, setRegion] = useState(d.region ?? "");
+  const [np, setNp] = useState(value.cloud_accounts?.non_production ?? "");
+  const [p, setP] = useState(value.cloud_accounts?.production ?? "");
+  const [region, setRegion] = useState(value.region ?? "");
+  const [own, setOwn] = useState(!sharedIn || value.cloud === "given");
   const [error, setError] = useState("");
   const [guide, setGuide] = useState<CloudGuide | null>(null);
   const [connect, setConnect] = useState<Record<string, Connect>>({});
   const timers = useRef<number[]>([]);
   useEffect(() => () => timers.current.forEach((t) => window.clearInterval(t)), []);
-  const accounts = [d.cloud_accounts?.non_production, d.cloud_accounts?.production].filter(Boolean).join(",");
+  const given = value.cloud === "given";
+  const accounts = [value.cloud_accounts?.non_production, value.cloud_accounts?.production]
+    .filter(Boolean)
+    .join(",");
   useEffect(() => {
-    if (!ws || d.cloud !== "given") return;
+    if (!ws || !given) return;
     let live = true;
     api
       .connections(ws)
@@ -58,37 +82,31 @@ export function CloudAccounts({
     return () => {
       live = false;
     };
-  }, [ws, cloud, accounts, d.cloud]);
+  }, [ws, cloud, accounts, given]);
 
-  const g = guide;
-  const noun = g?.noun ?? { aws: "account", gcp: "project", azure: "subscription" }[cloud];
+  const noun = NOUN[cloud];
   const ex = EXAMPLE[cloud];
 
-  async function save(next: { np?: string; p?: string; region?: string }) {
+  async function send(text: string) {
+    try {
+      setError("");
+      await onSave(text);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  function save(next: { np?: string; p?: string; region?: string }) {
     const a = (next.np ?? np).trim();
     const b = (next.p ?? p).trim();
     const r = (next.region ?? region).trim();
     if (!a || !b || !r) return; // all three, or nothing yet
-    try {
-      setError("");
-      onSaved(await api.intakeDraft(s.id, { cloud: `non-production: ${a}, production: ${b}, region: ${r}` }));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  async function later(on: boolean) {
-    try {
-      setError("");
-      onSaved(await api.intakeDraft(s.id, { cloud: on ? "later" : "" }));
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    void send(`non-production: ${a}, production: ${b}, region: ${r}`);
   }
 
   async function showGuide() {
     try {
-      setGuide(guide ? null : await api.cloudOnboarding(d.name || "the product"));
+      setGuide(guide ? null : await api.cloudOnboarding(productName || "the product"));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -134,66 +152,106 @@ export function CloudAccounts({
     }
   }
 
-  const given = d.cloud === "given";
+  const later = value.cloud === "later";
   return (
     <fieldset className="cloud-accounts" aria-label="Cloud accounts">
       <legend>
-        Cloud accounts{" "}
-        <span className="muted small">
-          · runs on {g?.name ?? { aws: "AWS", gcp: "Google Cloud", azure: "Azure" }[cloud]}
-        </span>
+        Cloud accounts <span className="muted small">· runs on {guide?.name ?? NAME[cloud]}</span>
       </legend>
-      <div className="split">
-        <label className={`ifield${s.missing.includes("cloud") && !np ? " missing" : ""}`}>
-          <span>Non-production {noun}</span>
-          <input
-            value={np}
-            disabled={disabled || d.cloud === "later"}
-            placeholder={ex.np}
-            onChange={(e) => setNp(e.target.value)}
-            onBlur={() => save({ np })}
-          />
-        </label>
-        <label className={`ifield${s.missing.includes("cloud") && !p ? " missing" : ""}`}>
-          <span>Production {noun}</span>
-          <input
-            value={p}
-            disabled={disabled || d.cloud === "later"}
-            placeholder={ex.p}
-            onChange={(e) => setP(e.target.value)}
-            onBlur={() => save({ p })}
-          />
-        </label>
-      </div>
-      <label className="ifield">
-        <span>Region</span>
-        <input
-          value={region}
-          disabled={disabled || d.cloud === "later"}
-          placeholder={ex.region}
-          onChange={(e) => setRegion(e.target.value)}
-          onBlur={() => save({ region })}
-        />
-      </label>
+      {sharedIn && (
+        <div className="row small" role="radiogroup" aria-label="Where it runs">
+          <label className="inline">
+            <input
+              type="radio"
+              name="placement"
+              checked={!own}
+              disabled={disabled}
+              onChange={() => {
+                setOwn(false);
+                void send("shared");
+              }}
+            />{" "}
+            Share {sharedIn}'s clusters (cheapest)
+          </label>
+          <label className="inline">
+            <input
+              type="radio"
+              name="placement"
+              checked={own}
+              disabled={disabled}
+              onChange={() => {
+                setOwn(true);
+                void send("dedicated");
+              }}
+            />{" "}
+            Its own {noun}s
+          </label>
+        </div>
+      )}
+      {sharedIn && !own && (
+        <p className="small muted">
+          It runs on {sharedIn}'s two clusters, in its own namespace with its own cloud identities. A product
+          with PHI or payments data always gets its own {noun}s: the product gate asks for them if its brief
+          finds such data.
+        </p>
+      )}
+      {own && (
+        <>
+          <div className="split">
+            <label className={`ifield${missing && !np ? " missing" : ""}`}>
+              <span>Non-production {noun}</span>
+              <input
+                value={np}
+                disabled={disabled || later}
+                placeholder={ex.np}
+                onChange={(e) => setNp(e.target.value)}
+                onBlur={() => save({ np })}
+              />
+            </label>
+            <label className={`ifield${missing && !p ? " missing" : ""}`}>
+              <span>Production {noun}</span>
+              <input
+                value={p}
+                disabled={disabled || later}
+                placeholder={ex.p}
+                onChange={(e) => setP(e.target.value)}
+                onBlur={() => save({ p })}
+              />
+            </label>
+          </div>
+          <label className="ifield">
+            <span>Region</span>
+            <input
+              value={region}
+              disabled={disabled || later}
+              placeholder={ex.region}
+              onChange={(e) => setRegion(e.target.value)}
+              onBlur={() => save({ region })}
+            />
+          </label>
+          <div className="row small">
+            <button type="button" className="linkish" onClick={showGuide}>
+              {guide ? "Hide how to create them" : `How do I create these ${noun}s?`}
+            </button>
+            {allowLater && (
+              <label className="inline">
+                <input
+                  type="checkbox"
+                  checked={later}
+                  disabled={disabled}
+                  onChange={(e) => void send(e.target.checked ? "later" : "")}
+                />{" "}
+                Set them up later
+              </label>
+            )}
+          </div>
+        </>
+      )}
       {error && (
         <p className="small error-note" role="alert">
           {error}
         </p>
       )}
-      <div className="row small">
-        <button type="button" className="linkish" onClick={showGuide}>
-          {guide ? "Hide how to create them" : `How do I create these ${noun}s?`}
-        </button>
-        <label className="inline">
-          <input
-            type="checkbox"
-            checked={d.cloud === "later"}
-            disabled={disabled}
-            onChange={(e) => later(e.target.checked)}
-          />{" "}
-          Set them up later
-        </label>
-      </div>
       {guide && (
         <ol className="small guide" aria-label={`How to create ${noun}s`}>
           {guide.steps.map((step) => (
@@ -201,10 +259,10 @@ export function CloudAccounts({
           ))}
         </ol>
       )}
-      {given && ws && (
+      {own && given && ws && (
         <ul className="connect-list" aria-label="Connect each account">
           {(["non_production", "production"] as const).map((k) => {
-            const account = d.cloud_accounts[k] ?? "";
+            const account = value.cloud_accounts[k] ?? "";
             const c = connect[account] ?? { state: "idle" };
             return (
               <li key={k}>
@@ -236,5 +294,80 @@ export function CloudAccounts({
         </ul>
       )}
     </fieldset>
+  );
+}
+
+/** The new-product draft's box: a product's own accounts, or its workspace's shared clusters. */
+export function DraftCloudAccounts({
+  s,
+  ws,
+  disabled,
+  onSaved,
+}: {
+  s: IntakeSession;
+  ws: string;
+  disabled: boolean;
+  onSaved: (next: IntakeSession) => void;
+}) {
+  const [sharedIn, setSharedIn] = useState("");
+  useEffect(() => {
+    if (!s.workspace) return;
+    let live = true;
+    api
+      .workspaceCloudAccounts(s.workspace)
+      .then((r) => {
+        if (live) setSharedIn(r.accounts ? s.workspace || "" : "");
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [s.workspace]);
+  return (
+    <CloudAccounts
+      key={sharedIn}
+      cloud={s.cloud ?? "aws"}
+      ws={ws}
+      value={s.draft}
+      productName={s.draft.name}
+      disabled={disabled}
+      missing={s.missing.includes("cloud")}
+      sharedIn={sharedIn}
+      onSave={async (text) => onSaved(await api.intakeDraft(s.id, { cloud: text }))}
+    />
+  );
+}
+
+/** A workspace's two shared accounts, set by its admins: where every product that shares runs. */
+export function WorkspaceCloudAccounts({ ws, admin }: { ws: string; admin: boolean }) {
+  const [v, setV] = useState<WorkspaceClouds | null>(null);
+  useEffect(() => {
+    api
+      .workspaceCloudAccounts(ws)
+      .then(setV)
+      .catch(() => undefined);
+  }, [ws]);
+  if (!v) return null;
+  return (
+    <section className="panel" aria-labelledby="h-shared-cloud">
+      <h2 id="h-shared-cloud" className="section-title">
+        Shared {v.noun}s
+      </h2>
+      <p className="small muted">
+        Products that share run on this workspace's two clusters ({v.planes.non_production} and{" "}
+        {v.planes.production}), each in its own namespace: one pair of cluster fees for all of them. Products
+        with PHI or payments data always get their own.
+      </p>
+      <CloudAccounts
+        key={v.accounts ? "set" : "unset"}
+        cloud={v.cloud}
+        ws={ws}
+        value={{ cloud: v.accounts ? "given" : "", cloud_accounts: v.accounts ?? {}, region: v.region ?? "" }}
+        productName="your products"
+        disabled={!admin}
+        allowLater={false}
+        onSave={async (text) => setV(await api.setWorkspaceCloudAccounts(ws, text))}
+      />
+    </section>
   );
 }

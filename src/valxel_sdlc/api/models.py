@@ -172,6 +172,11 @@ class WorkspaceIn(BaseModel):
     plan: str = Field(default="self-hosted", pattern=r"^(self-hosted|lite|full)$")
 
 
+class CloudAccountsIn(BaseModel):
+    accounts: str = Field(default="", max_length=300, description="'non-production: <id>, production: <id>, "
+                          "region: <region>', or empty to clear")
+
+
 class PlanIn(BaseModel):
     plan: str = Field(pattern=r"^(lite|full)$")
 

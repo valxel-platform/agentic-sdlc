@@ -12,6 +12,17 @@ page (deploy/<cloud>-connect), and the product gate builds a data plane in each.
     parse(cloud, text)      "non-production: acme-cln-dev, production: acme-cln-prod, region: us-central1"
                             -> {"accounts": {...}, "region": ...}, or what's wrong
     runtime_cloud(...)      product.yaml's runtime.cloud from those
+
+Two placements (constitution VX-19 lets either hold a product's environments in the customer's own
+accounts):
+
+    shared      the default: the product runs on its workspace's two shared clusters, in the
+                workspace's two accounts (set once in the workspace's settings), each product in its
+                own namespace with its own cloud identities and network policy. One pair of clusters
+                for every product, so one pair of cluster fees.
+    dedicated   the product's own two accounts and its own two clusters: for a team that wants the
+                isolation and pays for it, and required for products with PHI or payments data
+                (DEDICATED_CLASSES).
 """
 
 from __future__ import annotations
@@ -75,6 +86,29 @@ STEPS = {
         "Note each subscription's ID (a GUID).",
     ],
 }
+
+
+PLACEMENTS = ("shared", "dedicated")
+# Data classes that never share clusters or accounts with other products.
+DEDICATED_CLASSES = ("phi", "payments")
+
+
+def needs_dedicated(data_class: str) -> bool:
+    return (data_class or "").lower() in DEDICATED_CLASSES
+
+
+def shared_plane(workspace: str, kind: str) -> str:
+    """The workspace's shared cluster for `kind` (non_production or production): a name GKE, AKS and
+    OpenChoreo all accept (lowercase, 31 characters at most)."""
+    import hashlib
+
+    slug = re.sub(r"[^a-z0-9-]+", "-", workspace.lower()).strip("-") or "ws"
+    if not slug[0].isalpha():
+        slug = "w" + slug
+    suffix = "-nonprod" if kind == "non_production" else "-prod"
+    if len(slug) + len(suffix) > 31:
+        slug = slug[: 31 - len(suffix) - 5].rstrip("-") + "-" + hashlib.sha256(workspace.encode()).hexdigest()[:4]
+    return slug + suffix
 
 
 def name(cloud: str) -> str:
@@ -149,11 +183,27 @@ def parse(cloud: str, text: str) -> tuple[dict, str]:
     return {"accounts": accounts, "region": region}, ""
 
 
-def runtime_cloud(cloud: str, accounts: dict, region: str) -> dict:
+def runtime_cloud(cloud: str, accounts: dict, region: str, placement: str = "dedicated") -> dict:
     """product.yaml runtime.cloud: each pipeline environment's account (dev and staging share the
-    non-production one, where their data plane is)."""
-    return {"provider": cloud, "region": region,
+    non-production one, where their data plane is), and whether those are the workspace's shared
+    accounts or the product's own."""
+    return {"provider": cloud, "region": region, "placement": placement,
             "accounts": {env: accounts[plane] for env, plane in ENV_PLANE.items()}}
+
+
+def ask_placement(cloud: str, product: str, workspace: str) -> str:
+    n = noun(cloud)
+    return (f"{product} will run on {name(cloud)}, where this Valxel runs. It can share {workspace}'s two clusters "
+            f"(the cheapest: one pair of clusters for every product), or have two {n}s and clusters of its own, "
+            f"which cost more. A product with PHI or payments data always gets its own. Which?")
+
+
+def shared_accounts(ws: dict) -> dict:
+    """The workspace's shared accounts, when its admin has set them: {accounts, region}."""
+    c = (ws or {}).get("cloud_accounts") or {}
+    accounts = {k: str(c.get(k) or "") for k in PLANES}
+    return {"accounts": accounts, "region": str(c.get("region") or "")} if all(accounts.values()) and c.get("region") \
+        else {}
 
 
 def plane_accounts(cloud: dict) -> dict[str, str]:

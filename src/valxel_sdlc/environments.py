@@ -87,17 +87,23 @@ def runtime_entry(product_id: str, tier: int, mode: str = "full", today: str = "
             "observability": {"non_production": "shared", "production": n["observability"]}}
 
 
-def cluster_files(product_id: str, tier: int, template: str, zones: int, awake: str = AWAKE) -> dict[str, str]:
+def cluster_files(product_id: str, tier: int, template: str, zones: int, awake: str = AWAKE, *,
+                  owner: str = "", planes: dict | None = None) -> dict[str, str]:
     """The product's clusters for the infrastructure repo, from the platform's template (a YAML
-    document with {product}, {name}, {kind}, {zones} and {tier} placeholders, one per cluster kind)."""
-    n = names(product_id)
+    document with {product}, {name}, {kind}, {zones} and {tier} placeholders, one per cluster kind).
+    With `owner` (a workspace whose clusters the product shares) they're the workspace's, named
+    `planes`."""
+    n = {**names(product_id), **{k: v for k, v in (planes or {}).items() if k in ("non_production", "production")}}
+    if owner:
+        n["observability"] = n["production"].rsplit("-", 1)[0] + "-observe"
+    who = (owner or product_id).lower()
     out = {}
     for kind, name, z, spot, awake in (("data-plane", n["non_production"], 1, "true", awake),
                                        ("data-plane", n["production"], zones, "false", ""),
                                        ("observability-plane", n["observability"], min(zones, 2), "false", "")):
-        text = template.format(product=product_id.lower(), name=name, kind=kind, zones=z, tier=tier, spot=spot,
+        text = template.format(product=who, name=name, kind=kind, zones=z, tier=tier, spot=spot,
                                awake=awake)
-        out[f"clusters/{product_id.lower()}/{name}.yaml"] = text
+        out[f"clusters/{who}/{name}.yaml"] = text
     return out
 
 
@@ -118,7 +124,7 @@ spec:
 
 def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: str | None = None,
           template: str = "", zones: int = 2, thread_id: str = "", awake: str = AWAKE,
-          mode: str = "full", cloud: dict | None = None) -> list[dict]:
+          mode: str = "full", cloud: dict | None = None, planes: dict | None = None) -> list[dict]:
     """The product's clusters and its OpenChoreo project, environments and pipeline (when its data
     planes are registered). Returns the steps, like inception setup. On Google Cloud and Azure the
     tool builds the two data planes itself in the product's accounts (dataplanes.py); elsewhere the
@@ -137,7 +143,11 @@ def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: st
         if mode == "lite":
             return {"skipped": True, "why": "lite mode: on the shared non-production plane until it goes live on "
                                             "its own VMs; no clusters of its own"}
-        files = cluster_files(product_id, tier, template or DEFAULT_TEMPLATE, zones, awake)
+        shared = (cloud or {}).get("placement") == "shared" and (cloud or {}).get("workspace")
+        # A workspace's shared clusters are proposed by the first product that shares them; the
+        # pull request for the next is empty, and the platform team closes it.
+        files = cluster_files(product_id, tier, template or DEFAULT_TEMPLATE, zones, awake,
+                              owner=str((cloud or {})["workspace"]) if shared else "", planes=planes)
         if not infra_repo:
             return {"skipped": True, "files": sorted(files),
                     "why": "VALXEL_INFRA_REPO isn't set: give the platform team these cluster definitions"}
@@ -167,7 +177,8 @@ def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: st
                                                      infra_repo=infra_repo))
     else:
         step("clusters_pr", clusters)
-    step("environments", lambda: environments(services, product_id=product_id, approver=approver, mode=mode))
+    step("environments", lambda: environments(services, product_id=product_id, approver=approver, mode=mode,
+                                              planes=planes))
     return steps
 
 
@@ -191,11 +202,14 @@ def hosted_environments(services, *, product_id: str, approver: str) -> dict:
     return {"created": done, "approved_by": who, "hosted": True, "namespace": ns}
 
 
-def environments(services, *, product_id: str, approver: str, mode: str = "full") -> dict:
-    """The project, environments and pipeline, once both data planes are registered."""
+def environments(services, *, product_id: str, approver: str, mode: str = "full",
+                 planes: dict | None = None) -> dict:
+    """The project, environments and pipeline, once both data planes are registered. `planes`: the
+    product's data planes when they aren't its own (a workspace's shared clusters, product.yaml
+    runtime.data_planes)."""
     if mode == "lite":
         return hosted_environments(services, product_id=product_id, approver=approver)
-    n = names(product_id)
+    n = {**names(product_id), **{k: v for k, v in (planes or {}).items() if k in ("non_production", "production")}}
     oc = services.openchoreo
     if not callable(getattr(oc, "ensure_environment", None)):
         return {"skipped": True, "why": "this OpenChoreo client can't create environments"}

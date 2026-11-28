@@ -195,8 +195,10 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                     raise HTTPException(403, f"Only {', '.join(starters) or 'the inception starters'} can start a product")
                 from ...intake import installation_cloud
 
-                cloud = ({"provider": installation_cloud(), "region": d.region, "accounts": dict(d.cloud_accounts)}
-                         if d.cloud == "given" else {"provider": installation_cloud(), "later": True})
+                cloud = ({"provider": installation_cloud(), "region": d.region, "accounts": dict(d.cloud_accounts),
+                          "placement": "dedicated"} if d.cloud == "given" else
+                         {"provider": installation_cloud(), "placement": "shared"} if d.cloud == "shared" else
+                         {"provider": installation_cloud(), "later": True})
                 v = Vision(name=d.name or d.title, org=d.org, vision=d.problem,
                            goals=[measure] if measure else [],
                            users=[] if d.users == AGENT_PROPOSES else [d.users], budget_usd=d.budget_usd,

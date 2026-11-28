@@ -281,6 +281,25 @@ class Workspaces:
             self.store.audit(workspace, actor, "workspace.plan", {"plan": plan})
         return ws
 
+    def set_cloud_accounts(self, workspace: str, value: str, *, cloud: str, actor: str) -> dict:
+        """The workspace's two shared accounts (cloud/onboarding.py), where every product that shares
+        runs: 'non-production: <id>, production: <id>, region: <region>', or '' to clear them."""
+        from .cloud import onboarding
+
+        ws = self.get(workspace)
+        if not ws:
+            raise WorkspaceError(f"No workspace {workspace}")
+        if not value.strip():
+            ws = {k: v for k, v in ws.items() if k != "cloud_accounts"}
+        else:
+            got, why = onboarding.parse(cloud, value)
+            if not got:
+                raise WorkspaceError(why)
+            ws = {**ws, "cloud_accounts": {**got["accounts"], "region": got["region"]}}
+        self.store.put("workspace", workspace, "", ws)
+        self.store.audit(workspace, actor, "workspace.cloud_accounts", {"cloud_accounts": ws.get("cloud_accounts")})
+        return ws
+
     def ensure(self, workspace: str, actor: str = "valxel") -> dict:
         """The workspace, created (no owner) the first time a product names it: existing deployments
         become workspaces with nothing else changed."""

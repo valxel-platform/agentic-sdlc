@@ -64,14 +64,49 @@ def product_yaml(vision: Vision, brief: str) -> str:
 
 
 def _runtime_cloud(vision: Vision) -> dict:
-    """runtime.cloud, when the front door was given the product's two accounts (cloud/onboarding.py)."""
+    """runtime.cloud (and, for a product that shares, the workspace's clusters as its data planes),
+    when the accounts are known (cloud/onboarding.py, resolve_cloud)."""
     from ..cloud import onboarding
 
     c = vision.cloud or {}
     accounts = c.get("accounts") or {}
     if not (c.get("provider") and c.get("region") and all(accounts.get(k) for k in onboarding.PLANES)):
         return {}
-    return {"cloud": onboarding.runtime_cloud(c["provider"], accounts, c["region"])}
+    placement = c.get("placement") or "dedicated"
+    out: dict = {"cloud": onboarding.runtime_cloud(c["provider"], accounts, c["region"], placement)}
+    if placement == "shared" and c.get("workspace"):
+        out["cloud"]["workspace"] = c["workspace"]
+        out["data_planes"] = {k: onboarding.shared_plane(c["workspace"], k) for k in onboarding.PLANES}
+    return out
+
+
+def resolve_cloud(services, vision: Vision, brief: str) -> tuple[Vision, dict | None]:
+    """A product that shares gets its workspace's two accounts, unless its brief puts it in a data
+    class that never shares (PHI, payments): then it needs accounts of its own, and the product gate
+    waits for them. Returns the vision to set up with, and a step saying why, when it changed."""
+    from dataclasses import replace
+
+    from ..cloud import onboarding
+
+    c = dict(vision.cloud or {})
+    if c.get("placement") != "shared":
+        return vision, None
+    dc = ids(brief)["data_class"]
+    noun = onboarding.noun(c.get("provider", ""))
+    if onboarding.needs_dedicated(dc):
+        why = (f"{dc} data never shares clusters: the product needs two {noun}s of its own. Set runtime.cloud in "
+               "product.yaml (placement: dedicated) and connect them; the product gate waits for them")
+        return (replace(vision, cloud={"provider": c.get("provider"), "placement": "dedicated", "later": True}),
+                {"step": "cloud_placement", "ok": True, "skipped": True, "why": why})
+    ws = vision.workspace or f"wrkspc-{ids(brief)['product_id'].lower()}"
+    wsx = getattr(services, "workspaces", None)
+    shared = onboarding.shared_accounts((wsx.get(ws) if wsx is not None else None) or {})
+    if not shared:
+        why = (f"{ws} has no shared {noun}s yet: an admin sets them in the workspace's settings, then "
+               "`valxel environments --product` carries on")
+        return (replace(vision, cloud={**c, "workspace": ws, "later": True}),
+                {"step": "cloud_placement", "ok": True, "skipped": True, "why": why})
+    return replace(vision, cloud={**c, **shared, "workspace": ws}), None
 
 
 def constitution_md(vision: Vision, brief: str) -> str:
@@ -229,6 +264,9 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
         plat = platform(services)
     except Exception:
         plat = {}
+    vision, placed = resolve_cloud(services, vision, brief)
+    if placed:
+        steps.append(placed)
     files = governance_files(vision, brief, architecture, roadmap, approved_by, research, plat, launch)
     if not vision.existing:
         files.update(starter_contracts(services))
@@ -315,7 +353,8 @@ def run(services, vision: Vision, *, brief: str, architecture: str, roadmap: str
                                         template=template, zones=zones, thread_id=thread_id,
                                         awake=(plat.get("capacity") or capacity.DEFAULTS).get("awake")
                                         or environments.AWAKE, mode=environments.default_mode(),
-                                        cloud=_runtime_cloud(vision).get("cloud")))
+                                        cloud=_runtime_cloud(vision).get("cloud"),
+                                        planes=_runtime_cloud(vision).get("data_planes")))
         teams = sorted({f"{i['org']}/{t}" for t in (*TEAMS.values(), "qa")})
         steps.append({"step": "teams", "ok": True, "skipped": True, "teams": teams,
                       "why": "The approver teams product.yaml names; an org admin creates any that are missing"})
