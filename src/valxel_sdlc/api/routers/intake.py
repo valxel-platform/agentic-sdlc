@@ -193,10 +193,15 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                     founder_of(user, s.workspace)
                 elif not can_decide(user, {"approvers": starters}):
                     raise HTTPException(403, f"Only {', '.join(starters) or 'the inception starters'} can start a product")
+                from ...intake import installation_cloud
+
+                cloud = ({"provider": installation_cloud(), "region": d.region, "accounts": dict(d.cloud_accounts)}
+                         if d.cloud == "given" else {"provider": installation_cloud(), "later": True})
                 v = Vision(name=d.name or d.title, org=d.org, vision=d.problem,
                            goals=[measure] if measure else [],
                            users=[] if d.users == AGENT_PROPOSES else [d.users], budget_usd=d.budget_usd,
-                           attachments_text="", research_depth=d.research or "quick", workspace=s.workspace)
+                           attachments_text="", research_depth=d.research or "quick", workspace=s.workspace,
+                           cloud=cloud)
                 s.feature_id = eng().create_inception(v, created_by=user.login, background=True)
                 s.kind, what = "inception", "a new product: research first, then the brief for the product council"
         except GovernanceError as exc:

@@ -35,6 +35,17 @@ data:
   VALXEL_AZURE_FEDERATION_SUBJECT: {{ printf "system:serviceaccount:%s:%s" $.Release.Namespace (include "valxel.name" $) | quote }}
   {{- end }}
   {{- end }}
+  {{- if .Values.planes.enabled }}
+  # Products' data planes on Google Cloud and Azure, built by the tool (dataplanes.py).
+  VALXEL_PLANE_BUILDER_IMAGE: {{ required "planes.builderImage: platform-foundation's plane-builder, by digest" .Values.planes.builderImage | quote }}
+  VALXEL_PLANE_BUILDER_NAMESPACE: {{ .Release.Namespace | quote }}
+  VALXEL_PLANE_BUILDER_SERVICE_ACCOUNT: {{ include "valxel.name" . | quote }}
+  VALXEL_PLANE_DOMAIN: {{ required "planes.domain: planes answer at <plane>.<this>" .Values.planes.domain | quote }}
+  VALXEL_CONTROL_PLANE_DOMAIN: {{ required "planes.controlPlaneDomain: OpenChoreo's control plane" .Values.planes.controlPlaneDomain | quote }}
+  VALXEL_PLANE_ACME_EMAIL: {{ required "planes.acmeEmail" .Values.planes.acmeEmail | quote }}
+  VALXEL_PLANE_ADMIN_CIDRS: {{ required "planes.adminCidrs: the tool's egress addresses" (join "," .Values.planes.adminCidrs) | quote }}
+  VALXEL_DB_LOGINS_IMAGE: {{ required "planes.dbLoginsImage: platform-resources' db-logins, by digest" .Values.planes.dbLoginsImage | quote }}
+  {{- end }}
   # Sign-in.
   VALXEL_AUTH: {{ .Values.auth.mode | quote }}
   {{- if eq .Values.auth.mode "github" }}

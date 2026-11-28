@@ -192,6 +192,15 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             raise HTTPException(404, "Connections are off")
         return c
 
+    @api.get("/cloud/onboarding")
+    def cloud_onboarding(product: str = "", user: User = Depends(current_user)) -> dict:
+        """How to get a new product's cloud accounts ready: the installation's cloud, its sign-up and
+        account pages, and the steps (valxel_sdlc.cloud.onboarding)."""
+        from ...cloud import onboarding
+        from ...intake import installation_cloud
+
+        return onboarding.guide(installation_cloud(), product[:120] or "the product")
+
     @api.get("/workspaces/{workspace}/connections")
     def workspace_connections(workspace: str, user: User = Depends(current_user)) -> list[dict]:
         """Every tool, connected or not. Members see it; admins connect and disconnect."""

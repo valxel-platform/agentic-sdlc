@@ -14,6 +14,20 @@
 //                  products' own identities the data roles the catalog names, and no other role.
 //   valxel-agents  reads: resources and their tags, metrics, costs and Defender findings.
 //
+// Full mode also makes what your products' data plane (an AKS cluster Valxel builds in this
+// subscription at the product gate) runs as, each with only its own roles, granted here by you:
+// valxel-deploy can trust these from the cluster but can't give any identity a role beyond the
+// catalog's data roles.
+//
+//   valxel-aks               the cluster itself: joins nodes to its subnet, reads the etcd key
+//   valxel-crossplane        builds the catalog's services, and may give your products' identities
+//                            the catalog's data roles and no other role
+//   valxel-db-logins         each product database's Entra admin: no database password anywhere
+//   valxel-cert-manager      proves the plane's domain to Let's Encrypt (Azure DNS)
+//   valxel-external-secrets  reads your products' secrets in Key Vault
+//
+// and a storage account for the data plane's OpenTofu state, which stays in this subscription.
+//
 // Both are tagged with your workspace and a fingerprint of its external ID, which Valxel checks
 // before it uses them. To disconnect, delete the `valxel` resource group: the identities and their
 // role assignments go with it. Give Valxel subscriptions of their own: Azure scopes these roles to
@@ -57,6 +71,12 @@ var role = {
   networkContributor: '4d97b98b-1d4f-4787-a291-c67834d212e7'
   managedIdentityOperator: 'f1a07417-d97a-45cb-824c-7a7467783830'
   rbacAdministrator: 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
+  aksRbacClusterAdmin: 'b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b'
+  cryptoOfficer: '14b46e9e-c2b7-41b4-b07b-48a6ebf60603'
+  cryptoUser: '12338af0-0e69-4776-bea7-57ae8d297424'
+  secretsReader: '4633458b-17de-408a-b874-0445c86b69e6'
+  dnsZoneContributor: 'befefa01-2a29-4197-83a8-272ff33ce314'
+  storageBlobDataContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 }
 
 // The data roles full mode may give a product's identities: the catalog's access, nothing else.
@@ -72,9 +92,23 @@ var dataRoles = [
 var dataRoleList = join(dataRoles, ', ')
 var delegation = '((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/write\'})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${dataRoleList}})) AND ((!(ActionMatches{\'Microsoft.Authorization/roleAssignments/delete\'})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {${dataRoleList}}))'
 
+// Full mode: Contributor, plus administering the data plane's cluster and creating its keys (not
+// reading secrets).
 var deployRoles = mode == 'lite'
   ? [role.virtualMachineContributor, role.networkContributor, role.managedIdentityOperator]
-  : [role.contributor]
+  : [role.contributor, role.aksRbacClusterAdmin, role.cryptoOfficer]
+
+// Full mode: the data plane's identities and their roles on the subscription.
+var platformRoles = mode == 'full'
+  ? [
+      { name: 'aks', role: role.networkContributor }
+      { name: 'aks', role: role.cryptoUser }
+      { name: 'crossplane', role: role.contributor }
+      { name: 'cert-manager', role: role.dnsZoneContributor }
+      { name: 'external-secrets', role: role.secretsReader }
+    ]
+  : []
+var platformNames = mode == 'full' ? ['aks', 'crossplane', 'db-logins', 'cert-manager', 'external-secrets'] : []
 var agentsRoles = [role.reader, role.costManagementReader, role.monitoringReader, role.securityReader]
 
 resource group 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -118,6 +152,43 @@ resource deployDelegation 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   }
 }
 
+module platform 'platform.bicep' = if (mode == 'full') {
+  scope: group
+  name: 'valxel-platform'
+  params: {
+    location: location
+    tags: tags
+    names: platformNames
+    deployPrincipalId: identities.outputs.deployPrincipalId
+    stateAccountName: 'vxst${take(replace(subscription().subscriptionId, '-', ''), 20)}'
+  }
+}
+
+resource platformRoleAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
+  for (r, i) in platformRoles: {
+    name: guid(subscription().id, 'valxel-${r.name}', r.role)
+    properties: {
+      roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', r.role)
+      principalId: platform!.outputs.identities[indexOf(platformNames, r.name)].principalId
+      principalType: 'ServicePrincipal'
+      description: 'Valxel data plane: ${r.name} for workspace ${workspace}'
+    }
+  }
+]
+
+// Crossplane, like deploy, may give products' identities the catalog's data roles and no other.
+resource crossplaneDelegation 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (mode == 'full') {
+  name: guid(subscription().id, 'valxel-crossplane', role.rbacAdministrator)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', role.rbacAdministrator)
+    principalId: platform!.outputs.identities[indexOf(platformNames, 'crossplane')].principalId
+    principalType: 'ServicePrincipal'
+    description: 'Valxel Crossplane may give products\' identities the catalog\'s data roles, and no other role'
+    condition: delegation
+    conditionVersion: '2.0'
+  }
+}
+
 resource agentsRoleAssignments 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
   for r in agentsRoles: {
     name: guid(subscription().id, 'valxel-agents', r)
@@ -137,3 +208,16 @@ output connection object = {
   deployClientId: identities.outputs.deployClientId
   agentsClientId: identities.outputs.agentsClientId
 }
+
+@description('Full mode: the data plane\'s identities and its state account (Valxel reads these when it checks the connection)')
+output platform object = mode == 'full'
+  ? {
+      stateAccount: platform!.outputs.stateAccount
+      identities: toObject(platform!.outputs.identities, m => replace(m.key, '-', '_'), m => {
+        id: m.id
+        clientId: m.clientId
+        principalId: m.principalId
+        name: m.name
+      })
+    }
+  : {}

@@ -6,6 +6,12 @@ This makes two service accounts in your project that Valxel can act as, and noth
 Valxel's: `valxel-deploy` (what your products need, scoped to the mode you chose) and
 `valxel-agents` (read-only). Valxel never gets a key: it acts as them for 15 minutes at a time.
 
+In **full mode** it also makes the accounts your product's data plane (a GKE cluster Valxel builds in
+this project at the product gate) runs as, each with only its own roles: `valxel-nodes`,
+`valxel-crossplane`, `valxel-db-logins`, `valxel-cert-manager` and `valxel-external-secrets`, and a
+bucket (`<project>-valxel-state`) for the data plane's OpenTofu state. `valxel-deploy` can bind them to
+the cluster, but can't give any account a project role.
+
 ## Run the template
 
 Paste the command from Valxel's connections page in the terminal below, with your project ID in

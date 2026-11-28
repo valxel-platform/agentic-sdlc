@@ -121,7 +121,8 @@ jobs:
       - run: pip install -r requirements.lock && pip install -e ".[dev,lint]"
       - run: python scripts/lint_ratchet.py
 
-  # The Azure connect template compiles and passes Bicep's linter (az is on GitHub's runners).
+  # The Azure connect template compiles and passes Bicep's linter (az is on GitHub's runners); the
+  # Google Cloud one is formatted and validates in both modes.
   connect-templates:
     needs: changes
     if: needs.changes.outputs.python == 'true'
@@ -135,6 +136,14 @@ jobs:
           az bicep build --file deploy/azure-connect/main.bicep --stdout > /dev/null
           az bicep lint --file deploy/azure-connect/main.bicep --diagnostics-format sarif > bicep-lint.sarif
           python3 -c "import json,sys; r=[x for run in json.load(open('bicep-lint.sarif'))['runs'] for x in run.get('results',[]) if x.get('level') in ('error','warning')]; [print(x['message']['text']) for x in r]; sys.exit(1 if r else 0)"
+      - uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1.0.8
+        with:
+          tofu_version: 1.13.9
+      - name: The Google Cloud connect template
+        run: |
+          tofu fmt -check -diff deploy/gcp-connect
+          tofu -chdir=deploy/gcp-connect init -backend=false -input=false
+          tofu -chdir=deploy/gcp-connect validate
 
   test:
     needs: [changes, test-shard]

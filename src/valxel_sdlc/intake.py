@@ -8,7 +8,8 @@ what its flow needs, one question at a time, with quick replies and "leave the r
 
     feature      product, problem, users, success measure (+ the experience round)  -> a feature
     initiative   product, the outcome, the number that shows it worked, when, research -> G0
-    product      name, GitHub org, the idea, users, the first goal, research          -> inception
+    product      name, GitHub org, its cloud accounts, the idea, users, the first goal, research
+                                                                                      -> inception
 
 The agent asks for what the pipeline needs (lane, problem, users, success measure), drafts the
 title and description, checks what the product already has (features in flight, released or
@@ -34,7 +35,7 @@ SIZES = ("feature", "initiative", "product")
 NEEDS = {
     "feature": FIELDS,
     "initiative": ("product_id", "problem", "success_metric", "horizon", "research"),
-    "product": ("name", "org", "problem", "users", "success_metric", "research"),
+    "product": ("name", "org", "cloud", "problem", "users", "success_metric", "research"),
 }
 AGENT_PROPOSES = "Proposed by the agent"  # a field the person left to the agent
 SIZE_OPTIONS = {"initiative": "Plan it as an initiative", "feature": "Just one feature for now",
@@ -95,6 +96,32 @@ def size_said(text: str) -> str:
         return ""
     said = (m.group(1) or m.group(2) or "").lower()
     return "initiative" if "initiative" in said else "feature" if "feature" in said else "product"
+
+
+CLOUD_OPTIONS = ("I have them", "Help me create them", "Set them up later")
+
+
+def installation_cloud() -> str:
+    """The cloud every product of this installation runs on (ADR 0010)."""
+    from .cloud import UnknownCloud, provider
+
+    try:
+        return provider()
+    except UnknownCloud:
+        return "aws"
+
+
+def set_cloud(d: Draft, value) -> None:
+    """A new product's cloud accounts from the draft editor: 'later', or the two IDs and the region."""
+    if value in ("", None, "later"):
+        d.cloud, d.cloud_accounts, d.region = ("later" if value else ""), {}, ""
+        return
+    from .cloud import onboarding
+
+    got, why = onboarding.parse(installation_cloud(), str(value))
+    if not got:
+        raise ValueError(why)
+    d.cloud, d.cloud_accounts, d.region = "given", got["accounts"], got["region"]
 
 
 RESEARCH_SAID = {"quick": "quick", "thorough": "thorough", "own": "own", "my own": "own", "done": "own"}
@@ -170,6 +197,11 @@ class Draft:
     name: str = ""  # product: its name
     org: str = ""  # product: the GitHub org it will live in
     budget_usd: float = 0.0  # product: the first year's features (optional)
+    # product: its cloud accounts (cloud/onboarding.py). "given" with cloud_accounts and region, or
+    # "later" (the product gate waits for them).
+    cloud: str = ""
+    cloud_accounts: dict = field(default_factory=dict)  # {"non_production": id, "production": id}
+    region: str = ""
 
     @property
     def experience_done(self) -> bool:
@@ -389,7 +421,7 @@ class IntakeAgent:
                 if f == "problem":
                     s.awaiting = "problem"
                     return "What outcome do you want, and for whom?"
-                question, options = SIZED_QUESTIONS[s.draft.size][f]
+                question, options = self._sized_question(s, f)
                 s.awaiting, s.options = f, list(options)
                 if f in ("success_metric", "horizon", "research") and not s.options[-1].startswith("Leave"):
                     s.options.append("Leave the rest to the agent")
@@ -411,6 +443,15 @@ class IntakeAgent:
                     return question.format(product=name)
         s.awaiting = ""
         return ""
+
+    @staticmethod
+    def _sized_question(s: IntakeSession, f: str) -> tuple[str, list[str]]:
+        if f == "cloud":
+            from .cloud import onboarding
+
+            return onboarding.ask(installation_cloud(), s.draft.name or "The product"), list(CLOUD_OPTIONS)
+        question, options = SIZED_QUESTIONS[s.draft.size][f]
+        return question, list(options)
 
     def touches_ui(self, d: Draft) -> bool:
         """Whether the intent changes what people see: the product has a web or mobile app, and the
@@ -452,7 +493,15 @@ class IntakeAgent:
             if not s.starter:
                 return ("Starting a new product is for the inception starters. I can plan it as an initiative of a "
                         "product you work on instead: say 'plan it as an initiative'.")
-            return "\n".join([f"Here's the new product: {d.name}, in {d.org}.",
+            from .cloud import onboarding
+
+            cloud = installation_cloud()
+            where = (f"It runs on {onboarding.name(cloud)} in {d.region}: non-production in "
+                     f"{d.cloud_accounts.get('non_production')}, production in {d.cloud_accounts.get('production')}."
+                     if d.cloud == "given" else
+                     f"Its {onboarding.name(cloud)} {onboarding.noun(cloud)}s come later: the product gate waits for "
+                     "them.")
+            return "\n".join([f"Here's the new product: {d.name}, in {d.org}.", where,
                               f"Research: {d.research}. Then agents write the brief for the product council.",
                               "Start it when it looks right, or tell me what to change."])
         name = self.lane_names([d.product_id]).get(d.product_id, d.product_id)
@@ -516,6 +565,8 @@ class IntakeAgent:
             d.research = "quick"
         if d.size == "product" and not d.users:
             d.users = AGENT_PROPOSES
+        if d.size == "product" and not d.cloud:
+            d.cloud = "later"
 
     def _answer_sized(self, s: IntakeSession, text: str, lane: str) -> str:
         """An answer in an initiative or product conversation; returns a reply to stop at, or ''."""
@@ -546,11 +597,38 @@ class IntakeAgent:
         elif f == "name":
             d.name = text.strip().strip("\"'“”")[:120]
             d.title = d.title or d.name
+        elif f == "cloud":
+            return self._answer_cloud(s, text)
         elif f in ("users", "problem"):
             setattr(d, f, text.strip())
         else:
             d.problem = f"{d.problem.rstrip()}\n\n{text.strip()}"
         return ""
+
+    def _answer_cloud(self, s: IntakeSession, text: str) -> str:
+        """The product's cloud accounts: given, later, or how to make them. Returns a reply to stop
+        at ('' once answered)."""
+        from .cloud import onboarding
+
+        d, cloud, t = s.draft, installation_cloud(), text.strip().lower()
+        got, why = onboarding.parse(cloud, text)
+        if got:
+            d.cloud, d.cloud_accounts, d.region = "given", got["accounts"], got["region"]
+            return ""
+        if re.search(r"\b(later|not yet|skip|after)\b", t):
+            d.cloud, d.cloud_accounts, d.region = "later", {}, ""
+            return ""
+        s.awaiting = "cloud"
+        if re.search(r"\b(help|create|how|don'?t|do not|no)\b", t):
+            s.options = ["Set them up later"]
+            return (onboarding.guide_text(cloud, d.name or "the product") + "\n\nWhen they exist, "
+                    + onboarding.ask_ids(cloud)[0].lower() + onboarding.ask_ids(cloud)[1:]
+                    + ". Or set them up later: the product gate waits for them.")
+        if re.search(r"\b(yes|have|ready|got)\b", t):
+            s.options = ["Help me create them", "Set them up later"]
+            return onboarding.ask_ids(cloud) + "."
+        s.options = ["Help me create them", "Set them up later"]
+        return why
 
     def _named(self, text: str, lane: str) -> str:
         """The lane, if the text names it by id or full name (a shared word like 'app' doesn't count)."""
@@ -730,6 +808,8 @@ class IntakeAgent:
             s.draft.org = org
         if "name" in changes:
             s.draft.name = str(changes.pop("name") or "").strip()[:120]
+        if "cloud" in changes:
+            set_cloud(s.draft, changes.pop("cloud"))
         if "budget_usd" in changes:
             s.draft.budget_usd = max(0.0, float(changes.pop("budget_usd") or 0))
         for k, v in changes.items():

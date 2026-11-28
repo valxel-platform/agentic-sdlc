@@ -14,3 +14,9 @@ description = "The made-up JWT and private key block the secret-scrub tests mask
 condition = "AND"
 paths = ['''^tests/test_secret_scrub\.py$''']
 regexes = ['''c2lnbmF0dXJlLXZhbHVlLWhlcmU''', '''MIIEpAIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun''']
+
+[[allowlists]]
+description = "Azure's built-in role definition IDs in the connect template (public, the same in every tenant)"
+condition = "AND"
+paths = ['''^deploy/azure-connect/main\.bicep$''']
+regexes = ['''14b46e9e-c2b7-41b4-b07b-48a6ebf60603''', '''12338af0-0e69-4776-bea7-57ae8d297424''', '''4633458b-17de-408a-b874-0445c86b69e6''']

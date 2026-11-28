@@ -50,7 +50,8 @@ def test_a_draft_needs_what_its_size_needs():
     assert d.missing() == ["horizon", "research"]
     d.horizon, d.research = "now", "quick"
     assert d.missing() == []
-    assert Draft(size="product", problem="x").missing() == ["name", "org", "users", "success_metric", "research"]
+    assert Draft(size="product", problem="x").missing() == ["name", "org", "cloud", "users", "success_metric",
+                                                            "research"]
 
 
 def test_a_feature_goes_through_as_before_and_says_how_to_switch(client):
@@ -119,16 +120,25 @@ def test_a_new_product_needs_an_inception_starter(client, engine):
     say(client, sid, "A booking app for small vet practices")
     s = say(client, sid, "It's a new product")
     assert s["awaiting"] == "name"
-    for text in ("VetBook", "acme-vet", "Front desks at practices with one to five vets",
-                 "50 practices booking through it by June", "Quick web research"):
+    for text in ("VetBook", "acme-vet"):
+        s = say(client, sid, text)
+    assert s["awaiting"] == "cloud" and "VetBook will run on AWS" in s["messages"][-1]["text"]
+    assert s["messages"][-1]["options"] == ["I have them", "Help me create them", "Set them up later"]
+    for text in ("non-production: 111111111111, production: 222222222222, region: us-east-1",
+                 "Front desks at practices with one to five vets", "50 practices booking through it by June",
+                 "Quick web research"):
         s = say(client, sid, text)
     d = s["draft"]
     assert (d["name"], d["org"], d["research"]) == ("VetBook", "acme-vet", "quick") and s["ready"]
+    assert d["cloud"] == "given" and d["region"] == "us-east-1"
+    assert "non-production in 111111111111, production in 222222222222" in s["messages"][-1]["text"]
     s = client.post(f"/api/intake/{sid}/submit", json={}).json()
     assert s["kind"] == "inception" and s["feature_id"].startswith("INCEPTION-")
     wait_idle(engine, s["feature_id"])
     st = engine._state(s["feature_id"])
     assert st["vision"]["org"] == "acme-vet" and st["vision"]["goals"] == ["50 practices booking through it by June"]
+    assert st["vision"]["cloud"] == {"provider": "aws", "region": "us-east-1",
+                                     "accounts": {"non_production": "111111111111", "production": "222222222222"}}
     assert st["research"].startswith("# Research: VetBook")
 
 

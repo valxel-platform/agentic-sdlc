@@ -118,9 +118,11 @@ spec:
 
 def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: str | None = None,
           template: str = "", zones: int = 2, thread_id: str = "", awake: str = AWAKE,
-          mode: str = "full") -> list[dict]:
-    """The product's clusters (a pull request) and its OpenChoreo project, environments and
-    pipeline (when its data planes are registered). Returns the steps, like inception setup."""
+          mode: str = "full", cloud: dict | None = None) -> list[dict]:
+    """The product's clusters and its OpenChoreo project, environments and pipeline (when its data
+    planes are registered). Returns the steps, like inception setup. On Google Cloud and Azure the
+    tool builds the two data planes itself in the product's accounts (dataplanes.py); elsewhere the
+    clusters are a pull request to the platform's infrastructure repo."""
     steps: list[dict] = []
     gh = services.github
     infra_repo = infra_repo if infra_repo is not None else os.environ.get("VALXEL_INFRA_REPO", "")
@@ -150,7 +152,21 @@ def setup(services, *, product_id: str, tier: int, approver: str, infra_repo: st
                               "the control plane, the tool creates the product's environments."))
         return {"url": pr["url"], "repo": infra_repo, "files": sorted(files)}
 
-    step("clusters_pr", clusters)
+    from .cloud import UnknownCloud
+    from .cloud import provider as installation_cloud
+
+    try:
+        here = installation_cloud()
+    except UnknownCloud:
+        here = "aws"
+    if mode != "lite" and here in ("gcp", "azure"):
+        from . import dataplanes
+
+        step("data_planes", lambda: dataplanes.build(services, product_id=product_id, cloud=cloud or {"provider": here},
+                                                     approver=approver, zones=zones, thread_id=thread_id,
+                                                     infra_repo=infra_repo))
+    else:
+        step("clusters_pr", clusters)
     step("environments", lambda: environments(services, product_id=product_id, approver=approver, mode=mode))
     return steps
 

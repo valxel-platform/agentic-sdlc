@@ -3,6 +3,14 @@ output "service_accounts" {
   value       = { for k, sa in google_service_account.valxel : k => sa.email }
 }
 
+output "platform" {
+  description = "Full mode: the data plane's accounts and its state bucket (Valxel reads these when it checks the connection)."
+  value = var.mode == "full" ? {
+    state_bucket     = google_storage_bucket.state[0].name
+    service_accounts = { for k, sa in google_service_account.platform : replace(k, "-", "_") => sa.email }
+  } : null
+}
+
 output "next" {
   description = "What to do now."
   value = join("\n", compact([

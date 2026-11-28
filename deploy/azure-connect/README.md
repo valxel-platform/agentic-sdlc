@@ -12,6 +12,22 @@ What it makes, in a resource group named `valxel`:
 | `valxel-deploy` | lite: Virtual Machine Contributor, Network Contributor, Managed Identity Operator. full: Contributor, and Role Based Access Control Administrator limited to the catalog's data roles | Creating and running your products |
 | `valxel-agents` | Reader, Cost Management Reader, Monitoring Reader, Security Reader | Inventory, costs, alerts and Defender findings |
 
+In **full mode** it also makes the data plane's identities, which Valxel's data plane runs as once it
+builds the product's AKS cluster here (each trusts nothing until then: the cluster's build adds a
+federated credential for its own service account), and a storage account (`vxst…`, Entra sign-in only)
+for the data plane's OpenTofu state:
+
+| Identity | Roles on the subscription |
+|---|---|
+| `valxel-aks` | Network Contributor, Key Vault Crypto User (the cluster joins its subnet, reads the etcd key) |
+| `valxel-crossplane` | Contributor, and the same data-roles-only delegation as deploy |
+| `valxel-db-logins` | none: each product database's Entra admin, set by the catalog |
+| `valxel-cert-manager` | DNS Zone Contributor |
+| `valxel-external-secrets` | Key Vault Secrets User |
+
+and gives `valxel-deploy` Azure Kubernetes Service RBAC Cluster Admin and Key Vault Crypto Officer, to
+build the cluster and its keys.
+
 Each identity has a federated credential that trusts only Valxel's workload identity, so there is
 no secret to create, store or rotate. Valxel signs in as one for a single job at a time.
 
