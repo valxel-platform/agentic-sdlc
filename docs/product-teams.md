@@ -600,7 +600,9 @@ For a product of its own, three answers:
 - **I have them:** the two IDs and the region, as `non-production: <id>, production: <id>, region:
   <region>`. They become product.yaml's `runtime.cloud` at the product gate.
 - **Help me create them:** Valxel can't open cloud accounts (that takes a person, a payment method and
-  the cloud's terms), so it gives the cloud's own sign-up and create pages and the steps
+  the cloud's terms), so it gives the cloud's own sign-up and create pages and the steps, including
+  grouping them under one organizational unit (AWS), folder (Google Cloud) or management group (Azure)
+  per Valxel workspace, so they share policies and one bill that shows each account's share
   (`valxel_sdlc/cloud/onboarding.py`; also `GET /api/cloud/onboarding`), then asks for the IDs.
 - **Set them up later:** inception goes on; the product gate waits for `runtime.cloud`.
 

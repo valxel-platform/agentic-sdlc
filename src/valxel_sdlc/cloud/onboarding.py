@@ -53,16 +53,22 @@ LINKS = {
         "sign_up": "https://portal.aws.amazon.com/billing/signup",
         "new_account": "https://console.aws.amazon.com/organizations/v2/home/accounts",
         "billing": "https://console.aws.amazon.com/billing/home",
+        "group": "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_ous.html",
+        "costs": "https://console.aws.amazon.com/costmanagement/home",
     },
     "gcp": {
         "sign_up": "https://cloud.google.com/free",
         "new_account": "https://console.cloud.google.com/projectcreate",
         "billing": "https://console.cloud.google.com/billing/projects",
+        "group": "https://cloud.google.com/resource-manager/docs/creating-managing-folders",
+        "costs": "https://console.cloud.google.com/billing/reports",
     },
     "azure": {
         "sign_up": "https://azure.microsoft.com/free",
         "new_account": "https://portal.azure.com/#view/Microsoft_Azure_Billing/SubscriptionsBladeV2",
         "billing": "https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/overview",
+        "group": "https://learn.microsoft.com/azure/governance/management-groups/create-management-group-portal",
+        "costs": "https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/costanalysis",
     },
 }
 
@@ -71,18 +77,27 @@ STEPS = {
         "If your company has no AWS account yet, sign up ({sign_up}): it takes an email, a phone and a card.",
         "In AWS Organizations ({new_account}), add two accounts for {product}: one for non-production and one for "
         "production. Separate accounts keep production's data and permissions apart.",
+        "Put both in your workspace's organizational unit ({group}): one OU per Valxel workspace, for example "
+        "valxel-{workspace}, so its accounts share policies and one bill, and Cost Explorer ({costs}) shows each "
+        "account's share.",
         "Note each account's 12-digit ID.",
     ],
     "gcp": [
         "If your company has no Google Cloud organization or billing account yet, sign up ({sign_up}).",
         "Create two projects for {product} ({new_account}): one for non-production and one for production. "
         "Give Valxel projects of its own: Google Cloud scopes Valxel's roles to the whole project.",
-        "Link both to your billing account ({billing}), and note each project's ID (not its name or number).",
+        "Create them in your workspace's folder ({group}): one folder per Valxel workspace, for example "
+        "valxel-{workspace}, so its projects share policies.",
+        "Link both to your billing account ({billing}): one bill, and the billing reports ({costs}) show each "
+        "project's share. Note each project's ID (not its name or number).",
     ],
     "azure": [
         "If your company has no Azure account yet, sign up ({sign_up}).",
         "Create two subscriptions for {product} ({new_account}): one for non-production and one for production. "
         "Azure scopes Valxel's roles to the whole subscription, so give it subscriptions of its own.",
+        "Move both into your workspace's management group ({group}): one per Valxel workspace, for example "
+        "valxel-{workspace}, so its subscriptions share policies; one billing account pays for them, and cost "
+        "analysis ({costs}) shows each subscription's share.",
         "Note each subscription's ID (a GUID).",
     ],
 }
@@ -119,18 +134,19 @@ def noun(cloud: str) -> str:
     return NOUN.get(cloud, "account")
 
 
-def guide(cloud: str, product: str = "the product") -> dict:
+def guide(cloud: str, product: str = "the product", workspace: str = "") -> dict:
     """How to get the two accounts ready, as data (the API) and text (the chat)."""
     links = LINKS.get(cloud, {})
-    steps = [s.format(product=product, **links) for s in STEPS.get(cloud, [])]
+    ws = (workspace or "<workspace>").lower()
+    steps = [s.format(product=product, workspace=ws, **links) for s in STEPS.get(cloud, [])]
     steps.append(f"Connect each {noun(cloud)} in full mode from Valxel's connections page: it opens "
                  f"{'the AWS console' if cloud == 'aws' else 'Cloud Shell'} with a template that gives Valxel its "
                  "roles there, and nothing else. Valxel builds the product's data plane in each at the product gate.")
     return {"cloud": cloud, "name": name(cloud), "noun": noun(cloud), "links": links, "steps": steps}
 
 
-def guide_text(cloud: str, product: str = "the product") -> str:
-    g = guide(cloud, product)
+def guide_text(cloud: str, product: str = "the product", workspace: str = "") -> str:
+    g = guide(cloud, product, workspace)
     lines = [f"Valxel can't open {g['name']} {g['noun']}s for you (they need a person, a payment method and "
              f"{g['name']}'s own terms), but here's what to do:"]
     lines += [f"{i}. {s}" for i, s in enumerate(g["steps"], 1)]

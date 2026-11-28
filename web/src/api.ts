@@ -1938,8 +1938,11 @@ export const api = {
   setWorkspaceCloudAccounts: (ws: string, accounts: string) =>
     request<WorkspaceClouds>("PUT", `/workspaces/${encodeURIComponent(ws)}/cloud-accounts`, { accounts }),
   /** How to get a new product's cloud accounts ready: the installation's cloud's own pages. */
-  cloudOnboarding: (product: string) =>
-    request<CloudGuide>("GET", `/cloud/onboarding?product=${encodeURIComponent(product)}`),
+  cloudOnboarding: (product: string, workspace = "") =>
+    request<CloudGuide>(
+      "GET",
+      `/cloud/onboarding?product=${encodeURIComponent(product)}&workspace=${encodeURIComponent(workspace)}`,
+    ),
   azureCheck: (
     ws: string,
     body: { subscription: string; deploy_client_id: string; agents_client_id: string; mode: string },

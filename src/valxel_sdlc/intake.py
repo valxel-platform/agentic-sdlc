@@ -661,7 +661,7 @@ class IntakeAgent:
         s.awaiting = "cloud"
         if re.search(r"\b(help|create|how|don'?t|do not|no)\b", t):
             s.options = ["Set them up later"]
-            return (onboarding.guide_text(cloud, d.name or "the product") + "\n\nWhen they exist, "
+            return (onboarding.guide_text(cloud, d.name or "the product", s.workspace) + "\n\nWhen they exist, "
                     + onboarding.ask_ids(cloud)[0].lower() + onboarding.ask_ids(cloud)[1:]
                     + ". Or set them up later: the product gate waits for them.")
         if re.search(r"\b(yes|have|ready|got)\b", t):

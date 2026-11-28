@@ -106,7 +106,7 @@ export function CloudAccounts({
 
   async function showGuide() {
     try {
-      setGuide(guide ? null : await api.cloudOnboarding(productName || "the product"));
+      setGuide(guide ? null : await api.cloudOnboarding(productName || "the product", ws));
     } catch (e) {
       setError((e as Error).message);
     }
