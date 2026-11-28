@@ -550,3 +550,32 @@ def test_an_azure_installation_sees_azures_services():
                                                           "cosmos:Cosmos DB Built-in Data Reader"]
     assert r["parameters"]["tags"]["valxel:feature"] == "FARM-FEAT-7" and ident["type"] == "workload-identity"
     assert "Azure Cosmos DB" in resources.catalog_guide(az, "general")
+
+
+def test_a_known_subscription_is_selected_and_its_output_comes_back_by_itself(client, azure_conns, entra):
+    r = client.get(f"/api/workspaces/{WS}/connections/azure/launch",
+                   params={"mode": "full", "region": "eastus2", "account": SUB.upper()})
+    assert r.status_code == 200, r.text
+    cmd = r.json()["command"]
+    assert cmd.startswith(f"az account set --subscription {SUB} && git clone")
+    url = re.search(r"--data @- '([^']+)'", cmd).group(1)
+    path = "/api" + url.split("/api", 1)[1]
+    poll = f"/api/workspaces/{WS}/connections/azure/poll"
+    assert client.get(poll, params={"account": SUB}).json()["status"] == "waiting"
+    entra.apply_template(azure_conns, WS)
+    out = {"subscription": SUB, "tenant": TENANT, "deployClientId": DEPLOY, "agentsClientId": AGENTS}
+    with TestClient(client.app) as anon:  # Cloud Shell isn't signed in to Valxel: the code is the credential
+        wrong = anon.post(path, json={**out, "subscription": "00000000-0000-4000-8000-00000000000f"})
+        assert wrong.status_code == 422 and "az account set" in wrong.json()["detail"]
+    r2 = client.get(f"/api/workspaces/{WS}/connections/azure/launch",
+                    params={"mode": "full", "region": "eastus2", "account": SUB})
+    path = "/api" + re.search(r"--data @- '([^']+)'", r2.json()["command"]).group(1).split("/api", 1)[1]
+    with TestClient(client.app) as anon:
+        ok = anon.post(path, json=out)
+        assert ok.status_code == 200, ok.text
+        assert ok.json() == {"connected": SUB, "workspace": WS}
+        assert anon.post(path, json=out).status_code == 422  # once only
+        assert anon.post("/api/connect/azure/nope", json=out).status_code == 422
+        assert anon.post(path, content=b"not json", headers={"Content-Type": "application/json"}).status_code == 400
+    page = client.get(poll, params={"account": SUB}).json()
+    assert page["status"] == "connected" and page["connection"]["reach"]["mode"] == "full"

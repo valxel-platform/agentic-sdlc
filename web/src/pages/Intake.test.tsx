@@ -49,6 +49,9 @@ function draft(over: Partial<Draft> = {}): Draft {
     name: "",
     org: "",
     budget_usd: 0,
+    cloud: "",
+    cloud_accounts: {},
+    region: "",
     ...over,
   };
 }

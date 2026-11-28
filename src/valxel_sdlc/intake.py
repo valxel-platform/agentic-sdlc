@@ -279,11 +279,12 @@ class IntakeSession:
         d = asdict(self)
         d["ready"] = self.ready
         d["missing"] = self.draft.missing()
+        d["cloud"] = installation_cloud()
         return d
 
 
 def session_from(d: dict) -> IntakeSession:
-    d = {k: v for k, v in d.items() if k not in ("ready", "missing")}
+    d = {k: v for k, v in d.items() if k not in ("ready", "missing", "cloud")}
     d["draft"] = Draft(**(d.get("draft") or {}))
     return IntakeSession(**d)
 
@@ -497,7 +498,8 @@ class IntakeAgent:
 
             cloud = installation_cloud()
             where = (f"It runs on {onboarding.name(cloud)} in {d.region}: non-production in "
-                     f"{d.cloud_accounts.get('non_production')}, production in {d.cloud_accounts.get('production')}."
+                     f"{d.cloud_accounts.get('non_production')}, production in {d.cloud_accounts.get('production')}. "
+                     "Connect each from the Cloud accounts box: Valxel fills in the template."
                      if d.cloud == "given" else
                      f"Its {onboarding.name(cloud)} {onboarding.noun(cloud)}s come later: the product gate waits for "
                      "them.")
