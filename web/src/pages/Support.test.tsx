@@ -12,8 +12,8 @@ vi.mock("../api", async () => {
 
 const grafana = {
   to: "grafana" as const,
-  label: "Dashboards, logs and traces",
-  detail: "Grafana: requests, errors and latency per route; logs; request traces",
+  label: "Dashboards",
+  detail: "Grafana: requests, errors and latency per route",
   href: "/api/support/open?product=FARM&to=grafana",
   role: "Viewer" as const,
 };

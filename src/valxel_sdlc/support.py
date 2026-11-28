@@ -1,11 +1,12 @@
 """Who may open a product's dashboards and agent traces, and where (the Support page).
 
-Support reaches a product's Grafana (metrics, HTTP requests, logs and traces) and MLflow (its agents'
+Support reaches a product's Grafana (metrics and HTTP requests) and MLflow (its agents'
 traces) only through the tool: the product's Support page links to them, and the tool is their only
 sign-in (web/oidc_provider.py), so it decides, at each sign-in:
 
 - Grafana: the product's own members (anyone who may see the product) and the workspace's Support
-  group may open it, as Viewer; the workspace's admins and owners as Editor.
+  group may open it, as Viewer; the workspace's admins and owners as Editor. It shows only that
+  product's metrics, even on a plane products share (platform-foundation, docs/grafana.md).
 - MLflow: only the groups a workspace admin has granted it, per product (workspaces.support): agent
   traces can hold prompts and tool data, so nobody has it until then.
 
@@ -49,8 +50,8 @@ def grafana_url() -> str:
 
 
 def mlflow_url(product_id: str, plane: str) -> str:
-    """A plane's MLflow, from VALXEL_MLFLOW_URL ("https://mlflow.{plane}.{product}.example.com";
-    {product} is the id in lower case)."""
+    """The product's MLflow on a plane, from VALXEL_MLFLOW_URL
+    ("https://mlflow-{product}.{plane}.example.com"; {product} is the id in lower case)."""
     template = os.environ.get("VALXEL_MLFLOW_URL", "")
     return template.format(product=product_id.lower(), plane=plane).rstrip("/") if template else ""
 
@@ -61,8 +62,8 @@ def links(product_id: str, granted: Access) -> list[dict]:
     out = []
     base = f"/api/support/open?product={product_id}"
     if granted.grafana and grafana_url():
-        out.append({"to": "grafana", "label": "Dashboards, logs and traces", "role": granted.grafana,
-                    "detail": "Grafana: requests, errors and latency per route; logs; request traces",
+        out.append({"to": "grafana", "label": "Dashboards", "role": granted.grafana,
+                    "detail": "Grafana: requests, errors and latency per route",
                     "href": f"{base}&to=grafana"})
     if granted.mlflow:
         for plane in PLANES:

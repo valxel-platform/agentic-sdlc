@@ -22,7 +22,7 @@ from valxel_sdlc.workspaces import WorkspaceError
 WS = "wrkspc-shared"  # FARM and SHOP
 ISSUER = "http://testserver/api/oidc"
 GRAFANA_CB = "https://grafana.example.com/login/generic_oauth"
-MLFLOW_CB = "https://mlflow.prod.farm.example.com/oauth2/callback"
+MLFLOW_CB = "https://mlflow-farm.prod.example.com/oauth2/callback"
 
 
 def pem() -> str:
@@ -102,7 +102,7 @@ def client(engine, monkeypatch):
     monkeypatch.setenv("VALXEL_OIDC_SIGNING_KEY", pem())
     monkeypatch.setenv("VALXEL_OIDC_CLIENTS", json.dumps(CLIENTS))
     monkeypatch.setenv("VALXEL_GRAFANA_URL", "https://grafana.example.com")
-    monkeypatch.setenv("VALXEL_MLFLOW_URL", "https://mlflow.{plane}.{product}.example.com")
+    monkeypatch.setenv("VALXEL_MLFLOW_URL", "https://mlflow-{product}.{plane}.example.com")
     w = engine.services.workspaces
     w.bootstrap_owner(WS, {"github_login": "asha"})
     for login, role in (("ben", "member"), ("sam", "viewer")):

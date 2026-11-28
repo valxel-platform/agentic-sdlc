@@ -377,7 +377,7 @@ and the build fails its check if an action the HLD names appears in no task.
 
 ## Support: Grafana and MLflow through the tool
 
-A product's dashboards, logs and request traces (Grafana) and its agents' traces (MLflow) open
+A product's dashboards (Grafana) and its agents' traces (MLflow) open
 from its **Support** page in the tool, each in a new window. The tool is their only sign-in: it
 acts as an OpenID Connect provider for them alone (`src/valxel_sdlc/web/oidc_provider.py`), and a
 sign-in is for the one product chosen on the page. Opening Grafana or MLflow directly is refused
@@ -402,9 +402,9 @@ Configure the provider with:
 - `VALXEL_OIDC_CLIENTS`: a JSON list, one entry per client, each with one exact redirect URI and
   the SHA-256 of its secret:
   `[{"id": "grafana", "secret_sha256": "…", "redirect_uri": "https://grafana.example.com/login/generic_oauth", "kind": "grafana"},
-  {"id": "mlflow-pay-prod", "secret_sha256": "…", "redirect_uri": "https://mlflow.prod.pay.example.com/oauth2/callback", "kind": "mlflow", "product": "PAY", "plane": "prod"}]`.
+  {"id": "mlflow-pay-prod", "secret_sha256": "…", "redirect_uri": "https://mlflow-pay.prod.example.com/oauth2/callback", "kind": "mlflow", "product": "PAY", "plane": "prod"}]`.
 - `VALXEL_GRAFANA_URL` and `VALXEL_MLFLOW_URL` (a template:
-  `https://mlflow.{plane}.{product}.example.com`, `{product}` in lower case) for the links.
+  `https://mlflow-{product}.{plane}.example.com`, `{product}` in lower case) for the links.
 
 Codes are single use, last 60 seconds and require PKCE (S256); tokens last 5 minutes, after which
 Grafana and oauth2-proxy keep their own sessions. Grafana maps the `groups` claim

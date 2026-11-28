@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type SupportDetail, type SupportLink, type SupportProduct } from "../api";
 
 /**
- * Support — a product's dashboards, logs and traces (Grafana) and its agents' traces (MLflow),
+ * Support — a product's dashboards (Grafana) and its agents' traces (MLflow),
  * opened from here only. The tool signs the person in for that one product (valxel_sdlc.support):
  * its members and the workspace's Support group view, admins edit, and MLflow is open only to the
  * groups an admin grants it.
