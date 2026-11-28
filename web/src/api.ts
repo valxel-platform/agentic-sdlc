@@ -1893,7 +1893,7 @@ export const api = {
   awsLaunch: (ws: string, mode: string, region: string, account = "") =>
     request<{ url: string; mode: string; sign_in?: string }>(
       "GET",
-      `/workspaces/${encodeURIComponent(ws)}/connections/aws/launch?mode=${mode}&region=${encodeURIComponent(region)}&account=${encodeURIComponent(account)}`,
+      `/workspaces/${encodeURIComponent(ws)}/connections/aws/launch?mode=${mode}&region=${encodeURIComponent(region)}${account ? `&account=${encodeURIComponent(account)}` : ""}`,
     ),
   awsCheck: (ws: string, account: string, mode: string) =>
     request<Connection>("POST", `/workspaces/${encodeURIComponent(ws)}/connections/aws/check`, {
@@ -1903,7 +1903,7 @@ export const api = {
   gcpLaunch: (ws: string, mode: string, region: string, account = "") =>
     request<{ url: string; command: string; mode: string }>(
       "GET",
-      `/workspaces/${encodeURIComponent(ws)}/connections/gcp/launch?mode=${mode}&region=${encodeURIComponent(region)}&account=${encodeURIComponent(account)}`,
+      `/workspaces/${encodeURIComponent(ws)}/connections/gcp/launch?mode=${mode}&region=${encodeURIComponent(region)}${account ? `&account=${encodeURIComponent(account)}` : ""}`,
     ),
   gcpCheck: (ws: string, project: string, mode: string) =>
     request<Connection>("POST", `/workspaces/${encodeURIComponent(ws)}/connections/gcp/check`, {
@@ -1913,7 +1913,7 @@ export const api = {
   azureLaunch: (ws: string, mode: string, region: string, account = "") =>
     request<{ url: string; command: string; mode: string }>(
       "GET",
-      `/workspaces/${encodeURIComponent(ws)}/connections/azure/launch?mode=${mode}&region=${encodeURIComponent(region)}&account=${encodeURIComponent(account)}`,
+      `/workspaces/${encodeURIComponent(ws)}/connections/azure/launch?mode=${mode}&region=${encodeURIComponent(region)}${account ? `&account=${encodeURIComponent(account)}` : ""}`,
     ),
   /** Is one account connected yet? Valxel checks AWS and Google Cloud itself; Azure's command reports back. */
   connectionPoll: (ws: string, tool: string, account: string) =>

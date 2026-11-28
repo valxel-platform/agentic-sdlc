@@ -167,7 +167,11 @@ def test_a_features_card_and_its_products_month(engine):
     r = client.get(f"/api/costs/FARM/focus.csv?month={month}")
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
     rows = list(csv.DictReader(io.StringIO(r.text)))
-    assert {x["x_CostCategory"] for x in rows} >= {"llm", "ci", "compute", "aws", "platform"}
+    # The build is metered in the month it ran, which three days on may be the month before.
+    built = f"{released:%Y-%m}"
+    earlier = [] if built == month else list(csv.DictReader(io.StringIO(
+        client.get(f"/api/costs/FARM/focus.csv?month={built}").text)))
+    assert {x["x_CostCategory"] for x in rows + earlier} >= {"llm", "ci", "compute", "aws", "platform"}
     assert sum(float(x["EffectiveCost"]) for x in rows) == pytest.approx(roll["totals"]["total_usd"], abs=0.01)
 
 
