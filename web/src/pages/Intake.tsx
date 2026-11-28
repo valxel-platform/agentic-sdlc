@@ -17,6 +17,7 @@ import {
 } from "../api";
 import { threadPath } from "../vocab";
 import { AttachmentList } from "../components/Attachments";
+import { CloudAccounts } from "../components/CloudAccounts";
 import { SimilarList } from "../components/External";
 import { Mark } from "../components/Mark";
 
@@ -46,6 +47,7 @@ const SIZED_NEEDS: Record<"initiative" | "product", { key: keyof Draft; label: s
   product: [
     { key: "name", label: "Name" },
     { key: "org", label: "GitHub org" },
+    { key: "cloud", label: "Cloud accounts" },
     { key: "problem", label: "The idea" },
     { key: "users", label: "Users" },
     { key: "success_metric", label: "First goal" },
@@ -60,6 +62,7 @@ const FIELD_LABEL: Record<string, string> = {
   research: "Research",
   name: "Name",
   org: "GitHub org",
+  cloud: "Cloud accounts",
 };
 const SIZE: Record<RequestSize, { label: string; what: string; submit: string }> = {
   feature: {
@@ -597,28 +600,36 @@ export function Intake({ me }: { me: Me }) {
             {sized ? (
               <>
                 {size === "product" ? (
-                  <div className="split">
-                    <label className={`ifield${s.missing.includes("name") ? " missing" : ""}`}>
-                      <span>Name</span>
-                      <input
-                        value={s.draft.name}
-                        disabled={submitted}
-                        placeholder="A working name is fine"
-                        onChange={(e) => edit("name", e.target.value)}
-                        onBlur={() => save("name")}
-                      />
-                    </label>
-                    <label className={`ifield${s.missing.includes("org") ? " missing" : ""}`}>
-                      <span>GitHub org</span>
-                      <input
-                        value={s.draft.org}
-                        disabled={submitted}
-                        placeholder="It must already exist"
-                        onChange={(e) => edit("org", e.target.value)}
-                        onBlur={() => save("org")}
-                      />
-                    </label>
-                  </div>
+                  <>
+                    <div className="split">
+                      <label className={`ifield${s.missing.includes("name") ? " missing" : ""}`}>
+                        <span>Name</span>
+                        <input
+                          value={s.draft.name}
+                          disabled={submitted}
+                          placeholder="A working name is fine"
+                          onChange={(e) => edit("name", e.target.value)}
+                          onBlur={() => save("name")}
+                        />
+                      </label>
+                      <label className={`ifield${s.missing.includes("org") ? " missing" : ""}`}>
+                        <span>GitHub org</span>
+                        <input
+                          value={s.draft.org}
+                          disabled={submitted}
+                          placeholder="It must already exist"
+                          onChange={(e) => edit("org", e.target.value)}
+                          onBlur={() => save("org")}
+                        />
+                      </label>
+                    </div>
+                    <CloudAccounts
+                      s={s}
+                      ws={s.workspace || Object.keys(me.roles ?? {})[0] || ""}
+                      disabled={submitted}
+                      onSaved={setS}
+                    />
+                  </>
                 ) : (
                   <>
                     <label className={`ifield title${lit.has("title") ? " lit" : ""}`}>

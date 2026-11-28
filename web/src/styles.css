@@ -3837,3 +3837,44 @@ table.quality tfoot td {
     opacity: 1;
   }
 }
+
+/* A new product's cloud accounts on the front door's draft (CloudAccounts). */
+.cloud-accounts {
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem 0.75rem;
+  margin: 0.5rem 0;
+}
+.cloud-accounts legend {
+  font-weight: 500;
+  padding: 0 0.25rem;
+}
+.cloud-accounts .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: center;
+}
+.cloud-accounts .guide {
+  margin: 0.5rem 0 0;
+  padding-left: 1.25rem;
+}
+.cloud-accounts .connect-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.75rem 0 0;
+  display: grid;
+  gap: 0.5rem;
+}
+.cloud-accounts .connect-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.cloud-accounts .connect-list pre {
+  flex-basis: 100%;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}

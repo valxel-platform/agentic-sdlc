@@ -301,14 +301,19 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         return done(RedirectResponse(back + "&connected=" + q(rec["account"]), status_code=302))
 
     @api.get("/workspaces/{workspace}/connections/aws/launch")
-    def aws_launch(workspace: str, mode: str = "", region: str = "us-east-1", user: User = Depends(current_user)) -> dict:
-        """The AWS console's page that creates the stack, its parameters filled in for this workspace."""
+    def aws_launch(workspace: str, mode: str = "", region: str = "us-east-1", account: str = "",
+                   user: User = Depends(current_user)) -> dict:
+        """The AWS console's page that creates the stack, its parameters filled in for this workspace.
+        With `account` (a new product's, from inception) Valxel then checks it by itself (poll)."""
         from ...connections import ConnectionError_
 
         admin_of(user, workspace)
         mode = mode or (wsx().get(workspace) or {}).get("plan", "lite")
         try:
-            return {"url": conns().aws_launch(workspace, mode=mode, region=region, actor=user.login), "mode": mode}
+            url = conns().aws_launch(workspace, mode=mode, region=region, actor=user.login, account=account)
+            return {"url": url, "mode": mode,
+                    **({"sign_in": f"Sign in to AWS account {account.strip()} before you create the stack"}
+                       if account.strip() else {})}
         except ConnectionError_ as exc:
             raise HTTPException(409, str(exc)) from exc
 
@@ -325,15 +330,17 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             raise HTTPException(422, str(exc)) from exc
 
     @api.get("/workspaces/{workspace}/connections/gcp/launch")
-    def gcp_launch(workspace: str, mode: str = "", region: str = "us-central1",
+    def gcp_launch(workspace: str, mode: str = "", region: str = "us-central1", account: str = "",
                    user: User = Depends(current_user)) -> dict:
-        """Cloud Shell with the connect template, and the command to run there for this workspace."""
+        """Cloud Shell with the connect template, and the command to run there for this workspace (with
+        `account`, for that project, which Valxel then checks by itself)."""
         from ...connections import ConnectionError_
 
         admin_of(user, workspace)
         mode = mode or (wsx().get(workspace) or {}).get("plan", "lite")
         try:
-            return {**conns().gcp_launch(workspace, mode=mode, region=region, actor=user.login), "mode": mode}
+            return {**conns().gcp_launch(workspace, mode=mode, region=region, actor=user.login, account=account),
+                    "mode": mode}
         except ConnectionError_ as exc:
             raise HTTPException(409, str(exc)) from exc
 
@@ -350,15 +357,21 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             raise HTTPException(422, str(exc)) from exc
 
     @api.get("/workspaces/{workspace}/connections/azure/launch")
-    def azure_launch(workspace: str, mode: str = "", region: str = "eastus",
+    def azure_launch(workspace: str, request: Request, mode: str = "", region: str = "eastus", account: str = "",
                      user: User = Depends(current_user)) -> dict:
-        """Azure Cloud Shell, and the command that deploys the connect template for this workspace."""
+        """Azure Cloud Shell, and the command that deploys the connect template for this workspace. With
+        `account` the command selects that subscription and sends its output back to Valxel through a
+        one-time link, so nothing is pasted."""
+        import os
+
         from ...connections import ConnectionError_
 
         admin_of(user, workspace)
         mode = mode or (wsx().get(workspace) or {}).get("plan", "lite")
+        base = os.environ.get("VALXEL_PUBLIC_URL", "") or str(request.base_url)
         try:
-            return {**conns().azure_launch(workspace, mode=mode, region=region, actor=user.login), "mode": mode}
+            return {**conns().azure_launch(workspace, mode=mode, region=region, actor=user.login, account=account,
+                                           base_url=base), "mode": mode}
         except ConnectionError_ as exc:
             raise HTTPException(409, str(exc)) from exc
 
@@ -374,6 +387,32 @@ def build(ctx: SimpleNamespace) -> APIRouter:
                                        deploy_client_id=body.deploy_client_id,
                                        agents_client_id=body.agents_client_id, tenant=body.tenant,
                                        mode=mode, actor=user.login)
+        except ConnectionError_ as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @api.get("/workspaces/{workspace}/connections/{tool}/poll")
+    def connection_poll(workspace: str, tool: str, account: str, user: User = Depends(current_user)) -> dict:
+        """Is this account connected yet? The page asks every few seconds after Connect: on AWS and
+        Google Cloud Valxel tries the check itself; Azure's connects when its command reports back."""
+        admin_of(user, workspace)
+        if tool not in ("aws", "gcp", "azure"):
+            raise HTTPException(404, "Only cloud accounts connect this way")
+        return conns().poll(workspace, tool, account[:64], actor=user.login)
+
+    @api.post("/connect/azure/{code}")
+    async def azure_connected(code: str, request: Request) -> dict:
+        """The Azure connect command's output, sent from Cloud Shell with a one-time code (no sign-in:
+        the code is the credential, it works once, and the check still signs in as both identities)."""
+        from ...connections import ConnectionError_
+
+        try:
+            body = await request.json()
+        except ValueError as exc:
+            raise HTTPException(400, "Send the template's connection output as JSON") from exc
+        if not isinstance(body, dict):
+            raise HTTPException(400, "Send the template's connection output as JSON")
+        try:
+            return conns().azure_callback(code[:64], body)
         except ConnectionError_ as exc:
             raise HTTPException(422, str(exc)) from exc
 

@@ -414,7 +414,7 @@ class Connections:
             self.store.put("workspace", workspace, "", ws)
         return ws["aws_external_id"]
 
-    def aws_launch(self, workspace: str, *, mode: str, region: str, actor: str) -> str:
+    def aws_launch(self, workspace: str, *, mode: str, region: str, actor: str, account: str = "") -> str:
         if self.aws is None:
             raise ConnectionError_("AWS connections aren't set up on this Valxel")
         if self.billing is not None:
@@ -427,6 +427,7 @@ class Connections:
             raise ConnectionError_("Choose lite or full mode")
         url = self.aws.launch_url(workspace, external_id=self.external_id(workspace, actor), mode=mode, region=region)
         self.store.audit(workspace, actor, "connection.aws_stack_opened", {"mode": mode, "region": region})
+        self._expect(workspace, "aws", account, mode=mode, actor=actor)
         return url
 
     def aws_check(self, workspace: str, *, account: str, mode: str, actor: str) -> dict:
@@ -448,7 +449,7 @@ class Connections:
             if why:
                 raise ConnectionError_(why)
 
-    def gcp_launch(self, workspace: str, *, mode: str, region: str, actor: str) -> dict:
+    def gcp_launch(self, workspace: str, *, mode: str, region: str, actor: str, account: str = "") -> dict:
         """Cloud Shell with the connect template, and the command to run there for this workspace."""
         if self.gcp is None:
             raise ConnectionError_("Google Cloud connections aren't set up on this Valxel")
@@ -457,8 +458,10 @@ class Connections:
             raise ConnectionError_("Choose lite or full mode")
         ext = self.external_id(workspace, actor)
         out = {"url": self.gcp.launch_url(workspace, external_id=ext, mode=mode, region=region),
-               "command": self.gcp.command(workspace, external_id=ext, mode=mode, region=region)}
+               "command": self.gcp.command(workspace, external_id=ext, mode=mode, region=region,
+                                           project=account.strip().lower())}
         self.store.audit(workspace, actor, "connection.gcp_template_opened", {"mode": mode, "region": region})
+        self._expect(workspace, "gcp", account, mode=mode, actor=actor)
         return out
 
     def gcp_check(self, workspace: str, *, project: str, mode: str, actor: str) -> dict:
@@ -469,7 +472,8 @@ class Connections:
         reach = self.gcp.check(workspace, account=project, external_id=self.external_id(workspace, actor))
         return self.record(workspace, "gcp", project, actor=actor, reach={**reach, "mode": mode})
 
-    def azure_launch(self, workspace: str, *, mode: str, region: str, actor: str) -> dict:
+    def azure_launch(self, workspace: str, *, mode: str, region: str, actor: str, account: str = "",
+                     base_url: str = "") -> dict:
         """Azure Cloud Shell, and the command that deploys the connect template there for this workspace."""
         if self.azure is None:
             raise ConnectionError_("Azure connections aren't set up on this Valxel")
@@ -478,8 +482,12 @@ class Connections:
             raise ConnectionError_("Choose lite or full mode")
         ext = self.external_id(workspace, actor)
         out = {"url": self.azure.launch_url(workspace, external_id=ext, mode=mode, region=region),
-               "command": self.azure.command(workspace, external_id=ext, mode=mode, region=region)}
+               "command": self.azure.command(workspace, external_id=ext, mode=mode, region=region,
+                                             subscription=account.strip().lower(),
+                                             callback=self._callback(workspace, account, mode=mode, actor=actor,
+                                                                     base_url=base_url))}
         self.store.audit(workspace, actor, "connection.azure_template_opened", {"mode": mode, "region": region})
+        self._expect(workspace, "azure", account, mode=mode, actor=actor)
         return out
 
     def azure_check(self, workspace: str, *, subscription: str, deploy_client_id: str, agents_client_id: str,
@@ -491,6 +499,64 @@ class Connections:
         reach = self.azure.check(workspace, account=subscription, external_id=self.external_id(workspace, actor),
                                  deploy_client_id=deploy_client_id, agents_client_id=agents_client_id, tenant=tenant)
         return self.record(workspace, "azure", subscription, actor=actor, reach={**reach, "mode": mode})
+
+    # ------------------------------------------------------------------ one account, start to finish
+    CODE_TTL = 3 * 3600  # the Azure callback's one-time code: the template takes minutes, not hours
+
+    def _expect(self, workspace: str, tool: str, account: str, *, mode: str, actor: str) -> None:
+        """A launch for one known account: poll() checks it until it connects."""
+        if account.strip():
+            self.store.put("connect_pending", workspace, f"{tool}:{account.strip().lower()}",
+                           {"tool": tool, "account": account.strip().lower(), "mode": mode, "actor": actor,
+                            "at": int(time.time())})
+
+    def _callback(self, workspace: str, account: str, *, mode: str, actor: str, base_url: str) -> str:
+        """A one-time URL the Azure command posts its output to: only the code finds the workspace."""
+        if not (base_url and account.strip()):
+            return ""
+        code = secrets.token_urlsafe(24)
+        self.store.put("connect_code", "", code, {"workspace": workspace, "tool": "azure",
+                                                  "account": account.strip().lower(), "mode": mode,
+                                                  "actor": actor, "expires": int(time.time()) + self.CODE_TTL})
+        return f"{base_url.rstrip('/')}/api/connect/azure/{code}"
+
+    def azure_callback(self, code: str, body: dict) -> dict:
+        """The Azure command's output, sent back with its one-time code: checked like a pasted one, by
+        signing in as both identities. The code works once, for the subscription it was made for."""
+        got = self.store.get("connect_code", "", code) if code else None
+        if not got or got.get("expires", 0) < int(time.time()):
+            raise ConnectionError_("This connect link has expired: open Connect again in Valxel")
+        self.store.delete("connect_code", "", code)
+        sub = str(body.get("subscription") or "").strip().lower()
+        if sub != got["account"]:
+            raise ConnectionError_(f"This link is for subscription {got['account']}, not {sub or 'none'}: run "
+                                   f"az account set --subscription {got['account']} and open Connect again")
+        rec = self.azure_check(got["workspace"], subscription=sub,
+                               deploy_client_id=str(body.get("deployClientId") or ""),
+                               agents_client_id=str(body.get("agentsClientId") or ""),
+                               tenant=str(body.get("tenant") or ""), mode=got["mode"], actor=got["actor"])
+        self.store.delete("connect_pending", got["workspace"], f"azure:{sub}")
+        return {"connected": rec["account"], "workspace": got["workspace"]}
+
+    def poll(self, workspace: str, tool: str, account: str, *, actor: str) -> dict:
+        """Is this account connected yet? For AWS and Google Cloud, Valxel tries the check itself (the
+        template's roles have known names); Azure's connects when its command sends its output back."""
+        account = account.strip().lower().replace("-", "") if tool == "aws" else account.strip().lower()
+        done = [c for c in self.store.list("connection", workspace)
+                if c.get("tool") == tool and str(c.get("account", "")).lower() == account]
+        if done:
+            return {"status": done[0]["status"], "connection": done[0]}
+        pending = self.store.get("connect_pending", workspace, f"{tool}:{account}") or {}
+        mode = pending.get("mode") or (self.workspaces.get(workspace) or {}).get("plan", "lite")
+        if tool == "azure":
+            return {"status": "waiting", "why": "waiting for the Cloud Shell command to finish"}
+        try:
+            rec = (self.aws_check(workspace, account=account, mode=mode, actor=actor) if tool == "aws"
+                   else self.gcp_check(workspace, project=account, mode=mode, actor=actor))
+        except ConnectionError_ as exc:
+            return {"status": "waiting", "why": str(exc)}
+        self.store.delete("connect_pending", workspace, f"{tool}:{account}")
+        return {"status": rec["status"], "connection": rec}
 
     def azure_reach(self, subscription: str) -> dict:
         """A connected subscription's tenant and client IDs, whichever workspace connected it."""

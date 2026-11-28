@@ -162,3 +162,14 @@ def test_every_role_trusts_only_valxel_with_the_external_id_and_acts_only_on_tag
                                                                    "PassOnlyThisStacksRoles")]
         assert changing and all("valxel:workspace" in str(s.get("Condition")) for s in changing), k
     assert t["Parameters"]["ExternalId"]["NoEcho"] is True
+
+
+def test_a_known_account_is_named_and_valxel_checks_it_by_itself(client, conns, sts):
+    r = client.get(f"/api/workspaces/{WS}/connections/aws/launch",
+                   params={"mode": "full", "region": "us-east-1", "account": ACCOUNT}).json()
+    assert r["sign_in"] == f"Sign in to AWS account {ACCOUNT} before you create the stack"
+    poll = f"/api/workspaces/{WS}/connections/aws/poll"
+    assert client.get(poll, params={"account": ACCOUNT}).json()["status"] == "waiting"
+    sts.create_stack(conns, WS, ACCOUNT)
+    done = client.get(poll, params={"account": "1234-5678-9012"}).json()
+    assert done["status"] == "connected" and done["connection"]["reach"]["mode"] == "full"
