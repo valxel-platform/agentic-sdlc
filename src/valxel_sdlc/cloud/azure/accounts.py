@@ -132,14 +132,20 @@ class AzureConnect:
         """Azure Cloud Shell; the command (below) deploys the template there."""
         return "https://shell.azure.com/bash"
 
-    def command(self, workspace: str, *, external_id: str, mode: str, region: str) -> str:
-        """What to run in Cloud Shell: the template, with this workspace's values."""
+    def command(self, workspace: str, *, external_id: str, mode: str, region: str, subscription: str = "",
+                callback: str = "") -> str:
+        """What to run in Cloud Shell: the template, with this workspace's values. With `subscription`
+        it first selects that subscription; with `callback` (a one-time URL from Valxel) it sends the
+        template's output back, so the subscription is checked and connected with nothing pasted."""
         params = {"workspace": workspace, "connectLabel": connect_label(external_id), "mode": mode,
                   "valxelIssuer": self.issuer, "valxelSubject": self.subject}
-        return (f"git clone --depth 1 {self.repo} valxel-connect && cd valxel-connect/deploy/azure-connect && "
+        select = f"az account set --subscription {subscription} && " if subscription else ""
+        send = (f" | curl -fsS -X POST -H 'Content-Type: application/json' --data @- '{callback}'"
+                if callback else "")
+        return (f"{select}git clone --depth 1 {self.repo} valxel-connect && cd valxel-connect/deploy/azure-connect && "
                 f"az deployment sub create --name valxel-connect --location {region} --template-file main.bicep "
                 + "--parameters " + " ".join(f"{k}={v}" for k, v in params.items())
-                + " --query properties.outputs.connection.value -o json")
+                + " --query properties.outputs.connection.value -o json" + send)
 
     def token(self, account: str, job: str, reach: dict | None = None, scope: str = "") -> str:
         """A token for one job's identity in the subscription: for Azure Resource Manager, or `scope`

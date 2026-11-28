@@ -590,7 +590,14 @@ for production. Three answers:
   (`valxel_sdlc/cloud/onboarding.py`; also `GET /api/cloud/onboarding`), then asks for the IDs.
 - **Set them up later:** inception goes on; the product gate waits for `runtime.cloud`.
 
-Each account is then connected in **full mode** from the connections page (Cloud Shell runs
+The draft beside the chat has a **Cloud accounts** box with the same three things (the two IDs,
+the region, set up later) and the cloud's steps for creating them. Once the IDs are in, each account
+has its own **Connect**: it opens the connect template filled in for that account (on Google Cloud the
+project is in the command; on Azure the command selects the subscription first and sends its output
+back to Valxel through a one-time link; on AWS the page says which account to sign in to), and Valxel
+checks it by itself every few seconds until it's connected, so nothing is pasted back.
+
+Each account is then connected in **full mode** from there or from the connections page (Cloud Shell runs
 `deploy/gcp-connect` or `deploy/azure-connect`, which also makes the data plane's own identities with
 their roles, and a bucket or storage account for its state). On Google Cloud and Azure the product
 gate then **builds the two data planes itself** (`valxel_sdlc/dataplanes.py`): a Job in the tool's

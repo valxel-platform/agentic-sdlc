@@ -93,9 +93,12 @@ class GcpConnect:
                        "cloudshell_tutorial": "TUTORIAL.md", "show": "ide,terminal"})
         return f"https://shell.cloud.google.com/cloudshell/editor?{q}"
 
-    def command(self, workspace: str, *, external_id: str, mode: str, region: str) -> str:
-        """What to run in that shell: the template, with this workspace's values."""
-        args = {"project": "YOUR_PROJECT_ID", "workspace": workspace, "connect_label": connect_label(external_id),
+    def command(self, workspace: str, *, external_id: str, mode: str, region: str,
+                project: str = "") -> str:
+        """What to run in that shell: the template, with this workspace's values (and the project, when
+        Valxel knows which one: a new product's, from inception)."""
+        args = {"project": project or "YOUR_PROJECT_ID", "workspace": workspace,
+                "connect_label": connect_label(external_id),
                 "mode": mode, "region": region, "valxel_service_account": self.valxel_service_account}
         return "terraform init && terraform apply " + " ".join(f"-var {k}={v}" for k, v in args.items())
 

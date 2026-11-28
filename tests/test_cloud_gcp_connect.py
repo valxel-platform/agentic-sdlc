@@ -295,3 +295,18 @@ def test_budgets_take_the_platform_token(signals_client):
     project = token_for("project", PROJECT, "s" * 40)
     assert signals_client.post(f"/api/signals/gcp-budgets?token={project}",
                                json=fixture("budget-notification.json")).status_code == 401
+
+
+def test_a_known_project_is_filled_in_and_valxel_checks_it_by_itself(client, gcp_conns, iam):
+    r = client.get(f"/api/workspaces/{WS}/connections/gcp/launch",
+                   params={"mode": "full", "region": "us-central1", "account": PROJECT})
+    assert r.status_code == 200, r.text
+    assert f"-var project={PROJECT} " in r.json()["command"] and "YOUR_PROJECT_ID" not in r.json()["command"]
+    waiting = client.get(f"/api/workspaces/{WS}/connections/gcp/poll", params={"account": PROJECT}).json()
+    assert waiting["status"] == "waiting" and waiting["why"]
+    iam.apply_template(gcp_conns, WS, PROJECT)
+    done = client.get(f"/api/workspaces/{WS}/connections/gcp/poll", params={"account": PROJECT}).json()
+    assert done["status"] == "connected" and done["connection"]["reach"]["mode"] == "full"  # the launch's mode
+    again = client.get(f"/api/workspaces/{WS}/connections/gcp/poll", params={"account": PROJECT}).json()
+    assert again["status"] == "connected"
+    assert client.get(f"/api/workspaces/{WS}/connections/github/poll", params={"account": "x"}).status_code == 404

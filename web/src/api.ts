@@ -919,6 +919,14 @@ export interface Connection {
     user?: string;
   };
 }
+export interface CloudGuide {
+  cloud: "aws" | "gcp" | "azure";
+  name: string;
+  noun: string;
+  links: Record<string, string>;
+  steps: string[];
+}
+
 export interface ToolRow {
   tool: string;
   name: string;
@@ -1421,6 +1429,10 @@ export interface Draft {
   name: string;
   org: string;
   budget_usd: number;
+  // A new product's cloud accounts (cloud/onboarding.py): "given" with both IDs and the region, or "later".
+  cloud: "" | "given" | "later";
+  cloud_accounts: { non_production?: string; production?: string };
+  region: string;
 }
 export type RequestSize = "feature" | "initiative" | "product";
 export type ResearchDepth = "quick" | "thorough" | "own";
@@ -1441,6 +1453,9 @@ export const ATTACH_ACCEPT = ".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.md,.csv,.jso
 export interface IntakeSession {
   id: string;
   owner: string;
+  workspace?: string;
+  /** The installation's cloud (ADR 0010): every product runs on it. */
+  cloud?: "aws" | "gcp" | "azure";
   lanes: string[];
   draft: Draft;
   ready: boolean;
@@ -1801,7 +1816,11 @@ export const api = {
   intakeSay: (id: string, text: string) => request<IntakeSession>("POST", `/intake/${id}/messages`, { text }),
   intakeDraft: (
     id: string,
-    changes: Partial<Omit<Draft, "experience">> & { experience?: Partial<Record<ExperienceKey, string>> },
+    changes: Partial<Omit<Draft, "experience" | "cloud">> & {
+      experience?: Partial<Record<ExperienceKey, string>>;
+      /** "later", or "non-production: <id>, production: <id>, region: <region>" */
+      cloud?: string;
+    },
   ) => request<IntakeSession>("PATCH", `/intake/${id}/draft`, changes),
   resize: (id: string) =>
     request<{ feature_id: string }>("POST", `/threads/${encodeURIComponent(id)}/resize`),
@@ -1871,31 +1890,40 @@ export const api = {
       { gates },
     ),
   connections: (ws: string) => request<ToolRow[]>("GET", `/workspaces/${encodeURIComponent(ws)}/connections`),
-  awsLaunch: (ws: string, mode: string, region: string) =>
-    request<{ url: string; mode: string }>(
+  awsLaunch: (ws: string, mode: string, region: string, account = "") =>
+    request<{ url: string; mode: string; sign_in?: string }>(
       "GET",
-      `/workspaces/${encodeURIComponent(ws)}/connections/aws/launch?mode=${mode}&region=${encodeURIComponent(region)}`,
+      `/workspaces/${encodeURIComponent(ws)}/connections/aws/launch?mode=${mode}&region=${encodeURIComponent(region)}${account ? `&account=${encodeURIComponent(account)}` : ""}`,
     ),
   awsCheck: (ws: string, account: string, mode: string) =>
     request<Connection>("POST", `/workspaces/${encodeURIComponent(ws)}/connections/aws/check`, {
       account,
       mode,
     }),
-  gcpLaunch: (ws: string, mode: string, region: string) =>
+  gcpLaunch: (ws: string, mode: string, region: string, account = "") =>
     request<{ url: string; command: string; mode: string }>(
       "GET",
-      `/workspaces/${encodeURIComponent(ws)}/connections/gcp/launch?mode=${mode}&region=${encodeURIComponent(region)}`,
+      `/workspaces/${encodeURIComponent(ws)}/connections/gcp/launch?mode=${mode}&region=${encodeURIComponent(region)}${account ? `&account=${encodeURIComponent(account)}` : ""}`,
     ),
   gcpCheck: (ws: string, project: string, mode: string) =>
     request<Connection>("POST", `/workspaces/${encodeURIComponent(ws)}/connections/gcp/check`, {
       project,
       mode,
     }),
-  azureLaunch: (ws: string, mode: string, region: string) =>
+  azureLaunch: (ws: string, mode: string, region: string, account = "") =>
     request<{ url: string; command: string; mode: string }>(
       "GET",
-      `/workspaces/${encodeURIComponent(ws)}/connections/azure/launch?mode=${mode}&region=${encodeURIComponent(region)}`,
+      `/workspaces/${encodeURIComponent(ws)}/connections/azure/launch?mode=${mode}&region=${encodeURIComponent(region)}${account ? `&account=${encodeURIComponent(account)}` : ""}`,
     ),
+  /** Is one account connected yet? Valxel checks AWS and Google Cloud itself; Azure's command reports back. */
+  connectionPoll: (ws: string, tool: string, account: string) =>
+    request<{ status: string; why?: string; connection?: Connection }>(
+      "GET",
+      `/workspaces/${encodeURIComponent(ws)}/connections/${encodeURIComponent(tool)}/poll?account=${encodeURIComponent(account)}`,
+    ),
+  /** How to get a new product's cloud accounts ready: the installation's cloud's own pages. */
+  cloudOnboarding: (product: string) =>
+    request<CloudGuide>("GET", `/cloud/onboarding?product=${encodeURIComponent(product)}`),
   azureCheck: (
     ws: string,
     body: { subscription: string; deploy_client_id: string; agents_client_id: string; mode: string },
