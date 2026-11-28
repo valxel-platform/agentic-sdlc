@@ -217,7 +217,7 @@ def test_workspaces_persist_in_postgres(settings):
         _, token = w.invite(name, {"email": "b@x.example"}, role="approver", actor="asha")
         w.accept(name, token, login=f"b-{name}", email="b@x.example")
         again = Workspaces(PostgresWorkspaceStore(pool), settings.registry)  # a restarted replica
-        assert len(again.groups(name)) == 6 and len(again.members(name)) == 2
+        assert len(again.groups(name)) == 7 and len(again.members(name)) == 2
         assert [m["role"] for m in again.memberships(f"b-{name}")] == ["approver"]
         assert again.store.audit_log(name)[0]["action"] == "member.accept"
 
