@@ -26,6 +26,7 @@ import { StartPage } from "./pages/Start";
 import { TodayPage } from "./pages/Today";
 import { ActivityPage } from "./pages/Activity";
 import { ConnectedAppsPage } from "./pages/ConnectedApps";
+import { SupportPage } from "./pages/Support";
 import { startTelemetry } from "./telemetry";
 
 // Tracing fails open: a missing endpoint or a collector that can't be
@@ -98,6 +99,7 @@ function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; on
       <Route path="/incidents" element={<IncidentsPage me={me} />} />
       <Route path="/costs" element={<CostsPage me={me} />} />
       <Route path="/health" element={<HealthPage me={me} />} />
+      <Route path="/support" element={<SupportPage />} />
       <Route path="/lessons" element={<LessonsPage me={me} />} />
       <Route path="/pilot" element={<PilotPage me={me} />} />
       <Route path="/changes" element={<ChangesPage me={me} />} />
@@ -157,6 +159,7 @@ function Shell({ me, onSignOut, onChanged }: { me: Me; onSignOut: () => void; on
             <NavLink to="/pilot">Pilot</NavLink>
             <NavLink to="/costs">Costs</NavLink>
             <NavLink to="/health">Agent health</NavLink>
+            <NavLink to="/support">Support</NavLink>
             <NavLink to="/inventory">Inventory</NavLink>
             <NavLink to="/lessons">Lessons</NavLink>
           </div>
@@ -227,6 +230,7 @@ function More({ me, onSignOut }: { me: Me; onSignOut: () => void }) {
     ["Pilot", "/pilot"],
     ["Costs", "/costs"],
     ["Agent health", "/health"],
+    ["Support", "/support"],
     ["Inventory", "/inventory"],
     ["Lessons", "/lessons"],
     ["Connected apps", "/connected-apps"],

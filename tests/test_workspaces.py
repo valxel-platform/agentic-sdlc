@@ -29,7 +29,8 @@ def owned(ws):
 def test_an_owner_is_in_every_group_and_a_workspace_keeps_one(ws):
     o = owned(ws)
     assert all(o["id"] in g["members"] for g in ws.groups(WS))
-    assert {g["slug"] for g in ws.groups(WS)} == {"product", "design", "architecture", "security", "release", "on-call"}
+    assert {g["slug"] for g in ws.groups(WS)} == {"product", "design", "architecture", "security", "release",
+                                                  "on-call", "support"}
     assert ws.products(WS) == ["FARM", "SHOP"]
     with pytest.raises(WorkspaceError, match="already has an owner"):
         owned(ws)
