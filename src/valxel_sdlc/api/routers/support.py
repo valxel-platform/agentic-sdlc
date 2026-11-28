@@ -135,10 +135,37 @@ def build(ctx: SimpleNamespace) -> APIRouter:
 
     # ------------------------------------------------------------------ OpenID Connect
 
+    def recheck(line: dict) -> dict | None:
+        """At each refresh: the tool session it came from is still good, and the person may still open
+        this product (as the workspace is now). Fresh claims, so a changed role follows; else None."""
+        from ... import tenancy
+        from ...web.auth import user_from_payload
+
+        if int(line.get("session_exp") or 0) <= time.time():
+            return None
+        if ctx.stores["sessions"].revoked({"sid": line.get("sid", ""), "login": line.get("login", ""),
+                                           "signed_in_at": line.get("signed_in_at", 0)}):
+            return None
+        client = provider.clients.get(line["client"]) if provider else None
+        if client is None:
+            return None
+        with tenancy.bound(tenancy.PLATFORM):
+            who = user_from_payload(line.get("identity") or {"login": line["login"]})
+            if who is None or who.login != line["login"]:
+                return None
+            user = ctx.with_memberships(who)
+            a = granted(user, line["product"])
+        if not a.allows(client.kind):
+            audit(user, line["product"], "support.refresh", {"client": client.id, "granted": False})
+            return None
+        return claims_for(user, client, line["product"], a.grafana or "Viewer")
+
     def need_provider():
         if provider is None:
             raise HTTPException(404, "Not found")
         provider.codes = ctx.stores.get("oidc_codes") or provider.codes
+        provider.refresh = ctx.stores.get("oidc_refresh") or provider.refresh
+        provider.recheck = recheck
         return provider
 
     def oidc_error(exc: OIDCError) -> JSONResponse:
@@ -178,7 +205,15 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         if not a.allows(client.kind):
             audit(user, product_id, "support.signin", {"client": client.id, "granted": False})
             return _page(403, "You don't have access", f"You can't open {client.kind} for {product_id}.")
-        code = p.issue_code(client, q, claims_for(user, client, product_id, a.grafana or "Viewer"))
+        session = ctx.session(request) or {}
+        # Who they signed in to the tool as (GitHub orgs and teams included: product access can come
+        # from them), so a refresh judges the same person against the workspace as it is then.
+        from ...web.auth import IDENTITY
+
+        grant = {"product": product_id, "login": user.login, "sid": session.get("sid", ""),
+                 "signed_in_at": int(session.get("signed_in_at") or 0), "session_exp": int(session.get("exp") or 0),
+                 "identity": {k: session[k] for k in IDENTITY if k in session}}
+        code = p.issue_code(client, q, claims_for(user, client, product_id, a.grafana or "Viewer"), grant)
         audit(user, product_id, "support.signin", {"client": client.id, "granted": True,
                                                    **({"role": a.grafana} if client.kind == "grafana" else {}),
                                                    **({"plane": client.plane} if client.plane else {})})

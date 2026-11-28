@@ -406,8 +406,12 @@ Configure the provider with:
 - `VALXEL_GRAFANA_URL` and `VALXEL_MLFLOW_URL` (a template:
   `https://mlflow-{product}.{plane}.example.com`, `{product}` in lower case) for the links.
 
-Codes are single use, last 60 seconds and require PKCE (S256); tokens last 5 minutes, after which
-Grafana and oauth2-proxy keep their own sessions. Grafana maps the `groups` claim
+Codes are single use, last 60 seconds and require PKCE (S256); tokens last 5 minutes. Grafana and
+oauth2-proxy keep their own sessions and renew them with refresh tokens, and every renewal asks
+again: is the tool session it came from still good (not signed out or revoked), and may the
+person still open this product? If not, the renewal is refused (audited `support.refresh`) and
+their Grafana or MLflow session ends. Refresh tokens are used once and replaced; a used one
+presented again ends its whole line. A line lasts at most 8 hours, never past its tool session. Grafana maps the `groups` claim
 (`<PRODUCT>/<Viewer|Editor>`) to its organizations; oauth2-proxy in front of each plane's MLflow
 allows only `mlflow:<PRODUCT>`. The platform side is in `platform-foundation` (`docs/grafana.md`, `docs/mlflow.md`).
 

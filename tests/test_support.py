@@ -219,3 +219,58 @@ def test_admins_edit_support_opens_any_product_and_mlflow_follows_the_grant(clie
 
     signins = [a for a in engine.services.workspaces.store.audit_log(WS) if a["action"] == "support.signin"]
     assert signins and all("client" in a["detail"] for a in signins)
+
+
+# ---------------------------------------------------------------------- refresh: each one asks again
+
+GRAFANA_SECRET = "g-secret"  # a test client's
+
+
+def refresh(client, token, client_id="grafana", secret=None):
+    return client.post("/api/oidc/token", data={"grant_type": "refresh_token", "refresh_token": token},
+                       auth=(client_id, secret or GRAFANA_SECRET))
+
+
+def signed_in_tokens(client, product="FARM"):
+    r, verifier = sign_in(client, product, "grafana", "grafana", GRAFANA_CB)
+    code = parse_qs(urlparse(r.headers["location"]).query)["code"][0]
+    return exchange(client, code, verifier, "grafana", "g-secret", GRAFANA_CB).json()
+
+
+def test_a_refresh_rotates_and_a_reused_one_ends_the_line(client):
+    assert "refresh_token" in client.get("/api/oidc/.well-known/openid-configuration").json()["grant_types_supported"]
+    login(client, "ben")
+    first = signed_in_tokens(client)["refresh_token"]
+    second = refresh(client, first).json()
+    assert second["refresh_token"] != first
+    claims = jwt.decode(second["id_token"], options={"verify_signature": False})
+    assert claims["groups"] == ["FARM/Viewer"] and "nonce" not in claims
+    # The first again, as a stolen copy would be: refused, and the line it belongs to is over.
+    assert refresh(client, first).json()["error"] == "invalid_grant"
+    assert refresh(client, second["refresh_token"]).json()["error"] == "invalid_grant"
+    # Only the client it was issued to may use it.
+    third = signed_in_tokens(client)["refresh_token"]
+    assert refresh(client, third, "mlflow-farm-prod", "m-secret").json()["error"] == "invalid_grant"
+
+
+def test_removed_from_the_workspace_ends_it_at_the_next_refresh(client, engine):
+    login(client, "ben")
+    token = signed_in_tokens(client)["refresh_token"]
+    w = engine.services.workspaces
+    ben = next(m for m in w.members(WS) if m.get("github_login") == "ben")
+    w.update_member(WS, ben["id"], actor="asha", actor_role="owner", status="suspended")
+    r = refresh(client, token)
+    assert r.status_code == 400 and "no longer have access" in r.json()["error_description"]
+    assert "support.refresh" in [a["action"] for a in w.store.audit_log(WS)]
+
+
+def test_signing_out_of_the_tool_ends_it_and_a_role_change_follows(client, engine):
+    login(client, "sam")  # Support group: Viewer of FARM
+    token = signed_in_tokens(client)["refresh_token"]
+    w = engine.services.workspaces
+    sam = next(m for m in w.members(WS) if m.get("github_login") == "sam")
+    w.update_member(WS, sam["id"], actor="asha", actor_role="owner", role="admin")
+    fresh = refresh(client, token).json()
+    assert jwt.decode(fresh["id_token"], options={"verify_signature": False})["groups"] == ["FARM/Editor"]
+    assert client.post("/api/auth/logout").status_code in (200, 204)
+    assert refresh(client, fresh["refresh_token"]).json()["error"] == "invalid_grant"
