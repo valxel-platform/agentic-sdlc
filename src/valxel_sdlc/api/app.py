@@ -207,9 +207,10 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                 with bound(PLATFORM):
                     stores["intakes"] = PostgresIntakeStore(state["pool"])
                     stores["sessions"] = PostgresSessions(state["pool"])
-                    from ..web.oidc_provider import PostgresCodes
+                    from ..web.oidc_provider import PostgresCodes, PostgresRefresh
 
                     stores["oidc_codes"] = PostgresCodes(state["pool"])  # Grafana's and MLflow's sign-ins
+                    stores["oidc_refresh"] = PostgresRefresh(state["pool"])
             # Polls CI and OpenChoreo for features waiting on them; webhooks make it immediate. With a
             # run queue, API processes leave that to the workers (valxel worker): they run no agents.
             if os.environ.get("VALXEL_PROCESS", "").lower() != "api":
