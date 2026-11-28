@@ -739,7 +739,8 @@ def _main(argv: list[str] | None = None, *, github=None) -> int:
                       + (f" {st['pr']}" if st.get("pr") else ""))
             for why in built.get("waiting") or []:
                 print(f"waiting: {why}")
-        out = environments(services, product_id=args.product, approver=args.approver, mode=mode)
+        out = environments(services, product_id=args.product, approver=args.approver, mode=mode,
+                           planes=runtime.get("data_planes"))
         print(out.get("why") or f"Created for {out['approved_by']}: " + ", ".join(f"{k} {v}" for k, v in out["created"].items()))
         return 0 if not out.get("waiting") else 2
     if args.cmd == "provisioner":

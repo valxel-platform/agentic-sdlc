@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { WorkspaceCloudAccounts } from "../components/CloudAccounts";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   api,
@@ -218,7 +219,12 @@ export function WorkspacePage({ me, onChanged }: { me: Me; onChanged: () => void
         {tab === "people" && <People w={w} me={me} admin={admin} run={run} />}
         {tab === "groups" && <Groups w={w} admin={admin} run={run} />}
         {tab === "gates" && <Gates w={w} admin={admin} run={run} />}
-        {tab === "connections" && <Connections ws={w.id} admin={admin} />}
+        {tab === "connections" && (
+          <>
+            <WorkspaceCloudAccounts ws={w.id} admin={admin} />
+            <Connections ws={w.id} admin={admin} />
+          </>
+        )}
         {tab === "audit" && admin && <Audit ws={w.id} />}
       </div>
     </>

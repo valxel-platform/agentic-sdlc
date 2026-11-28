@@ -17,7 +17,7 @@ import {
 } from "../api";
 import { threadPath } from "../vocab";
 import { AttachmentList } from "../components/Attachments";
-import { CloudAccounts } from "../components/CloudAccounts";
+import { DraftCloudAccounts } from "../components/CloudAccounts";
 import { SimilarList } from "../components/External";
 import { Mark } from "../components/Mark";
 
@@ -623,7 +623,7 @@ export function Intake({ me }: { me: Me }) {
                         />
                       </label>
                     </div>
-                    <CloudAccounts
+                    <DraftCloudAccounts
                       s={s}
                       ws={s.workspace || Object.keys(me.roles ?? {})[0] || ""}
                       disabled={submitted}

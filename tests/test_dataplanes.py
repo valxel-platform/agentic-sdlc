@@ -57,11 +57,16 @@ def test_the_guide_links_to_the_clouds_own_pages_and_never_signs_anyone_up():
         text = onboarding.guide_text(cloud, "CLN")
         assert "can't open" in text and g["links"]["sign_up"] in text and "connections page" in text
     assert "https://console.cloud.google.com/projectcreate" in onboarding.guide_text("gcp")
+    # Grouped per workspace, so one bill shows each account's share.
+    grouped = {c: onboarding.guide_text(c, "CLN", "wrkspc-shared") for c in ("aws", "gcp", "azure")}
+    assert "organizational unit" in grouped["aws"] and "folder" in grouped["gcp"]
+    assert "management group" in grouped["azure"]
+    assert all("valxel-wrkspc-shared" in t for t in grouped.values())
 
 
 def test_runtime_cloud_puts_dev_and_staging_in_the_non_production_account():
     rc = onboarding.runtime_cloud("gcp", {"non_production": "a-nonprod", "production": "a-prod"}, "us-central1")
-    assert rc == {"provider": "gcp", "region": "us-central1",
+    assert rc == {"provider": "gcp", "region": "us-central1", "placement": "dedicated",
                   "accounts": {"dev": "a-nonprod", "staging": "a-nonprod", "production": "a-prod"}}
     assert onboarding.plane_accounts(rc) == {"non_production": "a-nonprod", "production": "a-prod"}
 
@@ -120,7 +125,7 @@ def test_product_yaml_carries_runtime_cloud_when_the_accounts_were_given():
     v = Vision(name="CLN", org="acme", vision="x",
                cloud={"provider": "gcp", "region": "us-central1",
                       "accounts": {"non_production": "acme-cln-nonprod", "production": "acme-cln-prod"}})
-    assert _runtime_cloud(v) == {"cloud": GCP}
+    assert _runtime_cloud(v) == {"cloud": {**GCP, "placement": "dedicated"}}
     assert _runtime_cloud(Vision(name="CLN", org="acme", vision="x", cloud={"provider": "gcp", "later": True})) == {}
 
 

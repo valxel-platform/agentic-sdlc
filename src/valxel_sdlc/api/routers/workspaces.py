@@ -15,7 +15,7 @@ from ...web.auth import (
 )
 from ..context import CONNECT_COOKIE
 from ..models import (WorkspaceIn, PlanIn, MemberIn, MemberUpdate, GroupIn, GroupMembers, AwsCheckIn, GcpCheckIn,
-                      AzureCheckIn, GatesIn)
+                      AzureCheckIn, GatesIn, CloudAccountsIn)
 
 
 log = logging.getLogger(__name__)
@@ -98,6 +98,28 @@ def build(ctx: SimpleNamespace) -> APIRouter:
             raise HTTPException(400, f"The {body.plan} plan isn't offered")
         admin_of(user, workspace)  # and from a strong sign-in
         return ws_call(wsx().set_plan, workspace, body.plan, actor=user.login)
+
+    @api.get("/workspaces/{workspace}/cloud-accounts")
+    def cloud_accounts(workspace: str, user: User = Depends(current_user)) -> dict:
+        """The workspace's two shared accounts: where every product that shares its clusters runs."""
+        from ...cloud import onboarding
+        from ...intake import installation_cloud
+
+        if workspace not in user.roles:
+            raise HTTPException(403, f"You're not a member of {workspace}")
+        cloud = installation_cloud()
+        got = onboarding.shared_accounts(wsx().get(workspace) or {})
+        return {"cloud": cloud, "name": onboarding.name(cloud), "noun": onboarding.noun(cloud), **got,
+                "planes": {k: onboarding.shared_plane(workspace, k) for k in onboarding.PLANES}}
+
+    @api.put("/workspaces/{workspace}/cloud-accounts")
+    def set_cloud_accounts(workspace: str, body: CloudAccountsIn, user: User = Depends(current_user)) -> dict:
+        """Admins set (or clear) the workspace's two shared accounts."""
+        from ...intake import installation_cloud
+
+        admin_of(user, workspace)
+        ws_call(wsx().set_cloud_accounts, workspace, body.accounts, cloud=installation_cloud(), actor=user.login)
+        return cloud_accounts(workspace, user)
 
     @api.get("/workspaces/{workspace}")
     def workspace_view(workspace: str, user: User = Depends(current_user)) -> dict:
@@ -193,13 +215,13 @@ def build(ctx: SimpleNamespace) -> APIRouter:
         return c
 
     @api.get("/cloud/onboarding")
-    def cloud_onboarding(product: str = "", user: User = Depends(current_user)) -> dict:
+    def cloud_onboarding(product: str = "", workspace: str = "", user: User = Depends(current_user)) -> dict:
         """How to get a new product's cloud accounts ready: the installation's cloud, its sign-up and
         account pages, and the steps (valxel_sdlc.cloud.onboarding)."""
         from ...cloud import onboarding
         from ...intake import installation_cloud
 
-        return onboarding.guide(installation_cloud(), product[:120] or "the product")
+        return onboarding.guide(installation_cloud(), product[:120] or "the product", workspace[:64])
 
     @api.get("/workspaces/{workspace}/connections")
     def workspace_connections(workspace: str, user: User = Depends(current_user)) -> list[dict]:

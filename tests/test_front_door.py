@@ -137,7 +137,7 @@ def test_a_new_product_needs_an_inception_starter(client, engine):
     wait_idle(engine, s["feature_id"])
     st = engine._state(s["feature_id"])
     assert st["vision"]["org"] == "acme-vet" and st["vision"]["goals"] == ["50 practices booking through it by June"]
-    assert st["vision"]["cloud"] == {"provider": "aws", "region": "us-east-1",
+    assert st["vision"]["cloud"] == {"provider": "aws", "region": "us-east-1", "placement": "dedicated",
                                      "accounts": {"non_production": "111111111111", "production": "222222222222"}}
     assert st["research"].startswith("# Research: VetBook")
 

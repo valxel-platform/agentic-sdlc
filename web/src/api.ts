@@ -919,6 +919,15 @@ export interface Connection {
     user?: string;
   };
 }
+export interface WorkspaceClouds {
+  cloud: "aws" | "gcp" | "azure";
+  name: string;
+  noun: string;
+  accounts?: { non_production: string; production: string };
+  region?: string;
+  planes: { non_production: string; production: string };
+}
+
 export interface CloudGuide {
   cloud: "aws" | "gcp" | "azure";
   name: string;
@@ -1429,10 +1438,12 @@ export interface Draft {
   name: string;
   org: string;
   budget_usd: number;
-  // A new product's cloud accounts (cloud/onboarding.py): "given" with both IDs and the region, or "later".
-  cloud: "" | "given" | "later";
+  // A new product's cloud accounts (cloud/onboarding.py): "given" with both IDs and the region (its own),
+  // "shared" (its workspace's clusters), or "later".
+  cloud: "" | "given" | "later" | "shared";
   cloud_accounts: { non_production?: string; production?: string };
   region: string;
+  placement?: "" | "shared" | "dedicated";
 }
 export type RequestSize = "feature" | "initiative" | "product";
 export type ResearchDepth = "quick" | "thorough" | "own";
@@ -1957,9 +1968,17 @@ export const api = {
       "GET",
       `/workspaces/${encodeURIComponent(ws)}/connections/${encodeURIComponent(tool)}/poll?account=${encodeURIComponent(account)}`,
     ),
+  /** A workspace's two shared accounts, where every product that shares its clusters runs. */
+  workspaceCloudAccounts: (ws: string) =>
+    request<WorkspaceClouds>("GET", `/workspaces/${encodeURIComponent(ws)}/cloud-accounts`),
+  setWorkspaceCloudAccounts: (ws: string, accounts: string) =>
+    request<WorkspaceClouds>("PUT", `/workspaces/${encodeURIComponent(ws)}/cloud-accounts`, { accounts }),
   /** How to get a new product's cloud accounts ready: the installation's cloud's own pages. */
-  cloudOnboarding: (product: string) =>
-    request<CloudGuide>("GET", `/cloud/onboarding?product=${encodeURIComponent(product)}`),
+  cloudOnboarding: (product: string, workspace = "") =>
+    request<CloudGuide>(
+      "GET",
+      `/cloud/onboarding?product=${encodeURIComponent(product)}&workspace=${encodeURIComponent(workspace)}`,
+    ),
   azureCheck: (
     ws: string,
     body: { subscription: string; deploy_client_id: string; agents_client_id: string; mode: string },

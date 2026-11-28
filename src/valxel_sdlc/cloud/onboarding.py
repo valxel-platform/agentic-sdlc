@@ -12,6 +12,17 @@ page (deploy/<cloud>-connect), and the product gate builds a data plane in each.
     parse(cloud, text)      "non-production: acme-cln-dev, production: acme-cln-prod, region: us-central1"
                             -> {"accounts": {...}, "region": ...}, or what's wrong
     runtime_cloud(...)      product.yaml's runtime.cloud from those
+
+Two placements (constitution VX-19 lets either hold a product's environments in the customer's own
+accounts):
+
+    shared      the default: the product runs on its workspace's two shared clusters, in the
+                workspace's two accounts (set once in the workspace's settings), each product in its
+                own namespace with its own cloud identities and network policy. One pair of clusters
+                for every product, so one pair of cluster fees.
+    dedicated   the product's own two accounts and its own two clusters: for a team that wants the
+                isolation and pays for it, and required for products with PHI or payments data
+                (DEDICATED_CLASSES).
 """
 
 from __future__ import annotations
@@ -42,16 +53,22 @@ LINKS = {
         "sign_up": "https://portal.aws.amazon.com/billing/signup",
         "new_account": "https://console.aws.amazon.com/organizations/v2/home/accounts",
         "billing": "https://console.aws.amazon.com/billing/home",
+        "group": "https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_ous.html",
+        "costs": "https://console.aws.amazon.com/costmanagement/home",
     },
     "gcp": {
         "sign_up": "https://cloud.google.com/free",
         "new_account": "https://console.cloud.google.com/projectcreate",
         "billing": "https://console.cloud.google.com/billing/projects",
+        "group": "https://cloud.google.com/resource-manager/docs/creating-managing-folders",
+        "costs": "https://console.cloud.google.com/billing/reports",
     },
     "azure": {
         "sign_up": "https://azure.microsoft.com/free",
         "new_account": "https://portal.azure.com/#view/Microsoft_Azure_Billing/SubscriptionsBladeV2",
         "billing": "https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/overview",
+        "group": "https://learn.microsoft.com/azure/governance/management-groups/create-management-group-portal",
+        "costs": "https://portal.azure.com/#view/Microsoft_Azure_CostManagement/Menu/~/costanalysis",
     },
 }
 
@@ -60,21 +77,53 @@ STEPS = {
         "If your company has no AWS account yet, sign up ({sign_up}): it takes an email, a phone and a card.",
         "In AWS Organizations ({new_account}), add two accounts for {product}: one for non-production and one for "
         "production. Separate accounts keep production's data and permissions apart.",
+        "Put both in your workspace's organizational unit ({group}): one OU per Valxel workspace, for example "
+        "valxel-{workspace}, so its accounts share policies and one bill, and Cost Explorer ({costs}) shows each "
+        "account's share.",
         "Note each account's 12-digit ID.",
     ],
     "gcp": [
         "If your company has no Google Cloud organization or billing account yet, sign up ({sign_up}).",
         "Create two projects for {product} ({new_account}): one for non-production and one for production. "
         "Give Valxel projects of its own: Google Cloud scopes Valxel's roles to the whole project.",
-        "Link both to your billing account ({billing}), and note each project's ID (not its name or number).",
+        "Create them in your workspace's folder ({group}): one folder per Valxel workspace, for example "
+        "valxel-{workspace}, so its projects share policies.",
+        "Link both to your billing account ({billing}): one bill, and the billing reports ({costs}) show each "
+        "project's share. Note each project's ID (not its name or number).",
     ],
     "azure": [
         "If your company has no Azure account yet, sign up ({sign_up}).",
         "Create two subscriptions for {product} ({new_account}): one for non-production and one for production. "
         "Azure scopes Valxel's roles to the whole subscription, so give it subscriptions of its own.",
+        "Move both into your workspace's management group ({group}): one per Valxel workspace, for example "
+        "valxel-{workspace}, so its subscriptions share policies; one billing account pays for them, and cost "
+        "analysis ({costs}) shows each subscription's share.",
         "Note each subscription's ID (a GUID).",
     ],
 }
+
+
+PLACEMENTS = ("shared", "dedicated")
+# Data classes that never share clusters or accounts with other products.
+DEDICATED_CLASSES = ("phi", "payments")
+
+
+def needs_dedicated(data_class: str) -> bool:
+    return (data_class or "").lower() in DEDICATED_CLASSES
+
+
+def shared_plane(workspace: str, kind: str) -> str:
+    """The workspace's shared cluster for `kind` (non_production or production): a name GKE, AKS and
+    OpenChoreo all accept (lowercase, 31 characters at most)."""
+    import hashlib
+
+    slug = re.sub(r"[^a-z0-9-]+", "-", workspace.lower()).strip("-") or "ws"
+    if not slug[0].isalpha():
+        slug = "w" + slug
+    suffix = "-nonprod" if kind == "non_production" else "-prod"
+    if len(slug) + len(suffix) > 31:
+        slug = slug[: 31 - len(suffix) - 5].rstrip("-") + "-" + hashlib.sha256(workspace.encode()).hexdigest()[:4]
+    return slug + suffix
 
 
 def name(cloud: str) -> str:
@@ -85,18 +134,19 @@ def noun(cloud: str) -> str:
     return NOUN.get(cloud, "account")
 
 
-def guide(cloud: str, product: str = "the product") -> dict:
+def guide(cloud: str, product: str = "the product", workspace: str = "") -> dict:
     """How to get the two accounts ready, as data (the API) and text (the chat)."""
     links = LINKS.get(cloud, {})
-    steps = [s.format(product=product, **links) for s in STEPS.get(cloud, [])]
+    ws = (workspace or "<workspace>").lower()
+    steps = [s.format(product=product, workspace=ws, **links) for s in STEPS.get(cloud, [])]
     steps.append(f"Connect each {noun(cloud)} in full mode from Valxel's connections page: it opens "
                  f"{'the AWS console' if cloud == 'aws' else 'Cloud Shell'} with a template that gives Valxel its "
                  "roles there, and nothing else. Valxel builds the product's data plane in each at the product gate.")
     return {"cloud": cloud, "name": name(cloud), "noun": noun(cloud), "links": links, "steps": steps}
 
 
-def guide_text(cloud: str, product: str = "the product") -> str:
-    g = guide(cloud, product)
+def guide_text(cloud: str, product: str = "the product", workspace: str = "") -> str:
+    g = guide(cloud, product, workspace)
     lines = [f"Valxel can't open {g['name']} {g['noun']}s for you (they need a person, a payment method and "
              f"{g['name']}'s own terms), but here's what to do:"]
     lines += [f"{i}. {s}" for i, s in enumerate(g["steps"], 1)]
@@ -149,11 +199,27 @@ def parse(cloud: str, text: str) -> tuple[dict, str]:
     return {"accounts": accounts, "region": region}, ""
 
 
-def runtime_cloud(cloud: str, accounts: dict, region: str) -> dict:
+def runtime_cloud(cloud: str, accounts: dict, region: str, placement: str = "dedicated") -> dict:
     """product.yaml runtime.cloud: each pipeline environment's account (dev and staging share the
-    non-production one, where their data plane is)."""
-    return {"provider": cloud, "region": region,
+    non-production one, where their data plane is), and whether those are the workspace's shared
+    accounts or the product's own."""
+    return {"provider": cloud, "region": region, "placement": placement,
             "accounts": {env: accounts[plane] for env, plane in ENV_PLANE.items()}}
+
+
+def ask_placement(cloud: str, product: str, workspace: str) -> str:
+    n = noun(cloud)
+    return (f"{product} will run on {name(cloud)}, where this Valxel runs. It can share {workspace}'s two clusters "
+            f"(the cheapest: one pair of clusters for every product), or have two {n}s and clusters of its own, "
+            f"which cost more. A product with PHI or payments data always gets its own. Which?")
+
+
+def shared_accounts(ws: dict) -> dict:
+    """The workspace's shared accounts, when its admin has set them: {accounts, region}."""
+    c = (ws or {}).get("cloud_accounts") or {}
+    accounts = {k: str(c.get(k) or "") for k in PLANES}
+    return {"accounts": accounts, "region": str(c.get("region") or "")} if all(accounts.values()) and c.get("region") \
+        else {}
 
 
 def plane_accounts(cloud: dict) -> dict[str, str]:

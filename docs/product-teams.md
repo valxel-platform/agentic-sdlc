@@ -581,12 +581,28 @@ marks superseded ones, and logs the change in the overview. People merge it.
 Cloud builds every product on Google Cloud. So the front door doesn't ask which cloud; after the
 GitHub org it says which one and asks whether the product has its two accounts (projects on Google
 Cloud, subscriptions on Azure): one for non-production (dev and staging share its data plane) and one
-for production. Three answers:
+for production.
+
+**Shared or its own.** A workspace's admin sets its two **shared** accounts once (the workspace's
+Connections tab), and Valxel builds one pair of clusters there, `<workspace>-nonprod` and
+`<workspace>-prod`. When they're set, the front door asks first whether the new product shares them
+(the default, and cheapest: every product on one pair of clusters, so one pair of cluster fees, each
+product in its own namespace with its own cloud identities and network policy) or has accounts and
+clusters of its own (more isolation, for a team that pays for it). A product whose brief puts it in
+the **PHI or payments** data class never shares: the product gate records why and waits for its own
+two accounts (`runtime.cloud.placement: dedicated` in product.yaml). product.yaml says which:
+`runtime.cloud.placement` is `shared` or `dedicated`, and a sharing product's `runtime.data_planes`
+name the workspace's clusters. On AWS the shared clusters are proposed to the infrastructure repo
+under the workspace's name, once.
+
+For a product of its own, three answers:
 
 - **I have them:** the two IDs and the region, as `non-production: <id>, production: <id>, region:
   <region>`. They become product.yaml's `runtime.cloud` at the product gate.
 - **Help me create them:** Valxel can't open cloud accounts (that takes a person, a payment method and
-  the cloud's terms), so it gives the cloud's own sign-up and create pages and the steps
+  the cloud's terms), so it gives the cloud's own sign-up and create pages and the steps, including
+  grouping them under one organizational unit (AWS), folder (Google Cloud) or management group (Azure)
+  per Valxel workspace, so they share policies and one bill that shows each account's share
   (`valxel_sdlc/cloud/onboarding.py`; also `GET /api/cloud/onboarding`), then asks for the IDs.
 - **Set them up later:** inception goes on; the product gate waits for `runtime.cloud`.
 
