@@ -187,6 +187,7 @@ describe("rail navigation", () => {
       "Pilot",
       "Costs",
       "Agent health",
+      "Support",
       "Inventory",
       "Lessons",
       "Connected apps",
@@ -196,7 +197,7 @@ describe("rail navigation", () => {
     ]) {
       expect(within(nav).getByRole("link", { name: new RegExp(link) })).toBeInTheDocument();
     }
-    expect(within(nav).getAllByRole("link")).toHaveLength(17);
+    expect(within(nav).getAllByRole("link")).toHaveLength(18);
   });
 
   it("renders the mobile tab bar with four tabs", async () => {

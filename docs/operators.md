@@ -8,6 +8,7 @@ Back to the [README](../README.md).
 
 - [Web interface](#web-interface)
 - [Tracing and the audit trail (VX-8, VX-15)](#tracing-and-the-audit-trail-vx-8-vx-15)
+- [Support: Grafana and MLflow through the tool](#support-grafana-and-mlflow-through-the-tool)
 - [Security model (VX-17)](#security-model-vx-17)
 - [Supply chain: what goes into a build, and what may run](#supply-chain-what-goes-into-a-build-and-what-may-run)
 - [Models: more than one vendor](#models-more-than-one-vendor)
@@ -373,6 +374,42 @@ The pipeline holds designs and builds to it. In PHI and payments products an HLD
 repo users reach must have an `## Audit` section naming its audited actions
 (`- consent.read: consent`); coders are told to publish those records, reviewers to check them,
 and the build fails its check if an action the HLD names appears in no task.
+
+## Support: Grafana and MLflow through the tool
+
+A product's dashboards (Grafana) and its agents' traces (MLflow) open
+from its **Support** page in the tool, each in a new window. The tool is their only sign-in: it
+acts as an OpenID Connect provider for them alone (`src/valxel_sdlc/web/oidc_provider.py`), and a
+sign-in is for the one product chosen on the page. Opening Grafana or MLflow directly is refused
+with a pointer to the Support page.
+
+| Who | Grafana (the product's organization) | MLflow (agent traces) |
+| --- | --- | --- |
+| The product's members (anyone who may see it) | Viewer | only if in a granted group |
+| The workspace's **Support** group (every workspace has one) | Viewer, for every product in the workspace | only if in a granted group |
+| The workspace's admins and owners | Editor | only if in a granted group |
+
+Agent traces can hold prompts and tool data, so nobody opens MLflow until a workspace admin ticks
+the groups allowed for that product on its Support page (versioned and audited, `support.set`).
+Each sign-in is checked against the workspace as it is then, and recorded in its audit
+(`support.signin`, granted or not).
+
+Configure the provider with:
+
+- `VALXEL_OIDC_ISSUER`: `<VALXEL_PUBLIC_URL>/api/oidc` (discovery at `/.well-known/openid-configuration`).
+- `VALXEL_OIDC_SIGNING_KEY`: a PEM private key, RSA (RS256) or P-256 (ES256). The key id is its
+  thumbprint, so a new key publishes a new id; Grafana and oauth2-proxy read the JWKS.
+- `VALXEL_OIDC_CLIENTS`: a JSON list, one entry per client, each with one exact redirect URI and
+  the SHA-256 of its secret:
+  `[{"id": "grafana", "secret_sha256": "…", "redirect_uri": "https://grafana.example.com/login/generic_oauth", "kind": "grafana"},
+  {"id": "mlflow-pay-prod", "secret_sha256": "…", "redirect_uri": "https://mlflow-pay.prod.example.com/oauth2/callback", "kind": "mlflow", "product": "PAY", "plane": "prod"}]`.
+- `VALXEL_GRAFANA_URL` and `VALXEL_MLFLOW_URL` (a template:
+  `https://mlflow-{product}.{plane}.example.com`, `{product}` in lower case) for the links.
+
+Codes are single use, last 60 seconds and require PKCE (S256); tokens last 5 minutes, after which
+Grafana and oauth2-proxy keep their own sessions. Grafana maps the `groups` claim
+(`<PRODUCT>/<Viewer|Editor>`) to its organizations; oauth2-proxy in front of each plane's MLflow
+allows only `mlflow:<PRODUCT>`. The platform side is in `platform-foundation` (`docs/grafana.md`, `docs/mlflow.md`).
 
 ## Security model (VX-17)
 

@@ -29,7 +29,8 @@ def owned(ws):
 def test_an_owner_is_in_every_group_and_a_workspace_keeps_one(ws):
     o = owned(ws)
     assert all(o["id"] in g["members"] for g in ws.groups(WS))
-    assert {g["slug"] for g in ws.groups(WS)} == {"product", "design", "architecture", "security", "release", "on-call"}
+    assert {g["slug"] for g in ws.groups(WS)} == {"product", "design", "architecture", "security", "release",
+                                                  "on-call", "support"}
     assert ws.products(WS) == ["FARM", "SHOP"]
     with pytest.raises(WorkspaceError, match="already has an owner"):
         owned(ws)
@@ -216,7 +217,7 @@ def test_workspaces_persist_in_postgres(settings):
         _, token = w.invite(name, {"email": "b@x.example"}, role="approver", actor="asha")
         w.accept(name, token, login=f"b-{name}", email="b@x.example")
         again = Workspaces(PostgresWorkspaceStore(pool), settings.registry)  # a restarted replica
-        assert len(again.groups(name)) == 6 and len(again.members(name)) == 2
+        assert len(again.groups(name)) == 7 and len(again.members(name)) == 2
         assert [m["role"] for m in again.memberships(f"b-{name}")] == ["approver"]
         assert again.store.audit_log(name)[0]["action"] == "member.accept"
 

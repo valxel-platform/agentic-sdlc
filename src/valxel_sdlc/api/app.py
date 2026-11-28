@@ -33,6 +33,7 @@ from ..worksync import PostgresLinkStore, WorkSync
 from ..web.auth import AuthConfig, GitHubOAuth
 from .context import make_context
 from .routers import auth as auth_routes, evals, events, features, findings, intake, reports, signals, threads, workspaces
+from .routers import support as support_routes
 from .routers.signals import record_review_effort  # noqa: F401 - importable from here as before
 
 
@@ -206,6 +207,9 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
                 with bound(PLATFORM):
                     stores["intakes"] = PostgresIntakeStore(state["pool"])
                     stores["sessions"] = PostgresSessions(state["pool"])
+                    from ..web.oidc_provider import PostgresCodes
+
+                    stores["oidc_codes"] = PostgresCodes(state["pool"])  # Grafana's and MLflow's sign-ins
             # Polls CI and OpenChoreo for features waiting on them; webhooks make it immediate. With a
             # run queue, API processes leave that to the workers (valxel worker): they run no agents.
             if os.environ.get("VALXEL_PROCESS", "").lower() != "api":
@@ -372,7 +376,8 @@ def create_app(engine: FeatureEngine | None = None, auth: AuthConfig | None = No
         return Response(status_code=status)
 
     api = APIRouter(prefix="/api")
-    for group in (auth_routes, signals, evals, features, findings, workspaces, reports, threads, intake, events):
+    for group in (auth_routes, signals, evals, features, findings, workspaces, reports, threads, intake, events,
+                  support_routes):
         api.include_router(group.build(ctx))
     app.include_router(api)
 
